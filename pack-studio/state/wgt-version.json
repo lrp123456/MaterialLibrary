@@ -1,0 +1,178 @@
+{
+  "lastIssued": 2040007,
+  "updatedAt": "2026-10-10T15:16:05.337Z",
+  "lastNote": "【新增功能】\n优化ui设计方案\n\n【修复Bug】\n无",
+  "lastBuildCode": 2040006,
+  "versionName": "1.0.4",
+  "versionCode": 204,
+  "machineCode": 7,
+  "history": [
+    {
+      "at": "2026-10-03T05:11:59.291Z",
+      "wgtVersion": 2030006,
+      "base": 2030005,
+      "buildCode": 2030005,
+      "note": "修复热更新安装：wgt 持久化+安装前校验"
+    },
+    {
+      "at": "2026-10-03T07:08:33.266Z",
+      "wgtVersion": 2030007,
+      "base": 2030006,
+      "buildCode": 2030005,
+      "note": "热更新WGT"
+    },
+    {
+      "at": "2026-10-03T07:18:05.868Z",
+      "wgtVersion": 2030008,
+      "base": 2030007,
+      "buildCode": 2030005,
+      "note": "热更新WGT"
+    },
+    {
+      "at": "2026-10-03T07:22:17.508Z",
+      "wgtVersion": 2030009,
+      "base": 2030008,
+      "buildCode": 2030005,
+      "note": "热更新WGT"
+    },
+    {
+      "at": "2026-10-03T07:22:53.582Z",
+      "wgtVersion": 2030010,
+      "base": 2030009,
+      "buildCode": 2030005,
+      "note": "热更新WGT"
+    },
+    {
+      "at": "2026-10-03T07:25:21.727Z",
+      "wgtVersion": 2030011,
+      "base": 2030010,
+      "buildCode": 2030006,
+      "note": "热更新WGT"
+    },
+    {
+      "at": "2026-10-03T07:31:50.922Z",
+      "wgtVersion": 2030012,
+      "base": 2030011,
+      "buildCode": 2030006,
+      "note": "????????"
+    },
+    {
+      "at": "2026-10-03T07:35:34.426Z",
+      "wgtVersion": 2030013,
+      "base": 2030012,
+      "buildCode": 2030006,
+      "note": "热更新WGT"
+    },
+    {
+      "at": "2026-10-03T08:24:18.005Z",
+      "wgtVersion": 2030014,
+      "base": 2030013,
+      "buildCode": 2030006,
+      "note": "【新增功能】\n- 出包确认弹窗支持输入新增功能与修复Bug情况\n\n【修复Bug】\n- 修复更新安装时卡在「准备安装包...」的问题"
+    },
+    {
+      "at": "2026-10-03T08:35:14.728Z",
+      "wgtVersion": 2030015,
+      "versionName": "1.0.3",
+      "versionCode": 203,
+      "machineCode": 15,
+      "note": "【新增功能】\n- 强化运行时版本同步感知机制\n\n【修复Bug】\n- 解决设置页版本号、机器号、构建号未随WGT热更变化的问题"
+    },
+    {
+      "at": "2026-10-03T09:00:41.359Z",
+      "wgtVersion": 2030016,
+      "versionName": "1.0.3",
+      "versionCode": 203,
+      "machineCode": 16,
+      "note": "可视化打包"
+    },
+    {
+      "at": "2026-10-08T02:13:45.107Z",
+      "wgtVersion": 2030017,
+      "versionName": "1.0.3",
+      "versionCode": 203,
+      "machineCode": 17,
+      "note": "【新增功能】\n无\n\n【修复Bug】\n修复风格转换等ip连接问题"
+    },
+    {
+      "at": "2026-10-08T06:25:03.014Z",
+      "wgtVersion": 2030018,
+      "versionName": "1.0.3",
+      "versionCode": 203,
+      "machineCode": 18,
+      "note": "【新增功能】\n无\n\n【修复Bug】\n修复风格转换等ip连接问题"
+    },
+    {
+      "at": "2026-10-08T06:25:40.889Z",
+      "wgtVersion": 2030019,
+      "versionName": "1.0.3",
+      "versionCode": 203,
+      "machineCode": 19,
+      "note": "【新增功能】\n增加人像库、收藏、材质库等功能\n\n【修复Bug】\n无"
+    },
+    {
+      "at": "2026-10-08T14:49:42.681Z",
+      "wgtVersion": 2040000,
+      "versionName": "1.0.4",
+      "versionCode": 204,
+      "machineCode": 0,
+      "note": "素材库收口：导航、木系、收藏时间、上传建议、详情操作"
+    },
+    {
+      "at": "2026-10-09T06:18:21.766Z",
+      "wgtVersion": 2040001,
+      "versionName": "1.0.4",
+      "versionCode": 204,
+      "machineCode": 1,
+      "note": "【新增功能】\n优化ui设计方案\n\n【修复Bug】\n无"
+    },
+    {
+      "at": "2026-10-10T05:32:30.808Z",
+      "wgtVersion": 2040002,
+      "versionName": "1.0.4",
+      "versionCode": 204,
+      "machineCode": 2,
+      "note": "【新增功能】\n优化ui设计方案\n\n【修复Bug】\n无"
+    },
+    {
+      "at": "2026-10-10T06:57:11.049Z",
+      "wgtVersion": 2040003,
+      "versionName": "1.0.4",
+      "versionCode": 204,
+      "machineCode": 3,
+      "note": "【新增功能】\n优化ui设计方案\n\n【修复Bug】\n无"
+    },
+    {
+      "at": "2026-10-10T08:17:32.071Z",
+      "wgtVersion": 2040004,
+      "versionName": "1.0.4",
+      "versionCode": 204,
+      "machineCode": 4,
+      "note": "【新增功能】\n优化ui设计方案\n\n【修复Bug】\n无"
+    },
+    {
+      "at": "2026-10-10T08:43:22.333Z",
+      "wgtVersion": 2040005,
+      "versionName": "1.0.4",
+      "versionCode": 204,
+      "machineCode": 5,
+      "note": "【新增功能】\n优化ui设计方案\n\n【修复Bug】\n无"
+    },
+    {
+      "at": "2026-10-10T15:13:22.531Z",
+      "wgtVersion": 2040006,
+      "versionName": "1.0.4",
+      "versionCode": 204,
+      "machineCode": 6,
+      "note": "【新增功能】\n优化ui设计方案\n\n【修复Bug】\n无"
+    },
+    {
+      "at": "2026-10-10T15:16:05.337Z",
+      "wgtVersion": 2040007,
+      "versionName": "1.0.4",
+      "versionCode": 204,
+      "machineCode": 7,
+      "note": "【新增功能】\n优化ui设计方案\n\n【修复Bug】\n无"
+    }
+  ]
+}

@@ -1,0 +1,99 @@
+# ==========================================
+# Dependencies & Package Managers
+# ==========================================
+node_modules/
+*/node_modules/
+*/*/node_modules/
+package-lock.json.bak
+.pnpm-store/
+.yarn/
+
+# ==========================================
+# Sensitive Credentials & Secrets (Security Rule)
+# ==========================================
+.env
+*.env
+!.env.example
+*.env.local
+*.key
+*credentials*
+*secret*
+credentials/
+_credentials_bundle/
+
+# ==========================================
+# Databases & Local Runtime Storage
+# ==========================================
+data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+metadata.db
+
+# ==========================================
+# Large Binary Models, Weights & Media
+# ==========================================
+*.glb
+*.gltf
+*.pth
+*.onnx
+*.bin
+*.param
+tools/ncnn/
+tools/pnnx/
+web-pro/dist/
+web-pro/public/assets-3d/
+web-pro/public/models/
+web-pro/public/sample-video.mp4
+app-uniapp/dist/
+app-uniapp/src_backup/
+pack-studio/zip4j-build/
+pack-studio/_shots/
+pack-studio/*.apk
+pack-studio/*.idsig
+pack-studio/_dev_dcstorage.db
+
+# ==========================================
+# Build Artifacts & Archives
+# ==========================================
+*.zip
+*.tar.gz
+*.7z
+dist/build/
+
+# ==========================================
+# Logs & Process IDs
+# ==========================================
+logs/
+*.log
+*.pid
+_pids.txt
+*.txt
+
+# ==========================================
+# Temporary Caches & IDE Files
+# ==========================================
+.cache/
+.vite/
+.DS_Store
+Thumbs.db
+__pycache__/
+*.pyc
+.quarkclouddrive/
+
+# ==========================================
+# Local Scratch & Diagnostic Scripts
+# ==========================================
+_audit_*
+_backup_*
+_test_*
+_strip_dup.js
+scripts/_*
+scripts/inspect_keys_wsl.py
+scripts/strip-provider-keys.py
+scripts/test_*
+query_*
+/test_*
+patch_mls.js
+cordis.patch.yml

@@ -1,0 +1,66 @@
+@import '@vue-flow/core/dist/style.css';
+@import '@vue-flow/core/dist/theme-default.css';
+@import '@vue-flow/controls/dist/style.css';
+@import '@vue-flow/minimap/dist/style.css';
+@tailwind base; @tailwind components; @tailwind utilities;
+
+body {
+  margin: 0;
+  background: #0B1220;
+  color: #E2E8F0;
+  font-family: Inter, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+.vue-flow {
+  --vf-node-bg: #111827;
+  --vf-node-color: #E2E8F0;
+  --vf-connection-path: #3B82F6;
+}
+.vue-flow__minimap {
+  background: #0B1220 !important;
+  width: 148px !important;
+  height: 96px !important;
+}
+.vue-flow__controls { box-shadow: none !important; }
+.vue-flow__controls-button {
+  background: #111827 !important;
+  border-color: #1E293B !important;
+  fill: #E2E8F0 !important;
+}
+
+/* 素材卡片 — 对齐 pc-assets 稿 */
+.asset-card {
+  border-radius: 12px;
+  border: 1px solid #1E293B;
+  background: #111827;
+  overflow: hidden;
+  transition: border-color .15s ease, transform .15s ease;
+}
+.asset-card:hover {
+  border-color: #3B82F6;
+}
+
+/* 筛选 Chip / Select — Atelier Curate */
+@layer components {
+  .filter-chip {
+    @apply inline-flex items-center gap-1 px-2.5 py-1.5 rounded-full text-[11px] font-medium
+      bg-surface border border-outline-variant text-on-surface-variant
+      hover:bg-surface-high hover:text-white transition;
+  }
+  .filter-chip-on {
+    @apply bg-primary/15 border-primary/40 text-primary-dim;
+  }
+  .filter-select {
+    @apply bg-surface border border-outline-variant rounded-xl px-2.5 py-2 text-xs text-on-surface
+      outline-none focus:border-primary transition;
+  }
+}

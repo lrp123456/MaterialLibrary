@@ -1,0 +1,10 @@
+const Database = require('better-sqlite3')
+const crypto = require('crypto')
+const db = new Database('/home/lrp/.dsh-material-library/material.db')
+const now = Date.now()
+console.log('active sessions:', db.prepare('SELECT token, role, expires_at, user_id FROM sessions WHERE expires_at > ?').all(now))
+// 为 admin 插入一个 24h 会话便于联调
+const token = crypto.randomBytes(24).toString('hex')
+db.prepare('INSERT INTO sessions (token, user_id, role, expires_at, created_at) VALUES (?, 3, ?, ?, ?)').run(token, 'admin', now + 24 * 3600 * 1000, now)
+console.log('NEW_TOKEN=' + token)
+db.close()

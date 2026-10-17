@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>本地推理 · Local Infer</title>
+<style>
+  :root {
+    --bg: #0b1220; --card: #121a2b; --line: #243044; --ink: #e8eefc;
+    --mut: #8b9bb8; --acc: #3b82f6; --ok: #10b981; --warn: #f59e0b; --err: #ef4444;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; }
+  body { display: flex; flex-direction: column; min-height: 100%; }
+  header { padding: 14px 16px 10px; border-bottom: 1px solid var(--line);
+    position: sticky; top: 0; background: rgba(11,18,32,.94); backdrop-filter: blur(8px); z-index: 5; }
+  h1 { margin: 0; font-size: 17px; font-weight: 600; }
+  .sub { margin-top: 4px; font-size: 12px; color: var(--mut); line-height: 1.4; }
+  main { flex: 1; padding: 12px 14px 28px; max-width: 480px; width: 100%; margin: 0 auto; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 12px 14px; margin-bottom: 12px; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .label { font-size: 13px; color: var(--mut); }
+  .val { font-size: 13px; font-weight: 600; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px;
+    border-radius: 999px; font-size: 12px; background: #1a2438; border: 1px solid var(--line); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--mut); }
+  .dot.ok { background: var(--ok); box-shadow: 0 0 8px rgba(16,185,129,.55); }
+  .dot.warn { background: var(--warn); }
+  .seg { display: flex; background: #0f172a; border-radius: 10px; padding: 3px; margin: 10px 0; }
+  .seg button { flex: 1; border: 0; background: transparent; color: var(--mut);
+    padding: 9px 0; border-radius: 8px; font-size: 13px; font-weight: 600; }
+  .seg button.on { background: var(--acc); color: #fff; }
+  .canvas-wrap { position: relative; width: 100%; aspect-ratio: 3/4; border-radius: 12px;
+    overflow: hidden; background: #0f172a; border: 1px solid var(--line);
+    touch-action: none; user-select: none; }
+  canvas { width: 100%; height: 100%; display: block; }
+  .badge-sim { position: absolute; top: 8px; left: 8px; font-size: 10px; font-weight: 700;
+    letter-spacing: .04em; padding: 4px 8px; border-radius: 6px;
+    background: rgba(245,158,11,.18); color: #fbbf24; border: 1px solid rgba(245,158,11,.45); }
+  .hint { position: absolute; left: 10px; right: 10px; bottom: 10px; font-size: 12px;
+    color: #e2e8f0; text-align: center; background: rgba(15,23,42,.78);
+    border-radius: 8px; padding: 7px 8px; line-height: 1.35; }
+  .actions { display: flex; gap: 8px; margin-top: 10px; }
+  .btn { flex: 1; border: 0; border-radius: 12px; padding: 12px 10px; font-size: 14px;
+    font-weight: 600; cursor: pointer; }
+  .btn.primary { background: var(--acc); color: #fff; }
+  .btn.ghost { background: #1a2438; color: var(--ink); border: 1px solid var(--line); }
+  .log { font-size: 11px; line-height: 1.55; color: var(--mut); max-height: 110px;
+    overflow: auto; white-space: pre-wrap; font-family: ui-monospace, Consolas, monospace; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  td { padding: 6px 0; border-bottom: 1px solid var(--line); color: var(--mut); }
+  td:last-child { text-align: right; color: var(--ink); white-space: nowrap; }
+  .badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; margin-left: 4px;
+    background: #1e293b; color: var(--mut); }
+  .badge.ok { color: var(--ok); } .badge.warn { color: var(--warn); }
+  .note { font-size: 11px; color: var(--mut); line-height: 1.5; margin-top: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>本地推理演示</h1>
+  <div class="sub">
+    装载状态机 / 点选 / 互斥 / 离线 4x。<br/>
+    <b>本页是交互模拟</b>，mask 按场景几何生成，不是真 EdgeSAM 前向；真机需 NCNN so + 权重。
+  </div>
+</header>
+<main>
+  <div class="card">
+    <div class="row">
+      <span class="label">运行时</span>
+      <span class="pill"><i class="dot ok"></i><span>Sim NCNN（模拟）</span></span>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <span class="label">已装载</span><span class="val" id="loadedLabel">无</span>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <span class="label">互斥组</span><span class="val" id="groupLabel">—</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row"><span class="label">模型目录</span><span class="val" id="catalogMeta">…</span></div>
+    <table id="modelTable" style="margin-top:6px"></table>
+    <div class="note">
+      已转换：EdgeSAM encoder/decoder NCNN（data/local-models）。超分：realesr-animevideov3-x4。
+      客户端无法分割的根因是 <b>未编 liblocalinfer.so</b>，不是 JS 逻辑。
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="margin-bottom:8px">
+      <span class="label">画布</span><span class="val" id="modeTag">点选</span>
+    </div>
+    <div class="seg">
+      <button id="btnSeg" class="on">EdgeSAM 点选</button>
+      <button id="btnUps">离线 4x</button>
+    </div>
+    <div class="canvas-wrap" id="wrap">
+      <canvas id="cv" width="360" height="480"></canvas>
+      <div class="badge-sim">SIM · 非真模型</div>
+      <div class="hint" id="hint">点击沙发区域：模拟「按场景轮廓贴合」的 mask</div>
+    </div>
+    <div class="actions">
+      <button class="btn ghost" id="btnClear">清除</button>
+      <button class="btn primary" id="btnUnload">卸载模型</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="label" style="margin-bottom:6px">多端</div>
+    <div class="row" style="margin-bottom:6px"><span>Android NCNN</span><span class="pill"><i class="dot warn"></i>权重已转 · 待 so</span></div>
+    <div class="row" style="margin-bottom:6px"><span>鸿蒙 NEXT</span><span class="pill"><i class="dot warn"></i>接口占位</span></div>
+    <div class="row"><span>iOS CoreML</span><span class="pill"><i class="dot warn"></i>接口占位</span></div>
+  </div>
+
+  <div class="card">
+    <div class="label" style="margin-bottom:6px">日志</div>
+    <div class="log" id="log"></div>
+  </div>
+</main>
+<script>
+const state = {
+  loadedId: null, group: null, busy: false, mode: 'seg',
+  catalog: [
+    { id: 'edge_sam_mobile', name: 'EdgeSAM enc+dec', task: 'segment', exclusiveGroup: 'seg',
+      version: '1.0.0', onServerDisk: true, note: 'NCNN 已转换' },
+    { id: 'realesrgan_x4_ncnn', name: 'ESRGAN Anime x4', task: 'upscale', exclusiveGroup: 'upscale',
+      version: '1.0.0', onServerDisk: true, note: '内置 1.2MB' },
+    { id: 'realesrgan_x4plus_ncnn', name: 'ESRGAN x4plus', task: 'upscale', exclusiveGroup: 'upscale',
+      version: '1.0.0', onServerDisk: true, note: '升级 33MB' },
+  ],
+  mask: null,
+  points: [],
+  sofa: null,
+}
+
+const logEl = document.getElementById('log')
+function log(msg) {
+  const t = new Date().toTimeString().slice(0, 8)
+  logEl.textContent = `[${t}] ${msg}\n` + logEl.textContent.slice(0, 2000)
+}
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)) }
+
+function renderCatalog() {
+  document.getElementById('catalogMeta').textContent = state.catalog.length + ' 项'
+  document.getElementById('modelTable').innerHTML = state.catalog.map((m) => {
+    const loaded = state.loadedId === m.id
+    return `<tr>
+      <td>${m.name}<div style="color:var(--mut);font-size:11px">${m.id} · ${m.note || ''}</div></td>
+      <td>${loaded ? '<span class="badge ok">已装载</span>' : ''}
+          ${m.onServerDisk ? '<span class="badge ok">有文件</span>' : '<span class="badge warn">缺文件</span>'}</td>
+    </tr>`
+  }).join('')
+}
+function setLoaded(id, group) {
+  state.loadedId = id
+  state.group = group
+  const m = state.catalog.find((x) => x.id === id)
+  document.getElementById('loadedLabel').textContent = m ? m.name : '无'
+  document.getElementById('groupLabel').textContent = group || '—'
+  renderCatalog()
+}
+async function ensureLoaded(task) {
+  const model = state.catalog.find((m) => m.task === task)
+  if (!model) throw new Error('无 ' + task)
+  if (state.loadedId === model.id) { log('常驻 ' + model.id); return model }
+  if (state.loadedId && state.group !== model.exclusiveGroup) {
+    log('互斥卸载 ' + state.loadedId); setLoaded(null, null)
+  }
+  log('load ' + model.id + ' …')
+  await sleep(260)
+  setLoaded(model.id, model.exclusiveGroup)
+  log('load ok')
+  return model
+}
+
+const cv = document.getElementById('cv')
+const ctx = cv.getContext('2d')
+const hint = document.getElementById('hint')
+const W = cv.width, H = cv.height
+
+function layoutSofa() {
+  // 与画面一致的沙发几何（百分比→像素）
+  const body = { x: 40, y: H * 0.42, w: W - 80, h: H * 0.28, r: 18 }
+  const back = { x: 55, y: H * 0.36, w: W - 110, h: H * 0.12, r: 14 }
+  state.sofa = { body, back, coffee: { x: W * 0.28, y: H * 0.68, w: W * 0.44, h: H * 0.1, r: 8 } }
+}
+layoutSofa()
+
+function rr(x, y, w, h, r) {
+  ctx.beginPath()
+  ctx.moveTo(x + r, y)
+  ctx.arcTo(x + w, y, x + w, y + h, r)
+  ctx.arcTo(x + w, y + h, x, y + h, r)
+  ctx.arcTo(x, y + h, x, y, r)
+  ctx.arcTo(x, y, x + w, y, r)
+  ctx.closePath()
+}
+
+function sofaPolygon(pad = 0) {
+  const { body, back } = state.sofa
+  const x1 = back.x - pad, y1 = back.y - pad
+  const x2 = body.x + body.w + pad, y2 = body.y + body.h + pad
+  // 圆角近似：8 点
+  const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2
+  const rx = (x2 - x1) / 2, ry = (y2 - y1) / 2
+  const pts = []
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * Math.PI * 2 - Math.PI / 2
+    // 稍微压扁底部，更像沙发
+    const k = 1 + 0.04 * Math.sin(a * 2)
+    pts.push([cx + Math.cos(a) * rx * k, cy + Math.sin(a) * ry * (i > 4 && i < 12 ? 1.08 : 0.92)])
+  }
+  return pts
+}
+
+function coffeePolygon(pad = 0) {
+  const c = state.sofa.coffee
+  return [
+    [c.x - pad, c.y - pad], [c.x + c.w + pad, c.y - pad],
+    [c.x + c.w + pad, c.y + c.h + pad], [c.x - pad, c.y + c.h + pad],
+  ]
+}
+
+function hitTest(x, y) {
+  const { body, back, coffee } = state.sofa
+  const inCoffee = x >= coffee.x - 8 && x <= coffee.x + coffee.w + 8 &&
+    y >= coffee.y - 8 && y <= coffee.y + coffee.h + 8
+  const inSofa = x >= back.x - 10 && x <= body.x + body.w + 10 &&
+    y >= back.y - 10 && y <= body.y + body.h + 10
+  if (inCoffee && y > body.y + body.h * 0.7) return 'coffee'
+  if (inSofa) return 'sofa'
+  return 'floor'
+}
+
+function drawScene() {
+  ctx.clearRect(0, 0, W, H)
+  const g = ctx.createLinearGradient(0, 0, W, H)
+  g.addColorStop(0, '#3b4a63')
+  g.addColorStop(1, '#152036')
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, W, H)
+  // 墙
+  ctx.fillStyle = '#2a3548'
+  ctx.fillRect(0, 0, W, H * 0.55)
+  // 地板
+  ctx.fillStyle = '#1a2233'
+  ctx.fillRect(0, H * 0.55, W, H * 0.45)
+  // 窗
+  ctx.fillStyle = 'rgba(148,163,184,0.15)'
+  rr(W * 0.55, H * 0.08, W * 0.35, H * 0.22, 8)
+  ctx.fill()
+
+  const { body, back, coffee } = state.sofa
+  // 沙发阴影
+  ctx.fillStyle = 'rgba(0,0,0,0.25)'
+  rr(body.x + 6, body.y + body.h - 4, body.w, 16, 8)
+  ctx.fill()
+  rr(body.x, body.y, body.w, body.h, body.r)
+  ctx.fillStyle = '#7c8aa0'
+  ctx.fill()
+  rr(back.x, back.y, back.w, back.h, back.r)
+  ctx.fillStyle = '#9aa8bc'
+  ctx.fill()
+  // 靠垫线
+  ctx.strokeStyle = 'rgba(15,23,42,0.25)'
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.moveTo(W / 2, back.y + 4)
+  ctx.lineTo(W / 2, body.y + 8)
+  ctx.stroke()
+  // 茶几
+  rr(coffee.x, coffee.y, coffee.w, coffee.h, coffee.r)
+  ctx.fillStyle = '#8b7355'
+  ctx.fill()
+
+  // mask
+  if (state.mask) {
+    for (const poly of state.mask) {
+      ctx.beginPath()
+      poly.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])))
+      ctx.closePath()
+      ctx.fillStyle = 'rgba(16,185,129,0.38)'
+      ctx.fill()
+      ctx.strokeStyle = 'rgba(16,185,129,0.95)'
+      ctx.lineWidth = 2.5
+      ctx.stroke()
+    }
+  }
+  for (const p of state.points) {
+    ctx.beginPath()
+    ctx.arc(p.x, p.y, 7, 0, Math.PI * 2)
+    ctx.fillStyle = '#3b82f6'
+    ctx.fill()
+    ctx.strokeStyle = '#fff'
+    ctx.lineWidth = 2
+    ctx.stroke()
+  }
+}
+
+function evPos(e) {
+  const r = cv.getBoundingClientRect()
+  const t = e.touches ? e.touches[0] : e
+  return { x: ((t.clientX - r.left) / r.width) * W, y: ((t.clientY - r.top) / r.height) * H }
+}
+
+async function onTap(e) {
+  if (state.mode !== 'seg' || state.busy) return
+  e.preventDefault()
+  const p = evPos(e)
+  state.points = [{ x: p.x, y: p.y, label: 1 }]
+  drawScene()
+  state.busy = true
+  hint.textContent = '模拟 EdgeSAM 前向…'
+  try {
+    await ensureLoaded('segment')
+    await sleep(220)
+    const kind = hitTest(p.x, p.y)
+    if (kind === 'sofa') {
+      state.mask = [sofaPolygon(2)]
+      hint.textContent = `贴合沙发轮廓 · polygon(16) · ${state.loadedId}`
+      log('segment ok → sofa')
+    } else if (kind === 'coffee') {
+      state.mask = [coffeePolygon(1)]
+      hint.textContent = `贴合茶几 · polygon(4) · ${state.loadedId}`
+      log('segment ok → coffee')
+    } else {
+      state.mask = null
+      hint.textContent = '点在背景上——请点沙发/茶几（演示用命中检测代替 prompt 编码）'
+      log('segment miss → background')
+    }
+  } catch (err) {
+    hint.textContent = err.message
+    log('fail ' + err.message)
+  } finally {
+    state.busy = false
+    drawScene()
+  }
+}
+
+async function runUpscale() {
+  if (state.busy) return
+  state.busy = true
+  hint.textContent = '离线 4x…'
+  try {
+    const m = await ensureLoaded('upscale')
+    for (let i = 1; i <= 4; i++) {
+      await sleep(160)
+      hint.textContent = `分块 ${i}/4 · ${m.id}`
+    }
+    hint.textContent = '4x 完成（模拟）· 已按互斥卸载 seg'
+    log('upscale ok')
+  } catch (err) {
+    hint.textContent = err.message
+  } finally {
+    state.busy = false
+  }
+}
+
+cv.addEventListener('touchstart', onTap, { passive: false })
+cv.addEventListener('mousedown', onTap)
+document.getElementById('btnSeg').onclick = () => {
+  state.mode = 'seg'
+  document.getElementById('btnSeg').classList.add('on')
+  document.getElementById('btnUps').classList.remove('on')
+  document.getElementById('modeTag').textContent = '点选'
+  hint.textContent = '点击沙发/茶几'
+}
+document.getElementById('btnUps').onclick = () => {
+  state.mode = 'ups'
+  document.getElementById('btnUps').classList.add('on')
+  document.getElementById('btnSeg').classList.remove('on')
+  document.getElementById('modeTag').textContent = '4x'
+  runUpscale()
+}
+document.getElementById('btnClear').onclick = () => {
+  state.points = []; state.mask = null
+  hint.textContent = '已清除'; drawScene()
+}
+document.getElementById('btnUnload').onclick = () => {
+  setLoaded(null, null)
+  hint.textContent = '已卸载，下次手势再 load'
+  log('unload')
+}
+
+renderCatalog()
+drawScene()
+log('ready · 演示 mask=场景几何，非 NCNN')
+</script>
+</body>
+</html>

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#F8FAFC" />
+    <title>素材工作台</title>
+    <style>
+      /* 桌面 Web 全宽：去掉手机模拟器窄栏/黑边 */
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        background: #f8fafc;
+        color: #0f172a;
+        font-family: Inter, 'PingFang SC', 'Segoe UI', 'Microsoft YaHei', sans-serif;
+      }
+      #app {
+        min-height: 100%;
+        width: 100%;
+        max-width: none !important;
+        margin: 0 !important;
+        background: #f8fafc;
+      }
+      uni-app,
+      uni-page,
+      uni-page-body {
+        width: 100% !important;
+        max-width: none !important;
+        min-height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"><!--app-html--></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

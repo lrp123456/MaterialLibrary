@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>端侧推理 · SO 构建向导</title>
+<style>
+:root{
+  --bg:#070b14;--card:#101827;--line:#243044;--ink:#eef3ff;--mut:#8b9bb8;
+  --acc:#3b82f6;--ok:#10b981;--warn:#f59e0b;--err:#ef4444;--glow:0 0 24px rgba(59,130,246,.18);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif}
+body{display:flex;flex-direction:column}
+header{padding:16px 16px 12px;border-bottom:1px solid var(--line);background:rgba(7,11,20,.95);position:sticky;top:0;z-index:9;backdrop-filter:blur(10px)}
+h1{margin:0;font-size:18px;font-weight:700;letter-spacing:.02em}
+.sub{margin-top:4px;font-size:12px;color:var(--mut);line-height:1.45}
+nav{display:flex;gap:6px;padding:10px 12px 0;overflow-x:auto}
+nav button{flex:0 0 auto;border:1px solid var(--line);background:#0d1524;color:var(--mut);
+  padding:8px 12px;border-radius:999px;font-size:12px;font-weight:600}
+nav button.on{background:var(--acc);border-color:var(--acc);color:#fff}
+main{flex:1;padding:12px 14px 36px;max-width:480px;width:100%;margin:0 auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:12px;box-shadow:var(--glow)}
+h2{margin:0 0 8px;font-size:15px;font-weight:700}
+p,li{font-size:13px;line-height:1.65;color:#c9d4ea;margin:0 0 8px}
+.mut{color:var(--mut);font-size:12px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:6px 0}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;font-size:12px;background:#152033;border:1px solid var(--line)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--mut)}
+.dot.ok{background:var(--ok);box-shadow:0 0 8px rgba(16,185,129,.5)}
+.dot.warn{background:var(--warn)}
+.dot.err{background:var(--err)}
+code,pre{font-family:ui-monospace,Consolas,monospace;font-size:11px}
+pre{background:#0a1220;border:1px solid var(--line);border-radius:10px;padding:10px;overflow:auto;color:#a5f3d0;line-height:1.5}
+.step{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.step:last-child{border-bottom:0}
+.n{flex:0 0 28px;height:28px;border-radius:8px;background:rgba(59,130,246,.2);color:#93c5fd;
+  display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px}
+.step b{display:block;font-size:13px;margin-bottom:2px}
+.step span{font-size:12px;color:var(--mut);line-height:1.5}
+.tag{display:inline-block;font-size:10px;padding:2px 6px;border-radius:4px;background:#1e293b;color:var(--mut);margin-left:6px}
+.tag.ok{color:var(--ok)}.tag.warn{color:var(--warn)}
+.bar{height:8px;background:#0f172a;border-radius:99px;overflow:hidden;margin:8px 0}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,#2563eb,#10b981);width:0;transition:width .4s}
+.btn{width:100%;border:0;border-radius:12px;padding:13px;font-size:14px;font-weight:700;background:var(--acc);color:#fff;margin-top:8px}
+.btn.ghost{background:#152033;border:1px solid var(--line);color:var(--ink)}
+ul{margin:0 0 8px 18px;padding:0}
+table{width:100%;border-collapse:collapse;font-size:12px}
+td{padding:7px 0;border-bottom:1px solid var(--line);color:var(--mut)}
+td:last-child{text-align:right;color:var(--ink)}
+.hidden{display:none}
+#toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#111827ee;
+  border:1px solid var(--line);color:var(--ink);padding:10px 14px;border-radius:10px;font-size:12px;
+  opacity:0;pointer-events:none;transition:.25s;z-index:20;max-width:90%}
+#toast.show{opacity:1}
+</style>
+</head>
+<body>
+<header>
+  <h1>端侧推理向导</h1>
+  <div class="sub">Android <code>liblocalinfer.so</code> 是什么 · 怎么编 · 已修什么 · 接下来点哪一步</div>
+</header>
+<nav id="tabs">
+  <button data-t="why" class="on">SO 是什么</button>
+  <button data-t="build">怎么编 SO</button>
+  <button data-t="fix">已修复</button>
+  <button data-t="demo">点选演示</button>
+  <button data-t="next">下一步</button>
+</nav>
+<main>
+  <!-- WHY -->
+  <section id="v-why">
+    <div class="card">
+      <h2>一句话</h2>
+      <p><b>.so</b> 是 Android/Linux 的动态库。Kotlin 调用：</p>
+      <pre>System.loadLibrary("localinfer")
+// → 加载 liblocalinfer.so
+// → JNI 进 C++ → NCNN 跑模型</pre>
+      <p>没有 so，App 里「本地 EdgeSAM / 超分」只是 JS 空壳，会自动回落服务端或提示涂抹。</p>
+    </div>
+    <div class="card">
+      <h2>链路</h2>
+      <div class="step"><div class="n">1</div><div><b>editor.vue 点选</b><span>JS LocalModelRuntime</span></div></div>
+      <div class="step"><div class="n">2</div><div><b>UTS uni-local-infer</b><span>createLocalInfer() 同一套 Promise API</span></div></div>
+      <div class="step"><div class="n">3</div><div><b>LocalInferNative.kt</b><span>System.loadLibrary + external fun</span></div></div>
+      <div class="step"><div class="n">4</div><div><b>liblocalinfer.so</b><span>CMake + NCNN：encoder/decoder 或 ESRGAN</span></div></div>
+      <div class="step"><div class="n">5</div><div><b>模型文件</b><span>filesDir/local-models/*.param + *.bin</span></div></div>
+    </div>
+    <div class="card">
+      <h2>仓库里已有</h2>
+      <table>
+        <tr><td>CMakeLists + JNI + Kotlin</td><td><span class="tag ok">已写</span></td></tr>
+        <tr><td>EdgeSAM NCNN 权重</td><td><span class="tag ok">已转换</span></td></tr>
+        <tr><td>超分 anime x4 NCNN</td><td><span class="tag ok">已下载</span></td></tr>
+        <tr><td>完整前向（解码+prompt）</td><td><span class="tag warn">待补</span></td></tr>
+        <tr><td>打出 so 并打进 APK</td><td><span class="tag warn">待你本机 NDK</span></td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- BUILD -->
+  <section id="v-build" class="hidden">
+    <div class="card">
+      <h2>编译步骤（本机）</h2>
+      <div class="step"><div class="n">1</div><div><b>装 NDK + CMake</b><span>Android Studio → SDK Manager → SDK Tools</span></div></div>
+      <div class="step"><div class="n">2</div><div><b>下 ncnn Android 包</b><span>运行仓库脚本 fetch_ncnn_android.ps1</span></div></div>
+      <div class="step"><div class="n">3</div><div><b>对齐目录</b><span>native/android/localinfer + third_party/ncnn-android</span></div></div>
+      <div class="step"><div class="n">4</div><div><b>CMake 编 so</b><span>arm64-v8a / armeabi-v7a</span></div></div>
+      <div class="step"><div class="n">5</div><div><b>拷进 APK jniLibs</b><span>或 AAR 原生工程 externalNativeBuild</span></div></div>
+    </div>
+    <div class="card">
+      <h2>PowerShell</h2>
+      <pre>powershell -File scripts/fetch_ncnn_android.ps1
+
+# 设置 NDK 后
+cd AlbumSyncUniAppX/native/android/localinfer
+cmake -B build -G Ninja `
+  -DCMAKE_TOOLCHAIN_FILE="$env:ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" `
+  -DANDROID_ABI=arm64-v8a `
+  -DANDROID_PLATFORM=android-26 `
+  -DNCNN_DIR="../../third_party/ncnn-android"
+cmake --build build</pre>
+      <button class="btn ghost" onclick="toast('详细说明见 native/android/localinfer/README.md')">打开 README 路径</button>
+    </div>
+    <div class="card">
+      <h2>模型放哪</h2>
+      <pre>context.filesDir/local-models/edge_sam_mobile/
+  edge_sam_encoder.param
+  edge_sam_encoder.bin
+  edge_sam_decoder.param
+  edge_sam_decoder.bin
+
+context.filesDir/local-models/realesrgan_x4_ncnn/
+  realesr-animevideov3-x4.param
+  realesr-animevideov3-x4.bin</pre>
+      <p class="mut">来源：MaterialLibraryServer/data/local-models/</p>
+    </div>
+  </section>
+
+  <!-- FIX -->
+  <section id="v-fix" class="hidden">
+    <div class="card">
+      <h2>本轮已修复</h2>
+      <div class="bar"><i id="fixBar" style="width:70%"></i></div>
+      <ul>
+        <li>EdgeSAM ONNX→NCNN 已落地（encoder+decoder）</li>
+        <li>可编译 Android 工程：CMake / JNI / Kotlin / UTS 加载 aux</li>
+        <li>编辑器点选：本地失败→服务端 YOLO→涂抹，路径可见</li>
+        <li>演示改为「贴合沙发/茶几轮廓」，并标明 SIM</li>
+        <li>超分 anime x4 权重可分发</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h2>为何客户端仍不能真分割</h2>
+      <div class="row"><span>本地 NCNN so</span><span class="pill"><i class="dot err"></i>未编入 APK</span></div>
+      <div class="row"><span>EdgeSAM 前向 C++</span><span class="pill"><i class="dot warn"></i>骨架</span></div>
+      <div class="row"><span>服务端 YOLO 5001</span><span class="pill"><i class="dot warn"></i>需本机服务</span></div>
+      <p class="mut">三选一可用即可出选区；当前都未就绪时只能涂抹。</p>
+    </div>
+    <div class="card">
+      <h2>文件索引</h2>
+      <table>
+        <tr><td>native/android/localinfer/</td><td>SO 工程</td></tr>
+        <tr><td>scripts/fetch_ncnn_android.ps1</td><td>拉 ncnn</td></tr>
+        <tr><td>scripts/convert_edgesam_pnnx.py</td><td>PNNX 重转</td></tr>
+        <tr><td>data/local-models/</td><td>权重</td></tr>
+        <tr><td>editor.vue runEdgeSamAt</td><td>三层回落</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- DEMO -->
+  <section id="v-demo" class="hidden">
+    <div class="card">
+      <h2>点选模拟 <span class="tag warn">SIM</span></h2>
+      <p class="mut">演示装载状态机与互斥；mask 按场景几何，非真 NCNN。</p>
+      <div style="position:relative;border-radius:12px;overflow:hidden;border:1px solid var(--line)">
+        <canvas id="cv" width="360" height="400" style="width:100%;display:block;background:#0f172a;touch-action:none"></canvas>
+        <div style="position:absolute;top:8px;left:8px;font-size:10px;padding:3px 7px;border-radius:5px;background:rgba(245,158,11,.2);color:#fbbf24;border:1px solid rgba(245,158,11,.4)">SIM</div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <span class="mut">装载</span><span id="dLoaded" style="font-weight:700;font-size:12px">无</span>
+      </div>
+      <div class="row">
+        <span class="mut">提示</span><span id="dHint" style="font-size:12px;text-align:right;flex:1">点沙发</span>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn ghost" id="dClear">清除</button>
+        <button class="btn" id="dUps">模拟 4x</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- NEXT -->
+  <section id="v-next" class="hidden">
+    <div class="card">
+      <h2>建议顺序</h2>
+      <div class="step"><div class="n">A</div><div><b>先编 so 跑通超分</b><span>anime x4 前向比 EdgeSAM 简单，验证 JNI</span></div></div>
+      <div class="step"><div class="n">B</div><div><b>补 EdgeSAM 解码+prompt</b><span>BitmapFactory → encoder → decoder → mask PNG</span></div></div>
+      <div class="step"><div class="n">C</div><div><b>起本地 YOLO :5001</b><span>so 未好时编辑器仍可用服务端吸附</span></div></div>
+      <div class="step"><div class="n">D</div><div><b>PNNX 重转 decoder</b><span>onnx2ncnn 对 decoder 有算子警告</span></div></div>
+    </div>
+    <div class="card">
+      <h2>我可以继续帮你</h2>
+      <ul>
+        <li>补全 EdgeSAM C++ 前向（解码 + prompt 编码）</li>
+        <li>补全 ESRGAN 分块拼图</li>
+        <li>写 YOLO seg 最小 FastAPI :5001</li>
+      </ul>
+      <button class="btn" onclick="toast('在对话里直接说「补 EdgeSAM 前向」即可')">继续指令</button>
+    </div>
+  </section>
+</main>
+<div id="toast"></div>
+<script>
+const tabs=document.getElementById('tabs')
+const views={why:'v-why',build:'v-build',fix:'v-fix',demo:'v-demo',next:'v-next'}
+tabs.addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b) return
+  tabs.querySelectorAll('button').forEach(x=>x.classList.remove('on'))
+  b.classList.add('on')
+  Object.values(views).forEach(id=>document.getElementById(id).classList.add('hidden'))
+  document.getElementById(views[b.dataset.t]).classList.remove('hidden')
+})
+function toast(msg){
+  const t=document.getElementById('toast')
+  t.textContent=msg; t.classList.add('show')
+  clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),2200)
+}
+// demo canvas
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d')
+const W=cv.width,H=cv.height
+let loaded=null,maskPts=null,pt=null,busy=false
+const sofa={x:36,y:H*0.42,w:W-72,h:H*0.26,r:16}
+const coffee={x:W*0.3,y:H*0.72,w:W*0.4,h:H*0.08,r:8}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+function sofaPoly(){
+  const x1=sofa.x-2,y1=sofa.y-H*0.08,x2=sofa.x+sofa.w+2,y2=sofa.y+sofa.h+2
+  const cx=(x1+x2)/2,cy=(y1+y2)/2,rx=(x2-x1)/2,ry=(y2-y1)/2,p=[]
+  for(let i=0;i<16;i++){const a=i/16*Math.PI*2-Math.PI/2
+    p.push([cx+Math.cos(a)*rx,cy+Math.sin(a)*ry*(i>4&&i<12?1.08:0.9)])}
+  return p
+}
+function draw(){
+  ctx.clearRect(0,0,W,H)
+  const g=ctx.createLinearGradient(0,0,W,H);g.addColorStop(0,'#334155');g.addColorStop(1,'#0f172a')
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H)
+  ctx.fillStyle='#1e293b';ctx.fillRect(0,H*0.58,W,H*0.42)
+  rr(sofa.x,sofa.y,sofa.w,sofa.h,sofa.r);ctx.fillStyle='#7c8aa0';ctx.fill()
+  rr(sofa.x+12,sofa.y-H*0.08,sofa.w-24,H*0.1,12);ctx.fillStyle='#9aa8bc';ctx.fill()
+  rr(coffee.x,coffee.y,coffee.w,coffee.h,coffee.r);ctx.fillStyle='#8b7355';ctx.fill()
+  if(maskPts){
+    ctx.beginPath();maskPts.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));ctx.closePath()
+    ctx.fillStyle='rgba(16,185,129,.35)';ctx.fill();ctx.strokeStyle='#10b981';ctx.lineWidth=2;ctx.stroke()
+  }
+  if(pt){ctx.beginPath();ctx.arc(pt.x,pt.y,6,0,Math.PI*2);ctx.fillStyle='#3b82f6';ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke()}
+}
+function pos(e){const r=cv.getBoundingClientRect();const t=e.touches?e.touches[0]:e
+  return{x:(t.clientX-r.left)/r.width*W,y:(t.clientY-r.top)/r.height*H}}
+async function onTap(e){
+  if(busy)return;e.preventDefault()
+  pt=pos(e);draw();busy=true
+  document.getElementById('dHint').textContent='load EdgeSAM…'
+  if(loaded!=='seg'){await sleep(280);loaded='seg';document.getElementById('dLoaded').textContent='edge_sam_mobile · seg'}
+  await sleep(200)
+  const inSofa=pt.x>=sofa.x-10&&pt.x<=sofa.x+sofa.w+10&&pt.y>=sofa.y-40&&pt.y<=sofa.y+sofa.h+10
+  if(inSofa){maskPts=sofaPoly();document.getElementById('dHint').textContent='贴合沙发 polygon(16)'}
+  else{maskPts=null;document.getElementById('dHint').textContent='请点沙发区域'}
+  busy=false;draw()
+}
+function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
+cv.addEventListener('touchstart',onTap,{passive:false})
+cv.addEventListener('mousedown',onTap)
+document.getElementById('dClear').onclick=()=>{maskPts=null;pt=null;draw();document.getElementById('dHint').textContent='已清除'}
+document.getElementById('dUps').onclick=async()=>{
+  if(busy)return;busy=true
+  document.getElementById('dHint').textContent='互斥卸载 seg → load upscale…'
+  await sleep(300);loaded='ups'
+  document.getElementById('dLoaded').textContent='realesrgan_x4 · upscale'
+  await sleep(500)
+  document.getElementById('dHint').textContent='4x 完成（模拟）'
+  busy=false
+}
+draw()
+</script>
+</body>
+</html>

@@ -1,0 +1,652 @@
+/* ==============================================================================
+   MATERIAL STUDIO PRO - 全局配色唯一真相源 (Theme Single Source of Truth)
+   所有模式（暗黑 / 明朗 / 护眼）的底色、文字、边框、按键、标签配色均在此统一定义
+   ============================================================================== */
+
+:root {
+  /* 默认：专业暗黑尊享 (Obsidian Titanium) */
+  --theme-bg-canvas: #0A0E17;
+  --theme-bg-panel: #131A29;
+  --theme-bg-card: #182236;
+  --theme-bg-subtle: #0E1422;
+  --theme-bg-hover: #212E47;
+  --theme-bg-input: #0D121D;
+  --theme-border: #27354D;
+  --theme-border-subtle: #1E2B40;
+  --theme-border-active: #6366F1;
+  --theme-text-primary: #F8FAFC;
+  --theme-text-secondary: #94A3B8;
+  --theme-text-muted: #64748B;
+  --theme-accent-primary: #6366F1;
+  --theme-accent-hover: #4F46E5;
+  --theme-accent-text: #FFFFFF;
+  --theme-accent-secondary: #06B6D4;
+  --theme-badge-bg: rgba(99, 102, 241, 0.15);
+  --theme-badge-text: #A5B4FC;
+  --theme-badge-border: rgba(99, 102, 241, 0.35);
+  --theme-chip-bg: rgba(6, 182, 212, 0.15);
+  --theme-chip-text: #22D3EE;
+  --theme-chip-border: rgba(6, 182, 212, 0.35);
+  --theme-tag-subtle-bg: #1A2336;
+  --theme-tag-subtle-text: #CBD5E1;
+  --theme-status-ready: #10B981;
+  --theme-danger-bg: rgba(225, 29, 72, 0.15);
+  --theme-danger-hover: rgba(225, 29, 72, 0.28);
+  --theme-danger-text: #FDA4AF;
+  --theme-danger-border: rgba(225, 29, 72, 0.4);
+  --theme-success-bg: #059669;
+  --theme-success-text: #FFFFFF;
+  --theme-success-border: #047857;
+  --theme-warning-bg: rgba(245, 158, 11, 0.18);
+  --theme-warning-text: #FCD34D;
+  --theme-warning-border: #D97706;
+  --theme-tick: #94A3B8;
+  --theme-scrollbar-track: #0A0E17;
+  --theme-scrollbar-thumb: #27354D;
+  --theme-media-scrim: rgba(0, 0, 0, 0.62);
+  --theme-media-text: #FFFFFF;
+
+  /* Studio 调色板原生 RGB 通道 (支持 Tailwind /alpha 透明度动态计算) */
+  --studio-950-rgb: 10 14 23;      /* Canvas 底色 */
+  --studio-900-rgb: 19 26 41;      /* Containers / Panels */
+  --studio-850-rgb: 24 34 54;      /* Cards / Surfaces */
+  --studio-800-rgb: 33 46 71;      /* Hover / Raised */
+  --studio-750-rgb: 39 53 77;      /* Subtle borders */
+  --studio-700-rgb: 51 65 85;      /* Solid borders */
+  --studio-600-rgb: 71 85 105;     /* Highlight borders / Secondary icons */
+  --studio-500-rgb: 100 116 139;   /* Muted text / notes */
+  --studio-accent-rgb: 99 102 241;  /* Primary Accent (Indigo) */
+  --studio-cyan-rgb: 6 182 212;    /* Cyan Chips / Mentions */
+  --studio-indigo-rgb: 99 102 241; /* Indigo */
+  --studio-emerald-rgb: 16 185 129;/* Emerald */
+  --studio-rose-rgb: 244 63 94;    /* Rose */
+  --studio-amber-rgb: 245 158 11;  /* Amber */
+
+  /* Slate 色系原生 RGB 通道 (全站字阶与边框自适应唯一真相源) */
+  --slate-50-rgb: 248 250 252;
+  --slate-100-rgb: 241 245 249;
+  --slate-200-rgb: 226 232 240;
+  --slate-300-rgb: 203 213 225;
+  --slate-400-rgb: 148 163 184;
+  --slate-500-rgb: 100 116 139;
+  --slate-600-rgb: 71 85 105;
+  --slate-700-rgb: 51 65 85;
+  --slate-800-rgb: 30 41 59;
+  --slate-900-rgb: 15 23 42;
+  --slate-950-rgb: 2 6 23;
+}
+
+/* 1. 专业暗黑模式 */
+html.dark {
+  color-scheme: dark;
+}
+
+/* 2. 极简白瓷明朗模式 (Porcelain Studio) */
+html.light {
+  color-scheme: light;
+  --theme-bg-canvas: #F1F5F9;
+  --theme-bg-panel: #FFFFFF;
+  --theme-bg-card: #FFFFFF;
+  --theme-bg-subtle: #F8FAFC;
+  --theme-bg-hover: #EEF2F6;
+  --theme-bg-input: #FFFFFF;
+  --theme-border: #CBD5E1;
+  --theme-border-subtle: #E2E8F0;
+  --theme-border-active: #4F46E5;
+  --theme-text-primary: #0F172A;
+  --theme-text-secondary: #334155;
+  --theme-text-muted: #64748B;
+  --theme-accent-primary: #4F46E5;
+  --theme-accent-hover: #4338CA;
+  --theme-accent-text: #FFFFFF;
+  --theme-accent-secondary: #0284C7;
+  --theme-badge-bg: #EEF2FF;
+  --theme-badge-text: #4338CA;
+  --theme-badge-border: #C7D2FE;
+  --theme-chip-bg: #E0F2FE;
+  --theme-chip-text: #0369A1;
+  --theme-chip-border: #BAE6FD;
+  --theme-tag-subtle-bg: #F1F5F9;
+  --theme-tag-subtle-text: #334155;
+  --theme-status-ready: #059669;
+  --theme-danger-bg: #FFE4E6;
+  --theme-danger-hover: #FECDD3;
+  --theme-danger-text: #9F1239;
+  --theme-danger-border: #FDA4AF;
+  --theme-success-bg: #D1FAE5;
+  --theme-success-text: #065F46;
+  --theme-success-border: #6EE7B7;
+  --theme-warning-bg: #FEF3C7;
+  --theme-warning-text: #92400E;
+  --theme-warning-border: #FCD34D;
+  --theme-tick: #475569;
+  --theme-scrollbar-track: #F1F5F9;
+  --theme-scrollbar-thumb: #94A3B8;
+  --theme-media-scrim: rgba(15, 23, 42, 0.55);
+  --theme-media-text: #FFFFFF;
+
+  /* Studio 调色板原生 RGB 通道 (极简白瓷明朗模式) */
+  --studio-950-rgb: 241 245 249;   /* Canvas 底色 #F1F5F9 */
+  --studio-900-rgb: 255 255 255;   /* Containers / Panels #FFFFFF */
+  --studio-850-rgb: 255 255 255;   /* Cards / Surfaces #FFFFFF */
+  --studio-800-rgb: 238 242 246;   /* Hover / Raised #EEF2F6 */
+  --studio-750-rgb: 226 232 240;   /* Subtle borders #E2E8F0 */
+  --studio-700-rgb: 203 213 225;   /* Solid borders #CBD5E1 */
+  --studio-600-rgb: 148 163 184;   /* Secondary icons #94A3B8 */
+  --studio-500-rgb: 100 116 139;   /* Muted text #64748B */
+  --studio-accent-rgb: 79 70 229;  /* Primary Accent #4F46E5 */
+  --studio-cyan-rgb: 2 132 199;    /* Cyan #0284C7 */
+  --studio-indigo-rgb: 79 70 229;  /* Indigo #4F46E5 */
+  --studio-emerald-rgb: 5 150 105; /* Emerald #059669 */
+  --studio-rose-rgb: 225 29 72;    /* Rose #E11D48 */
+  --studio-amber-rgb: 217 119 6;   /* Amber #D97706 */
+
+  /* Slate 色系原生 RGB 通道 (白瓷明朗模式：深墨字阶，高清晰度) */
+  --slate-50-rgb: 2 6 23;
+  --slate-100-rgb: 15 23 42;      /* 最深主标题墨字 #0F172A */
+  --slate-200-rgb: 30 41 59;      /* 正文深色墨字 #1E293B */
+  --slate-300-rgb: 51 65 85;      /* 次级正文 #334155 */
+  --slate-400-rgb: 71 85 105;     /* 辅助标签与日期 #475569 */
+  --slate-500-rgb: 100 116 139;   /* 浅次要描述 #64748B */
+  --slate-600-rgb: 148 163 184;   /* 占位提示 */
+  --slate-700-rgb: 203 213 225;   /* 实线浅灰边框 #CBD5E1 */
+  --slate-800-rgb: 226 232 240;   /* 极浅灰边框 #E2E8F0 */
+  --slate-900-rgb: 241 245 249;   /* 浅灰底块 #F1F5F9 */
+  --slate-950-rgb: 255 255 255;   /* 纯白 */
+}
+
+/* 3. 沉香宣纸·温润茶道护眼模式 (Warm Parchment & Amber Matcha)
+   - 彻底消灭一切冷灰、突兀黑条、刺眼蓝光！
+   - 高对比深沉香墨字，保护老年人视力，视觉极其和谐温润
+*/
+html.eye-care {
+  color-scheme: light;
+  --theme-bg-canvas: #F6F1E5;
+  --theme-bg-panel: #FAF5EB;
+  --theme-bg-card: #FFFDF8;
+  --theme-bg-subtle: #EFE7D3;
+  --theme-bg-hover: #E8DEC8;
+  --theme-bg-input: #FFFDF8;
+  --theme-border: #D8CDAF;
+  --theme-border-subtle: #E4DAC4;
+  --theme-border-active: #B45309;
+  --theme-text-primary: #241E15;
+  --theme-text-secondary: #5F5645;
+  --theme-text-muted: #7F745E;
+  --theme-accent-primary: #B45309;
+  --theme-accent-hover: #9A4306;
+  --theme-accent-text: #FFFDF8;
+  --theme-accent-secondary: #2D5A43;
+  --theme-badge-bg: #F5ECD7;
+  --theme-badge-text: #854D0E;
+  --theme-badge-border: #DFD0AF;
+  --theme-chip-bg: #EFE7D3;
+  --theme-chip-text: #78350F;
+  --theme-chip-border: #D8CDAF;
+  --theme-tag-subtle-bg: #EAE1CB;
+  --theme-tag-subtle-text: #4A4232;
+  --theme-status-ready: #2D5A43;
+  --theme-danger-bg: #FBE6E3;
+  --theme-danger-hover: #F7D2CD;
+  --theme-danger-text: #881337;
+  --theme-danger-border: #E8B4AC;
+  --theme-success-bg: #E4EFE6;
+  --theme-success-text: #1E3D2E;
+  --theme-success-border: #8FB39A;
+  --theme-warning-bg: #F8E8C8;
+  --theme-warning-text: #7A4E0D;
+  --theme-warning-border: #E2C48A;
+  --theme-tick: #5F5645;
+  --theme-scrollbar-track: #F6F1E5;
+  --theme-scrollbar-thumb: #C4B89A;
+  --theme-media-scrim: rgba(36, 30, 21, 0.55);
+  --theme-media-text: #FFFDF8;
+
+  /* Studio 调色板原生 RGB 通道 (温润沉香宣纸护眼模式) */
+  --studio-950-rgb: 246 241 229;   /* Canvas 底色 #F6F1E5 */
+  --studio-900-rgb: 250 245 235;   /* Containers / Panels #FAF5EB */
+  --studio-850-rgb: 255 253 248;   /* Cards / Surfaces #FFFDF8 */
+  --studio-800-rgb: 232 222 200;   /* Hover / Raised #E8DEC8 */
+  --studio-750-rgb: 228 218 196;   /* Subtle borders #E4DAC4 */
+  --studio-700-rgb: 216 205 175;   /* Solid borders #D8CDAF */
+  --studio-600-rgb: 168 155 130;   /* Secondary icons #A89B82 */
+  --studio-500-rgb: 127 116 94;    /* Muted text #7F745E */
+  --studio-accent-rgb: 180 83 9;   /* Primary Accent #B45309 Warm Amber */
+  --studio-cyan-rgb: 45 90 67;     /* Chip / Cyan #2D5A43 Forest Matcha */
+  --studio-indigo-rgb: 180 83 9;   /* Indigo #B45309 */
+  --studio-emerald-rgb: 45 90 67;  /* Emerald #2D5A43 */
+  --studio-rose-rgb: 184 28 28;    /* Rose #B81C1C */
+  --studio-amber-rgb: 180 83 9;    /* Amber #B45309 */
+
+  /* Slate 色系原生 RGB 通道 (沉香宣纸护眼模式：温润茶香浓墨，无冷灰，无眩光) */
+  --slate-50-rgb: 36 30 21;
+  --slate-100-rgb: 36 30 21;      /* 沉香浓墨书法标题 #241E15 */
+  --slate-200-rgb: 48 40 28;      /* 温润深墨正文 #30281C */
+  --slate-300-rgb: 74 66 50;      /* 茶褐次要文字 #4A4232 */
+  --slate-400-rgb: 95 86 69;      /* 沉香浅褐标签 #5F5645 */
+  --slate-500-rgb: 127 116 94;    /* 羊皮纸温和注释 #7F745E */
+  --slate-600-rgb: 168 155 130;   /* 次级浅茶边 #A89B82 */
+  --slate-700-rgb: 216 205 175;   /* 宣纸微沙金边框 #D8CDAF */
+  --slate-800-rgb: 228 218 196;   /* 浅米灰温和边 #E4DAC4 */
+  --slate-900-rgb: 245 239 227;   /* 宣纸底色 #F5EFE3 */
+  --slate-950-rgb: 250 245 235;   /* 暖白 */
+}
+
+/* 老年人高易读性字体体系 (Senior-Friendly Readability, 默认适老关怀大字模式生效) */
+html {
+  font-size: 16.5px;
+  -webkit-font-smoothing: antialiased;
+}
+
+html.light {
+  font-size: 16.5px;
+}
+
+html.eye-care {
+  font-size: 17px;
+  line-height: 1.6;
+}
+
+/* 适老化大字关怀模式启用时的字阶增强 (默认开启，全局舒展大字，护眼降压) */
+html.senior-mode {
+  font-size: 18px;
+  letter-spacing: 0.015em;
+}
+
+html.light.senior-mode {
+  font-size: 18px;
+}
+
+html.eye-care.senior-mode {
+  font-size: 18.5px;
+  line-height: 1.65;
+}
+
+/* 适老模式下全面拔高微小字号与按钮触控区，彻底告别局促小家子气排版 */
+html.senior-mode .text-\[10px\],
+html.senior-mode .text-\[11px\],
+html.senior-mode .text-\[11\.5px\],
+html.senior-mode .text-\[12px\] {
+  font-size: 13.5px !important;
+  line-height: 1.45 !important;
+}
+
+html.senior-mode .text-xs {
+  font-size: 15px !important;
+  line-height: 1.45 !important;
+}
+
+html.senior-mode .text-sm {
+  font-size: 16.5px !important;
+  line-height: 1.5 !important;
+}
+
+html.senior-mode .text-base {
+  font-size: 18px !important;
+}
+
+html.senior-mode button,
+html.senior-mode input,
+html.senior-mode select,
+html.senior-mode textarea {
+  font-size: inherit;
+}
+
+/* ==============================================================================
+   核心全局映射规则：全站组件自动继承唯一真相源，杜绝任何孤立硬编码颜色
+   ============================================================================== */
+
+body {
+  background-color: var(--theme-bg-canvas);
+  color: var(--theme-text-primary);
+}
+
+/* 容器底色适配 */
+.bg-studio-950 { background-color: var(--theme-bg-canvas) !important; }
+.bg-studio-900 { background-color: var(--theme-bg-panel) !important; }
+.bg-studio-850 { background-color: var(--theme-bg-card) !important; }
+.bg-studio-800 { background-color: var(--theme-bg-hover) !important; }
+.bg-studio-750,
+.bg-studio-700 { background-color: var(--theme-bg-hover) !important; }
+
+
+/* 边框统一适配 */
+.border-studio-700,
+.border-studio-750,
+.border-studio-800,
+.border-studio-850,
+.border-studio-600 {
+  border-color: var(--theme-border) !important;
+}
+
+/* 文字颜色统一定义（slate 系列已由 Tailwind RGB 变量自适应） */
+.text-slate-100,
+.text-slate-200 {
+  color: var(--theme-text-primary) !important;
+}
+
+.text-slate-300,
+.text-slate-400 {
+  color: var(--theme-text-secondary) !important;
+}
+
+.text-slate-500,
+.text-slate-600 {
+  color: var(--theme-text-muted) !important;
+}
+
+/* 输入框与控件 */
+input, select, textarea {
+  background-color: var(--theme-bg-input) !important;
+  color: var(--theme-text-primary) !important;
+  border-color: var(--theme-border) !important;
+}
+
+input::placeholder, textarea::placeholder {
+  color: var(--theme-text-muted) !important;
+}
+
+/* 核心主色调按键与高亮 */
+.bg-studio-accent {
+  background-color: var(--theme-accent-primary) !important;
+  color: var(--theme-accent-text) !important;
+}
+.text-studio-accent {
+  color: var(--theme-accent-primary) !important;
+}
+
+.text-studio-cyan {
+  color: var(--theme-chip-text) !important;
+}
+
+/* ==============================================================================
+   亮色与护眼模式下，消除一切残留暗色 (bg-black, bg-slate-900, etc.)
+   ============================================================================== */
+html.light .bg-black,
+html.light .bg-black\/20,
+html.light .bg-black\/25,
+html.light .bg-black\/40,
+html.light .bg-black\/60,
+html.light .bg-black\/70,
+html.light .bg-black\/80,
+html.light .bg-black\/90,
+html.light .bg-slate-900,
+html.light .bg-slate-950,
+html.light .bg-slate-850,
+html.light .bg-slate-800,
+html.light .bg-slate-700,
+html.eye-care .bg-black,
+html.eye-care .bg-black\/20,
+html.eye-care .bg-black\/25,
+html.eye-care .bg-black\/40,
+html.eye-care .bg-black\/60,
+html.eye-care .bg-black\/70,
+html.eye-care .bg-black\/80,
+html.eye-care .bg-black\/90,
+html.eye-care .bg-slate-900,
+html.eye-care .bg-slate-950,
+html.eye-care .bg-slate-850,
+html.eye-care .bg-slate-800,
+html.eye-care .bg-slate-700 {
+  background-color: var(--theme-bg-subtle) !important;
+}
+
+/* 消除所有深蓝与深紫暗色残留 */
+html.light .bg-indigo-900,
+html.light .bg-indigo-900\/40,
+html.light .bg-indigo-950,
+html.light .bg-indigo-950\/60,
+html.light .bg-blue-900,
+html.light .bg-blue-900\/30,
+html.light .bg-blue-900\/40,
+html.light .bg-blue-950,
+html.light .bg-blue-950\/60,
+html.eye-care .bg-indigo-900,
+html.eye-care .bg-indigo-900\/40,
+html.eye-care .bg-indigo-950,
+html.eye-care .bg-indigo-950\/60,
+html.eye-care .bg-blue-900,
+html.eye-care .bg-blue-900\/30,
+html.eye-care .bg-blue-900\/40,
+html.eye-care .bg-blue-950,
+html.eye-care .bg-blue-950\/60 {
+  background-color: var(--theme-badge-bg) !important;
+  color: var(--theme-badge-text) !important;
+  border-color: var(--theme-badge-border) !important;
+}
+
+html.light .text-indigo-300,
+html.light .text-blue-300 {
+  color: var(--theme-accent-primary) !important;
+}
+
+html.light .text-indigo-400,
+html.light .text-blue-400 {
+  color: var(--theme-accent-hover) !important;
+}
+
+html.eye-care .text-indigo-300,
+html.eye-care .text-blue-300,
+html.eye-care .text-indigo-400,
+html.eye-care .text-blue-400 {
+  color: var(--theme-badge-text) !important;
+}
+
+html.light .ring-black\/40,
+html.light .ring-black\/20,
+html.light .ring-white\/10,
+html.light .ring-white\/20,
+html.light .ring-white,
+html.eye-care .ring-black\/40,
+html.eye-care .ring-black\/20,
+html.eye-care .ring-white\/10,
+html.eye-care .ring-white\/20,
+html.eye-care .ring-white {
+  --tw-ring-color: var(--theme-border-subtle) !important;
+}
+
+/* 护眼模式下的细分条、头部分类与徽章 */
+html.eye-care header.h-\[62px\],
+html.eye-care .h-10.px-6.bg-studio-950,
+html.eye-care [class*="bg-studio-900\/90"] {
+  background-color: var(--theme-bg-subtle) !important;
+  border-color: var(--theme-border) !important;
+}
+
+html.eye-care .h-10.px-6.bg-studio-950 span,
+html.eye-care .h-10.px-6.bg-studio-950 button {
+  color: var(--theme-text-primary) !important;
+}
+
+html.eye-care .bg-studio-cyan\/25,
+html.eye-care .bg-studio-cyan\/15 {
+  background-color: var(--theme-badge-bg) !important;
+  color: var(--theme-badge-text) !important;
+  border-color: var(--theme-badge-border) !important;
+}
+
+/* 状态指示绿灯在护眼模式下转为沉静松青 */
+html.eye-care .bg-studio-emerald,
+html.eye-care .text-emerald-400,
+html.eye-care .text-emerald-300 {
+  color: var(--theme-status-ready) !important;
+}
+
+/* ==============================================================================
+   语义化危险与回收站操作（统一全模式下的对比度与高易读性）
+   ============================================================================== */
+.theme-btn-danger {
+  background-color: var(--theme-danger-bg) !important;
+  color: var(--theme-danger-text) !important;
+  border: 1px solid var(--theme-danger-border) !important;
+}
+.theme-btn-danger:hover {
+  background-color: var(--theme-danger-hover) !important;
+}
+
+/* 消除所有 rose/red 暗色在亮色与护眼模式下的对比度漏洞 */
+html.light .bg-rose-950,
+html.light .bg-rose-950\/20,
+html.light .bg-rose-950\/30,
+html.light .bg-rose-950\/40,
+html.light .bg-rose-950\/60,
+html.light .bg-rose-950\/80,
+html.eye-care .bg-rose-950,
+html.eye-care .bg-rose-950\/20,
+html.eye-care .bg-rose-950\/30,
+html.eye-care .bg-rose-950\/40,
+html.eye-care .bg-rose-950\/60,
+html.eye-care .bg-rose-950\/80 {
+  background-color: var(--theme-danger-bg) !important;
+  color: var(--theme-danger-text) !important;
+  border-color: var(--theme-danger-border) !important;
+}
+
+html.light .text-rose-300,
+html.light .text-rose-400,
+html.eye-care .text-rose-300,
+html.eye-care .text-rose-400 {
+  color: var(--theme-danger-text) !important;
+}
+
+html.light .border-rose-900\/60,
+html.light .border-rose-900\/40,
+html.light .border-rose-900\/30,
+html.eye-care .border-rose-900\/60,
+html.eye-care .border-rose-900\/40,
+html.eye-care .border-rose-900\/30 {
+  border-color: var(--theme-danger-border) !important;
+}
+
+/* 衍生版本浮层胶囊高对比度徽章 (彻底解决 1080×1920 看不清的问题，全模式超高对比度) */
+.theme-capsule-badge-active {
+  background-color: var(--theme-media-scrim) !important;
+  color: var(--theme-media-text) !important;
+  border: 1px solid var(--theme-border) !important;
+  font-weight: 700 !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3) !important;
+}
+.theme-capsule-badge-inactive {
+  background-color: var(--theme-bg-subtle) !important;
+  color: var(--theme-text-primary) !important;
+  border: 1px solid var(--theme-border) !important;
+  font-weight: 700 !important;
+}
+
+
+
+/* ==============================================================================
+   调色板别名：组件里残留的 emerald / rose / amber / cyan / 渐变
+   全部指回上面的语义令牌。色值只写在本文件各主题块里。
+   ============================================================================== */
+.theme-count {
+  color: var(--theme-text-secondary);
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  opacity: 1;
+}
+.theme-year {
+  color: var(--theme-text-primary) !important;
+  font-size: 16px !important;
+  font-weight: 800;
+  opacity: 1 !important;
+}
+.theme-tick {
+  background-color: var(--theme-tick) !important;
+  height: 4px !important;
+  opacity: 1 !important;
+}
+.theme-tick.is-on {
+  background-color: var(--theme-accent-primary) !important;
+}
+.theme-btn-success {
+  background-color: var(--theme-success-bg) !important;
+  color: var(--theme-success-text) !important;
+  border: 1px solid var(--theme-success-border) !important;
+}
+.theme-btn-success:hover { filter: brightness(0.97); }
+.theme-btn-success:disabled,
+.theme-btn-danger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+[class*="bg-emerald-"] {
+  background-color: var(--theme-success-bg) !important;
+  color: var(--theme-success-text) !important;
+  border-color: var(--theme-success-border) !important;
+}
+[class*="text-emerald-"] { color: var(--theme-success-text) !important; }
+[class*="border-emerald-"] { border-color: var(--theme-success-border) !important; }
+
+[class*="bg-rose-"] {
+  background-color: var(--theme-danger-bg) !important;
+  color: var(--theme-danger-text) !important;
+  border-color: var(--theme-danger-border) !important;
+}
+[class*="text-rose-"] { color: var(--theme-danger-text) !important; }
+[class*="border-rose-"] { border-color: var(--theme-danger-border) !important; }
+
+[class*="bg-amber-"] {
+  background-color: var(--theme-warning-bg) !important;
+  color: var(--theme-warning-text) !important;
+  border-color: var(--theme-warning-border) !important;
+}
+[class*="text-amber-"] { color: var(--theme-warning-text) !important; }
+[class*="border-amber-"] { border-color: var(--theme-warning-border) !important; }
+
+[class*="text-cyan-"] { color: var(--theme-accent-secondary) !important; }
+[class*="bg-cyan-"] {
+  background-color: var(--theme-accent-secondary) !important;
+  color: var(--theme-accent-text) !important;
+}
+
+[class*="from-cyan-"],
+[class*="from-blue-"],
+[class*="from-purple-"],
+[class*="from-pink-"],
+[class*="from-indigo-"] {
+  --tw-gradient-from: var(--theme-accent-primary) var(--tw-gradient-from-position) !important;
+  --tw-gradient-to: var(--theme-accent-secondary) var(--tw-gradient-to-position) !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+
+/* 明朗 / 护眼：界面白字改为主文字色。照片叠层用 .on-media 保持浅色。 */
+html.light .text-white,
+html.light .text-white\/90,
+html.light .text-white\/80,
+html.light .text-white\/70,
+html.light .text-white\/60,
+html.eye-care .text-white,
+html.eye-care .text-white\/90,
+html.eye-care .text-white\/80,
+html.eye-care .text-white\/70,
+html.eye-care .text-white\/60 {
+  color: var(--theme-text-primary) !important;
+}
+html.light .bg-studio-accent,
+html.light .bg-studio-accent.text-white,
+html.eye-care .bg-studio-accent,
+html.eye-care .bg-studio-accent.text-white,
+html.light [class*="bg-gradient-"].text-white,
+html.eye-care [class*="bg-gradient-"].text-white {
+  background-color: var(--theme-accent-primary);
+  color: var(--theme-accent-text) !important;
+}
+html.light .on-media,
+html.light .on-media .text-white,
+html.eye-care .on-media,
+html.eye-care .on-media .text-white {
+  color: var(--theme-media-text) !important;
+}
+html.light .bg-studio-accent,
+html.eye-care .bg-studio-accent {
+  color: var(--theme-accent-text) !important;
+}
+html.light [class*="from-black"] .text-white,
+html.eye-care [class*="from-black"] .text-white,
+html.light .on-media .text-white,
+html.eye-care .on-media .text-white {
+  color: var(--theme-media-text) !important;
+}

@@ -1,0 +1,122 @@
+[
+  {
+    "time": "2026-10-10T15:16:05.335Z",
+    "action": "pack-and-push-wgt",
+    "note": "【新增功能】\n优化ui设计方案\n\n【修复Bug】\n无",
+    "features": "优化ui设计方案",
+    "bugfixes": "无",
+    "bumpVersion": false
+  },
+  {
+    "time": "2026-10-10T15:13:22.528Z",
+    "action": "pack-and-push-wgt",
+    "note": "【新增功能】\n优化ui设计方案\n\n【修复Bug】\n无",
+    "features": "优化ui设计方案",
+    "bugfixes": "无",
+    "bumpVersion": false
+  },
+  {
+    "time": "2026-10-10T08:43:22.331Z",
+    "action": "pack-and-push-wgt",
+    "note": "【新增功能】\n优化ui设计方案\n\n【修复Bug】\n无",
+    "features": "优化ui设计方案",
+    "bugfixes": "无",
+    "bumpVersion": false
+  },
+  {
+    "time": "2026-10-10T08:38:45.031Z",
+    "action": "push-wgt",
+    "note": "【新增功能】\n优化ui设计方案\n\n【修复Bug】\n无",
+    "features": "",
+    "bugfixes": "",
+    "bumpVersion": false
+  },
+  {
+    "time": "2026-10-10T08:37:50.590Z",
+    "action": "push-wgt",
+    "note": "优化ui设计方案",
+    "features": "",
+    "bugfixes": "",
+    "bumpVersion": false
+  },
+  {
+    "time": "2026-10-10T08:17:32.070Z",
+    "action": "pack-and-push-wgt",
+    "note": "【新增功能】\n优化ui设计方案\n\n【修复Bug】\n无",
+    "features": "优化ui设计方案",
+    "bugfixes": "无",
+    "bumpVersion": false
+  },
+  {
+    "time": "2026-10-10T06:57:11.047Z",
+    "action": "pack-and-push-wgt",
+    "note": "【新增功能】\n优化ui设计方案\n\n【修复Bug】\n无",
+    "features": "优化ui设计方案",
+    "bugfixes": "无",
+    "bumpVersion": false
+  },
+  {
+    "time": "2026-10-10T05:32:30.804Z",
+    "action": "pack-and-push-wgt",
+    "note": "【新增功能】\n优化ui设计方案\n\n【修复Bug】\n无",
+    "features": "优化ui设计方案",
+    "bugfixes": "无",
+    "bumpVersion": false
+  },
+  {
+    "time": "2026-10-09T06:18:21.764Z",
+    "action": "pack-and-push-wgt",
+    "note": "【新增功能】\n优化ui设计方案\n\n【修复Bug】\n无",
+    "features": "优化ui设计方案",
+    "bugfixes": "无",
+    "bumpVersion": false
+  },
+  {
+    "time": "2026-10-08T06:25:40.888Z",
+    "action": "pack-and-push-wgt",
+    "note": "【新增功能】\n增加人像库、收藏、材质库等功能\n\n【修复Bug】\n无",
+    "features": "增加人像库、收藏、材质库等功能",
+    "bugfixes": "无",
+    "bumpVersion": false
+  },
+  {
+    "time": "2026-10-08T06:25:03.006Z",
+    "action": "pack-and-push-wgt",
+    "note": "【新增功能】\n无\n\n【修复Bug】\n修复风格转换等ip连接问题",
+    "features": "无",
+    "bugfixes": "修复风格转换等ip连接问题",
+    "bumpVersion": false
+  },
+  {
+    "time": "2026-10-08T02:13:45.101Z",
+    "action": "pack-and-push-wgt",
+    "note": "【新增功能】\n无\n\n【修复Bug】\n修复风格转换等ip连接问题",
+    "features": "无",
+    "bugfixes": "修复风格转换等ip连接问题",
+    "bumpVersion": false
+  },
+  {
+    "time": "2026-10-03T09:00:41.358Z",
+    "action": "pack-and-push-wgt",
+    "note": "可视化打包",
+    "features": "- 手动上传素材即刻入库可见，无需傻等后台AI解释器打标\n- 强化缩略图防串图机制，精修图强制使用服务端主衍生",
+    "bugfixes": "- 彻底修复外部缩略图（本地同名短文件误匹配）与内部详情图不一致的问题\n- 修复回收站中堆满「文件已清理」空壳卡片的问题，已清理的不可恢复项不再进入垃圾库\n- 激活历史停留在 discovered 的未打标原图资产",
+    "bumpVersion": false
+  },
+  {
+    "time": "2026-10-03T08:35:14.726Z",
+    "action": "pack-and-push-wgt",
+    "note": "【新增功能】\n- 强化运行时版本同步感知机制\n\n【修复Bug】\n- 解决设置页版本号、机器号、构建号未随WGT热更变化的问题",
+    "features": "- 强化运行时版本同步感知机制",
+    "bugfixes": "- 解决设置页版本号、机器号、构建号未随WGT热更变化的问题",
+    "bumpVersion": false
+  },
+  {
+    "time": "2026-10-03T08:24:01.026Z",
+    "action": "pack-and-push-wgt",
+    "note": "【新增功能】\n- 出包确认弹窗支持输入新增功能与修复Bug情况\n\n【修复Bug】\n- 修复更新安装时卡在「准备安装包...」的问题",
+    "features": "- 出包确认弹窗支持输入新增功能与修复Bug情况",
+    "bugfixes": "- 修复更新安装时卡在「准备安装包...」的问题",
+    "bumpVersion": false
+  }
+]

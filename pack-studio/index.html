@@ -1,0 +1,1183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Pack Studio</title>
+<style>
+:root{
+  --bg:#070b14;--card:#0f1726;--line:#1e2a40;--ink:#eef3ff;--mut:#8b9bb8;
+  --acc:#3b82f6;--ok:#10b981;--warn:#f59e0b;--err:#ef4444;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;min-height:100%;background:var(--bg);color:var(--ink);
+  font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif}
+body{display:flex;flex-direction:column;min-height:100vh}
+header{padding:14px 16px 12px;border-bottom:1px solid var(--line);
+  background:rgba(7,11,20,.95);position:sticky;top:0;z-index:9}
+h1{margin:0;font-size:17px;font-weight:700}
+.sub{margin-top:4px;font-size:12px;color:var(--mut)}
+main{flex:1;padding:12px 14px 32px;max-width:520px;width:100%;margin:0 auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:12px}
+h2{margin:0 0 10px;font-size:14px;font-weight:700;color:#c7d2fe}
+.row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:6px 0}
+.mut{font-size:12px;color:var(--mut);line-height:1.5}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.btn{border:0;border-radius:14px;padding:14px 10px;font-size:14px;font-weight:700;
+  cursor:pointer;color:#fff;background:var(--acc);transition:.15s}
+.btn:active{transform:scale(.98)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.wgt{background:linear-gradient(135deg,#2563eb,#38bdf8)}
+.btn.apk{background:linear-gradient(135deg,#7c3aed,#a78bfa);width:100%;padding:16px 12px;font-size:15px;margin-bottom:10px}
+.btn.wgt.hero{width:100%;padding:16px 12px;font-size:15px;margin-bottom:0}
+.btn.ghost{background:#152033;border:1px solid var(--line);color:var(--ink)}
+.btn.mirror{background:linear-gradient(135deg,#0ea5e9,#6366f1)}
+.btn.full{grid-column:1 / -1}
+select{width:100%;background:#0a1220;border:1px solid var(--line);color:var(--ink);
+  border-radius:10px;padding:10px 12px;font-size:13px;outline:none}
+select:focus{border-color:var(--acc)}
+label{display:block;font-size:11px;color:var(--mut);margin:8px 0 4px}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;
+  font-size:11px;background:#152033;border:1px solid var(--line)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--mut)}
+.dot.ok{background:var(--ok);box-shadow:0 0 8px rgba(16,185,129,.5)}
+.dot.busy{background:var(--warn);animation:pulse 1s infinite}
+@keyframes pulse{50%{opacity:.35}}
+#log{background:#050a14;border:1px solid var(--line);border-radius:12px;
+  font-family:ui-monospace,Consolas,monospace;font-size:11px;line-height:1.45;
+  padding:10px;height:200px;overflow:auto;white-space:pre-wrap;word-break:break-all;color:#a5f3d0}
+.pkg{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);font-size:12px}
+.pkg:last-child{border-bottom:0}
+.badge{font-size:10px;padding:2px 6px;border-radius:4px;background:#1e293b;color:var(--mut)}
+.badge.wgt{color:#7dd3fc}.badge.apk{color:#c4b5fd}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);
+  background:#111827ee;border:1px solid var(--line);padding:10px 14px;border-radius:10px;
+  font-size:12px;opacity:0;pointer-events:none;transition:.2s;z-index:9999;max-width:92%}
+.toast.show{opacity:1}
+.hero{background:linear-gradient(135deg,rgba(37,99,246,.2),rgba(139,92,246,.15));
+  border:1px solid rgba(99,102,241,.35);border-radius:16px;padding:14px;margin-bottom:12px}
+#conn{font-size:11px;color:var(--mut);margin-top:6px}
+.sel-dev{font-size:12px;color:#a5b4fc;margin-top:6px}
+.sel-dev b{color:#e0e7ff}
+a.dl{padding:8px 10px;text-decoration:none;display:inline-block;border-radius:10px;
+  background:#152033;border:1px solid var(--line);color:var(--ink);font-size:12px;font-weight:700}
+
+.modal-mask{position:fixed;inset:0;background:rgba(0,0,0,.62);z-index:40;
+  display:none;align-items:flex-end;justify-content:center}
+.modal-mask.show{display:flex}
+.modal{width:min(520px,100%);background:var(--card);border:1px solid var(--line);
+  border-radius:18px 18px 0 0;padding:16px 14px 20px;max-height:80vh;overflow:auto}
+.modal h3{margin:0 0 8px;font-size:15px}
+.dev-item{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:12px;border:1px solid var(--line);border-radius:12px;margin-bottom:8px;cursor:pointer;
+  background:#0a1220}
+.dev-item:hover,.dev-item.active{border-color:var(--acc);background:#0f1a30}
+.dev-item .meta{font-size:12px;color:var(--mut);margin-top:2px}
+.dev-item .serial{font-weight:700;font-size:13px;font-family:ui-monospace,Consolas,monospace}
+.tag{font-size:10px;padding:2px 6px;border-radius:999px;background:#152033;color:var(--mut)}
+.tag.on{color:#6ee7b7;background:rgba(16,185,129,.12)}
+
+.phone-wrap{position:relative;background:#050a14;border:1px solid var(--line);
+  border-radius:12px;overflow:hidden;min-height:220px;display:flex;align-items:center;justify-content:center}
+.phone-wrap img{max-width:100%;max-height:420px;display:block;cursor:crosshair;user-select:none}
+.phone-ph{color:var(--mut);font-size:12px;padding:28px 12px;text-align:center}
+.keybar{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}
+.mirror-status{font-size:11px;color:var(--mut);margin-top:6px}
+.rule{display:flex;flex-direction:column;gap:7px}
+.rule-i{display:flex;gap:8px;align-items:flex-start;font-size:12px;color:var(--mut);line-height:1.55}
+.rule-i i{flex:0 0 auto;width:17px;height:17px;border-radius:50%;background:#152033;
+  border:1px solid var(--line);color:#93c5fd;font-style:normal;font-size:10px;
+  display:flex;align-items:center;justify-content:center;font-weight:700;margin-top:1px}
+.rule-i b{color:#cbd5e1}
+.rule-i b.bad{color:var(--err)}
+#lastBuild{font-family:ui-monospace,Consolas,monospace;font-size:11px;line-height:1.6;
+  background:#050a14;border:1px solid var(--line);border-radius:10px;padding:9px 10px;white-space:pre-wrap}
+.form-lbl{display:block;font-size:12px;font-weight:700;margin:12px 0 6px;color:#c7d2fe}
+.form-lbl .req{color:var(--err);margin-right:4px}
+.form-ta{width:100%;background:#0a1220;border:1px solid var(--line);color:var(--ink);
+  border-radius:10px;padding:10px 12px;font-size:13px;line-height:1.5;outline:none;font-family:inherit;
+  resize:vertical;min-height:68px;box-sizing:border-box;transition:border-color .15s}
+.form-ta:focus{border-color:var(--acc)}
+.form-ta.err{border-color:var(--err);background:rgba(239,68,68,.06)}
+.form-err{color:var(--err);font-size:12px;margin:8px 0;display:none;background:rgba(239,68,68,.12);
+  border:1px solid rgba(239,68,68,.3);padding:8px 12px;border-radius:8px;line-height:1.4}
+.ver-options{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:6px}
+.ver-opt{padding:10px 8px;border:1px solid var(--line);border-radius:10px;cursor:pointer;
+  background:#0a1220;font-size:12px;text-align:center;transition:.15s;color:var(--mut)}
+.ver-opt:hover{border-color:var(--acc);background:#0f1a30}
+.ver-opt.active{border-color:var(--acc);background:#101d36;color:#93c5fd;font-weight:700;box-shadow:0 0 10px rgba(59,130,246,.2)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Pack Studio</h1>
+  <div class="sub">打最新 APK / 发最新 WGT · scrcpy 投屏 · 设备日志</div>
+</header>
+<main>
+  <div class="hero">
+    <div class="row">
+      <div>
+        <b id="verName">—</b>
+        <div class="mut" style="margin-top:2px">versionCode <span id="verCode">—</span></div>
+      </div>
+      <span class="pill"><i class="dot" id="runDot"></i><span id="runText">空闲</span></span>
+    </div>
+    <button class="btn ghost" id="btnCancel" style="width:100%;margin-top:10px;display:none">取消当前任务</button>
+    <div id="conn">连接中…</div>
+    <div class="sel-dev" id="selDev">设备：<b>未选择</b>（点下方「选择 ADB 设备」）</div>
+  </div>
+
+  <div class="card">
+    <h2>APK 装机（ADB，不推通道）</h2>
+    <div class="grid">
+      <div>
+        <button class="btn apk" data-act="cloud-apk-install" style="width:100%;margin-bottom:0">云打包 APK<br/>并 ADB 安装</button>
+        <div class="mut" style="margin-top:8px">DCloud 云端打自定义基座（VideoPlayer / so / 权限），打完直接装到手机。改原生且离线未就绪时用。慢。</div>
+      </div>
+      <div>
+        <button class="btn mirror" data-act="offline-apk-install" style="width:100%;margin-bottom:0">离线打包 APK<br/>并 ADB 安装</button>
+        <div class="mut" style="margin-top:8px">本地 Gradle + Offline SDK 出包后 ADB 安装。同样含 VideoPlayer / localinfer。快，日常改原生走这个。</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>出包纪律（不可绕过）</h2>
+    <div class="rule">
+      <div class="rule-i"><i>1</i><span>每次打包都在<b>隔离目录</b>重新编译，<b>你的源码只读</b>，不会被写入或清理</span></div>
+      <div class="rule-i"><i>2</i><span>编译失败 → <b class="bad">立刻中止并如实报错</b>，绝不改用上一次的历史产物</span></div>
+      <div class="rule-i"><i>3</i><span>产物必须通过<b>新鲜度 / 源码标识符 / 生产指纹</b>三道校验</span></div>
+      <div class="rule-i"><i>4</i><span>压缩后解开 wgt <b>逐字节比对 sha256</b>，确认包 = 本次编译产物</span></div>
+    </div>
+    <div id="lastBuild" class="mut" style="margin-top:10px">本次编译：尚无记录</div>
+  </div>
+
+  <div class="card">
+    <h2>热更新（WGT，推更新通道）</h2>
+    <button class="btn wgt hero" data-act="pack-and-push-wgt">打包并推送 WGT</button>
+    <div class="mut" style="margin-top:8px">先隔离重编 → 校验 → 压缩 → 字节同源校验 → 推送。任何一步失败都会停下来并把真实报错打在下方日志里。</div>
+    <button class="btn ghost full" data-act="pack-wgt" style="margin-top:8px">仅打包 WGT（不推送）</button>
+  </div>
+
+  <div class="card" id="canaryBoardCard">
+    <div class="row" style="margin:0 0 10px">
+      <h2 style="margin:0">📢 发布监控与灰度控制台</h2>
+      <button class="btn ghost" id="btnRefreshUpdateState" style="padding:4px 8px;font-size:11px">刷新状态</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+      <div style="background:#050a14;border:1px solid var(--line);border-radius:12px;padding:10px">
+        <div style="font-size:11px;color:#34d399;font-weight:700">🟢 全量正式版</div>
+        <div id="fullReleaseInfo" style="font-size:12px;margin-top:6px;line-height:1.5;color:#e2e8f0">加载中…</div>
+      </div>
+      <div style="background:#050a14;border:1px solid var(--line);border-radius:12px;padding:10px">
+        <div style="font-size:11px;color:#f59e0b;font-weight:700">🧪 灰度测试版</div>
+        <div id="canaryReleaseInfo" style="font-size:12px;margin-top:6px;line-height:1.5;color:#e2e8f0">加载中…</div>
+      </div>
+    </div>
+    <div id="canaryActions" style="display:none;grid-template-columns:1fr 1fr;gap:8px">
+      <button class="btn" id="btnPromoteCanary" style="background:linear-gradient(135deg,#059669,#10b981);padding:10px 8px;font-size:12px">🚀 灰度通过，一键转正</button>
+      <button class="btn ghost" id="btnRevokeCanary" style="color:#f87171;border-color:rgba(239,68,68,.4);padding:10px 8px;font-size:12px">🛑 发现Bug，撤回灰度</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>离线工具</h2>
+    <button class="btn ghost full" data-act="pack-offline-apk">仅离线打包 APK（不安装）</button>
+    <div class="mut" style="margin-top:6px">只出包到 dist/release/apk，可手动分发或稍后安装。</div>
+    <button class="btn ghost full" data-act="offline-status" style="margin-top:8px">检查离线打包就绪状态</button>
+    <div class="mut" style="margin-top:6px">核对 Android SDK / 离线 AAR / AppKey / www / so。</div>
+  </div>
+
+  <div class="card">
+    <h2>手机投屏 / 控制</h2>
+    <div class="grid">
+      <button class="btn ghost full" id="btnDevices">选择 ADB 设备…</button>
+      <button class="btn mirror" id="btnScrcpy">启动 scrcpy 投屏</button>
+      <button class="btn ghost" id="btnScrcpyStop">停止 scrcpy</button>
+      <button class="btn full ghost" id="btnWebMirror">网页镜像（ADB 截屏）</button>
+    </div>
+    <div class="mut" style="margin-top:8px">
+      scrcpy 打开桌面投屏窗口（完整触控/键盘）。网页镜像用 ADB 截屏轮询，可点击发送 tap。
+    </div>
+    <div class="phone-wrap" id="phoneWrap" style="margin-top:10px">
+      <div class="phone-ph" id="phonePh">点「网页镜像」开始截屏；或用 scrcpy 打开桌面投屏窗口</div>
+      <img id="phoneImg" alt="phone" style="display:none" />
+    </div>
+    <div class="keybar">
+      <button class="btn ghost" data-key="KEYCODE_BACK" style="padding:10px">返回</button>
+      <button class="btn ghost" data-key="KEYCODE_HOME" style="padding:10px">Home</button>
+      <button class="btn ghost" data-key="KEYCODE_APP_SWITCH" style="padding:10px">多任务</button>
+    </div>
+    <div class="mirror-status" id="mirrorStatus">镜像：关闭</div>
+  </div>
+
+  <div class="card">
+    <h2>设备日志（排错）</h2>
+    <label>过滤</label>
+    <select id="logFilter">
+      <option value="app">应用/DCloud/JS（推荐）</option>
+      <option value="error">仅 JS/崩溃</option>
+      <option value="all">全部 logcat</option>
+    </select>
+    <div class="grid" style="margin-top:10px">
+      <button class="btn ghost" id="btnLogDump">抓取当前日志</button>
+      <button class="btn ghost" id="btnLogRelaunch">重启应用并抓日志</button>
+      <button class="btn mirror" id="btnLogLive">开始实时日志</button>
+      <button class="btn ghost" id="btnLogLiveStop">停止实时</button>
+      <button class="btn ghost full" id="btnLogClear">清空设备 logcat</button>
+    </div>
+    <div id="logHint" class="mut" style="margin-top:8px"></div>
+    <div id="logcat" style="background:#050a14;border:1px solid var(--line);border-radius:12px;
+      font-family:ui-monospace,Consolas,monospace;font-size:11px;line-height:1.45;
+      padding:10px;height:220px;overflow:auto;white-space:pre-wrap;word-break:break-all;color:#fcd34d;margin-top:8px">尚未抓取。白屏时点「重启应用并抓日志」。</div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="margin:0 0 10px">
+      <h2 style="margin:0">打包日志</h2>
+      <button class="btn ghost" id="btnLogCopy" style="padding:8px 12px;font-size:12px">复制</button>
+    </div>
+    <div id="log">就绪。点上面按钮开始。</div>
+  </div>
+
+  <div class="card">
+    <h2>最近产物</h2>
+    <div id="pkgs" class="mut">加载中…</div>
+  </div>
+</main>
+<div class="toast" id="toast"></div>
+
+<div class="modal-mask" id="devModal">
+  <div class="modal">
+    <div class="row">
+      <h3>ADB 设备</h3>
+      <button class="btn ghost" id="btnDevClose" style="padding:8px 12px;font-size:12px">关闭</button>
+    </div>
+    <div class="mut" id="devAdbPath" style="margin-bottom:10px;word-break:break-all"></div>
+    <div id="devList">加载中…</div>
+    <button class="btn full ghost" id="btnDevRefresh" style="margin-top:8px">刷新设备列表</button>
+  </div>
+</div>
+
+<div class="modal-mask" id="verModal">
+  <div class="modal">
+    <div class="row" style="margin:0 0 10px">
+      <h3 style="margin:0">📦 出包信息确认</h3>
+      <span class="badge wgt" id="packActBadge">出包任务</span>
+    </div>
+    <div class="mut" id="verCur" style="margin-bottom:8px">当前版本加载中…</div>
+
+    <label class="form-lbl">版本号递增策略</label>
+    <div class="ver-options">
+      <div class="ver-opt active" id="optMachine">
+        <div><b>仅机器号 +1</b></div>
+        <div class="mut" style="font-size:11px;margin-top:2px">日常出包 / 热更修补</div>
+      </div>
+      <div class="ver-opt" id="optBump">
+        <div><b>正式版本号 +1</b></div>
+        <div class="mut" style="font-size:11px;margin-top:2px">重大发版 / 机器号清零</div>
+      </div>
+    </div>
+
+    <label class="form-lbl">发布模式</label>
+    <div class="ver-options">
+      <div class="ver-opt active" id="modeFull">
+        <div><b>🚀 全量发布</b></div>
+        <div class="mut" style="font-size:11px;margin-top:2px">所有客户端均可直接收到升级提示</div>
+      </div>
+      <div class="ver-opt" id="modeCanary">
+        <div><b>🧪 灰度测试</b></div>
+        <div class="mut" style="font-size:11px;margin-top:2px">仅尝鲜通道或指定测试设备收到，验证后可一键转正</div>
+      </div>
+    </div>
+
+    <div id="canaryTargetBlock" style="display:none;margin-top:6px;margin-bottom:8px;background:#050a14;padding:12px;border-radius:12px;border:1px solid var(--line)">
+      <label style="margin:0 0 6px;color:#cbd5e1;font-size:12px">灰度测试目标设备（可留空，支持多设备逗号分隔）：</label>
+      <input type="text" id="targetDevicesInput" placeholder="留空则所有参与灰度设备生效；或输入设备序列号/型号..." style="width:100%;background:#0a1220;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:8px 10px;font-size:12px;box-sizing:border-box" />
+      <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap">
+        <button type="button" class="btn ghost" id="btnFillCurrentDevice" style="padding:6px 12px;font-size:11px">📱 填入在线 ADB 设备</button>
+        <button type="button" class="btn ghost" id="btnClearTargetDevices" style="padding:6px 12px;font-size:11px">清空设备</button>
+        <span id="targetDeviceTip" style="font-size:11px;color:#94a3b8"></span>
+      </div>
+    </div>
+
+    <label class="form-lbl"><span class="req">*</span> 本次新增功能：</label>
+    <textarea class="form-ta" id="packFeatures" placeholder="请详细列出本次新增功能（如无新增请填写“无”或“优化体验”）..." rows="3"></textarea>
+
+    <label class="form-lbl"><span class="req">*</span> 修复 Bug 情况：</label>
+    <textarea class="form-ta" id="packBugfixes" placeholder="请详细列出本次修复的 Bug（如无 Bug 修复请填写“无”或“日常维护”）..." rows="3"></textarea>
+
+    <div class="form-err" id="packFormError"></div>
+
+    <button class="btn full" id="verSubmitBtn" style="margin-top:12px;margin-bottom:8px">确认出包并开始</button>
+    <button class="btn full ghost" id="verCancelBtn">取消本次打包</button>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id)
+const logEl = $('log')
+const API_BASE = (location.port === '3789') ? '' : 'http://127.0.0.1:3789'
+let selectedSerial = ''
+let phoneW = 0, phoneH = 0
+let mirrorTimer = null
+let mirrorOn = false
+
+function api(path) { return API_BASE + path }
+
+function toast(msg) {
+  const t = $('toast')
+  t.textContent = msg
+  t.classList.add('show')
+  clearTimeout(t._h)
+  t._h = setTimeout(() => t.classList.remove('show'), 2500)
+}
+
+function setBusy(on, action) {
+  $('runDot').className = 'dot ' + (on ? 'busy' : 'ok')
+  $('runText').textContent = on ? (action || '运行中…') : '空闲'
+  document.querySelectorAll('button[data-act]').forEach((b) => { b.disabled = on })
+  const cancelBtn = $('btnCancel')
+  if (cancelBtn) cancelBtn.style.display = on ? 'block' : 'none'
+}
+
+async function cancelRun() {
+  try {
+    const d = await safeJson(await fetch(api('/api/cancel'), { method: 'POST' }))
+    appendLog('[cancel] ' + JSON.stringify(d) + '\n')
+    toast(d.ok ? '已请求取消' : (d.error || '取消失败'))
+    setBusy(false)
+  } catch (e) {
+    appendLog('[cancel] ' + e.message + '\n')
+    toast(e.message)
+  }
+}
+
+function appendLog(text) {
+  logEl.textContent += text
+  if (logEl.textContent.length > 300000) logEl.textContent = logEl.textContent.slice(-150000)
+  logEl.scrollTop = logEl.scrollHeight
+}
+
+async function safeJson(r) {
+  const text = await r.text()
+  try { return JSON.parse(text) }
+  catch (e) {
+    throw new Error('HTTP ' + r.status + ' 非 JSON: ' + (text || '').slice(0, 80))
+  }
+}
+
+function setSerial(s, model) {
+  selectedSerial = s || ''
+  const el = $('selDev')
+  if (!selectedSerial) {
+    el.innerHTML = '设备：<b>未选择</b>（点下方「选择 ADB 设备」）'
+  } else {
+    el.innerHTML = '设备：<b>' + selectedSerial + '</b>' + (model ? ' · ' + model : '')
+  }
+}
+
+async function refreshStatus() {
+  try {
+    const d = await safeJson(await fetch(api('/api/status')))
+    if (d.manifest) {
+      $('verName').textContent = d.manifest.versionName || '—'
+      const vs = d.versionState
+      if (vs && vs.buildCode != null) {
+        $('verCode').textContent = `${vs.buildCode}（机器号 ${vs.machineCode ?? 0}）`
+      } else {
+        $('verCode').textContent = d.manifest.versionCode ?? '—'
+      }
+    }
+    if (d.running) setBusy(true, d.running.action)
+    renderLastBuild(d)
+    $('conn').textContent = '已连接 ' + (API_BASE || location.host)
+    $('conn').style.color = 'var(--ok)'
+  } catch (e) {
+    $('conn').textContent = '无法连接 Pack Studio'
+    $('conn').style.color = 'var(--err)'
+    appendLog('[连接失败] ' + e.message + '\n')
+  }
+}
+
+/** 展示本次编译身份：什么时候编的、多少字节、sha256、标识符命中情况 */
+function renderLastBuild(d) {
+  const el = $('lastBuild')
+  if (!el) return
+  const b = d.lastBuild
+  if (!b) {
+    el.textContent = '本次编译：尚无记录（点上方按钮开始一次全新编译）'
+    el.style.color = 'var(--mut)'
+    return
+  }
+  const t = (s) => (s ? new Date(s).toLocaleString() : '—')
+  const im = b.identityMarkers || { hit: 0, total: 0 }
+  const fp = b.fingerprint || {}
+  const lines = [
+    '编译开始  ' + t(b.builtAt),
+    '编译结束  ' + t(b.finishedAt),
+    '退出码    ' + b.exitCode + (b.exitCode === 0 ? '  ✓' : '  ✗'),
+    '产物字节  ' + (b.appServiceBytes || 0).toLocaleString(),
+    'sha256    ' + String(b.appServiceSha256 || '').slice(0, 32),
+    '源码标识  ' + im.hit + '/' + im.total + (im.hit === im.total ? '  ✓' : '  ✗ 缺: ' + (im.missing || []).join(',')),
+    '生产指纹  公网' + (fp.hasPublic ? '✓' : '✗') + ' 内网' + (fp.hasLan ? '⚠' : '✓') +
+      (fp.banned && fp.banned.length ? ' 禁用标记:' + fp.banned.join(',') : ''),
+  ]
+  el.textContent = lines.join('\n')
+  el.style.color = b.exitCode === 0 && im.hit === im.total ? '#a5f3d0' : 'var(--err)'
+}
+
+async function refreshPackages() {
+  try {
+    const d = await safeJson(await fetch(api('/api/packages')))
+    const list = d.packages || []
+    if (!list.length) {
+      $('pkgs').textContent = '暂无产物。'
+      return
+    }
+    $('pkgs').innerHTML = list.map((p) => {
+      const mb = (p.size / 1048576).toFixed(2)
+      const time = new Date(p.mtime).toLocaleString()
+      const href = api('/api/download?kind=' + encodeURIComponent(p.kind) + '&name=' + encodeURIComponent(p.name))
+      return `<div class="pkg"><div>
+        <span class="badge ${p.kind}">${p.kind.toUpperCase()}</span>
+        <span style="margin-left:6px">${p.name}</span>
+        <div class="mut" style="margin-top:2px">${mb} MB · ${time}</div>
+      </div>
+      <a class="dl" href="${href}">下载</a>
+      </div>`
+    }).join('')
+  } catch (e) {
+    $('pkgs').textContent = '无法读取产物：' + e.message
+  }
+}
+
+const NEED_VERSION_ASK = new Set([
+  'cloud-apk-install',
+  'offline-apk-install',
+  'pack-and-push-wgt',
+  'pack-and-push-apk',
+  'pack-and-push-offline-apk',
+  'pack-offline-apk',
+  'pack-wgt',
+])
+
+let selectedBumpVersion = false
+let selectedReleaseMode = 'full'
+
+function initVerModalEvents() {
+  const optM = $('optMachine')
+  const optB = $('optBump')
+  if (optM && optB) {
+    optM.onclick = () => {
+      selectedBumpVersion = false
+      optM.classList.add('active')
+      optB.classList.remove('active')
+    }
+    optB.onclick = () => {
+      selectedBumpVersion = true
+      optB.classList.add('active')
+      optM.classList.remove('active')
+    }
+  }
+
+  const modeF = $('modeFull')
+  const modeC = $('modeCanary')
+  const targetBlock = $('canaryTargetBlock')
+  const devTip = $('targetDeviceTip')
+  const targetInp = $('targetDevicesInput')
+  if (modeF && modeC) {
+    modeF.onclick = () => {
+      selectedReleaseMode = 'full'
+      modeF.classList.add('active')
+      modeC.classList.remove('active')
+      if (targetBlock) targetBlock.style.display = 'none'
+    }
+    modeC.onclick = () => {
+      selectedReleaseMode = 'canary'
+      modeC.classList.add('active')
+      modeF.classList.remove('active')
+      if (targetBlock) {
+        targetBlock.style.display = 'block'
+        if (devTip && targetInp && !targetInp.value) {
+          if (selectedSerial) {
+            devTip.innerHTML = `当前设备：<b style="color:#93c5fd">${selectedSerial}</b>，点击左侧按钮填入`
+          } else {
+            devTip.innerHTML = `<span style="color:#94a3b8">点击左侧按钮自动检测填入在线 ADB 设备</span>`
+          }
+        }
+      }
+    }
+  }
+
+  const clearBtn = $('btnClearTargetDevices')
+  if (clearBtn && targetInp) {
+    clearBtn.onclick = () => {
+      targetInp.value = ''
+      if (devTip) devTip.innerHTML = '<span style="color:#94a3b8">已清空（留空表示所有参与灰度设备均可升级）</span>'
+      toast('已清空设备限制')
+    }
+  }
+
+  const fillBtn = $('btnFillCurrentDevice')
+  if (fillBtn) {
+    fillBtn.onclick = async () => {
+      const origText = fillBtn.textContent
+      fillBtn.disabled = true
+      fillBtn.textContent = '⏳ 检测中…'
+      if (devTip) devTip.innerHTML = '<span style="color:#60a5fa">🔍 正在检测在线 ADB 设备…</span>'
+      try {
+        let devToUse = null
+        const d = await safeJson(await fetch(api('/api/adb/devices')))
+        const list = d.devices || []
+        const online = list.filter((x) => x.state === 'device')
+
+        if (online.length === 0) {
+          if (devTip) devTip.innerHTML = '<span style="color:#f87171">⚠️ 未检测到在线 ADB 设备，请连接手机并开启 USB 调试</span>'
+          toast('⚠️ 未检测到在线 ADB 设备')
+          return
+        }
+
+        if (selectedSerial) {
+          devToUse = online.find((x) => x.serial === selectedSerial) || online[0]
+        } else {
+          devToUse = online[0]
+        }
+
+        if (devToUse) {
+          setSerial(devToUse.serial, devToUse.model || '')
+          loadPhoneSize()
+
+          const parts = [devToUse.serial]
+          if (devToUse.model && devToUse.model !== devToUse.serial) {
+            parts.push(devToUse.model)
+          }
+          const addStr = parts.join(', ')
+
+          if (targetInp) {
+            const cur = targetInp.value.trim()
+            if (!cur) {
+              targetInp.value = addStr
+            } else {
+              const tokens = cur.split(/[,，\s]+/).map((s) => s.trim()).filter(Boolean)
+              parts.forEach((p) => {
+                if (!tokens.includes(p)) tokens.push(p)
+              })
+              targetInp.value = tokens.join(', ')
+            }
+          }
+
+          if (devTip) {
+            devTip.innerHTML = `✅ 已填入：<b style="color:#6ee7b7">${addStr}</b>`
+          }
+          toast('✅ 已填入设备: ' + addStr)
+        }
+      } catch (e) {
+        if (devTip) devTip.innerHTML = `<span style="color:#f87171">检测失败: ${e.message}</span>`
+        toast('检测失败: ' + e.message)
+      } finally {
+        fillBtn.disabled = false
+        fillBtn.textContent = origText
+      }
+    }
+  }
+}
+
+function askPackageInfo(action) {
+  return new Promise((resolve) => {
+    initVerModalEvents()
+    const cur = `${$('verName').textContent || '—'} · buildCode ${$('verCode').textContent || '—'}`
+    $('verCur').textContent = `当前基准：${cur}`
+    
+    const actMap = {
+      'cloud-apk-install': '云打包 APK 并 ADB 安装',
+      'offline-apk-install': '离线打包 APK 并 ADB 安装',
+      'pack-and-push-wgt': '打包并推送 WGT',
+      'pack-and-push-apk': '云打包并推送 APK',
+      'pack-and-push-offline-apk': '离线打包并推送 APK',
+      'pack-offline-apk': '仅离线打包 APK',
+      'pack-wgt': '仅打包 WGT',
+    }
+    const badge = $('packActBadge')
+    if (badge) {
+      badge.textContent = actMap[action] || action
+      badge.className = 'badge ' + (action.includes('wgt') ? 'wgt' : 'apk')
+    }
+
+    const errBox = $('packFormError')
+    errBox.style.display = 'none'
+    errBox.textContent = ''
+    $('packFeatures').classList.remove('err')
+    $('packBugfixes').classList.remove('err')
+
+    try {
+      if (!$('packFeatures').value) $('packFeatures').value = localStorage.getItem('last_pack_features') || ''
+      if (!$('packBugfixes').value) $('packBugfixes').value = localStorage.getItem('last_pack_bugfixes') || ''
+    } catch (e) {}
+
+    selectedBumpVersion = false
+    $('optMachine').classList.add('active')
+    $('optBump').classList.remove('active')
+
+    // 默认全量
+    selectedReleaseMode = 'full'
+    if ($('modeFull')) $('modeFull').classList.add('active')
+    if ($('modeCanary')) $('modeCanary').classList.remove('active')
+    if ($('canaryTargetBlock')) $('canaryTargetBlock').style.display = 'none'
+    if ($('targetDeviceTip')) $('targetDeviceTip').textContent = ''
+
+    $('verModal').classList.add('show')
+
+    const done = (val) => {
+      $('verModal').classList.remove('show')
+      $('verSubmitBtn').onclick = $('verCancelBtn').onclick = null
+      resolve(val)
+    }
+
+    $('verSubmitBtn').onclick = () => {
+      const featEl = $('packFeatures')
+      const fixEl = $('packBugfixes')
+      const features = (featEl.value || '').trim()
+      const bugfixes = (fixEl.value || '').trim()
+
+      featEl.classList.remove('err')
+      fixEl.classList.remove('err')
+      errBox.style.display = 'none'
+
+      if (!features) {
+        featEl.classList.add('err')
+        errBox.textContent = '请填写本次新增功能情况（如无新增请填写“无”）'
+        errBox.style.display = 'block'
+        featEl.focus()
+        return
+      }
+      if (!bugfixes) {
+        fixEl.classList.add('err')
+        errBox.textContent = '请填写本次修复bug情况（如无修复请填写“无”）'
+        errBox.style.display = 'block'
+        fixEl.focus()
+        return
+      }
+
+      try {
+        localStorage.setItem('last_pack_features', features)
+        localStorage.setItem('last_pack_bugfixes', bugfixes)
+      } catch (e) {}
+
+      const note = `【新增功能】\n${features}\n\n【修复Bug】\n${bugfixes}`
+      const targetDevices = ($('targetDevicesInput')?.value || '').trim()
+      done({
+        bumpVersion: selectedBumpVersion,
+        releaseMode: selectedReleaseMode,
+        targetDevices,
+        features,
+        bugfixes,
+        note,
+      })
+    }
+
+    $('verCancelBtn').onclick = () => done(null)
+    $('verModal').onclick = (e) => {
+      if (e.target === $('verModal')) done(null)
+    }
+  })
+}
+
+async function run(action) {
+  let bumpVersion = false
+  let releaseMode = 'full'
+  let targetDevices = ''
+  let customNote = ''
+  let features = ''
+  let bugfixes = ''
+  if (NEED_VERSION_ASK.has(action)) {
+    const pkgInfo = await askPackageInfo(action)
+    if (!pkgInfo) {
+      appendLog('已取消（未打包）\n')
+      return
+    }
+    bumpVersion = pkgInfo.bumpVersion
+    releaseMode = pkgInfo.releaseMode || 'full'
+    targetDevices = pkgInfo.targetDevices || ''
+    customNote = pkgInfo.note
+    features = pkgInfo.features
+    bugfixes = pkgInfo.bugfixes
+  }
+  setBusy(true, action)
+  logEl.textContent = ''
+  const modeTag = releaseMode === 'canary' ? '【🧪 灰度测试模式】' : '【🚀 全量发布模式】'
+  appendLog('启动 ' + action + ' ' + modeTag + (bumpVersion ? '（版本号 +1）' : '（机器号 +1）') + ' …\n')
+  if (customNote) {
+    appendLog('════════ 本次更新说明 ════════\n' + customNote + '\n═════════════════════════════\n\n')
+  }
+  const note = customNote || '可视化打包'
+  try {
+    const d = await safeJson(await fetch(api('/api/run'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action,
+        note,
+        features,
+        bugfixes,
+        channel: releaseMode === 'canary' ? 'canary' : 'internal',
+        releaseMode,
+        targetDevices,
+        force: true,
+        server: 'http://39.107.120.55:30001',
+        user: 'admin',
+        pass: '',
+        serial: selectedSerial || '',
+        bumpVersion,
+        noPrompt: true,
+      }),
+    }))
+    if (!d.ok) {
+      appendLog('失败: ' + (d.error || '未知') + '\n')
+      toast(d.error || '失败')
+      setBusy(false)
+      return
+    }
+    toast('已启动 ' + modeTag)
+  } catch (e) {
+    appendLog('请求失败: ' + e.message + '\n')
+    toast(e.message)
+    setBusy(false)
+  }
+}
+
+function connectSSE() {
+  const es = new EventSource(api('/api/events'))
+  es.onmessage = (ev) => {
+    try {
+      const msg = JSON.parse(ev.data)
+      if (msg.type === 'hello' && msg.log) {
+        logEl.textContent = msg.log
+        logEl.scrollTop = logEl.scrollHeight
+        if (msg.logcat) {
+          $('logcat').textContent = msg.logcat
+          $('logcat').scrollTop = $('logcat').scrollHeight
+        }
+      } else if (msg.type === 'log') {
+        appendLog(msg.line)
+      } else if (msg.type === 'logcat') {
+        appendLogcat(msg.line)
+      } else if (msg.type === 'done') {
+        setBusy(false)
+        refreshPackages()
+        refreshStatus()
+        if (msg.ok) {
+          toast('完成')
+        } else if (msg.cancelled) {
+          toast('已取消')
+        } else {
+          // 如实呈现失败原因：编译错误 / 闸门拦截 / 推送失败，都要说人话
+          const errs = msg.buildErrors || []
+          const head = msg.error || '任务失败'
+          const detail = errs.length ? '\n\n' + errs.join('\n') : ''
+          toast('失败：' + head.split('\n')[0])
+          appendLog('\n════════ 任务失败 · 真实原因 ════════\n')
+          appendLog(head + detail + '\n')
+          if (/编译|build|闸门|resolve|产物/i.test(head + detail)) {
+            appendLog('提示：出包纪律要求「宁可不推，也不推旧产物」。上面的报错修好后再点一次即可。\n')
+          }
+          appendLog('═══════════════════════════════════════\n')
+        }
+      }
+    } catch (e) {}
+  }
+  es.onerror = () => {
+    setTimeout(() => { try { es.close() } catch (_) {} ; connectSSE() }, 2500)
+  }
+}
+
+async function openDeviceModal() {
+  $('devModal').classList.add('show')
+  await loadDevices()
+}
+
+async function loadDevices() {
+  const box = $('devList')
+  box.innerHTML = '加载中…'
+  try {
+    const d = await safeJson(await fetch(api('/api/adb/devices')))
+    $('devAdbPath').textContent = (d.adb || '') + (d.raw ? '\n' + d.raw.trim() : '')
+    const list = d.devices || []
+    if (!list.length) {
+      box.innerHTML = '<div class="mut">未检测到设备。请连接手机并打开 USB 调试。</div>'
+      return
+    }
+    box.innerHTML = list.map((dev) => {
+      const on = dev.state === 'device'
+      const active = selectedSerial === dev.serial ? ' active' : ''
+      return `<div class="dev-item${active}" data-serial="${dev.serial}" data-model="${dev.model || ''}">
+        <div>
+          <div class="serial">${dev.serial}</div>
+          <div class="meta">${dev.model || '未知型号'} · ${dev.product || ''}</div>
+        </div>
+        <span class="tag ${on ? 'on' : ''}">${dev.state}</span>
+      </div>`
+    }).join('')
+    box.querySelectorAll('.dev-item').forEach((el) => {
+      el.addEventListener('click', () => {
+        const s = el.dataset.serial
+        const m = el.dataset.model || ''
+        setSerial(s, m)
+        box.querySelectorAll('.dev-item').forEach((x) => x.classList.remove('active'))
+        el.classList.add('active')
+        toast('已选择设备 ' + s)
+        loadPhoneSize()
+      })
+    })
+    const online = list.filter((x) => x.state === 'device')
+    if (!selectedSerial && online.length === 1) {
+      setSerial(online[0].serial, online[0].model || '')
+      toast('自动选择唯一设备 ' + online[0].serial)
+      loadPhoneSize()
+    }
+  } catch (e) {
+    box.innerHTML = '<div class="mut">读取失败：' + e.message + '</div>'
+  }
+}
+
+async function loadPhoneSize() {
+  if (!selectedSerial) return
+  try {
+    const d = await safeJson(await fetch(api('/api/phone/size?serial=' + encodeURIComponent(selectedSerial))))
+    if (d.ok) {
+      phoneW = d.width
+      phoneH = d.height
+      $('mirrorStatus').textContent = `镜像：设备分辨率 ${phoneW}×${phoneH}`
+    }
+  } catch (e) {}
+}
+
+async function refreshScreen() {
+  if (!selectedSerial) {
+    toast('请先选择 ADB 设备')
+    return false
+  }
+  const img = $('phoneImg')
+  const ph = $('phonePh')
+  const url = api('/api/phone/screen?serial=' + encodeURIComponent(selectedSerial) + '&t=' + Date.now())
+  try {
+    const r = await fetch(url)
+    const ct = r.headers.get('content-type') || ''
+    if (ct.includes('application/json')) {
+      const d = await r.json()
+      appendLog('[screen] ' + (d.error || '失败') + '\n')
+      toast(d.error || '截屏失败')
+      return false
+    }
+    const blob = await r.blob()
+    if (!blob.size) return false
+    const objUrl = URL.createObjectURL(blob)
+    img.onload = () => {
+      try { URL.revokeObjectURL(objUrl) } catch (e) {}
+      ph.style.display = 'none'
+      img.style.display = 'block'
+    }
+    img.src = objUrl
+    if (!phoneW) loadPhoneSize()
+    return true
+  } catch (e) {
+    appendLog('[screen] ' + e.message + '\n')
+    return false
+  }
+}
+
+function setMirror(on) {
+  mirrorOn = on
+  if (mirrorTimer) { clearInterval(mirrorTimer); mirrorTimer = null }
+  if (on) {
+    $('mirrorStatus').textContent = '镜像：轮询中…'
+    mirrorTimer = setInterval(() => { refreshScreen() }, 1200)
+    refreshScreen()
+  } else {
+    $('mirrorStatus').textContent = '镜像：关闭'
+  }
+}
+
+function appendLogcat(text) {
+  const el = $('logcat')
+  el.textContent += text
+  if (el.textContent.length > 250000) el.textContent = el.textContent.slice(-120000)
+  el.scrollTop = el.scrollHeight
+}
+
+function setLogHint(msg, critical) {
+  const el = $('logHint')
+  el.textContent = msg || ''
+  el.style.color = critical ? 'var(--err)' : 'var(--mut)'
+}
+
+async function logDump() {
+  const filter = $('logFilter').value
+  $('logcat').textContent = ''
+  setLogHint('抓取中…')
+  try {
+    const q = new URLSearchParams({ filter, lines: '500' })
+    if (selectedSerial) q.set('serial', selectedSerial)
+    const d = await safeJson(await fetch(api('/api/logcat/dump?' + q.toString())))
+    if (!d.ok) { setLogHint(d.error || '抓取失败', true); return }
+    $('logcat').textContent = d.log || '(空)'
+    $('logcat').scrollTop = $('logcat').scrollHeight
+    if (d.hasCritical) {
+      setLogHint('检测到关键错误（白屏/JS 异常等），请看下方黄色日志中的 WeexCore / versionTabs / FATAL。', true)
+    } else {
+      setLogHint(`已抓取 ${d.lines} 行 · serial=${d.serial} · filter=${d.filter}`)
+    }
+  } catch (e) {
+    setLogHint(e.message, true)
+  }
+}
+
+async function logRelaunch() {
+  setLogHint('重启应用…')
+  try {
+    const d = await safeJson(await fetch(api('/api/logcat/relaunch'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serial: selectedSerial, packageName: 'lrp.aibum' }),
+    }))
+    if (!d.ok) { setLogHint(d.error || '重启失败', true); return }
+    setLogHint('已重启，等待 3s 后抓日志…')
+    await new Promise((r) => setTimeout(r, 3000))
+    await logDump()
+  } catch (e) { setLogHint(e.message, true) }
+}
+
+async function logLiveStart() {
+  try {
+    const d = await safeJson(await fetch(api('/api/logcat/live/start'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serial: selectedSerial, filter: $('logFilter').value }),
+    }))
+    if (!d.ok) { setLogHint(d.error || '实时日志失败', true); return }
+    $('btnLogLive').textContent = '实时日志运行中…'
+    setLogHint('实时日志已开始（写入下方与打包日志）')
+  } catch (e) { setLogHint(e.message, true) }
+}
+
+async function logLiveStop() {
+  try {
+    await safeJson(await fetch(api('/api/logcat/live/stop'), { method: 'POST' }))
+    $('btnLogLive').textContent = '开始实时日志'
+    setLogHint('实时日志已停止')
+  } catch (e) { setLogHint(e.message, true) }
+}
+
+async function phoneTap(clientX, clientY) {
+  if (!selectedSerial) { toast('请先选择设备'); return }
+  const img = $('phoneImg')
+  if (!img.naturalWidth) return
+  if (!phoneW || !phoneH) await loadPhoneSize()
+  if (!phoneW || !phoneH) { toast('无法获取分辨率'); return }
+  const rect = img.getBoundingClientRect()
+  const x = Math.round((clientX - rect.left) / rect.width * phoneW)
+  const y = Math.round((clientY - rect.top) / rect.height * phoneH)
+  try {
+    const d = await safeJson(await fetch(api('/api/phone/tap'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serial: selectedSerial, x, y }),
+    }))
+    if (!d.ok) toast(d.error || 'tap 失败')
+    else setTimeout(() => refreshScreen(), 250)
+  } catch (e) { toast(e.message) }
+}
+
+document.querySelectorAll('button[data-act]').forEach((btn) => {
+  btn.addEventListener('click', () => run(btn.dataset.act))
+})
+const btnCancel = $('btnCancel')
+if (btnCancel) btnCancel.addEventListener('click', cancelRun)
+
+$('btnDevices').addEventListener('click', openDeviceModal)
+$('btnDevClose').addEventListener('click', () => $('devModal').classList.remove('show'))
+$('btnDevRefresh').addEventListener('click', loadDevices)
+$('devModal').addEventListener('click', (e) => {
+  if (e.target === $('devModal')) $('devModal').classList.remove('show')
+})
+
+$('btnScrcpy').addEventListener('click', async () => {
+  try {
+    const d = await safeJson(await fetch(api('/api/scrcpy/start'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serial: selectedSerial }),
+    }))
+    if (!d.ok) { toast(d.error || 'scrcpy 启动失败'); appendLog('[scrcpy] ' + (d.error || '') + '\n'); return }
+    toast(d.already ? 'scrcpy 已在运行' : 'scrcpy 已启动')
+    appendLog('[scrcpy] pid=' + d.pid + ' serial=' + (d.serial || '') + '\n')
+  } catch (e) { toast(e.message) }
+})
+
+$('btnScrcpyStop').addEventListener('click', async () => {
+  try {
+    const d = await safeJson(await fetch(api('/api/scrcpy/stop'), { method: 'POST' }))
+    toast(d.stopped ? '已停止 scrcpy' : 'scrcpy 未在运行')
+  } catch (e) { toast(e.message) }
+})
+
+$('btnWebMirror').addEventListener('click', () => {
+  if (!selectedSerial) {
+    openDeviceModal()
+    return
+  }
+  setMirror(!mirrorOn)
+  $('btnWebMirror').textContent = mirrorOn ? '停止网页镜像' : '网页镜像（ADB 截屏）'
+})
+
+$('phoneImg').addEventListener('click', (ev) => phoneTap(ev.clientX, ev.clientY))
+
+document.querySelectorAll('button[data-key]').forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    if (!selectedSerial) { toast('请先选择设备'); return }
+    try {
+      const d = await safeJson(await fetch(api('/api/phone/key'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serial: selectedSerial, code: btn.dataset.key }),
+      }))
+      if (!d.ok) toast(d.error || '按键失败')
+      else setTimeout(() => refreshScreen(), 300)
+    } catch (e) { toast(e.message) }
+  })
+})
+
+$('btnLogCopy').addEventListener('click', async () => {
+  const text = logEl.textContent
+  if (!text || text === '就绪。点上面按钮开始。') { toast('暂无日志可复制'); return }
+  try {
+    await navigator.clipboard.writeText(text)
+    toast('打包日志已复制')
+  } catch (e) {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.cssText = 'position:fixed;left:-9999px;top:0'
+    document.body.appendChild(ta)
+    ta.select()
+    try { document.execCommand('copy'); toast('打包日志已复制') }
+    catch (e2) { toast('复制失败：' + e2.message) }
+    document.body.removeChild(ta)
+  }
+})
+
+$('btnLogDump').addEventListener('click', logDump)
+$('btnLogRelaunch').addEventListener('click', logRelaunch)
+$('btnLogLive').addEventListener('click', logLiveStart)
+$('btnLogLiveStop').addEventListener('click', logLiveStop)
+$('btnLogClear').addEventListener('click', async () => {
+  try {
+    const q = selectedSerial ? '?serial=' + encodeURIComponent(selectedSerial) : ''
+    await safeJson(await fetch(api('/api/logcat/clear' + q), { method: 'POST' }))
+    $('logcat').textContent = ''
+    setLogHint('已清空设备 logcat')
+  } catch (e) { setLogHint(e.message, true) }
+})
+
+async function refreshUpdateState() {
+  try {
+    let d = null
+    try {
+      const res = await safeJson(await fetch(api('/api/update/state')))
+      if (res && res.ok && res.data) d = res.data
+    } catch {}
+    if (!d) {
+      const res2 = await safeJson(await fetch('http://127.0.0.1:30001/api/app/update/state'))
+      if (res2 && (res2.success || res2.ok)) d = res2.data || res2
+    }
+    if (!d) return
+    const latest = d.latest || {}
+    const canary = d.canary || (d.grayscale && d.grayscale.latest) || null
+    const gray = d.grayscale || {}
+
+    const fullEl = $('fullReleaseInfo')
+    if (fullEl) {
+      if (latest && latest.url) {
+        const time = latest.publishedAt ? new Date(latest.publishedAt).toLocaleString() : '—'
+        fullEl.innerHTML = `<b style="color:#6ee7b7">${latest.versionName || '1.0.0'}</b> (wgt: ${latest.wgtVersion || latest.versionCode || '—'})<br/>
+          <span class="mut" style="font-size:11px">发布: ${time}</span><br/>
+          <span class="mut" style="font-size:11px;display:block;margin-top:2px;max-height:36px;overflow:hidden">说明: ${latest.note ? (latest.note.slice(0, 60) + (latest.note.length > 60 ? '…' : '')) : '无'}</span>`
+      } else {
+        fullEl.innerHTML = '<span class="mut">暂无正式版本记录</span>'
+      }
+    }
+
+    const canaryEl = $('canaryReleaseInfo')
+    const actionsEl = $('canaryActions')
+    if (canaryEl) {
+      if (gray.active && canary && canary.url) {
+        const time = canary.publishedAt ? new Date(canary.publishedAt).toLocaleString() : '—'
+        const devList = (gray.targetDevices && gray.targetDevices.length)
+          ? `目标设备: <b>${gray.targetDevices.join(', ')}</b>`
+          : '目标设备: <b>全部灰度/尝鲜通道</b>'
+        canaryEl.innerHTML = `<b style="color:#fbbf24">${canary.versionName || '1.0.0'}</b> (wgt: ${canary.wgtVersion || canary.versionCode || '—'})<br/>
+          <span class="mut" style="font-size:11px">灰度时间: ${time}</span><br/>
+          <span style="font-size:11px;color:#a5b4fc">${devList}</span><br/>
+          <span class="mut" style="font-size:11px;display:block;margin-top:2px;max-height:36px;overflow:hidden">说明: ${canary.note ? (canary.note.slice(0, 60) + (canary.note.length > 60 ? '…' : '')) : '无'}</span>`
+        if (actionsEl) actionsEl.style.display = 'grid'
+      } else {
+        const historyText = (canary && (canary.wgtVersion || canary.versionName))
+          ? `<br/><span class="mut" style="font-size:11px;display:block;margin-top:4px">上个灰度记录: <b>${canary.versionName || ''}</b> (wgt: ${canary.wgtVersion || canary.versionCode || ''}) · ${gray.revokedAt ? '已于 ' + new Date(gray.revokedAt).toLocaleString() + ' 撤销' : '未激活'}</span>`
+          : ''
+        canaryEl.innerHTML = `<span class="mut">暂无活跃的灰度版本（所有设备运行正式版）</span>${historyText}`
+        if (actionsEl) actionsEl.style.display = 'none'
+      }
+    }
+  } catch (e) {
+    console.warn('refreshUpdateState error', e)
+  }
+}
+
+$('btnRefreshUpdateState') && ($('btnRefreshUpdateState').onclick = () => {
+  refreshUpdateState()
+  toast('已刷新发布状态')
+})
+
+$('btnPromoteCanary') && ($('btnPromoteCanary').onclick = async () => {
+  if (!confirm('确定将当前的灰度版本转正为全量正式发布吗？所有客户端将在下次启动或前台检查时收到此更新。')) return
+  try {
+    const res = await safeJson(await fetch(api('/api/update/promote'), { method: 'POST' }))
+    if (res.ok) {
+      toast('🎉 灰度版本已成功转正为全量发布！')
+      appendLog('\n[灰度管理] 灰度版本已成功转正为全量发布！\n')
+      refreshUpdateState()
+      refreshStatus()
+    } else {
+      toast('转正失败: ' + (res.error || '未知错误'))
+    }
+  } catch (e) {
+    toast('转正异常: ' + e.message)
+  }
+})
+
+$('btnRevokeCanary') && ($('btnRevokeCanary').onclick = async () => {
+  if (!confirm('确定撤销当前灰度测试版本吗？撤销后测试设备将不再收到此测试版。')) return
+  try {
+    const res = await safeJson(await fetch(api('/api/update/revoke-canary'), { method: 'POST' }))
+    if (res.ok) {
+      toast('🛑 已成功撤销当前灰度测试版本')
+      appendLog('\n[灰度管理] 已撤销当前灰度测试版本。\n')
+      refreshUpdateState()
+      refreshStatus()
+    } else {
+      toast('撤销失败: ' + (res.error || '未知错误'))
+    }
+  } catch (e) {
+    toast('撤销异常: ' + e.message)
+  }
+})
+
+refreshStatus()
+refreshPackages()
+refreshUpdateState()
+connectSSE()
+setInterval(refreshPackages, 8000)
+setInterval(refreshUpdateState, 10000)
+loadDevices().then(() => { $('devModal').classList.remove('show') })
+</script>
+</body>
+</html>

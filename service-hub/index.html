@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>服务启动面板</title>
+<style>
+:root{
+  --bg:#060a12;--card:#0e1624;--line:#1c2940;--ink:#eef3ff;--mut:#8b9bb8;
+  --ok:#10b981;--off:#64748b;--acc:#3b82f6;--warn:#f59e0b;--err:#ef4444;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;min-height:100%;background:var(--bg);color:var(--ink);
+  font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif}
+body{display:flex;flex-direction:column;min-height:100vh}
+header{padding:16px 16px 12px;border-bottom:1px solid var(--line);position:sticky;top:0;
+  background:rgba(6,10,18,.95);backdrop-filter:blur(10px);z-index:5}
+h1{margin:0;font-size:18px;font-weight:700}
+.sub{margin-top:4px;font-size:12px;color:var(--mut)}
+main{flex:1;padding:14px;max-width:560px;width:100%;margin:0 auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;
+  padding:14px;margin-bottom:12px}
+.svc{display:flex;flex-direction:column;gap:10px}
+.svc-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.svc-name{font-size:15px;font-weight:700}
+.svc-desc{font-size:12px;color:var(--mut);margin-top:3px}
+.port{font-size:11px;color:var(--mut);margin-top:4px;font-family:ui-monospace,monospace}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;
+  font-size:11px;background:#152033;border:1px solid var(--line);white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--off)}
+.dot.on{background:var(--ok);box-shadow:0 0 10px rgba(16,185,129,.55)}
+.dot.busy{background:var(--warn);animation:blink 1s infinite}
+@keyframes blink{50%{opacity:.3}}
+.acts{display:flex;gap:8px;flex-wrap:wrap}
+.btn{border:0;border-radius:12px;padding:11px 14px;font-size:13px;font-weight:700;
+  cursor:pointer;color:#fff;background:var(--acc);min-width:88px}
+.btn:active{transform:scale(.97)}
+.btn:disabled{opacity:.4}
+.btn.go{background:linear-gradient(135deg,#059669,#34d399);color:#042f1a}
+.btn.stop{background:linear-gradient(135deg,#b91c1c,#f87171)}
+.btn.open{background:#152033;border:1px solid var(--line);color:var(--ink)}
+.btn.all{width:100%;background:linear-gradient(135deg,#2563eb,#7c3aed);padding:14px;font-size:14px}
+.port-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.port-row label{font-size:12px;color:var(--mut)}
+.port-input{width:96px;background:#0b1322;border:1px solid var(--line);color:var(--ink);
+  border-radius:10px;padding:8px 10px;font-size:13px;font-family:ui-monospace,monospace}
+.port-input:focus{outline:1px solid var(--acc)}
+.mut{font-size:12px;color:var(--mut)}
+.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);
+  background:#111827f0;border:1px solid var(--line);padding:10px 14px;border-radius:10px;
+  font-size:12px;opacity:0;pointer-events:none;transition:.2s;z-index:20;max-width:92%}
+.toast.show{opacity:1}
+.hero{background:linear-gradient(135deg,rgba(37,99,246,.18),rgba(16,185,129,.12));
+  border:1px solid rgba(99,102,241,.3);border-radius:16px;padding:14px;margin-bottom:12px}
+</style>
+</head>
+<body>
+<header>
+  <h1>服务启动面板</h1>
+  <div class="sub">素材库 · 打包台 · Web 端 · 统一启停</div>
+</header>
+<main>
+  <div class="hero">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <div>
+        <b id="summary">检测中…</b>
+        <div class="mut" style="margin-top:4px">最后刷新 <span id="ts">—</span></div>
+      </div>
+      <button class="btn open" id="btnRefresh">刷新</button>
+    </div>
+    <div style="margin-top:12px">
+      <button class="btn all" id="btnAll">一键启动全部</button>
+    </div>
+  </div>
+  <div id="list"></div>
+  <div class="mut" style="text-align:center;padding:8px 0 20px">
+    本机 Hub: http://127.0.0.1:3790 · 桌面快捷方式「启动服务面板」
+  </div>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+const $ = (id) => document.getElementById(id)
+const API = (location.port === '3790') ? '' : 'http://127.0.0.1:3790'
+
+function toast(m) {
+  const t = $('toast'); t.textContent = m; t.classList.add('show')
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2200)
+}
+
+/**
+ * 展示动作结果。以前只弹 result.note，启动失败时 note 是空字符串，
+ * 界面就什么都不显示 —— 用户点「启动」看到的是「毫无反应」，
+ * 真实原因（wsl.exe 被拉黑、端口占用、进程 exit=1）全在 service-hub/logs 里。
+ * 现在失败会把 error 原样弹出来，并且 toast 显示更久，便于看清。
+ */
+function showResult(d, fallbackMsg) {
+  const r = d && d.result
+  if (r && r.ok === false) {
+    toast('✗ ' + (r.error || '未知错误') + (r.log ? ' （日志 ' + r.log.split(/[\\/]/).pop() + '）' : ''))
+    const t = $('toast')
+    clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 9000)
+    return
+  }
+  if (d && d.ok === false) { toast('✗ ' + (d.error || '动作失败')); return }
+  toast((r && r.note) || fallbackMsg)
+}
+
+async function safeJson(r) {
+  const text = await r.text()
+  try { return JSON.parse(text) } catch (e) {
+    throw new Error('HTTP ' + r.status + ' ' + text.slice(0, 60))
+  }
+}
+
+let busyId = null
+
+function render(services) {
+  const up = services.filter((s) => s.up).length
+  $('summary').textContent = `在线 ${up} / ${services.length}`
+  $('ts').textContent = new Date().toLocaleTimeString()
+  $('list').innerHTML = services.map((s) => {
+    const on = s.up
+    const busy = busyId === s.id
+    return `<div class="card svc" data-id="${s.id}">
+      <div class="svc-top">
+        <div>
+          <div class="svc-name">${s.name}</div>
+          <div class="svc-desc">${s.desc}</div>
+          <div class="port">:${s.port} · ${s.url}</div>
+        </div>
+        <span class="pill"><i class="dot ${busy ? 'busy' : on ? 'on' : ''}"></i>${busy ? '操作中' : on ? '运行中' : '未启动'}</span>
+      </div>
+      <div class="acts">
+        <button class="btn go" data-act="start" data-id="${s.id}" ${on || busy ? 'disabled' : ''}>启动</button>
+        <button class="btn stop" data-act="stop" data-id="${s.id}" ${!on || busy ? 'disabled' : ''}>停止</button>
+        <button class="btn open" data-act="restart" data-id="${s.id}" ${busy ? 'disabled' : ''}>重启</button>
+        <button class="btn open" data-act="open" data-id="${s.id}" ${!on ? 'disabled' : ''}>打开</button>
+      </div>
+      ${s.portEditable ? `
+      <div class="port-row">
+        <label for="port-${s.id}">端口</label>
+        <input class="port-input" id="port-${s.id}" data-port-for="${s.id}" type="number" min="1" max="65535" value="${s.port}" />
+        <button class="btn open" data-act="apply-port" data-id="${s.id}" ${busy ? 'disabled' : ''}>应用端口并启动</button>
+      </div>` : ''}
+    </div>`
+  }).join('')
+
+  $('list').querySelectorAll('button[data-act]').forEach((btn) => {
+    btn.addEventListener('click', () => action(btn.dataset.id, btn.dataset.act))
+  })
+}
+
+async function load() {
+  try {
+    const d = await safeJson(await fetch(API + '/api/services'))
+    render(d.services || [])
+  } catch (e) {
+    $('summary').textContent = '无法连接面板服务'
+    $('list').innerHTML = `<div class="card mut">请先运行：<br/><code>node service-hub/server.js</code></div>`
+  }
+}
+
+function readPort(id) {
+  const el = document.querySelector('[data-port-for="' + id + '"]')
+  if (!el) return null
+  const n = Number(el.value)
+  return Number.isFinite(n) && n > 0 && n < 65536 ? n : null
+}
+
+async function action(id, act) {
+  busyId = id
+  load()
+  try {
+    if (act === 'open') {
+      const port = readPort(id)
+      await safeJson(await fetch(API + '/api/open', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, port }),
+      }))
+      toast('已在浏览器打开')
+    } else if (act === 'apply-port') {
+      const port = readPort(id)
+      if (port == null) {
+        toast('请输入 1–65535 的端口')
+        return
+      }
+      const d = await safeJson(await fetch(API + '/api/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action: 'start', port }),
+      }))
+      showResult(d, '已按端口 ' + port + ' 启动')
+      if (d.services) render(d.services)
+    } else {
+      const port = readPort(id)
+      const d = await safeJson(await fetch(API + '/api/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action: act, port }),
+      }))
+      showResult(d, act + ' 完成')
+      if (d.services) render(d.services)
+    }
+  } catch (e) {
+    toast(e.message)
+  } finally {
+    busyId = null
+    setTimeout(load, 600)
+  }
+}
+
+$('btnRefresh').onclick = load
+$('btnAll').onclick = async () => {
+  const failed = []
+  for (const id of ['ml-server', 'pack-studio', 'web-h5']) {
+    try {
+      const port = readPort(id)
+      const d = await safeJson(await fetch(API + '/api/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action: 'start', port }),
+      }))
+      if (d.result && d.result.ok === false) failed.push(id + ': ' + d.result.error)
+    } catch (e) {
+      failed.push(id + ': ' + e.message)
+    }
+  }
+  // 以前不管成功失败都只弹一句「正在启动全部…」，某个服务起不来完全看不见
+  if (failed.length) {
+    toast('✗ ' + failed.length + ' 个服务失败 · ' + failed[0])
+    const t = $('toast')
+    clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 9000)
+  } else {
+    toast('全部服务已启动')
+  }
+  setTimeout(load, 1500)
+}
+
+load()
+setInterval(load, 5000)
+</script>
+</body>
+</html>

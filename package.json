@@ -1,0 +1,41 @@
+{
+    "name": "material-library-server",
+    "version": "0.1.0",
+    "description": "DSH 素材库插件：夸克网盘素材自动吸收、质检、去水印、AI 打标、检索与下载",
+    "main": "index.js",
+    "exports": {
+        ".": "./index.js",
+        "./package.json": "./package.json"
+    },
+    "keywords": [
+        "dsh",
+        "dsh-plugin",
+        "cordis-plugin",
+        "material-library",
+        "quark"
+    ],
+    "dsh": {
+        "bundle": {
+            "patch": "./cordis.patch.yml"
+        },
+        "client": {
+            "platform": "web"
+        }
+    },
+    "dependencies": {
+        "better-sqlite3": "^11.0.0",
+        "https-proxy-agent": "^9.1.0",
+        "sharp": "^0.35.4",
+        "undici": "^7.29.0"
+    },
+    "author": "DSH Team",
+    "license": "MIT",
+    "scripts": {
+        "start": "node server.js",
+        "stop": "bash start.sh stop",
+        "restart": "bash start.sh restart",
+        "status": "bash start.sh status",
+        "logs": "bash start.sh logs",
+        "test": "node test/suite.js && node test/e2e.js && node test/ai-tasks.test.js && node test/lab.test.js && node test/quick-pipeline.test.js && node test/portrait-music.test.js && node test/admin-model.test.js"
+    }
+}

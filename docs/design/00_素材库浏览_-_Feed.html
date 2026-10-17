@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="zh-CN"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter,+'PingFang+SC',+-apple-system,+sans-serif:wght@100..900&display=swap" rel="stylesheet"/><style>@layer base{html,body{width:100vw;margin:0;padding:0;}body{overscroll-behavior:none;}.pb-safe{padding-bottom:env(safe-area-inset-bottom,0px);}.pt-safe{padding-top:env(safe-area-inset-top,0px);}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config = { darkMode: "class", theme: { extend: { "colors": { "primary": "#adc6ff", "on-surface": "#dfe2eb", "surface-dim": "#10141a", "on-tertiary-container": "#3e2400", "outline-variant": "#424754", "surface": "#10141a", "secondary-fixed-dim": "#4edea3", "primary-fixed-dim": "#adc6ff", "surface-bright": "#353940", "primary-container": "#4d8eff", "tertiary": "#ffb95f", "on-primary-container": "#00285d", "on-background": "#dfe2eb", "background": "#10141a", "surface-container": "#1c2026", "on-primary": "#002e6a", "on-primary-fixed-variant": "#004395", "on-error-container": "#ffdad6", "secondary": "#4edea3", "outline": "#8c909f", "on-secondary-fixed-variant": "#005236", "on-surface-variant": "#c2c6d6", "inverse-surface": "#dfe2eb", "error-container": "#93000a", "on-error": "#690005", "on-primary-fixed": "#001a42", "surface-container-low": "#181c22", "tertiary-container": "#ca8100", "on-tertiary-fixed": "#2a1700", "on-secondary-container": "#00311f", "secondary-fixed": "#6ffbbe", "inverse-on-surface": "#2d3137", "tertiary-fixed": "#ffddb8", "error": "#ffb4ab", "on-tertiary": "#472a00", "surface-variant": "#31353c", "inverse-primary": "#005ac2", "surface-tint": "#adc6ff", "on-secondary-fixed": "#002113", "primary-fixed": "#d8e2ff", "on-tertiary-fixed-variant": "#653e00", "surface-container-lowest": "#0a0e14", "surface-container-highest": "#31353c", "surface-container-high": "#262a31", "on-secondary": "#003824", "tertiary-fixed-dim": "#ffb95f", "secondary-container": "#00a572" }, "borderRadius": { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" }, "spacing": { "space-xs": "4px", "space-2xs": "2px", "space-xl": "20px", "card-padding-default": "14px", "space-sm": "8px", "space-md": "12px", "grid-gutter": "8px", "screen-margin-mobile": "12px", "card-padding-dense": "10px", "space-lg": "16px", "space-2xl": "24px" }, "fontFamily": { "headline-lg": ["Inter, 'PingFang SC', -apple-system, sans-serif"], "body-lg": ["Inter, 'PingFang SC', -apple-system, sans-serif"], "body-md": ["Inter, 'PingFang SC', -apple-system, sans-serif"], "label-sm": ["Inter, 'PingFang SC', -apple-system, sans-serif"], "code-sm": ["'JetBrains Mono', monospace"], "display-sm": ["Inter, 'PingFang SC', -apple-system, sans-serif"], "headline-sm": ["Inter, 'PingFang SC', -apple-system, sans-serif"], "label-md": ["Inter, 'PingFang SC', -apple-system, sans-serif"], "body-sm": ["Inter, 'PingFang SC', -apple-system, sans-serif"] }, "fontSize": { "headline-lg": ["20px", { "lineHeight": "28px", "letterSpacing": "-0.015em", "fontWeight": "600" }], "body-lg": ["15px", { "lineHeight": "22px", "letterSpacing": "0em", "fontWeight": "400" }], "body-md": ["13px", { "lineHeight": "18px", "letterSpacing": "0em", "fontWeight": "400" }], "label-sm": ["11px", { "lineHeight": "14px", "letterSpacing": "0.02em", "fontWeight": "500" }], "code-sm": ["11px", { "lineHeight": "14px", "letterSpacing": "0.02em", "fontWeight": "400" }], "display-sm": ["24px", { "lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "600" }], "headline-sm": ["16px", { "lineHeight": "22px", "letterSpacing": "-0.01em", "fontWeight": "600" }], "label-md": ["13px", { "lineHeight": "18px", "letterSpacing": "0.01em", "fontWeight": "500" }], "body-sm": ["12px", { "lineHeight": "16px", "letterSpacing": "0.01em", "fontWeight": "400" }] } } } }</script><style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head><body class="bg-surface text-on-surface flex flex-col min-h-screen"><header class="fixed top-0 w-full z-50 pt-safe bg-surface-container-lowest/80 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.25)]"><div class="h-14 px-screen-margin-mobile flex items-center justify-between gap-space-sm"><div class="flex items-center gap-space-sm min-w-0 flex-1"><img alt="Interior Archive Logo" class="h-8 w-auto object-contain flex-shrink-0" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBWYBTDT_JThXyZhwANKD7LpYJE_vb-Xh3GGA01lDyS6IutNK8Gy5kXMPsqhY8rHf5G_TvfW1ztfuW0rr0OQ9F8W4h9-TyC5j_ooy7OeOxNqSgJLi_AYOLRo-cG_vUTaZhXU7CToHxhD89dcdcqBGDDJehrhfiy0O0iSpqjQlov8Y_u39R0KGSgdLc_wV33D96PFouChzuVj1SV5toHF6_gtAtwFwt7f5Pgnyt42sMiDhFrX7-uRqEH-w"/><span class="font-headline-sm text-headline-sm text-on-surface tracking-tight truncate">Browse</span></div><div class="flex items-center gap-space-xs flex-shrink-0"><button class="w-11 h-11 flex items-center justify-center text-on-surface-variant hover:text-on-surface transition-colors"><span class="material-symbols-outlined text-[20px]">search</span></button><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center flex-shrink-0"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></div></header><main class="flex flex-col relative w-full pt-14 pb-20 bg-surface min-h-screen"><div class="flex flex-col w-full px-screen-margin-mobile gap-space-md">
+<!-- Search and Micro Filter Bar -->
+<div class="sticky top-0 z-30 pt-space-xs pb-space-xs bg-surface/90 backdrop-blur-md flex flex-col gap-space-sm">
+<div class="flex items-center gap-space-sm w-full">
+<div class="relative flex-1 flex items-center bg-surface-container-low rounded-xl px-space-md h-10 shadow-sm">
+<span class="material-symbols-outlined text-outline text-[18px] mr-space-xs select-none">search</span>
+<input class="bg-transparent text-on-surface placeholder:text-outline focus:outline-none w-full font-body-sm text-body-sm" placeholder="搜索素材、风格、色板、材质..." type="text"/>
+<button class="flex items-center justify-center w-6 h-6 rounded-full text-outline hover:text-on-surface" title="扫码识别">
+<span class="material-symbols-outlined text-[16px]">qr_code_scanner</span>
+</button>
+</div>
+<!-- Filter Button with Badge -->
+<button class="relative flex items-center justify-center w-10 h-10 rounded-xl bg-surface-container-low text-on-surface-variant hover:text-primary transition-all shadow-sm flex-shrink-0" id="filter-btn">
+<span class="material-symbols-outlined text-[20px]">tune</span>
+<span class="absolute -top-1 -right-1 px-1.5 h-4 min-w-[16px] bg-primary-container text-on-primary-container font-code-sm text-[10px] leading-[16px] rounded-full font-bold flex items-center justify-center shadow-md">3</span>
+</button>
+<!-- Density/Grid Toggle -->
+<button class="flex items-center justify-center w-10 h-10 rounded-xl bg-surface-container-low text-on-surface-variant hover:text-on-surface transition-all flex-shrink-0 shadow-sm" id="view-mode-btn" title="视图切换">
+<span class="material-symbols-outlined text-[20px]">grid_view</span>
+</button>
+</div>
+<!-- Quick Filter Category Chips -->
+<div class="flex items-center gap-space-xs overflow-x-auto no-scrollbar py-0.5 -mx-screen-margin-mobile px-screen-margin-mobile select-none">
+<button class="px-space-md py-1 rounded-full bg-primary/15 text-primary font-label-sm text-label-sm flex-shrink-0 flex items-center gap-1 shadow-sm">
+<span>全部 (1,428)</span>
+</button>
+<button class="px-space-md py-1 rounded-full bg-surface-container text-on-surface-variant hover:text-on-surface font-label-sm text-label-sm flex-shrink-0 transition-colors">
+<span>侘寂风</span>
+</button>
+<button class="px-space-md py-1 rounded-full bg-surface-container text-on-surface-variant hover:text-on-surface font-label-sm text-label-sm flex-shrink-0 transition-colors">
+<span>法式复古</span>
+</button>
+<button class="px-space-md py-1 rounded-full bg-surface-container text-on-surface-variant hover:text-on-surface font-label-sm text-label-sm flex-shrink-0 transition-colors">
+<span>极简茶室</span>
+</button>
+<button class="px-space-md py-1 rounded-full bg-surface-container text-on-surface-variant hover:text-on-surface font-label-sm text-label-sm flex-shrink-0 transition-colors">
+<span>中古南洋</span>
+</button>
+<button class="px-space-md py-1 rounded-full bg-surface-container text-on-surface-variant hover:text-on-surface font-label-sm text-label-sm flex-shrink-0 transition-colors">
+<span>微水泥</span>
+</button>
+</div>
+</div>
+<!-- Feed Card 1: Japandi Living Room -->
+<article class="flex flex-col bg-surface-container-low rounded-xl overflow-hidden shadow-md transition-transform active:scale-[0.99] duration-150">
+<div class="relative w-full aspect-[4/3] bg-surface-container-highest overflow-hidden">
+<img class="w-full h-full object-cover select-none" data-alt="Editorial photograph of an organic Japandi living room interior, tactile micro-cement beige plaster curved walls, low modular linen curved sofa, raw reclaimed dark timber coffee table, minimalist bonsai centerpiece, diffuse soft morning architectural lighting through floor-to-ceiling sheer linen blinds, ultra realistic 8k interior design archive capture." loading="lazy" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDgptMUb3F9KWRKTvJEzuCB7wi5-Ysd_8KlYxc3MPfrLCsoLkwWR4Vy4PW55B2cLKkD2is_7_lMEN8XAKE6QgvReFEli7KsBWpNMY5lynfAEO-gR-_gMFVnALpsRs8auNDJwMLehMOldpjdHWN2DhdOGHnet8_yTRZVn9N2m7kYygMXzhyi3HFdCXKY-Meh7kNeuP8NRYFEw26plkAyD8v72H4YaZ5LNZOdHSldJTy4_XPGGI7JPuYFIA"/>
+<!-- Overlaid Badges Top -->
+<div class="absolute top-2.5 left-2.5 flex items-center gap-1.5 z-10">
+<span class="px-2 py-0.5 rounded-md bg-surface-container-lowest/80 backdrop-blur-md font-code-sm text-label-sm text-on-surface flex items-center gap-1 shadow-sm">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary"></span>
+          已校准色温
+        </span>
+</div>
+<div class="absolute top-2.5 right-2.5 flex items-center gap-1.5 z-10">
+<button class="w-8 h-8 rounded-full bg-surface-container-lowest/70 backdrop-blur-md text-on-surface flex items-center justify-center hover:bg-surface-container-lowest transition-colors shadow-sm active:scale-95">
+<span class="material-symbols-outlined text-[18px]">bookmark_border</span>
+</button>
+</div>
+<!-- Bottom Gradient Scrim with Resolution Overlay -->
+<div class="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-surface-container-lowest/90 via-surface-container-lowest/30 to-transparent flex items-end justify-between px-space-md pb-2 z-10">
+<span class="font-code-sm text-label-sm text-on-surface-variant flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">aspect_ratio</span> 4096 × 2730
+        </span>
+<span class="font-code-sm text-label-sm text-outline">RAW · 18.4 MB</span>
+</div>
+</div>
+<!-- Metadata Strip -->
+<div class="p-card-padding-default flex flex-col gap-space-sm">
+<div class="flex items-start justify-between gap-space-xs">
+<div class="flex flex-col min-w-0">
+<span class="font-body-md text-body-md font-semibold text-on-surface truncate">Japandi_Living_084.jpg</span>
+<span class="font-body-sm text-body-sm text-outline truncate">日式侘寂 · 客厅核心区漫反射质感采样</span>
+</div>
+<button class="text-on-surface-variant hover:text-on-surface p-1 -mr-1">
+<span class="material-symbols-outlined text-[18px]">more_horiz</span>
+</button>
+</div>
+<!-- Spec & Tag Chips -->
+<div class="flex flex-wrap items-center gap-1.5 pt-0.5">
+<span class="px-2 py-0.5 rounded bg-surface-container font-label-sm text-label-sm text-on-surface-variant">客厅</span>
+<span class="px-2 py-0.5 rounded bg-surface-container font-label-sm text-label-sm text-on-surface-variant">侘寂</span>
+<span class="px-2 py-0.5 rounded bg-surface-container font-label-sm text-label-sm text-on-surface-variant">微水泥 4mm</span>
+<span class="px-2 py-0.5 rounded bg-surface-container font-label-sm text-label-sm text-on-surface-variant">老榆木</span>
+</div>
+<!-- Color Swatches & Action Bar -->
+<div class="flex items-center justify-between pt-space-xs border-t border-white/5">
+<div class="flex items-center gap-1">
+<div class="w-4 h-4 rounded-full bg-[#d6cbbe] shadow-inner" title="#D6CBBE 暖白灰泥"></div>
+<div class="w-4 h-4 rounded-full bg-[#8c7b6d] shadow-inner" title="#8C7B6D 原木深褐"></div>
+<div class="w-4 h-4 rounded-full bg-[#3c3b37] shadow-inner" title="#3C3B37 炭黑岩板"></div>
+<span class="font-code-sm text-[10px] text-outline ml-1">3 原色调</span>
+</div>
+<div class="flex items-center gap-space-xs">
+<button class="px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-primary font-label-sm text-label-sm transition-colors flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">palette</span>
+<span>提色卡</span>
+</button>
+<button class="px-2.5 py-1 rounded-lg bg-primary text-on-primary font-label-sm text-label-sm transition-colors flex items-center gap-1 shadow-sm">
+<span class="material-symbols-outlined text-[14px]">add</span>
+<span>入案卷</span>
+</button>
+</div>
+</div>
+</div>
+</article>
+<!-- Feed Card 2: French Retro Master Bedroom (With Duplication Tag) -->
+<article class="flex flex-col bg-surface-container-low rounded-xl overflow-hidden shadow-md transition-transform active:scale-[0.99] duration-150">
+<div class="relative w-full aspect-[4/3] bg-surface-container-highest overflow-hidden">
+<img class="w-full h-full object-cover select-none" data-alt="Luxurious Parisian vintage apartment master bedroom, intricate cream plaster ceiling moldings, chevron parquet European oak flooring, velvet olive green headboard, unlacquered brass wall sconces, antique gilded floor mirror reflecting dusk Parisian window light, moody cinematic interior render." loading="lazy" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDrnyt5SauANBU-OJDV3V6RvxO-nOyGo5FbKEZC32u_9peLJXQD_VET3JpBa5fefPei8V_fqCm59Ul-_VWis0sK0E7ULQTfiA27X0AsWuARQxObWhxXMV_oZz0LW3_l_GvhD_n2Yo7Bdl8r4CodIMoY2FryyX4KClKjvNBmsdQdsDloYAnhGgPoYa4j_MwPE520ED6ra1BsjYLidnD2At94HGixKWOXcFfx2xwWz7cpgLKaJlG36NTVzA"/>
+<!-- Duplicate Warning Badge & Verified Badge -->
+<div class="absolute top-2.5 left-2.5 flex items-center gap-1.5 z-10">
+<span class="px-2 py-0.5 rounded-md bg-tertiary-container/90 backdrop-blur-md font-code-sm text-label-sm text-on-tertiary-container font-semibold flex items-center gap-1 shadow-sm">
+<span class="material-symbols-outlined text-[13px]">content_copy</span>
+          重复 ×4
+        </span>
+<span class="px-2 py-0.5 rounded-md bg-surface-container-lowest/80 backdrop-blur-md font-code-sm text-label-sm text-secondary flex items-center gap-1 shadow-sm">
+<span class="material-symbols-outlined text-[13px]">verified</span>
+          已打标
+        </span>
+</div>
+<div class="absolute top-2.5 right-2.5 flex items-center gap-1.5 z-10">
+<button class="w-8 h-8 rounded-full bg-surface-container-lowest/70 backdrop-blur-md text-tertiary flex items-center justify-center hover:bg-surface-container-lowest transition-colors shadow-sm active:scale-95">
+<span class="material-symbols-outlined text-[18px]" style="font-variation-settings: 'FILL' 1;">bookmark</span>
+</button>
+</div>
+<div class="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-surface-container-lowest/90 via-surface-container-lowest/30 to-transparent flex items-end justify-between px-space-md pb-2 z-10">
+<span class="font-code-sm text-label-sm text-on-surface-variant flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">aspect_ratio</span> 5120 × 3413
+        </span>
+<span class="font-code-sm text-label-sm text-outline">TIFF · 42.1 MB</span>
+</div>
+</div>
+<!-- Metadata Strip -->
+<div class="p-card-padding-default flex flex-col gap-space-sm">
+<div class="flex items-start justify-between gap-space-xs">
+<div class="flex flex-col min-w-0">
+<span class="font-body-md text-body-md font-semibold text-on-surface truncate">French_Retro_Bed_019.png</span>
+<span class="font-body-sm text-body-sm text-outline truncate">法式复古 · 主卧壁板石膏线与鱼骨拼地板</span>
+</div>
+<button class="text-on-surface-variant hover:text-on-surface p-1 -mr-1">
+<span class="material-symbols-outlined text-[18px]">more_horiz</span>
+</button>
+</div>
+<div class="flex flex-wrap items-center gap-1.5 pt-0.5">
+<span class="px-2 py-0.5 rounded bg-surface-container font-label-sm text-label-sm text-on-surface-variant">主卧</span>
+<span class="px-2 py-0.5 rounded bg-surface-container font-label-sm text-label-sm text-on-surface-variant">法式复古</span>
+<span class="px-2 py-0.5 rounded bg-surface-container font-label-sm text-label-sm text-on-surface-variant">鱼骨拼橡木</span>
+<span class="px-2 py-0.5 rounded bg-surface-container font-label-sm text-label-sm text-on-surface-variant">橄榄绿丝绒</span>
+<span class="px-2 py-0.5 rounded bg-surface-container font-label-sm text-label-sm text-on-surface-variant">拉丝黄铜</span>
+</div>
+<div class="flex items-center justify-between pt-space-xs border-t border-white/5">
+<div class="flex items-center gap-1">
+<div class="w-4 h-4 rounded-full bg-[#3d4d3a] shadow-inner" title="#3D4D3A 橄榄墨绿"></div>
+<div class="w-4 h-4 rounded-full bg-[#b58e58] shadow-inner" title="#B58E58 氧化黄铜"></div>
+<div class="w-4 h-4 rounded-full bg-[#ba9a74] shadow-inner" title="#BA9A74 欧洲白橡"></div>
+<span class="font-code-sm text-[10px] text-outline ml-1">复核完成</span>
+</div>
+<div class="flex items-center gap-space-xs">
+<button class="px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-outline font-label-sm text-label-sm transition-colors flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">auto_fix_high</span>
+<span>去重合并</span>
+</button>
+<button class="px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-primary font-label-sm text-label-sm transition-colors flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">inventory_2</span>
+<span>选样 2</span>
+</button>
+</div>
+</div>
+</div>
+</article>
+<!-- Feed Card 3: Minimalist Zen Tea Room -->
+<article class="flex flex-col bg-surface-container-low rounded-xl overflow-hidden shadow-md transition-transform active:scale-[0.99] duration-150">
+<div class="relative w-full aspect-[4/3] bg-surface-container-highest overflow-hidden">
+<img class="w-full h-full object-cover select-none" data-alt="Modern high-end minimalist tea room aesthetic interior, textured deep basalt flamed stone monolithic cantilevered table, tatami floor mats with refined woven border, recessed linear ambient perimeter lighting, charcoal shoji screen, Japanese iron kettle steaming gently, serene contemplative architectural atmosphere." loading="lazy" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDh3i3pFq8I2M5j64bHfjvNqCCKuq_xIordFfyema1iW54vXvex9cGIW1h8e3jiSluk_Lp6bcuyth1ks-6KGBQf_kQqToMEKwUn6J8zgadqbOyWwHgMmFDQxMlSwS9hO0kf7wdM1oZYwi80cfUwInTfzOZXlsTU2D4ULln-wDegAhXy46BFaitLCV-otZQqaiOhjAW3YubhDj0--nYD8cmmT5ySqMQCngoQAIaQq-WJaD45Fr4sfpUvAA"/>
+<div class="absolute top-2.5 left-2.5 flex items-center gap-1.5 z-10">
+<span class="px-2 py-0.5 rounded-md bg-surface-container-lowest/80 backdrop-blur-md font-code-sm text-label-sm text-secondary flex items-center gap-1 shadow-sm">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary animate-pulse"></span>
+          已打标 · 9项
+        </span>
+</div>
+<div class="absolute top-2.5 right-2.5 flex items-center gap-1.5 z-10">
+<button class="w-8 h-8 rounded-full bg-surface-container-lowest/70 backdrop-blur-md text-on-surface flex items-center justify-center hover:bg-surface-container-lowest transition-colors shadow-sm active:scale-95">
+<span class="material-symbols-outlined text-[18px]">bookmark_border</span>
+</button>
+</div>
+<div class="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-surface-container-lowest/90 via-surface-container-lowest/30 to-transparent flex items-end justify-between px-space-md pb-2 z-10">
+<span class="font-code-sm text-label-sm text-on-surface-variant flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">aspect_ratio</span> 3840 × 2160
+        </span>
+<span class="font-code-sm text-label-sm text-outline">JPG · 9.8 MB</span>
+</div>
+</div>
+<!-- Metadata Strip -->
+<div class="p-card-padding-default flex flex-col gap-space-sm">
+<div class="flex items-start justify-between gap-space-xs">
+<div class="flex flex-col min-w-0">
+<span class="font-body-md text-body-md font-semibold text-on-surface truncate">Zen_TeaRoom_Spec_031.jpg</span>
+<span class="font-body-sm text-body-sm text-outline truncate">茶室 · 极简暗调天然玄武岩板及编织地席</span>
+</div>
+<button class="text-on-surface-variant hover:text-on-surface p-1 -mr-1">
+<span class="material-symbols-outlined text-[18px]">more_horiz</span>
+</button>
+</div>
+<div class="flex flex-wrap items-center gap-1.5 pt-0.5">
+<span class="px-2 py-0.5 rounded bg-surface-container font-label-sm text-label-sm text-on-surface-variant">茶室</span>
+<span class="px-2 py-0.5 rounded bg-surface-container font-label-sm text-label-sm text-on-surface-variant">极简暗调</span>
+<span class="px-2 py-0.5 rounded bg-surface-container font-label-sm text-label-sm text-on-surface-variant">黑色岩板 12mm</span>
+<span class="px-2 py-0.5 rounded bg-surface-container font-label-sm text-label-sm text-on-surface-variant">手工蔺草席</span>
+</div>
+<div class="flex items-center justify-between pt-space-xs border-t border-white/5">
+<div class="flex items-center gap-1">
+<div class="w-4 h-4 rounded-full bg-[#1b1c1d] shadow-inner" title="#1B1C1D 玄武岩黑"></div>
+<div class="w-4 h-4 rounded-full bg-[#54504b] shadow-inner" title="#54504B 烟熏褐灰"></div>
+<div class="w-4 h-4 rounded-full bg-[#a39a82] shadow-inner" title="#A39A82 天然蔺草色"></div>
+<span class="font-code-sm text-[10px] text-outline ml-1">耐火A级</span>
+</div>
+<div class="flex items-center gap-space-xs">
+<button class="px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-primary font-label-sm text-label-sm transition-colors flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">palette</span>
+<span>提色卡</span>
+</button>
+<button class="px-2.5 py-1 rounded-lg bg-primary text-on-primary font-label-sm text-label-sm transition-colors flex items-center gap-1 shadow-sm">
+<span class="material-symbols-outlined text-[14px]">add</span>
+<span>入案卷</span>
+</button>
+</div>
+</div>
+</div>
+</article>
+<!-- Feed Card 4: Modern Minimalist Dining & Open Kitchen -->
+<article class="flex flex-col bg-surface-container-low rounded-xl overflow-hidden shadow-md transition-transform active:scale-[0.99] duration-150">
+<div class="relative w-full aspect-[4/3] bg-surface-container-highest overflow-hidden">
+<img class="w-full h-full object-cover select-none" data-alt="Warm contemporary open dining room and minimal kitchen island, fluted travertine stone cladding, smoked walnut cabinetry, sculptural matte white pendant light fixture above rounded marble dining table, soft diffused natural daylight from sheer curtains, elegant architectural publication style." loading="lazy" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB21_Oa6SItHL3ItD96MZdTbLU4vx8S73u9u5QMBJJ8WZfIfvoDiAZZ1D3wb0srnt8S6JX1h3XQtzN_wwcD-WYB-mYr5VUJ87fT63aCUJ47fGIZnNGU2YX76cep4NidL6uCE38zjYpQPbTA2B-Jea8bbI5YSdqwbkrsF437jxxpfzYnvPzx7WXuQXWyL4GZv05zRMVYOAGuMcA6nFdnfkYWrtMnUc_Pw-cAJ_bmEVSqJ4TBf7piYTHaVQ"/>
+<div class="absolute top-2.5 left-2.5 flex items-center gap-1.5 z-10">
+<span class="px-2 py-0.5 rounded-md bg-surface-container-lowest/80 backdrop-blur-md font-code-sm text-label-sm text-on-surface flex items-center gap-1 shadow-sm">
+<span class="w-1.5 h-1.5 rounded-full bg-primary"></span>
+          BOM 已关联
+        </span>
+</div>
+<div class="absolute top-2.5 right-2.5 flex items-center gap-1.5 z-10">
+<button class="w-8 h-8 rounded-full bg-surface-container-lowest/70 backdrop-blur-md text-on-surface flex items-center justify-center hover:bg-surface-container-lowest transition-colors shadow-sm active:scale-95">
+<span class="material-symbols-outlined text-[18px]">bookmark_border</span>
+</button>
+</div>
+<div class="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-surface-container-lowest/90 via-surface-container-lowest/30 to-transparent flex items-end justify-between px-space-md pb-2 z-10">
+<span class="font-code-sm text-label-sm text-on-surface-variant flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">aspect_ratio</span> 4500 × 3000
+        </span>
+<span class="font-code-sm text-label-sm text-outline">RAW · 24.6 MB</span>
+</div>
+</div>
+<!-- Metadata Strip -->
+<div class="p-card-padding-default flex flex-col gap-space-sm">
+<div class="flex items-start justify-between gap-space-xs">
+<div class="flex flex-col min-w-0">
+<span class="font-body-md text-body-md font-semibold text-on-surface truncate">OpenKitchen_Island_102.jpg</span>
+<span class="font-body-sm text-body-sm text-outline truncate">餐厨空间 · 洞石弧形倒台与烟熏胡桃木饰面</span>
+</div>
+<button class="text-on-surface-variant hover:text-on-surface p-1 -mr-1">
+<span class="material-symbols-outlined text-[18px]">more_horiz</span>
+</button>
+</div>
+<div class="flex flex-wrap items-center gap-1.5 pt-0.5">
+<span class="px-2 py-0.5 rounded bg-surface-container font-label-sm text-label-sm text-on-surface-variant">餐厨</span>
+<span class="px-2 py-0.5 rounded bg-surface-container font-label-sm text-label-sm text-on-surface-variant">现代暖调</span>
+<span class="px-2 py-0.5 rounded bg-surface-container font-label-sm text-label-sm text-on-surface-variant">天然洞石</span>
+<span class="px-2 py-0.5 rounded bg-surface-container font-label-sm text-label-sm text-on-surface-variant">烟熏胡桃木</span>
+</div>
+<div class="flex items-center justify-between pt-space-xs border-t border-white/5">
+<div class="flex items-center gap-1">
+<div class="w-4 h-4 rounded-full bg-[#cfc3af] shadow-inner" title="#CFC3AF 米黄洞石"></div>
+<div class="w-4 h-4 rounded-full bg-[#4a3a30] shadow-inner" title="#4A3A30 烟熏胡桃"></div>
+<div class="w-4 h-4 rounded-full bg-[#eae7e1] shadow-inner" title="#EAE7E1 哑光白漆"></div>
+<span class="font-code-sm text-[10px] text-outline ml-1">4 种物料</span>
+</div>
+<div class="flex items-center gap-space-xs">
+<button class="px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-primary font-label-sm text-label-sm transition-colors flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">palette</span>
+<span>提色卡</span>
+</button>
+<button class="px-2.5 py-1 rounded-lg bg-primary text-on-primary font-label-sm text-label-sm transition-colors flex items-center gap-1 shadow-sm">
+<span class="material-symbols-outlined text-[14px]">add</span>
+<span>入案卷</span>
+</button>
+</div>
+</div>
+</div>
+</article>
+<!-- Feed End Indicator / Delight micro-state -->
+<div class="py-space-lg flex flex-col items-center justify-center text-center gap-1 text-outline select-none">
+<span class="material-symbols-outlined text-[24px] text-outline-variant">auto_awesome</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant">已探索至最新素材切片</span>
+<span class="font-code-sm text-[10px] text-outline">ARCHIVE ENGINE V2.4 · 持续同步中</span>
+</div>
+<!-- Floating Action Buttons: Scroll to top -->
+<aside class="fixed right-4 bottom-20 z-40 flex flex-col gap-2.5">
+<button class="w-11 h-11 rounded-full bg-surface-container-highest/80 backdrop-blur-xl text-on-surface flex items-center justify-center shadow-xl hover:bg-surface-container-highest transition-all duration-200 active:scale-90" id="scroll-top-btn" onclick="window.scrollTo({top: 0, behavior: 'smooth'})" title="回到顶部">
+<span class="material-symbols-outlined text-[20px]">arrow_upward</span>
+</button>
+</aside>
+</div>
+<script>
+  // Dynamic Scroll to Top visibility logic
+  (function() {
+    const scrollBtn = document.getElementById('scroll-top-btn');
+    if (!scrollBtn) return;
+    
+    function checkScroll() {
+      if (window.scrollY > 300) {
+        scrollBtn.classList.remove('opacity-0', 'pointer-events-none', 'translate-y-2');
+        scrollBtn.classList.add('opacity-100', 'translate-y-0');
+      } else {
+        scrollBtn.classList.add('opacity-0', 'pointer-events-none', 'translate-y-2');
+        scrollBtn.classList.remove('opacity-100', 'translate-y-0');
+      }
+    }
+    
+    scrollBtn.classList.add('transition-all', 'duration-300', 'opacity-0', 'pointer-events-none', 'translate-y-2');
+    window.addEventListener('scroll', checkScroll, { passive: true });
+  })();
+</script></main><nav class="fixed bottom-0 w-full z-50 pb-safe bg-surface-container-lowest/85 backdrop-blur-xl shadow-[0_-1px_12px_rgba(0,0,0,0.35)]" data-active-classes="text-primary font-semibold"><div class="flex justify-around items-center h-16 px-screen-margin-mobile"><a aria-current="page" class="flex flex-col items-center justify-center gap-space-2xs min-w-[56px] h-11 transition-all text-primary font-semibold" data-path="browse" href="#"><span class="material-symbols-outlined text-[22px]">category</span><span class="font-label-sm text-label-sm">浏览</span></a><a class="relative flex flex-col items-center justify-center gap-space-2xs min-w-[56px] h-11 text-on-surface-variant hover:text-on-surface transition-all" data-path="review" href="#"><div class="relative flex items-center justify-center"><span class="material-symbols-outlined text-[22px]">fact_check</span><span class="absolute -top-1 -right-2.5 px-1 py-0.2 min-w-[16px] h-4 rounded-full bg-error-container text-error font-code-sm text-[10px] leading-[14px] flex items-center justify-center font-bold">23</span></div><span class="font-label-sm text-label-sm">审核</span></a><a class="flex flex-col items-center justify-center gap-space-2xs min-w-[56px] h-11 text-on-surface-variant hover:text-on-surface transition-all" data-path="manage" href="#"><span class="material-symbols-outlined text-[22px]">inventory_2</span><span class="font-label-sm text-label-sm">管理</span></a><a class="flex flex-col items-center justify-center gap-space-2xs min-w-[56px] h-11 text-on-surface-variant hover:text-on-surface transition-all" data-path="settings" href="#"><span class="material-symbols-outlined text-[22px]">tune</span><span class="font-label-sm text-label-sm">设置</span></a></div></nav></body></html>

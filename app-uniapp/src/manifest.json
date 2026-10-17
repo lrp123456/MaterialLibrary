@@ -1,0 +1,74 @@
+{
+  "name": "素材库-turret",
+  "appid": "__UNI__F183218",
+  "description": "仅上传相册元数据，不上传照片内容",
+  "versionName": "1.0.0",
+  "versionCode": "200",
+  "transformPx": false,
+  "app": {
+    "darkmode": false,
+    "name": "素材库-turret",
+    "modules": {},
+    "installPlugins": []
+  },
+  "quickapp": {},
+  "mp-weixin": {
+    "appid": "",
+    "setting": {
+      "urlCheck": false
+    },
+    "usingComponents": true
+  },
+  "h5": {
+    "title": "素材工作台",
+    "router": {
+      "mode": "hash",
+      "base": "./"
+    }
+  },
+  "vueVersion": "3",
+  "app-plus": {
+    "compatible": {
+      "ignoreVersion": true
+    },
+    "modules": {
+      "VideoPlayer": {}
+    },
+    "nativePlugins": {
+      "uni-local-infer": {
+        "__plugin_info__": {
+          "name": "uni-local-infer",
+          "description": "NCNN EdgeSAM + Real-ESRGAN",
+          "platforms": "Android",
+          "android_package_name": "",
+          "ios_bundle_id": "",
+          "isCloud": false,
+          "bought": -1,
+          "pid": "",
+          "parameters": {}
+        }
+      }
+    },
+    "distribute": {
+      "android": {
+        "permissions": [
+          "<uses-permission android:name=\"android.permission.READ_MEDIA_IMAGES\"/>",
+          "<uses-permission android:name=\"android.permission.READ_MEDIA_VIDEO\"/>",
+          "<uses-permission android:name=\"android.permission.READ_EXTERNAL_STORAGE\" android:maxSdkVersion=\"32\"/>",
+          "<uses-permission android:name=\"android.permission.INTERNET\"/>",
+          "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>",
+          "<uses-permission android:name=\"android.permission.POST_NOTIFICATIONS\"/>"
+        ],
+        "minSdkVersion": 26,
+        "targetSdkVersion": 34,
+        "usesCleartextTraffic": true
+      },
+      "ios": {
+        "dSYMs": false,
+        "privacyDescription": {
+          "NSPhotoLibraryUsageDescription": "读取相册元数据用于同步到素材库服务器"
+        }
+      }
+    }
+  }
+}

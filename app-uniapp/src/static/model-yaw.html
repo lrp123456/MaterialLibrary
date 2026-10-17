@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <script type="module" src="./model-viewer.min.js"></script>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;
+    }
+    #wrap {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      background: transparent;
+    }
+    model-viewer {
+      width: 100%;
+      height: 100%;
+      background-color: transparent;
+      --poster-color: transparent;
+    }
+    #fallback {
+      position: absolute;
+      inset: 0;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: #0f172a;
+      z-index: 2;
+    }
+    #fallback.show { display: flex; }
+    #fallback .icon { font-size: 44px; }
+    #fallback .tip { font-size: 13px; color: #94a3b8; text-align: center; padding: 0 16px; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <model-viewer
+      id="mv"
+      src=""
+      camera-controls
+      camera-orbit="45deg 85deg auto"
+      min-camera-orbit="auto 70deg auto"
+      max-camera-orbit="auto 110deg auto"
+      orientation="0deg 0deg 0deg"
+      shadow-intensity="1"
+      exposure="1"
+      loading="eager"
+      reveal="auto"
+    ></model-viewer>
+    <div id="fallback">
+      <div class="icon">🛋️</div>
+      <div class="tip" id="fallbackTip">3D 模型加载中或需要重试</div>
+    </div>
+  </div>
+
+  <script>
+    function qs(k) {
+      try {
+        return new URL(location.href).searchParams.get(k) || '';
+      } catch (e) {
+        var m = location.search.match(new RegExp('[?&]' + k + '=([^&]*)'));
+        return m ? decodeURIComponent(m[1]) : '';
+      }
+    }
+
+    function showFallback(msg) {
+      var tip = document.getElementById('fallbackTip');
+      if (tip && msg) tip.textContent = msg;
+      document.getElementById('fallback').classList.add('show');
+      notifyParent({ type: 'model-viewer-error', msg: msg || 'load failed' });
+    }
+
+    function notifyParent(data) {
+      try {
+        if (window.uni && typeof window.uni.postMessage === 'function') {
+          window.uni.postMessage({ data: data });
+        }
+      } catch (e) {}
+      try {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage(data, '*');
+        }
+      } catch (e) {}
+      try {
+        if (window.plus && plus.webview && plus.webview.currentWebview) {
+          var op = plus.webview.currentWebview().opener();
+          if (op && typeof op.evalJS === 'function') {
+            op.evalJS('window.__onModelMessage && window.__onModelMessage(' + JSON.stringify(data) + ')');
+          }
+        }
+      } catch (e) {}
+    }
+
+    var mv = document.getElementById('mv');
+    var src = qs('src');
+    var initYaw = parseInt(qs('yaw') || '0', 10) || 0;
+
+    if (!/^https?:\/\//i.test(src)) {
+      showFallback('模型地址无效（需 http/https 绝对地址）');
+    } else {
+      mv.setAttribute('src', src);
+    }
+    setYaw(initYaw);
+
+    var failedTimer = setTimeout(function () {
+      if (!mv.loaded) showFallback('3D 模型加载超时');
+    }, 12000);
+
+    mv.addEventListener('load', function () {
+      clearTimeout(failedTimer);
+      document.getElementById('fallback').classList.remove('show');
+      notifyParent({ type: 'model-loaded', src: src });
+    });
+
+    mv.addEventListener('error', function () {
+      clearTimeout(failedTimer);
+      showFallback('3D 模型加载失败（网络/跨域/文件格式）');
+    });
+
+    function setYaw(deg) {
+      var d = ((Math.round(deg) % 360) + 360) % 360;
+      mv.setAttribute('orientation', '0deg 0deg ' + d + 'deg');
+    }
+    window.setYaw = setYaw;
+
+    /**
+     * 导出截图：
+     * 相机锁回 方位 45°、俯仰 85°，导出干净透明/纯色 PNG 作为图2，再把相机恢复
+     */
+    async function exportPngSnapshot() {
+      if (!mv) throw new Error('model-viewer not ready');
+      var prevOrbit = mv.cameraOrbit;
+      try {
+        mv.cameraOrbit = '45deg 85deg auto';
+        if (typeof mv.jumpCameraToGoal === 'function') {
+          mv.jumpCameraToGoal();
+        }
+        await new Promise(function (resolve) {
+          requestAnimationFrame(function () {
+            requestAnimationFrame(resolve);
+          });
+        });
+        var blob = await mv.toBlob({ mimeType: 'image/png', idealAspect: true });
+        if (!blob) throw new Error('截图导出失败');
+
+        var reader = new FileReader();
+        reader.onloadend = function () {
+          var dataUrl = reader.result;
+          notifyParent({
+            type: 'model-snapshot-ready',
+            dataUrl: dataUrl
+          });
+        };
+        reader.readAsDataURL(blob);
+        return true;
+      } catch (err) {
+        notifyParent({
+          type: 'model-snapshot-error',
+          error: err.message || String(err)
+        });
+        return false;
+      } finally {
+        if (prevOrbit) {
+          mv.cameraOrbit = prevOrbit;
+          if (typeof mv.jumpCameraToGoal === 'function') {
+            mv.jumpCameraToGoal();
+          }
+        }
+      }
+    }
+    window.exportPngSnapshot = exportPngSnapshot;
+
+    // 通信接收
+    window.addEventListener('message', function (e) {
+      try {
+        var d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
+        if (!d) return;
+        if (d.type === 'set-yaw' || d.yaw != null) setYaw(d.yaw);
+        if (d.type === 'load-model' && d.src && /^https?:\/\//i.test(d.src)) {
+          mv.setAttribute('src', d.src);
+        }
+        if (d.type === 'export-snapshot') {
+          exportPngSnapshot();
+        }
+      } catch (err) {}
+    });
+    document.addEventListener('message', function (e) {
+      try {
+        var d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
+        if (!d) return;
+        if (d.type === 'set-yaw' || d.yaw != null) setYaw(d.yaw);
+        if (d.type === 'load-model' && d.src && /^https?:\/\//i.test(d.src)) {
+          mv.setAttribute('src', d.src);
+        }
+        if (d.type === 'export-snapshot') {
+          exportPngSnapshot();
+        }
+      } catch (err) {}
+    });
+  </script>
+</body>
+</html>

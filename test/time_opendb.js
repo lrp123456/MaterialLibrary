@@ -1,0 +1,7 @@
+const { openDb } = require('/home/lrp/my_folder/smu/dsh_plugins/material_library/src/db')
+console.log('opening...')
+const t = Date.now()
+const db = openDb('/home/lrp/.dsh-material-library')
+console.log('openDb ms', Date.now() - t)
+db.close()
+console.log('done')

@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-10T15:16:23.484Z",
+  "server": "http://39.107.120.55:30001",
+  "channel": "canary",
+  "fileName": "album-sync-2040006-20261010151341.wgt",
+  "url": "/api/app/update/files/album-sync-2040006-20261010151341.wgt",
+  "versionName": "1.0.4",
+  "versionCode": 2040006,
+  "wgtVersion": "2040006",
+  "type": "wgt",
+  "force": true,
+  "note": "【新增功能】\n优化ui设计方案\n\n【修复Bug】\n无"
+}
