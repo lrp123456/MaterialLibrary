@@ -5179,6 +5179,32 @@ async function handleApi(services, req, res, prefix = '/api') {
     return sendJson(res, 200, { success: true, data: getAvailableEnvKeys() });
   }
 
+  if (pathname === '/providers/env-secrets' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const { inspectEnvKey, KNOWN_SECRET_ENV_SPECS } = require('./env-secrets');
+    const { getAvailableEnvKeys } = require('./models-contract');
+    const keys = getAvailableEnvKeys();
+    return sendJson(res, 200, {
+      success: true,
+      data: {
+        items: keys.map(k => inspectEnvKey(k)),
+        specs: KNOWN_SECRET_ENV_SPECS,
+      }
+    });
+  }
+
+  if (pathname === '/providers/env-secrets' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const b = await parseBody(req);
+      const { writeEnvUpdates } = require('./env-secrets');
+      const result = writeEnvUpdates(b?.updates || {});
+      return sendJson(res, 200, { success: true, data: result });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
   if (pathname === '/providers' && req.method === 'POST') {
     if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
     const { saveEndpointData } = require('./models-contract');
@@ -5647,6 +5673,43 @@ async function handleApi(services, req, res, prefix = '/api') {
       return sendJson(res, 400, { error: err });
     }
   }
+  if (pathname === '/governance/gen-models/preview-convert' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const b = await parseBody(req);
+      const { getModelContractsList, assembleModelPayload } = require('./models-contract');
+      const { previewUnifiedConversion } = require('./converters');
+      const list = getModelContractsList(db).models;
+      const contract = b.contract || list.find(m => m.id === b.model_id) || list[0];
+      const assembled = assembleModelPayload({
+        modelContract: contract,
+        values: b.values || {},
+        editablePrompt: b.prompt || '现代极简客厅，落地窗自然采光，@图片1 沙发细节保留',
+        images: b.images || ['https://example.com/ref1.jpg'],
+      });
+      const converted = previewUnifiedConversion({
+        contract,
+        canonicalInput: {
+          prompt: b.prompt || '现代极简客厅，落地窗自然采光，@图片1 沙发细节保留',
+          negativePrompt: b.negativePrompt || '模糊，伪影，水渍',
+          mode: b.mode || 'text_to_image',
+          params: b.values || {},
+          refs: { images: b.images || ['https://example.com/ref1.jpg'], videos: b.videos || [], audios: b.audios || [] },
+          selection: b.selection || { bbox: [120, 200, 680, 760] },
+        }
+      });
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          assembled,
+          converted,
+        }
+      });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
   if (pathname === '/governance/gen-models' && req.method === 'POST') {
     if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
     try {

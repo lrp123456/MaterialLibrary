@@ -817,10 +817,64 @@ async function executeAdapter(services, adapter, input) {
     }
 
     const data = await res.json();
+    const isPngOut = Boolean(bodyObj && (bodyObj.output_format === 'png' || bodyObj.background === 'transparent' || bodyObj.layer_decomposition === true));
+    const defaultImgExt = isPngOut ? '.png' : '.jpg';
+    const defaultImgMime = isPngOut ? 'image/png' : 'image/jpeg';
+
+    // 支持 Seedream 5.0 图层分解 (layer_decomposition) 及 Lite 多图连拍返回的多张 data[]
+    const dataArr = Array.isArray(data?.data) ? data.data : [];
+    if (input.kind !== 'video' && dataArr.length > 1) {
+      const files = [];
+      for (let i = 0; i < dataArr.length; i++) {
+        const item = dataArr[i] || {};
+        const itemFileName = `gen_${Date.now()}_${i}_${crypto.randomBytes(3).toString('hex')}${defaultImgExt}`;
+        const itemPath = path.join(tempDir, itemFileName);
+        if (item.b64_json) {
+          fs.writeFileSync(itemPath, Buffer.from(item.b64_json, 'base64'));
+        } else if (item.url) {
+          await downloadToFile(item.url, itemPath, { timeoutMs: 120000 });
+        } else {
+          continue;
+        }
+        let itemMeta = { mime: defaultImgMime };
+        try {
+          const info = await sharp(itemPath).metadata();
+          itemMeta = { width: info.width, height: info.height, mime: info.format === 'png' ? 'image/png' : defaultImgMime };
+        } catch {}
+        files.push({
+          localPath: itemPath,
+          previewUrl: `/api/cache/temp/${itemFileName}`,
+          mime: itemMeta.mime,
+          width: itemMeta.width,
+          height: itemMeta.height,
+          layerIndex: i,
+          role: bodyObj?.layer_decomposition ? (i === 0 ? 'background' : `layer_${i}`) : `image_${i + 1}`,
+          label: bodyObj?.layer_decomposition ? (i === 0 ? '底层背景 (Layer 0)' : `独立前景图层 #${i}`) : `生成图 #${i + 1}`,
+        });
+      }
+      if (files.length) {
+        let layerStack = null;
+        try {
+          const { normalizeArkSeedreamResponse } = require('../converters');
+          layerStack = normalizeArkSeedreamResponse(
+            { data: files.map(f => ({ url: f.previewUrl, width: f.width, height: f.height })) },
+            { layerDecomposition: Boolean(bodyObj?.layer_decomposition) }
+          );
+        } catch (_) {}
+        return {
+          ok: true,
+          success: true,
+          files,
+          layerStack,
+          raw: data,
+        };
+      }
+    }
+
     const resultUrl = getNested(data, cfg.resultUrlPath || 'data.0.url') || data.url;
     const resultB64 = getNested(data, cfg.resultB64Path || 'data.0.b64_json');
 
-    const outExt = input.kind === 'video' ? '.mp4' : '.jpg';
+    const outExt = input.kind === 'video' ? '.mp4' : defaultImgExt;
     const outFileName = `gen_${Date.now()}_${crypto.randomBytes(4).toString('hex')}${outExt}`;
     const outPath = path.join(tempDir, outFileName);
 
@@ -836,7 +890,7 @@ async function executeAdapter(services, adapter, input) {
     if (input.kind !== 'video') {
       try {
         const info = await sharp(outPath).metadata();
-        meta = { width: info.width, height: info.height, mime: 'image/jpeg' };
+        meta = { width: info.width, height: info.height, mime: info.format === 'png' ? 'image/png' : defaultImgMime };
       } catch {}
     } else {
       meta = { mime: 'video/mp4' };

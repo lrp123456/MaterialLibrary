@@ -18,6 +18,7 @@ package-lock.json.bak
 *.key
 *credentials*
 *secret*
+!src/env-secrets.js
 credentials/
 _credentials_bundle/
 

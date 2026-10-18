@@ -7,6 +7,14 @@
  */
 const crypto = require('crypto');
 const { resolveModelCode, officialOf, OFFICIAL_STUDIO } = require('./studio-catalog');
+const {
+  CANONICAL_VOCABULARY,
+  setDeepField,
+  normalizeCanonicalInput,
+  evaluateModelRules,
+  compileModelDialect,
+  transformFieldValue,
+} = require('./unified-translator');
 
 // 1. Seedream 5.0 Flash 官方核实换算表
 const SEEDREAM_FLASH_SIZE_TABLE = {
@@ -66,7 +74,7 @@ const RATIO_SEEDANCE = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9', 'adaptive']
 
 function seedance20Params() {
   return [
-    contractEnum('resolution', '分辨率', ['480p', '720p', '1080p'], '720p'),
+    contractEnum('resolution', '分辨率', ['480p', '720p', '1080p', '4k'], '720p'),
     contractDuration('duration', '时长', 4, 15, 5, { extra_stops: [-1], extra_labels: { '-1': '智能' } }),
     contractEnum('ratio', '画幅', RATIO_SEEDANCE, '16:9'),
     contractBool('generate_audio', '生成同步音频', true, { visibility: 'public' }),
@@ -77,6 +85,8 @@ function seedance20Params() {
     contractBool('watermark', 'AI 水印', false),
     contractNumber('seed', '种子', -1, 2147483647, -1),
     contractBool('camera_fixed', '镜头固定', false),
+    contractBool('return_last_frame', '返回尾帧', false),
+    contractBool('web_search', '联网搜索增强', false),
   ];
 }
 
@@ -86,17 +96,19 @@ function seedance25Params() {
     contractDuration('duration', '时长', 4, 30, -1, { extra_stops: [-1], extra_labels: { '-1': '智能' } }),
     contractEnum('ratio', '画幅', RATIO_SEEDANCE, 'adaptive'),
     contractBool('generate_audio', '生成同步音频', true, { visibility: 'public' }),
-    contractEnum('mode', '模式', ['text_to_video', 'omni_reference', 'image_to_video', 'first_last_frame', 'video_edit', 'video_extend'], 'text_to_video', {
+    contractEnum('mode', '模式', ['text_to_video', 'omni_reference', 'image_to_video', 'first_last_frame', 'video_edit', 'video_extend', 'draft_to_final'], 'text_to_video', {
       location: 'none',
       option_labels: {
         text_to_video: '文生视频', omni_reference: '全能参考', image_to_video: '图生视频',
-        first_last_frame: '首尾帧', video_edit: '视频编辑', video_extend: '视频延长',
+        first_last_frame: '首尾帧', video_edit: '视频编辑', video_extend: '视频延长', draft_to_final: '样片转正片',
       },
     }),
     contractBool('watermark', 'AI 水印', false),
     contractNumber('seed', '种子', -1, 2147483647, -1),
     contractEnum('output_format', '封装', ['mp4', 'mov'], 'mp4', { visibility: 'advanced' }),
     contractBool('return_last_frame', '返回尾帧', false),
+    contractBool('draft', '样片预览模式(480p)', false, { visibility: 'advanced' }),
+    contractBool('web_search', '联网搜索增强', false, { visibility: 'advanced' }),
     contractEnum('omni_reference_task_type', '任务类型', ['auto', 'reference', 'edit', 'extend'], 'auto', {
       visibility: 'advanced',
       option_labels: { auto: '自动', reference: '参考生视频', edit: '编辑', extend: '延长' },
@@ -359,6 +371,17 @@ const DEFAULT_MODEL_CONTRACTS = [
     name: 'Seedream 5.0 Flash',
     vendor_model_id: 'doubao-seedream-5-0-flash-260915',
     capability_id: 'ark_image',
+    converter: 'ark-seedream',
+    refStyle: 'generic',
+    polishHint: '1K/1.5K/2K · 原生交互编辑（bbox/point 进提示词） · 图层拆分',
+    modes: [
+      { id: 'text_to_image', label: '文生图' },
+      { id: 'image_to_image', label: '图生图' },
+      { id: 'image_reference', label: '多参考' },
+      { id: 'image_edit', label: '交互编辑' },
+      { id: 'expand_fill', label: '扩边填白' },
+    ],
+    slots: { images: 6, videos: 0, audios: 0 },
     enabled: 1,
     params: [
       {
@@ -440,7 +463,9 @@ const DEFAULT_MODEL_CONTRACTS = [
         visibility: 'advanced',
         location: 'body',
         body_field: 'optimize_prompt_options.mode'
-      }
+      },
+      { key: 'bbox', label: '框选 0-999（x1 y1 x2 y2）', type: 'text', default: '', visibility: 'advanced', location: 'none' },
+      { key: 'point', label: '落位中心点 0-999（x y）', type: 'text', default: '', visibility: 'advanced', location: 'none' }
     ],
     table_mappings: {
       size_ratio: SEEDREAM_FLASH_SIZE_TABLE
@@ -473,11 +498,122 @@ const DEFAULT_MODEL_CONTRACTS = [
     }
   },
   {
+    id: 'seedream5pro',
+    name: 'Seedream 5.0 Pro',
+    vendor_model_id: 'doubao-seedream-5-0-pro-260628',
+    capability_id: 'ark_image',
+    converter: 'ark-seedream',
+    enabled: 1,
+    modes: [
+      { id: 'text_to_image', label: '文生图' },
+      { id: 'image_to_image', label: '图生图' },
+      { id: 'image_reference', label: '多参考融合' },
+      { id: 'image_edit', label: '交互坐标编辑' },
+      { id: 'layer_split', label: '图层拆分' },
+      { id: 'expand_fill', label: '扩边填白' },
+    ],
+    slots: { images: 10, videos: 0, audios: 0 },
+    polishHint: '1K/1.5K/2K · 框内替换 · 图层拆分 · 支持极速提示优化(fast)',
+    params: [
+      { key: 'size', label: '尺寸档', type: 'enum', default: '2K', options: ['1K', '1.5K', '2K'], visibility: 'public', location: 'table' },
+      { key: 'ratio', label: '宽高比', type: 'enum', default: '1:1', options: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'], visibility: 'public', location: 'table' },
+      { key: 'layer_decomposition', label: '图层拆分', type: 'boolean', default: false, visibility: 'public', location: 'body', body_field: 'layer_decomposition' },
+      { key: 'background', label: '透明底', type: 'enum', default: 'opaque', options: ['opaque', 'transparent'], visibility: 'advanced', location: 'body', body_field: 'background' },
+      { key: 'output_format', label: '输出格式', type: 'enum', default: 'jpeg', options: ['jpeg', 'png'], visibility: 'advanced', location: 'body', body_field: 'output_format' },
+      { key: 'response_format', label: '返回格式', type: 'enum', default: 'url', options: ['url', 'b64_json'], visibility: 'advanced', location: 'body', body_field: 'response_format' },
+      { key: 'watermark', label: '水印', type: 'boolean', default: false, visibility: 'advanced', location: 'body', body_field: 'watermark' },
+      {
+        key: 'optimize_prompt_options.mode',
+        label: '厂商自动优化',
+        type: 'enum',
+        default: 'off',
+        options: ['off', 'standard', 'fast'],
+        option_labels: { off: '关闭', standard: '开启 - 强 (标准)', fast: '开启 - 极速 (Pro专属)' },
+        visibility: 'advanced',
+        location: 'body',
+        body_field: 'optimize_prompt_options.mode',
+      },
+      { key: 'bbox', label: '框选 0-999（x1 y1 x2 y2）', type: 'text', default: '', visibility: 'advanced', location: 'none' },
+      { key: 'point', label: '落位中心点 0-999（x y）', type: 'text', default: '', visibility: 'advanced', location: 'none' },
+    ],
+    table_mappings: { size_ratio: SEEDREAM_FLASH_SIZE_TABLE },
+    conditional_rules: [
+      {
+        type: 'layer_decomposition',
+        when: { layer_decomposition: true },
+        effect: {
+          suppress: ['ratio'],
+          size_mode: 'direct',
+          size_options: ['1K', '1.5K', '2K', 'auto'],
+          size_default: 'auto',
+          require_single_image: true,
+        },
+      },
+      {
+        type: 'transparent_background',
+        when: { background: 'transparent' },
+        effect: {
+          force: { output_format: 'png' },
+          require_single_image: true,
+        },
+      },
+    ],
+    mutex_groups: [],
+    optimizer: { optimizer_model_id: 'agnes3_0flash', prompt: '' },
+  },
+  {
+    id: 'seedream5lite',
+    name: 'Seedream 5.0 Lite',
+    vendor_model_id: 'doubao-seedream-5-0-260128',
+    capability_id: 'ark_image',
+    converter: 'ark-seedream',
+    enabled: 1,
+    modes: [
+      { id: 'text_to_image', label: '文生图' },
+      { id: 'image_to_image', label: '图生图' },
+      { id: 'image_reference', label: '多参考(最多14张)' },
+    ],
+    slots: { images: 14, videos: 0, audios: 0 },
+    polishHint: '2K/3K/4K · 支持组图连拍(最多15张) · 支持联网生图',
+    params: [
+      { key: 'size', label: '尺寸档', type: 'enum', default: '2K', options: ['2K', '3K', '4K'], visibility: 'public', location: 'body', body_field: 'size' },
+      { key: 'ratio', label: '宽高比', type: 'enum', default: '1:1', options: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'], visibility: 'public', location: 'none' },
+      { key: 'watermark', label: '水印', type: 'boolean', default: false, visibility: 'advanced', location: 'body', body_field: 'watermark' },
+      { key: 'n', label: '组图张数', type: 'number', default: 1, min: 1, max: 15, visibility: 'advanced', location: 'body', body_field: 'max_images' },
+      {
+        key: 'sequential_image_generation',
+        label: '组图模式',
+        type: 'enum',
+        default: 'disabled',
+        options: ['disabled', 'auto'],
+        option_labels: { disabled: '单张', auto: '组图 auto' },
+        visibility: 'advanced',
+        location: 'body',
+        body_field: 'sequential_image_generation',
+      },
+      { key: 'output_format', label: '输出格式', type: 'enum', default: 'jpeg', options: ['jpeg', 'png'], visibility: 'advanced', location: 'body', body_field: 'output_format' },
+      { key: 'web_search', label: '联网搜索生图', type: 'boolean', default: false, visibility: 'advanced', location: 'body', body_field: 'web_search' },
+    ],
+    table_mappings: {},
+    conditional_rules: [],
+    mutex_groups: [],
+    optimizer: { optimizer_model_id: 'agnes3_0flash', prompt: '' },
+  },
+  {
     id: 'agnes_image_2_5_flash',
     name: 'Agnes Image 2.5 Flash',
     vendor_model_id: 'agnes-image-2.5-flash',
     capability_id: 'agnes_image',
+    converter: 'agnes-image',
     enabled: 1,
+    modes: [
+      { id: 'text_to_image', label: '文生图' },
+      { id: 'image_to_image', label: '图生图' },
+      { id: 'image_reference', label: '多参考' },
+    ],
+    slots: { images: 3, videos: 0, audios: 0 },
+    free: { maxRefs: 3, sizes: ['1K', '2K'] },
+    polishHint: '官方三结构 · 1K/2K/3K/4K 现价免费 · extra_body 规范封装',
     params: [
       {
         key: 'size',
@@ -498,6 +634,16 @@ const DEFAULT_MODEL_CONTRACTS = [
         visibility: 'public',
         location: 'body',
         body_field: 'ratio'
+      },
+      {
+        key: 'response_format',
+        label: '返回格式(extra_body)',
+        type: 'enum',
+        default: 'url',
+        options: ['url', 'b64_json'],
+        visibility: 'advanced',
+        location: 'body',
+        body_field: 'extra_body.response_format'
       }
     ],
     table_mappings: {},
@@ -513,6 +659,16 @@ const DEFAULT_MODEL_CONTRACTS = [
     name: 'Seedance 2.0',
     vendor_model_id: 'doubao-seedance-2-0-260128',
     capability_id: 'ark_video',
+    converter: 'ark-seedance-video',
+    refStyle: 'seedance',
+    polishHint: '三类公式：参考/编辑/延长 · 4–15s · 图≤9',
+    modes: [
+      { id: 'text_to_video', label: '文生视频' },
+      { id: 'omni_reference', label: '全能参考' },
+      { id: 'image_to_video', label: '图生视频' },
+      { id: 'first_last_frame', label: '首尾帧' },
+    ],
+    slots: { images: 9, videos: 3, audios: 3 },
     enabled: 1,
     params: seedance20Params(),
     table_mappings: {},
@@ -530,6 +686,18 @@ const DEFAULT_MODEL_CONTRACTS = [
     name: 'Seedance 2.5',
     vendor_model_id: 'doubao-seedance-2-5-260628',
     capability_id: 'ark_video',
+    converter: 'ark-seedance-video',
+    refStyle: 'seedance',
+    polishHint: '公式：主体+运镜+声音 · @图片1 · 4–30s',
+    modes: [
+      { id: 'text_to_video', label: '文生视频' },
+      { id: 'omni_reference', label: '全能参考' },
+      { id: 'image_to_video', label: '图生视频' },
+      { id: 'first_last_frame', label: '首尾帧' },
+      { id: 'video_edit', label: '视频编辑' },
+      { id: 'video_extend', label: '视频延长' },
+    ],
+    slots: { images: 30, videos: 10, audios: 10 },
     enabled: 1,
     params: seedance25Params(),
     table_mappings: {},
@@ -549,6 +717,16 @@ const DEFAULT_MODEL_CONTRACTS = [
     name: 'Agnes Video 2.5 Flash',
     vendor_model_id: 'agnes-video-2.5-flash',
     capability_id: 'agnes_video',
+    converter: 'agnes-video',
+    refStyle: 'agnes',
+    polishHint: '<Picture 1> · 仅 720P · 4–12s',
+    modes: [
+      { id: 'text_to_video', label: '文生视频' },
+      { id: 'image_to_video', label: '参考' },
+      { id: 'first_last_frame', label: '首尾帧' },
+    ],
+    slots: { images: 5, videos: 0, audios: 3 },
+    free: { size: '720P', maxRefs: 5, maxAudios: 3, noVideoRef: true },
     enabled: 1,
     params: [
       {
@@ -595,6 +773,14 @@ const DEFAULT_MODEL_CONTRACTS = [
     name: '豆包纯音乐 v5',
     vendor_model_id: 'doubao-bgm-v5',
     capability_id: 'doubao_music_bgm',
+    converter: 'doubao-music',
+    refStyle: 'generic',
+    polishHint: '豆包纯音乐 v5 · 中文描述',
+    modes: [
+      { id: 'text_to_song', label: '文生歌曲' },
+      { id: 'text_to_bgm', label: '文生纯音乐' },
+    ],
+    slots: { images: 0, videos: 0, audios: 0 },
     enabled: 1,
     params: [
       {
@@ -640,8 +826,27 @@ const DEFAULT_MODEL_CONTRACTS = [
     name: '豆包歌曲 v5',
     vendor_model_id: 'doubao-song-v5',
     capability_id: 'doubao_music_song',
+    converter: 'doubao-music',
+    refStyle: 'generic',
+    polishHint: '豆包歌曲 v5 · 提示词或歌词',
+    modes: [
+      { id: 'text_to_song', label: '文生歌曲' },
+      { id: 'text_to_bgm', label: '文生纯音乐' },
+    ],
+    slots: { images: 0, videos: 0, audios: 0 },
     enabled: 1,
     params: [
+      {
+        key: 'lang',
+        label: '语言',
+        type: 'enum',
+        default: 'Chinese',
+        options: ['Chinese', 'English', 'Cantonese'],
+        option_labels: { Chinese: '普通话', English: '英文', Cantonese: '粤语' },
+        visibility: 'public',
+        location: 'body',
+        body_field: 'Lang'
+      },
       {
         key: 'Duration',
         label: '时长',
@@ -2151,11 +2356,12 @@ function assembleModelPayload({
     prompt: promptText,
   };
 
-  // 处理换算表 (如 Seedream Flash 的 尺寸档 + 宽高比 -> size=宽x高)
-  const isSeedreamFlash = contract.id === 'seedream5flash' || contract.vendor_model_id === 'doubao-seedream-5-0-flash-260915';
+  // 处理换算表 (如 Seedream 5.0 Flash / Pro 的 尺寸档 + 宽高比 -> size=宽x高)
+  const isSeedreamFlashOrPro = contract.id === 'seedream5flash' || contract.id === 'seedream5pro' ||
+    contract.vendor_model_id === 'doubao-seedream-5-0-flash-260915' || contract.vendor_model_id === 'doubao-seedream-5-0-pro-260628';
   const isLayerDecomp = Boolean(mergedValues.layer_decomposition);
 
-  if (isSeedreamFlash) {
+  if (isSeedreamFlashOrPro) {
     if (isLayerDecomp) {
       // 图层拆分打开：宽高比不提交，工坊不给填。尺寸档改交请求体 size，可选 1K、1.5K、2K、auto，默认 auto。不再查换算表。
       const allowedDecompSizes = ['1K', '1.5K', '2K', 'auto'];
@@ -2229,9 +2435,16 @@ function assembleModelPayload({
         continue;
       }
 
-      if (field && !field.includes('.')) {
-        if (val !== undefined && val !== null) {
-          body[field] = val;
+      if (field && val !== undefined && val !== null) {
+        const casted = transformFieldValue(val, p);
+        if (field.includes('.')) {
+          if (field === 'optimize_prompt_options.mode') {
+            if (casted && casted !== 'off') setDeepField(body, field, casted);
+          } else {
+            setDeepField(body, field, casted);
+          }
+        } else {
+          body[field] = casted;
         }
       }
     }
@@ -2364,8 +2577,308 @@ function getModelPublicCatalog(db) {
     };
   }
 
+  catalog.schemas = getUnifiedSchemasMap(db);
   return catalog;
 }
+
+/**
+ * 从单一权威契约 (Model Contract) 动态派生前端与适配器所需的 Schema 结构
+ * 彻底消除 model-schemas.js 与 models-contract.js 的双轨硬编码分裂
+ */
+function buildSchemaForContract(c) {
+  if (!c) return null;
+  const defC = DEFAULT_MODEL_CONTRACTS.find(d => d.id === c.id) || {};
+  const rawParams = c.params_json
+    ? (typeof c.params_json === 'string' ? JSON.parse(c.params_json) : c.params_json)
+    : (c.params || defC.params || []);
+  const rawRules = c.conditional_rules_json
+    ? (typeof c.conditional_rules_json === 'string' ? JSON.parse(c.conditional_rules_json) : c.conditional_rules_json)
+    : (c.conditional_rules || defC.conditional_rules || []);
+  const modes = c.modes_json
+    ? (typeof c.modes_json === 'string' ? JSON.parse(c.modes_json) : c.modes_json)
+    : (c.modes || defC.modes || []);
+  const slots = c.slots_json
+    ? (typeof c.slots_json === 'string' ? JSON.parse(c.slots_json) : c.slots_json)
+    : (c.slots || defC.slots || { images: 0, videos: 0, audios: 0 });
+  const free = c.free_json
+    ? (typeof c.free_json === 'string' ? JSON.parse(c.free_json) : c.free_json)
+    : (c.free || defC.free || undefined);
+
+  const common = [];
+  const advanced = [];
+  const submitMap = {};
+
+  for (const p of rawParams) {
+    if (!p || !p.key || p.key === 'mode') continue;
+    let uiKey = p.key;
+    if (p.key === 'seconds' || p.key === 'Duration') {
+      uiKey = 'duration';
+      submitMap.duration = p.body_field || p.key;
+    } else if (p.key === 'aspect_ratio') {
+      uiKey = 'ratio';
+    } else if (p.key === 'resolution') {
+      submitMap.size = 'resolution';
+    } else if (p.key === 'size') {
+      submitMap.size = p.body_field || 'size';
+    } else if (p.key === 'duration') {
+      submitMap.duration = p.body_field || 'duration';
+    }
+
+    let uiType = p.type || 'enum';
+    if (uiType === 'boolean') uiType = 'bool';
+    if (uiType === 'duration' || (uiKey === 'duration' && uiType === 'number')) uiType = 'range';
+    if (uiType === 'string' && Array.isArray(p.options) && p.options.length) uiType = 'enum';
+    else if (uiType === 'string' && p.key === 'size') uiType = 'enum';
+
+    const fieldObj = {
+      key: uiKey,
+      rawKey: p.key,
+      label: p.label || p.name || uiKey,
+      type: uiType,
+      default: p.default,
+    };
+    if (Array.isArray(p.options)) {
+      fieldObj.options = p.options.slice();
+    } else if (p.key === 'size' && typeof p.default === 'string') {
+      fieldObj.options = [p.default];
+    }
+    if (p.min !== undefined) fieldObj.min = p.min;
+    if (p.max !== undefined) fieldObj.max = p.max;
+    if (uiType === 'range') fieldObj.step = p.step || (uiKey === 'duration' && (p.min >= 30) ? 10 : 1);
+    if (Array.isArray(p.extra_stops) && p.extra_stops.length) fieldObj.extraStops = p.extra_stops;
+    const labels = p.option_labels || p.extra_labels || p.labels;
+    if (labels && Object.keys(labels).length) fieldObj.labels = labels;
+
+    if (p.visibility === 'advanced') {
+      advanced.push(fieldObj);
+    } else {
+      common.push(fieldObj);
+    }
+  }
+
+  // Ensure seedream models expose watermark in common and bbox/point in advanced for backward compatibility
+  if (c.id === 'seedream5flash' || c.id === 'seedream5pro' || c.id === 'seedream5lite') {
+    const ratioField = common.find(f => f.key === 'ratio');
+    if (ratioField && Array.isArray(ratioField.options) && !ratioField.options.includes('auto')) {
+      ratioField.options = ['auto', ...ratioField.options];
+    }
+    const wmIdx = advanced.findIndex(f => f.key === 'watermark');
+    if (wmIdx >= 0 && !common.some(f => f.key === 'watermark')) {
+      const [wm] = advanced.splice(wmIdx, 1);
+      common.push(wm);
+    }
+  }
+  if (c.id === 'agnes_image_2_5_flash') {
+    const sizeField = common.find(f => f.key === 'size');
+    if (sizeField && free && Array.isArray(free.sizes)) {
+      sizeField.options = free.sizes.slice();
+    }
+    if (!advanced.some(f => f.key === 'size3k')) {
+      advanced.push({ key: 'size3k', label: '3K/4K（刊例价收费档）', type: 'enum', options: ['', '3K', '4K'], default: '' });
+    }
+  }
+
+  const modeConstraints = {};
+  const valueConstraints = [];
+  for (const r of rawRules) {
+    if (!r || !r.when) continue;
+    if (r.when.mode && (r.set || r.lock || r.effect)) {
+      modeConstraints[r.when.mode] = {
+        set: r.set || (r.effect && r.effect.force) || {},
+        lock: r.lock || (r.effect && r.effect.suppress) || [],
+      };
+    } else {
+      const entries = Object.entries(r.when);
+      if (entries.length === 1) {
+        const [ifKey, ifVal] = entries[0];
+        valueConstraints.push({
+          type: r.type || 'rule',
+          ifKey,
+          ifIn: Array.isArray(ifVal) ? ifVal : [ifVal],
+          set: r.set || (r.effect && r.effect.force) || {},
+          lock: r.lock || (r.effect && r.effect.suppress) || [],
+          effect: r.effect || null,
+        });
+      }
+    }
+  }
+
+  return {
+    polishId: c.id,
+    refStyle: c.refStyle || defC.refStyle || (c.id.includes('agnes') ? 'agnes' : (c.id.includes('seedance') ? 'seedance' : 'generic')),
+    polishHint: c.polish_hint || c.polishHint || defC.polishHint || '',
+    converter: c.converter || defC.converter || '',
+    modes,
+    common,
+    advanced,
+    slots,
+    ...(free ? { free } : {}),
+    submitMap,
+    ...(Object.keys(modeConstraints).length ? { modeConstraints } : {}),
+    ...(valueConstraints.length ? { valueConstraints } : {}),
+  };
+}
+
+function getUnifiedSchemasMap(db) {
+  const map = {};
+  let contracts = DEFAULT_MODEL_CONTRACTS;
+  if (db) {
+    try {
+      contracts = getModelContractsList(db).models;
+    } catch (_) {
+      contracts = DEFAULT_MODEL_CONTRACTS;
+    }
+  }
+  for (const c of contracts) {
+    if (!c || !c.id) continue;
+    if (GATEWAY_TEXT_NAMES.has(c.id)) continue;
+    map[c.id] = buildSchemaForContract(c);
+  }
+  if (map.seedream5flash) map.seedream_portrait = map.seedream5flash;
+  if (map.agnes_image_2_5_flash) map.agnes_portrait_2_5 = map.agnes_image_2_5_flash;
+  return map;
+}
+
+const MODEL_SCHEMAS = new Proxy({}, {
+  get(_target, prop) {
+    const map = getUnifiedSchemasMap(null);
+    return map[prop];
+  },
+  ownKeys() {
+    return Reflect.ownKeys(getUnifiedSchemasMap(null));
+  },
+  getOwnPropertyDescriptor(_target, prop) {
+    const map = getUnifiedSchemasMap(null);
+    if (prop in map) {
+      return { enumerable: true, configurable: true, value: map[prop] };
+    }
+    return undefined;
+  }
+});
+
+function schemaFor(model, db = null) {
+  if (!model) return null;
+  if (model.schema) return model.schema;
+  const map = getUnifiedSchemasMap(db);
+  return map[model.id] || map[model.polishId] || null;
+}
+
+function optionLabel(field, value) {
+  if (field && field.labels && field.labels[String(value)] != null) return field.labels[String(value)];
+  if (value === -1) return '智能';
+  return String(value);
+}
+
+function slotLimit(schema, kind) {
+  const slots = (schema && schema.slots) || {};
+  const free = (schema && schema.free) || {};
+  if (kind === 'images') {
+    const cap = Number(slots.images || 0);
+    if (free.maxRefs != null) return Math.min(cap, Number(free.maxRefs));
+    return cap;
+  }
+  if (kind === 'videos') {
+    if (free.noVideoRef) return 0;
+    return Number(slots.videos || 0);
+  }
+  if (kind === 'audios') {
+    const cap = Number(slots.audios || 0);
+    if (free.maxAudios != null) return Math.min(cap, Number(free.maxAudios));
+    return cap;
+  }
+  return 0;
+}
+
+function applyConstraints(schema, mode, params) {
+  const out = Object.assign({}, params || {});
+  const locks = new Set();
+  const mc = schema && schema.modeConstraints && schema.modeConstraints[mode];
+  if (mc) {
+    if (mc.set) Object.assign(out, mc.set);
+    (mc.lock || []).forEach((k) => locks.add(k));
+  }
+  const vcs = (schema && schema.valueConstraints) || [];
+  for (const vc of vcs) {
+    const v = out[vc.ifKey];
+    if (vc.ifIn && vc.ifIn.map(String).includes(String(v))) {
+      if (vc.set) Object.assign(out, vc.set);
+      (vc.lock || []).forEach((k) => locks.add(k));
+    }
+  }
+  return { params: out, lock: Array.from(locks) };
+}
+
+function enumOptionsOf(schema, key) {
+  if (!schema || !key) return [];
+  const pools = [schema.common, schema.advanced, schema.modes];
+  for (const pool of pools) {
+    if (!Array.isArray(pool)) continue;
+    for (const f of pool) {
+      if (f && f.key === key && Array.isArray(f.options)) return f.options;
+    }
+  }
+  return [];
+}
+
+function sizeOptionsOf(modelId, db = null) {
+  const map = getUnifiedSchemasMap(db);
+  const schema = map[modelId] || null;
+  if (modelId === 'agnes_image_2_5_flash') {
+    const contract = DEFAULT_MODEL_CONTRACTS.find(c => c.id === 'agnes_image_2_5_flash');
+    const sp = contract?.params?.find(p => p.key === 'size');
+    if (sp && Array.isArray(sp.options)) return sp.options;
+  }
+  const opts = enumOptionsOf(schema, 'size');
+  if (opts.length) return opts;
+  return enumOptionsOf(schema, 'resolution');
+}
+
+function uniqueUrls(list) {
+  const out = [];
+  const seen = new Set();
+  for (const item of list || []) {
+    const s = String(item || '').trim();
+    if (!s || seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+  return out;
+}
+
+function assertFreeTier(schema, { refs, videos, audios, size } = {}) {
+  const free = schema && schema.free;
+  if (!free) return;
+  const refList = Array.isArray(refs) ? uniqueUrls(refs) : null;
+  const nRefs = refList ? refList.length : Number(refs || 0);
+  const nVid = Array.isArray(videos) ? videos.length : Number(videos || 0);
+  const nAud = Array.isArray(audios) ? audios.length : Number(audios || 0);
+  const err = (msg) => {
+    const e = new Error(msg);
+    e.code = 'free_tier';
+    throw e;
+  };
+  if (free.maxRefs != null && nRefs > Number(free.maxRefs)) err(`本次提交了 ${nRefs} 张，免费档最多 ${free.maxRefs} 张`);
+  if (free.noVideoRef && nVid > 0) err('免费档不支持视频参考');
+  if (free.maxAudios != null && nAud > Number(free.maxAudios)) err(`免费档音频最多 ${free.maxAudios} 条`);
+  if (free.size && size && String(size).toUpperCase() !== String(free.size).toUpperCase()) {
+    err(`免费档分辨率仅 ${free.size}`);
+  }
+  if (Array.isArray(free.sizes) && size && !free.sizes.includes(size)) {
+    err(`免费档分辨率仅 ${free.sizes.join('/')}`);
+  }
+}
+
+function mapSubmitParams(schema, genParams) {
+  const out = Object.assign({}, genParams || {});
+  const sm = (schema && schema.submitMap) || {};
+  if (sm.duration && out.duration != null && sm.duration !== 'duration') out[sm.duration] = out.duration;
+  if (sm.size) {
+    const v = out.size != null ? out.size : out.resolution;
+    if (v != null) out[sm.size] = v;
+  }
+  return out;
+}
+
 
 const DEFAULT_WORKFLOWS_DOCUMENT = {
   unattended: {
@@ -2895,6 +3408,15 @@ function getModelContractsList(db) {
 
     const cap = allCapabilities.find(capItem => capItem.id === c.capability_id);
 
+    const defContract = DEFAULT_MODEL_CONTRACTS.find(dc => dc.id === c.id) || {};
+    const modes = c.modes_json ? (typeof c.modes_json === 'string' ? JSON.parse(c.modes_json) : c.modes_json) : (c.modes || defContract.modes || []);
+    const slots = c.slots_json ? (typeof c.slots_json === 'string' ? JSON.parse(c.slots_json) : c.slots_json) : (c.slots || defContract.slots || { images: 0, videos: 0, audios: 0 });
+    const free = c.free_json ? (typeof c.free_json === 'string' ? JSON.parse(c.free_json) : c.free_json) : (c.free || defContract.free || null);
+    const converter = c.converter || defContract.converter || '';
+    const refStyle = c.ref_style || c.refStyle || defContract.refStyle || 'generic';
+    const polishHint = c.polish_hint || c.polishHint || defContract.polishHint || '';
+    const failoverModelId = c.failover_model_id || defContract.failover_model_id || '';
+
     return {
       id: c.id,
       name: c.name,
@@ -2902,6 +3424,13 @@ function getModelContractsList(db) {
       capability_id: c.capability_id,
       capability_name: cap ? `${cap.name} (${cap.id})` : c.capability_id,
       kind: cap?.kind || 'image',
+      converter,
+      refStyle,
+      polishHint,
+      failover_model_id: failoverModelId,
+      modes,
+      slots,
+      free,
       enabled: c.enabled !== 0 && c.enabled !== false,
       params,
       table_mappings: tables,
@@ -2944,14 +3473,33 @@ function saveModelContractData(db, data) {
   };
 
   try { db.exec('ALTER TABLE model_contracts ADD COLUMN dialect_json TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE model_contracts ADD COLUMN converter TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE model_contracts ADD COLUMN modes_json TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE model_contracts ADD COLUMN slots_json TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE model_contracts ADD COLUMN free_json TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE model_contracts ADD COLUMN polish_hint TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE model_contracts ADD COLUMN failover_model_id TEXT'); } catch (_) {}
+
+  const converter = data.converter !== undefined ? data.converter : (baseContract?.converter || '');
+  const modes = data.modes !== undefined ? data.modes : (baseContract?.modes || []);
+  const slots = data.slots !== undefined ? data.slots : (baseContract?.slots || { images: 0, videos: 0, audios: 0 });
+  const free = data.free !== undefined ? data.free : (baseContract?.free || null);
+  const polishHint = data.polish_hint !== undefined ? data.polish_hint : (data.polishHint !== undefined ? data.polishHint : (baseContract?.polishHint || ''));
+  const failoverModelId = data.failover_model_id !== undefined ? data.failover_model_id : (baseContract?.failover_model_id || '');
 
   db.prepare(`
-    INSERT INTO model_contracts (id, name, vendor_model_id, capability_id, enabled, params_json, table_mappings_json, mutex_groups_json, conditional_rules_json, optimizer_json, dialect_json, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO model_contracts (id, name, vendor_model_id, capability_id, converter, modes_json, slots_json, free_json, polish_hint, failover_model_id, enabled, params_json, table_mappings_json, mutex_groups_json, conditional_rules_json, optimizer_json, dialect_json, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       name=excluded.name,
       vendor_model_id=excluded.vendor_model_id,
       capability_id=excluded.capability_id,
+      converter=excluded.converter,
+      modes_json=excluded.modes_json,
+      slots_json=excluded.slots_json,
+      free_json=excluded.free_json,
+      polish_hint=excluded.polish_hint,
+      failover_model_id=excluded.failover_model_id,
       enabled=excluded.enabled,
       params_json=excluded.params_json,
       table_mappings_json=excluded.table_mappings_json,
@@ -2965,6 +3513,12 @@ function saveModelContractData(db, data) {
     name,
     vendorId,
     capId,
+    converter,
+    JSON.stringify(modes),
+    JSON.stringify(slots),
+    free ? JSON.stringify(free) : null,
+    polishHint,
+    failoverModelId,
     data.enabled === false ? 0 : 1,
     JSON.stringify(params),
     JSON.stringify(tables),
@@ -3523,4 +4077,20 @@ module.exports = {
   deleteMountModule,
   reorderMountModules,
   syncMountPointsToWorkflowGraph,
+  buildSchemaForContract,
+  getUnifiedSchemasMap,
+  MODEL_SCHEMAS,
+  schemaFor,
+  optionLabel,
+  slotLimit,
+  applyConstraints,
+  assertFreeTier,
+  uniqueUrls,
+  mapSubmitParams,
+  enumOptionsOf,
+  sizeOptionsOf,
+  CANONICAL_VOCABULARY,
+  normalizeCanonicalInput,
+  evaluateModelRules,
+  compileModelDialect,
 };

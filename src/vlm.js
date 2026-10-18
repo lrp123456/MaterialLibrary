@@ -92,6 +92,9 @@ async function completeChat({
   if (!baseUrl) {
     throw new Error('LiteLLM 未配置 base_url（llm_providers.litellm）');
   }
+  if (!apiKey && /127\.0\.0\.1:4000|localhost:4000/i.test(String(baseUrl))) {
+    throw new Error('本地网关没有钥匙');
+  }
   const endpoint = resolveChatCompletionsUrl(baseUrl);
   const body = {
     model,

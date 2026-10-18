@@ -1,6 +1,6 @@
 <template>
   <div class="min-h-screen bg-canvas text-white flex flex-col md:flex-row font-sans select-none">
-    <!-- 桌面侧栏 · Atelier Console (已移除 /workflow 与 /adapters，批次与视频巡检合入 /runs，词典合入 /models) -->
+    <!-- 桌面侧栏 · Atelier Console (已移除旧版分散入口，批次与视频巡检合入 /runs，词典合入 /models) -->
     <aside class="hidden md:flex w-60 flex-none flex-col border-r border-outline-variant bg-surface sticky top-0 h-screen">
       <div class="flex items-center gap-2.5 px-4 py-4 border-b border-outline-variant cursor-pointer" @click="$router.push('/')">
         <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-[#2563EB] to-[#60A5FA] flex items-center justify-center text-white font-bold text-sm shadow-[0_8px_20px_rgba(37,99,235,.35)]">

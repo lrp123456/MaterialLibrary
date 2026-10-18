@@ -1349,9 +1349,6 @@ function resolveLiteLlmChatConfig(db, config, requestedModel) {
   const extra = process.env.LITELLM_API_KEY || config?.litellmApiKey || '';
   if (extra && !keys.includes(extra)) keys.push(extra);
   const apiKey = pickRoundRobin('litellm', keys) || '';
-  if (!apiKey) {
-    throw new Error('本地网关没有钥匙');
-  }
   let model = modelCode;
   if (!model) {
     try {

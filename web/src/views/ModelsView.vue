@@ -82,6 +82,13 @@
         </div>
         <div class="flex items-center gap-2">
           <button
+            @click="openEnvSecretsDrawer"
+            class="px-3 py-1.5 rounded-xl bg-cyan/15 hover:bg-cyan/25 text-cyan border border-cyan/30 text-xs font-medium flex items-center gap-1.5 transition cursor-pointer"
+          >
+            <span class="material-symbols-outlined text-sm">key</span>
+            <span>.env 统一密钥中枢 ({{ envSecretsList.filter(i => i.has_value).length }}/{{ envSecretsList.length }})</span>
+          </button>
+          <button
             @click="openNewProvider"
             class="px-3 py-1.5 rounded-xl bg-primary hover:bg-primary-dim text-white text-xs font-medium flex items-center gap-1.5 transition cursor-pointer"
           >
@@ -95,6 +102,62 @@
             <span class="material-symbols-outlined text-sm">refresh</span>
             <span>刷新</span>
           </button>
+        </div>
+      </div>
+
+      <!-- .env 统一密钥中枢折叠面板 (只读状态指纹 + 单向热写入 .env，绝不返明文) -->
+      <div v-if="showEnvSecretsPanel" class="rounded-2xl bg-surface border border-cyan/40 p-4 space-y-3 shadow-lg">
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-outline-variant pb-2.5">
+          <div>
+            <h4 class="text-xs font-bold text-cyan flex items-center gap-1.5">
+              <span class="material-symbols-outlined text-sm">vpn_key</span>
+              <span>.env 统一密钥中枢 (Single Source of Truth · 零数据库明文残留)</span>
+            </h4>
+            <p class="text-[11px] text-on-surface-variant">
+              所有供应商 API Key / AK / SK 统一收纳于根目录 .env 并注入 process.env；下方仅显示 SHA-256 指纹与打码状态，输入新值可单向热更新写入 .env
+            </p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button
+              @click="saveEnvSecretsUpdates"
+              :disabled="savingEnvSecrets"
+              class="px-3 py-1.5 rounded-xl bg-primary hover:bg-primary-dim text-white text-xs font-medium cursor-pointer"
+            >
+              {{ savingEnvSecrets ? '写入中...' : '保存并热重载新密钥' }}
+            </button>
+            <button
+              @click="showEnvSecretsPanel = false"
+              class="px-2.5 py-1.5 rounded-xl bg-surface-low text-on-surface-variant hover:text-white text-xs cursor-pointer"
+            >
+              收起
+            </button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-80 overflow-y-auto pr-1">
+          <div
+            v-for="item in envSecretsList"
+            :key="item.env"
+            class="p-2.5 rounded-xl bg-surface-low border border-outline-variant space-y-1.5 text-xs"
+          >
+            <div class="flex items-center justify-between font-mono">
+              <span class="font-bold text-white text-[11px]">{{ item.env }}</span>
+              <span
+                class="px-1.5 py-0.5 rounded text-[10px]"
+                :class="item.has_value ? 'bg-ok/15 text-ok' : 'bg-warn/15 text-warn'"
+              >
+                {{ item.has_value ? `已就绪 (${item.count || 1}把 · fp:${item.fingerprint})` : '未配置' }}
+              </span>
+            </div>
+            <div class="flex items-center gap-2">
+              <input
+                v-model="envSecretsDraft[item.env]"
+                type="password"
+                :placeholder="item.has_value ? `${item.masked} (输入新值覆盖)` : '输入新密钥写入 .env...'"
+                class="w-full px-2.5 py-1 rounded-lg bg-surface border border-outline-variant text-white font-mono text-[11px]"
+              />
+            </div>
+          </div>
         </div>
       </div>
 
@@ -252,6 +315,12 @@
                 </span>
                 <span v-if="m.dialect?.ref_syntax" class="px-2 py-0.5 rounded bg-primary/15 text-primary-dim border border-primary/25">
                   参考记号: {{ m.dialect.ref_syntax }}
+                </span>
+                <span v-if="m.converter" class="px-2 py-0.5 rounded bg-primary/15 text-primary-dim border border-primary/25 font-mono">
+                  转换器: {{ m.converter }}
+                </span>
+                <span class="px-2 py-0.5 rounded bg-surface-low text-on-surface-variant border border-outline-variant">
+                  参数: {{ (m.params || []).length }} 项
                 </span>
                 <span v-if="m.optimizer?.prompt" class="px-2 py-0.5 rounded bg-ok/10 text-ok border border-ok/25">
                   专属优化器已就绪
@@ -1533,6 +1602,33 @@
                 </option>
               </select>
             </div>
+            <div>
+              <label class="block text-on-surface-variant mb-1">专用协议转换器 (Converter)</label>
+              <select
+                v-model="editingModel.converter"
+                class="w-full px-3 py-2 rounded-xl bg-surface-low border border-outline-variant text-white font-mono"
+              >
+                <option value="">自动推断 (按能力/厂商)</option>
+                <option value="ark-seedream">ark-seedream (火山方舟 Seedream 5.0 协议)</option>
+                <option value="agnes-image">agnes-image (Agnes Image extra_body 协议)</option>
+                <option value="ark-seedance-video">ark-seedance-video (火山 Seedance content[] 协议)</option>
+                <option value="agnes-video">agnes-video (Agnes Video first/last/refer 协议)</option>
+                <option value="doubao-music">doubao-music (豆包音乐 AK/SK GenSong/GenBGM)</option>
+                <option value="qwenimage-local">qwenimage-local (局域网 Qwen 32倍数对齐协议)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-on-surface-variant mb-1">熔断故障转移备选模型 (Failover Model)</label>
+              <select
+                v-model="editingModel.failover_model_id"
+                class="w-full px-3 py-2 rounded-xl bg-surface-low border border-outline-variant text-white font-mono"
+              >
+                <option value="">无自动降级 (直接报错)</option>
+                <option v-for="cand in modelsList.filter(x => x.id !== editingModel.id)" :key="cand.id" :value="cand.id">
+                  {{ cand.name }} ({{ cand.id }})
+                </option>
+              </select>
+            </div>
           </div>
 
           <!-- 二、模型方言三开关 (Dialect Three Switches) -->
@@ -1576,6 +1672,255 @@
                   <option value="field">走独立 negative_prompt 参数字段</option>
                 </select>
               </div>
+            </div>
+          </div>
+
+          <!-- 二点五、零黑盒全量参数契约矩阵与折叠高级配置抽屉 -->
+          <div class="p-3.5 rounded-xl bg-surface-low border border-outline-variant space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <span class="text-xs font-bold text-white">🎛️ 参数契约矩阵 (Params Matrix · 共 {{ (editingModel.params || []).length }} 项)</span>
+                <p class="text-[10px] text-on-surface-variant">
+                  统一管理客户端外露层级 (常用直出 vs 高级折叠)、提交位置 (请求体 / 换算表 / 提示词 / 仅前端控制) 与深层字段转译
+                </p>
+              </div>
+              <div class="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  @click="addModelParamRow"
+                  class="px-2.5 py-1 rounded-lg bg-primary hover:bg-primary-dim text-white text-[11px] font-medium cursor-pointer"
+                >
+                  + 新增参数
+                </button>
+                <button
+                  type="button"
+                  @click="modelDrawerTab = modelDrawerTab === 'slots' ? '' : 'slots'"
+                  class="px-2.5 py-1 rounded-lg border text-[11px] cursor-pointer"
+                  :class="modelDrawerTab === 'slots' ? 'bg-primary/20 border-primary text-white' : 'bg-surface border-outline-variant text-on-surface-variant hover:text-white'"
+                >
+                  🗂️ 模式与参考槽位
+                </button>
+                <button
+                  type="button"
+                  @click="modelDrawerTab = modelDrawerTab === 'table' ? '' : 'table'"
+                  class="px-2.5 py-1 rounded-lg border text-[11px] cursor-pointer"
+                  :class="modelDrawerTab === 'table' ? 'bg-primary/20 border-primary text-white' : 'bg-surface border-outline-variant text-on-surface-variant hover:text-white'"
+                >
+                  📐 二维尺寸换算表 ({{ Object.keys(editingModel.table_mappings?.size_ratio || {}).length }})
+                </button>
+                <button
+                  type="button"
+                  @click="modelDrawerTab = modelDrawerTab === 'rules' ? '' : 'rules'"
+                  class="px-2.5 py-1 rounded-lg border text-[11px] cursor-pointer"
+                  :class="modelDrawerTab === 'rules' ? 'bg-primary/20 border-primary text-white' : 'bg-surface border-outline-variant text-on-surface-variant hover:text-white'"
+                >
+                  🔗 条件联动规则 ({{ (editingModel.conditional_rules || []).length }})
+                </button>
+                <button
+                  type="button"
+                  @click="runModelConvertPreview"
+                  class="px-2.5 py-1 rounded-lg bg-cyan/15 hover:bg-cyan/25 text-cyan border border-cyan/30 text-[11px] font-medium cursor-pointer"
+                >
+                  👁️ 载荷转译预览
+                </button>
+              </div>
+            </div>
+
+            <!-- 参数列表：主行简洁，右侧带 [⚙ 映射] 展开深层 body_field / cast / options -->
+            <div v-if="!(editingModel.params || []).length" class="text-[11px] text-outline py-2 text-center">
+              当前模型无附加参数（如纯文本对话模型），可点击右上角「+ 新增参数」添加
+            </div>
+            <div v-else class="space-y-2 max-h-64 overflow-y-auto pr-1">
+              <div
+                v-for="(p, pIdx) in editingModel.params"
+                :key="pIdx"
+                class="p-2.5 rounded-xl bg-surface border border-outline-variant space-y-2"
+              >
+                <div class="grid grid-cols-2 sm:grid-cols-6 gap-2 items-center">
+                  <input
+                    v-model="p.key"
+                    placeholder="参数 key (如 size)"
+                    class="px-2 py-1 rounded bg-surface-low border border-outline-variant text-white font-mono text-[11px]"
+                  />
+                  <input
+                    v-model="p.label"
+                    placeholder="中文名 (如 尺寸档)"
+                    class="px-2 py-1 rounded bg-surface-low border border-outline-variant text-white text-[11px]"
+                  />
+                  <select
+                    v-model="p.type"
+                    class="px-2 py-1 rounded bg-surface-low border border-outline-variant text-white text-[11px]"
+                  >
+                    <option value="enum">enum (枚举)</option>
+                    <option value="boolean">boolean (开关)</option>
+                    <option value="number">number (数值)</option>
+                    <option value="duration">duration (时长滑轨)</option>
+                    <option value="string">string (字符串)</option>
+                    <option value="text">text (文本框)</option>
+                  </select>
+                  <select
+                    v-model="p.visibility"
+                    class="px-2 py-1 rounded bg-surface-low border border-outline-variant text-white text-[11px]"
+                  >
+                    <option value="public">常用外露 (public)</option>
+                    <option value="advanced">高级折叠 (advanced)</option>
+                  </select>
+                  <select
+                    v-model="p.location"
+                    class="px-2 py-1 rounded bg-surface-low border border-outline-variant text-white text-[11px]"
+                  >
+                    <option value="body">写请求体 (body)</option>
+                    <option value="table">查换算表 (table)</option>
+                    <option value="prompt">拼提示词 (prompt)</option>
+                    <option value="none">仅前端控制 (none)</option>
+                  </select>
+                  <div class="flex items-center justify-end gap-1">
+                    <button
+                      type="button"
+                      @click="expandedParamRows[pIdx] = !expandedParamRows[pIdx]"
+                      class="px-2 py-1 rounded bg-surface-low hover:bg-surface-high text-[10px] text-cyan border border-outline-variant cursor-pointer"
+                    >
+                      {{ expandedParamRows[pIdx] ? '收起映射' : '⚙ 映射/枚举' }}
+                    </button>
+                    <button
+                      type="button"
+                      @click="editingModel.params.splice(pIdx, 1)"
+                      class="px-1.5 py-1 rounded bg-err/10 hover:bg-err/20 text-err text-[10px] cursor-pointer"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+
+                <!-- 展开的单参数深层映射抽屉 -->
+                <div v-if="expandedParamRows[pIdx]" class="pt-2 border-t border-outline-variant grid grid-cols-1 sm:grid-cols-4 gap-2 text-[11px]">
+                  <div>
+                    <label class="block text-on-surface-variant text-[10px] mb-0.5">请求体目标字段 (支持点号深层路径)</label>
+                    <input
+                      v-model="p.body_field"
+                      placeholder="如 extra_body.response_format"
+                      class="w-full px-2 py-1 rounded bg-surface-low border border-outline-variant text-white font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label class="block text-on-surface-variant text-[10px] mb-0.5">默认值 (default)</label>
+                    <input
+                      v-model="p.default"
+                      placeholder="默认值"
+                      class="w-full px-2 py-1 rounded bg-surface-low border border-outline-variant text-white font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label class="block text-on-surface-variant text-[10px] mb-0.5">类型强转 / 大小写 (cast / transform)</label>
+                    <div class="flex gap-1">
+                      <select v-model="p.cast" class="w-1/2 px-1.5 py-1 rounded bg-surface-low border border-outline-variant text-white">
+                        <option value="">不强转</option>
+                        <option value="string">转 String</option>
+                        <option value="number">转 Number</option>
+                        <option value="boolean">转 Boolean</option>
+                      </select>
+                      <select v-model="p.transform" class="w-1/2 px-1.5 py-1 rounded bg-surface-low border border-outline-variant text-white">
+                        <option value="">原样</option>
+                        <option value="uppercase">转大写</option>
+                        <option value="lowercase">转小写</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div v-if="p.type === 'enum'">
+                    <label class="block text-on-surface-variant text-[10px] mb-0.5">枚举候选值 (逗号分隔)</label>
+                    <input
+                      :value="(p.options || []).join(', ')"
+                      @change="p.options = $event.target.value.split(',').map(s => s.trim()).filter(Boolean)"
+                      placeholder="1K, 1.5K, 2K"
+                      class="w-full px-2 py-1 rounded bg-surface-low border border-outline-variant text-white font-mono"
+                    />
+                  </div>
+                  <div v-else-if="p.type === 'number' || p.type === 'duration'" class="flex gap-1">
+                    <div class="w-1/2">
+                      <label class="block text-on-surface-variant text-[10px] mb-0.5">Min</label>
+                      <input type="number" v-model.number="p.min" class="w-full px-2 py-1 rounded bg-surface-low border border-outline-variant text-white font-mono" />
+                    </div>
+                    <div class="w-1/2">
+                      <label class="block text-on-surface-variant text-[10px] mb-0.5">Max</label>
+                      <input type="number" v-model.number="p.max" class="w-full px-2 py-1 rounded bg-surface-low border border-outline-variant text-white font-mono" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 抽屉 A：模式与多模态参考槽位 (modes & slots) -->
+            <div v-if="modelDrawerTab === 'slots'" class="p-3 rounded-xl bg-canvas border border-outline-variant space-y-2.5">
+              <div class="text-xs font-bold text-cyan">🗂️ 多模态参考槽位上限 (Slots) 与可用创作模式 (Modes)</div>
+              <div class="grid grid-cols-3 gap-3">
+                <div>
+                  <label class="block text-[10px] text-on-surface-variant mb-1">最大参考图片数 (slots.images)</label>
+                  <input type="number" v-model.number="editingModel.slots.images" class="w-full px-2.5 py-1.5 rounded bg-surface border border-outline-variant text-white font-mono" />
+                </div>
+                <div>
+                  <label class="block text-[10px] text-on-surface-variant mb-1">最大参考视频数 (slots.videos)</label>
+                  <input type="number" v-model.number="editingModel.slots.videos" class="w-full px-2.5 py-1.5 rounded bg-surface border border-outline-variant text-white font-mono" />
+                </div>
+                <div>
+                  <label class="block text-[10px] text-on-surface-variant mb-1">最大参考音频数 (slots.audios)</label>
+                  <input type="number" v-model.number="editingModel.slots.audios" class="w-full px-2.5 py-1.5 rounded bg-surface border border-outline-variant text-white font-mono" />
+                </div>
+              </div>
+              <div>
+                <label class="block text-[10px] text-on-surface-variant mb-1">提示词栏下方缩写提示 (polishHint)</label>
+                <input v-model="editingModel.polishHint" class="w-full px-2.5 py-1.5 rounded bg-surface border border-outline-variant text-white" />
+              </div>
+            </div>
+
+            <!-- 抽屉 B：二维尺寸换算表编辑器 (table_mappings.size_ratio) -->
+            <div v-if="modelDrawerTab === 'table'" class="p-3 rounded-xl bg-canvas border border-outline-variant space-y-2">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-bold text-cyan">📐 二维尺寸换算表 (size_ratio: 尺寸档_宽高比 -> 像素值)</span>
+                <button
+                  type="button"
+                  @click="addSizeTableEntry"
+                  class="px-2 py-0.5 rounded bg-primary/20 text-primary-dim text-[11px] cursor-pointer"
+                >
+                  + 新增换算项
+                </button>
+              </div>
+              <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto">
+                <div
+                  v-for="(val, key) in (editingModel.table_mappings?.size_ratio || {})"
+                  :key="key"
+                  class="flex items-center gap-1.5 p-1.5 rounded bg-surface border border-outline-variant font-mono text-[11px]"
+                >
+                  <span class="text-cyan shrink-0">{{ key }}=</span>
+                  <input
+                    :value="typeof val === 'object' ? `${val.width}x${val.height}` : val"
+                    @change="updateSizeTableEntry(key, $event.target.value)"
+                    class="w-full px-1.5 py-0.5 rounded bg-surface-low text-white border border-outline-variant"
+                  />
+                  <button type="button" @click="delete editingModel.table_mappings.size_ratio[key]" class="text-err cursor-pointer">✕</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 抽屉 C：条件联动规则编辑器 (conditional_rules JSON 可视化) -->
+            <div v-if="modelDrawerTab === 'rules'" class="p-3 rounded-xl bg-canvas border border-outline-variant space-y-2">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-bold text-cyan">🔗 条件联动与互斥规则 (conditional_rules · 支持 when -> set / lock / suppress / force)</span>
+              </div>
+              <textarea
+                :value="JSON.stringify(editingModel.conditional_rules || [], null, 2)"
+                @change="onConditionalRulesJsonChange($event.target.value)"
+                rows="6"
+                class="w-full p-2.5 rounded-lg bg-surface border border-outline-variant text-white font-mono text-[11px]"
+              ></textarea>
+            </div>
+
+            <!-- 抽屉 D：统一转译器与协议载荷实时预览 -->
+            <div v-if="modelConvertPreview" class="p-3 rounded-xl bg-canvas border border-ok/40 space-y-2">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-bold text-ok">🚀 统一转译器与专用协议转换器编译结果预览</span>
+                <button type="button" @click="modelConvertPreview = null" class="text-[11px] text-on-surface-variant underline cursor-pointer">收起</button>
+              </div>
+              <pre class="p-2.5 rounded bg-surface-low font-mono text-[11px] text-ok overflow-x-auto max-h-56">{{ JSON.stringify(modelConvertPreview, null, 2) }}</pre>
             </div>
           </div>
 
@@ -1840,13 +2185,22 @@ function normalizeArray(res) {
   return []
 }
 
-// 1. 供应商管理状态
+// 1. 供应商管理与 .env 统一密钥中枢状态
 const providersList = ref([])
 const expandedEndpoints = ref({})
 const editingProvider = ref(null)
 const isNewProvider = ref(false)
 const savingProvider = ref(false)
 const providerCredentialsInput = ref('')
+const showEnvSecretsPanel = ref(false)
+const envSecretsList = ref([])
+const envSecretsDraft = ref({})
+const savingEnvSecrets = ref(false)
+
+// 模型契约零黑盒扩展状态
+const expandedParamRows = ref({})
+const modelDrawerTab = ref('')
+const modelConvertPreview = ref(null)
 
 // 2. 模型管理与三开关状态
 const modelsList = ref([])
@@ -2232,14 +2586,116 @@ function openNewModel() {
   }
 }
 
+async function openEnvSecretsDrawer() {
+  showEnvSecretsPanel.value = !showEnvSecretsPanel.value
+  if (showEnvSecretsPanel.value) {
+    try {
+      const res = await api.envSecrets()
+      const data = res?.items ? res : (res?.data || {})
+      envSecretsList.value = data.items || []
+      envSecretsDraft.value = {}
+    } catch (e) {
+      error.value = e.message
+    }
+  }
+}
+
+async function saveEnvSecretsUpdates() {
+  const updates = {}
+  for (const [k, v] of Object.entries(envSecretsDraft.value || {})) {
+    if (v && String(v).trim()) updates[k] = String(v).trim()
+  }
+  if (!Object.keys(updates).length) {
+    error.value = '请先输入至少一项要更新的密钥值'
+    return
+  }
+  savingEnvSecrets.value = true
+  try {
+    await api.saveEnvSecrets(updates)
+    envSecretsDraft.value = {}
+    const res = await api.envSecrets()
+    const data = res?.items ? res : (res?.data || {})
+    envSecretsList.value = data.items || []
+    providersList.value = normalizeArray(await api.providers())
+    successMsg.value = `已安全写入 .env 并热更新 ${Object.keys(updates).length} 项密钥`
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    savingEnvSecrets.value = false
+  }
+}
+
+function addModelParamRow() {
+  if (!editingModel.value) return
+  if (!Array.isArray(editingModel.value.params)) editingModel.value.params = []
+  editingModel.value.params.push({
+    key: 'custom_param',
+    label: '自定义参数',
+    type: 'enum',
+    default: '',
+    options: ['default'],
+    visibility: 'public',
+    location: 'body',
+    body_field: 'custom_param',
+  })
+}
+
+function addSizeTableEntry() {
+  if (!editingModel.value) return
+  if (!editingModel.value.table_mappings) editingModel.value.table_mappings = {}
+  if (!editingModel.value.table_mappings.size_ratio) editingModel.value.table_mappings.size_ratio = {}
+  const k = prompt('请输入「尺寸档_宽高比」键名（例如 2K_16:9）：', '2K_16:9')
+  if (!k) return
+  editingModel.value.table_mappings.size_ratio[k.trim()] = '2816x1584'
+}
+
+function updateSizeTableEntry(key, rawVal) {
+  if (!editingModel.value?.table_mappings?.size_ratio) return
+  editingModel.value.table_mappings.size_ratio[key] = String(rawVal || '').trim()
+}
+
+function onConditionalRulesJsonChange(raw) {
+  try {
+    editingModel.value.conditional_rules = JSON.parse(raw)
+  } catch (e) {
+    error.value = '条件规则 JSON 格式有误: ' + e.message
+  }
+}
+
+async function runModelConvertPreview() {
+  if (!editingModel.value) return
+  try {
+    const res = await api.previewModelConvert({
+      model_id: editingModel.value.id,
+      contract: editingModel.value,
+      prompt: testPromptInput.value || '现代极简客厅，落地窗自然采光，@图片1 沙发细节保留',
+    })
+    modelConvertPreview.value = res?.assembled ? res : (res?.data || res)
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
 function openEditModel(m) {
   isNewModel.value = false
+  expandedParamRows.value = {}
+  modelDrawerTab.value = ''
+  modelConvertPreview.value = null
   editingModel.value = JSON.parse(JSON.stringify(m))
   if (!editingModel.value.optimizer) {
     editingModel.value.optimizer = { optimizer_model_id: 'agnes-3.0-flash', prompt: '' }
   }
   if (!editingModel.value.dialect) {
     editingModel.value.dialect = { region_mode: 'coords_bbox', ref_syntax: '图N', negative_mode: 'append_prompt' }
+  }
+  if (!editingModel.value.slots) {
+    editingModel.value.slots = { images: 6, videos: 0, audios: 0 }
+  }
+  if (!editingModel.value.table_mappings) {
+    editingModel.value.table_mappings = {}
+  }
+  if (!Array.isArray(editingModel.value.conditional_rules)) {
+    editingModel.value.conditional_rules = []
   }
   testPromptInput.value = ''
   testRewriteResult.value = ''

@@ -557,6 +557,45 @@
                   </a>
                 </div>
               </div>
+              <!-- Seedream 5.0 图层分解 (layer_decomposition) / Lite 组图连拍 交互画布图层栈 -->
+              <div
+                v-if="msg.layerStack && Array.isArray(msg.layerStack.layers) && msg.layerStack.layers.length > 1"
+                class="rounded-xl bg-studio-950 border border-studio-750 p-3 space-y-2.5"
+              >
+                <div class="flex items-center justify-between text-xs">
+                  <span class="font-bold text-studio-cyan flex items-center gap-1.5">
+                    <span>🗂️ {{ msg.layerStack.kind === 'layer_stack' ? 'Seedream 5.0 透明图层拆分栈' : '多图连拍画廊' }}</span>
+                    <span class="px-1.5 py-0.5 rounded bg-studio-850 text-[10px] font-mono text-white border border-studio-700">
+                      共 {{ msg.layerStack.layers.length }} 层
+                    </span>
+                  </span>
+                  <span class="text-[11px] text-slate-400">点击单层可切换大图预览，或一键挂载为 @图1 进行二次精修</span>
+                </div>
+                <div class="grid grid-cols-4 gap-2.5">
+                  <div
+                    v-for="layer in msg.layerStack.layers"
+                    :key="layer.index"
+                    class="group relative rounded-lg overflow-hidden border bg-studio-900 cursor-pointer transition-all"
+                    :class="msg.imageUrl === layer.url ? 'border-studio-accent ring-1 ring-studio-accent' : 'border-studio-750 hover:border-studio-cyan'"
+                    @click="msg.imageUrl = layer.url"
+                  >
+                    <div class="h-24 w-full bg-[radial-gradient(#334155_1px,transparent_1px)] [background-size:8px_8px] flex items-center justify-center">
+                      <img :src="layer.url" class="max-h-24 w-full object-contain" />
+                    </div>
+                    <div class="p-1.5 bg-studio-950/90 flex items-center justify-between text-[10px]">
+                      <span class="font-bold text-slate-200 truncate">{{ layer.label }}</span>
+                      <button
+                        type="button"
+                        class="px-1.5 py-0.5 rounded bg-studio-accent/20 hover:bg-studio-accent text-studio-cyan hover:text-white font-bold cursor-pointer shrink-0"
+                        @click.stop="mountAssetFromLibrary({ url: layer.url, name: layer.label, kind: 'image' })"
+                        title="挂载为 @图1 继续二次编辑"
+                      >
+                        @引用
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
               <p v-if="msg.imageUrl && msg.modality === 'image'" class="text-xs text-slate-400 leading-relaxed">
                 这一轮留在对话历史，并写入精修素材。创作库仍要点「存入创作库」，保存这一轮的提示词、模型和画幅。
               </p>
@@ -711,47 +750,15 @@
               只有文生图已经实测：可以不传参考图。张数上限和框选编辑都还没实测。生图只走 8003。
             </p>
             <p v-else-if="!currentSchema" class="text-xs text-slate-300">这个模型的参数表还没接入，这次只提交提示词。</p>
-            <div v-if="currentSchema && currentSchema.modes" class="flex flex-wrap gap-2">
-              <button
-                v-for="mode in currentSchema.modes"
-                :key="mode.id"
-                type="button"
-                class="choice"
-                :class="{ 'is-on': activeGenMode === mode.id }"
-                @click="setGenMode(mode.id)"
-              >
-                <span class="choice-mark"></span>
-                <span>{{ mode.label }}</span>
-                <span v-if="activeGenMode === mode.id" class="choice-now">当前</span>
-              </button>
-            </div>
-            <div v-if="commonFields.length" class="flex flex-wrap items-end gap-2">
-              <label v-for="field in commonFields" :key="'c-' + field.key" class="flex flex-col gap-1 text-xs">
-                <span class="text-slate-400 font-bold">{{ field.label }}</span>
-                <select v-if="field.type === 'enum'" class="bg-studio-950 text-slate-100 border border-studio-700 rounded-lg px-2 py-1 outline-none" :disabled="isFieldLocked(field.key)" :value="schemaParams[field.key]" @change="setSchemaParam(field.key, $event.target.value)">
-                  <option v-for="opt in field.options" :key="String(opt)" :value="opt">{{ optionText(field, opt) }}</option>
-                </select>
-                <input v-else-if="field.type === 'bool'" type="checkbox" class="rounded accent-studio-accent" :disabled="isFieldLocked(field.key)" :checked="!!schemaParams[field.key]" @change="setSchemaParam(field.key, $event.target.checked)" />
-                <input v-else-if="field.type === 'range' || field.type === 'number'" type="number" class="w-24 bg-studio-950 text-slate-100 border border-studio-700 rounded-lg px-2 py-1 outline-none" :min="field.min" :max="field.max" :step="field.step || 1" :disabled="isFieldLocked(field.key)" :value="schemaParams[field.key]" @change="setSchemaParam(field.key, Number($event.target.value))" />
-                <input v-else type="text" class="bg-studio-950 text-slate-100 border border-studio-700 rounded-lg px-2 py-1 outline-none" :disabled="isFieldLocked(field.key)" :value="schemaParams[field.key] || ''" @change="setSchemaParam(field.key, $event.target.value)" />
-              </label>
-              <button v-if="advancedFields.length" type="button" class="choice" :class="{ 'is-on': showAdvanced }" @click="showAdvanced = !showAdvanced">
-                <span class="choice-mark"></span>
-                <span>高级配置</span>
-                <span v-if="showAdvanced" class="choice-now">当前</span>
-              </button>
-            </div>
-            <div v-if="showAdvanced && advancedFields.length" class="flex flex-wrap items-end gap-2">
-              <label v-for="field in advancedFields" :key="'a-' + field.key" class="flex flex-col gap-1 text-xs">
-                <span class="text-slate-400 font-bold">{{ field.label }}</span>
-                <select v-if="field.type === 'enum'" class="bg-studio-950 text-slate-100 border border-studio-700 rounded-lg px-2 py-1 outline-none" :disabled="isFieldLocked(field.key)" :value="schemaParams[field.key]" @change="setSchemaParam(field.key, $event.target.value)">
-                  <option v-for="opt in field.options" :key="String(opt)" :value="opt">{{ optionText(field, opt) }}</option>
-                </select>
-                <input v-else-if="field.type === 'bool'" type="checkbox" class="rounded accent-studio-accent" :disabled="isFieldLocked(field.key)" :checked="!!schemaParams[field.key]" @change="setSchemaParam(field.key, $event.target.checked)" />
-                <input v-else-if="field.type === 'range' || field.type === 'number'" type="number" class="w-28 bg-studio-950 text-slate-100 border border-studio-700 rounded-lg px-2 py-1 outline-none" :min="field.min" :max="field.max" :step="field.step || 1" :disabled="isFieldLocked(field.key)" :value="schemaParams[field.key]" @change="setSchemaParam(field.key, Number($event.target.value))" />
-                <input v-else type="text" class="bg-studio-950 text-slate-100 border border-studio-700 rounded-lg px-2 py-1 outline-none" :disabled="isFieldLocked(field.key)" :value="schemaParams[field.key] || ''" @change="setSchemaParam(field.key, $event.target.value)" />
-              </label>
-            </div>
+            <DynamicModelParamBar
+              v-if="currentSchema"
+              :schema="currentSchema"
+              :activeMode="activeGenMode"
+              v-model="schemaParams"
+              v-model:showAdvanced="showAdvanced"
+              :refCounts="currentRefCounts"
+              @select-mode="setGenMode"
+            />
             <p v-if="oldRecipeNote" class="text-xs text-slate-300">这是旧配方，模型未记录，已改用 Agnes Image 2.5 Flash。</p>
             <p v-if="composerError" class="text-xs font-bold text-rose-500">{{ composerError }}</p>
             </div>
@@ -892,6 +899,39 @@
             >
               <span># 创作库</span>
             </button>
+
+            <div class="relative">
+              <button
+                type="button"
+                @click="showSkillsMenu = !showSkillsMenu"
+                class="px-2.5 py-1.5 rounded-lg bg-studio-850 hover:bg-studio-800 text-emerald-400 text-xs font-bold border border-studio-750 flex items-center space-x-1 cursor-pointer"
+                title="挂载模型专属创作技能 (Skills)"
+              >
+                <span>🧩 技能挂载{{ activeSkillIds.length ? ` (${activeSkillIds.length})` : '' }}</span>
+              </button>
+              <div
+                v-if="showSkillsMenu"
+                class="absolute bottom-full right-0 mb-2 w-80 rounded-xl bg-studio-900 border border-studio-700 shadow-2xl p-2.5 z-40 space-y-1.5"
+              >
+                <div class="flex items-center justify-between text-[11px] text-slate-400 pb-1 border-b border-studio-800">
+                  <span class="font-bold text-white">🧩 空间与多模态专属技能 (Skills)</span>
+                  <button type="button" class="text-slate-400 hover:text-white cursor-pointer" @click="showSkillsMenu = false">✕</button>
+                </div>
+                <div
+                  v-for="sk in availableStudioSkills"
+                  :key="sk.id"
+                  @click="toggleStudioSkill(sk)"
+                  class="p-2 rounded-lg border cursor-pointer transition-all"
+                  :class="activeSkillIds.includes(sk.id) ? 'bg-studio-accent/20 border-studio-accent text-white' : 'bg-studio-950/60 border-studio-800 text-slate-300 hover:border-studio-700'"
+                >
+                  <div class="flex items-center justify-between text-xs font-bold">
+                    <span>{{ sk.name }}</span>
+                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-studio-850 text-emerald-400 border border-studio-750">{{ sk.badge }}</span>
+                  </div>
+                  <p class="text-[11px] text-slate-400 mt-0.5 leading-snug">{{ sk.desc }}</p>
+                </div>
+              </div>
+            </div>
 
             <!-- 立即生成/发送按钮 -->
             <button
@@ -1359,6 +1399,8 @@
 <script setup>
 import { ref, computed, watch, onMounted, nextTick } from 'vue';
 import StudioIcon from '../../components/StudioIcon.vue';
+import DynamicModelParamBar from '../../components/DynamicModelParamBar.vue';
+import { STUDIO_SKILLS_REGISTRY, evaluateClientModelRules, normalizeClientLayerStack } from '../../utils/model-protocol';
 import {
   getAssetImageUrl,
   fetchAssets,
@@ -1442,6 +1484,32 @@ const studioModels = ref({
 const activeGenMode = ref('');
 const schemaParams = ref({});
 const showAdvanced = ref(false);
+const showSkillsMenu = ref(false);
+const activeSkillIds = ref([]);
+const availableStudioSkills = computed(() =>
+  STUDIO_SKILLS_REGISTRY.filter((s) => !s.modality || s.modality.includes(activeModality.value))
+);
+const currentRefCounts = computed(() => {
+  const list = referenceTray.value || [];
+  return {
+    images: list.filter((r) => !r.kind || r.kind === 'image').length,
+    videos: list.filter((r) => r.kind === 'video').length,
+    audios: list.filter((r) => r.kind === 'audio' || r.kind === 'music').length,
+  };
+});
+function toggleStudioSkill(skill) {
+  if (!skill) return;
+  const idx = activeSkillIds.value.indexOf(skill.id);
+  if (idx >= 0) {
+    activeSkillIds.value.splice(idx, 1);
+  } else {
+    activeSkillIds.value.push(skill.id);
+    if (skill.autoParams && typeof skill.autoParams === 'object') {
+      schemaParams.value = { ...schemaParams.value, ...skill.autoParams };
+      applyModeLocks();
+    }
+  }
+}
 const oldRecipeNote = ref(false);
 const composerError = ref('');
 const retryDialog = ref({ visible: false, msg: null });
@@ -1507,15 +1575,15 @@ function valueStillFits(schema, key, value) {
   return true;
 }
 function lockedKeySet() {
-  const constraint = currentSchema.value?.modeConstraints?.[activeGenMode.value];
-  return new Set(constraint?.lock || []);
+  const evaluated = evaluateClientModelRules(currentSchema.value, activeGenMode.value, schemaParams.value, currentRefCounts.value);
+  return new Set(evaluated.lockedKeys || []);
 }
 function isFieldLocked(key) {
   return lockedKeySet().has(key);
 }
 function applyModeLocks() {
-  const constraint = currentSchema.value?.modeConstraints?.[activeGenMode.value];
-  if (constraint?.set) schemaParams.value = { ...schemaParams.value, ...constraint.set };
+  const evaluated = evaluateClientModelRules(currentSchema.value, activeGenMode.value, schemaParams.value, currentRefCounts.value);
+  schemaParams.value = evaluated.params;
 }
 function resetSchemaForModel() {
   const schema = currentSchema.value;
@@ -1846,7 +1914,7 @@ function fileNameFromUrl(url) {
 }
 function namesInPrompt(text) {
   const names = [];
-  const re = /@(?:图|图片)(\d+)\[([^\]]+)\]/g;
+  const re = /@(?:图|图片|视频|音频)(\d+)\[([^\]]+)\]/g;
   let match;
   while ((match = re.exec(String(text || '')))) names[Number(match[1]) - 1] = match[2];
   return names;
@@ -1976,7 +2044,7 @@ function syncTrayFromEditor() {
 function editorHasRawMention() {
   if (!richEditorRef.value) return false;
   const walk = (node) => {
-    if (node.nodeType === Node.TEXT_NODE) return /@(?:图|图片)\d+\[[^\]]+\]/.test(node.nodeValue || '');
+    if (node.nodeType === Node.TEXT_NODE) return /@(?:图|图片|视频|音频)\d+\[[^\]]+\]/.test(node.nodeValue || '');
     if (node.nodeType === Node.ELEMENT_NODE && !(node.classList && node.classList.contains('inline-asset-chip'))) {
       return [...node.childNodes].some(walk);
     }
@@ -2030,7 +2098,7 @@ function restorePromptContent(text, tray) {
   richEditorRef.value.innerHTML = '';
   if (!text) return;
 
-  const regex = /(@(?:图|图片)(\d+))\[([^\]]+)\]/g;
+  const regex = /(@(?:图|图片|视频|音频)(\d+))\[([^\]]+)\]/g;
   let lastIdx = 0;
   let match;
   while ((match = regex.exec(text)) !== null) {
@@ -2162,7 +2230,7 @@ function insertChipToEditor(asset) {
 function parseRichSegments(content) {
   if (!content) return [];
   const segments = [];
-  const regex = /(@(?:图|图片)(\d+))\[([^\]]+)\]/g;
+  const regex = /(@(?:图|图片|视频|音频)(\d+))\[([^\]]+)\]/g;
   let lastIdx = 0;
   let match;
 
@@ -2713,16 +2781,20 @@ async function sendMessage() {
         throw new Error(res.error || '未获取到生成的图片地址');
       }
 
+      const layerStack = normalizeClientLayerStack(res, retryParams);
       const asstMsg = {
         role: 'assistant',
         modality: 'image',
-        content: `已为您完成空间视效生成。家具材质光泽与参考项深度统一，光影自然，画质达到 ${selectedResolution.value}。`,
+        content: layerStack && layerStack.layers.length > 1
+          ? `已完成 Seedream 5.0 多图层拆分生成（共 ${layerStack.layers.length} 个独立图层），可直接在上方切换查看或单层二次引用。`
+          : `已为您完成空间视效生成。家具材质光泽与参考项深度统一，光影自然，画质达到 ${retryParams.size || selectedResolution.value}。`,
         userPrompt: rawContent,
         refs: currentTray,
         imageUrl: genUrl,
+        layerStack,
         duration: res.duration ? `${res.duration}s` : '2.8s',
-        resolution: selectedResolution.value,
-        ratio: selectedRatio.value,
+        resolution: retryParams.size || selectedResolution.value,
+        ratio: retryParams.ratio || selectedRatio.value,
         model: getModelDisplayName(imageModelKey.value),
         modelKey: imageModelKey.value,
         genMode: 'image'

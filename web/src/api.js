@@ -176,6 +176,8 @@ export const api = {
 
   // 供应商与大模型 (Providers & Models)
   providers: () => request('/providers'),
+  envSecrets: () => request('/providers/env-secrets'),
+  saveEnvSecrets: (updates) => request('/providers/env-secrets', { method: 'POST', body: { updates } }),
   saveProvider: (p) => request('/providers', { method: 'POST', body: p }),
   deleteProvider: (id) => request(`/providers/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   toggleProvider: (id, enabled) => request(`/providers/${encodeURIComponent(id)}/toggle`, { method: 'POST', body: { enabled } }),
@@ -254,6 +256,7 @@ export const api = {
     }
   },
   createGenModel: (body) => request('/governance/gen-models', { method: 'POST', body }),
+  previewModelConvert: (body) => request('/governance/gen-models/preview-convert', { method: 'POST', body }),
   saveGenModelSchema: (id, body) => request(`/governance/gen-models/${encodeURIComponent(id)}/schema`, { method: 'PUT', body }),
   deleteGenModel: (id) => request(`/governance/gen-models/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   saveGenPolish: (id, body) => request(`/governance/gen-models/${encodeURIComponent(id)}/polish`, { method: 'PUT', body }),
