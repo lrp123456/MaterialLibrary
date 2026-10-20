@@ -140,13 +140,13 @@
     <!-- ========================================================================= -->
     <!-- 4. 主体视口：左侧侧边时间轴 (精准到每一天) + 右侧自适应瀑布流画廊 -->
     <!-- ========================================================================= -->
-    <div class="flex-1 relative overflow-hidden flex">
-      <!-- 4.1 rgallery 原生质感：右侧独立时间轴刻度轨与拖拽游标 (Timeline Scrubber Rail, 满屏拉大横线) -->
+    <div class="library-gallery relative flex-1 overflow-hidden">
+      <!-- 4.1 时间轴画在画廊内部，年份和游标都留在刻度区域内 -->
       <transition name="fade">
         <div
           v-if="showSidebarTimeline && activeMainTab !== 'trash' && flatScrubberNodes.length > 0"
           ref="scrubberOuterRef"
-          class="timeline-rail relative order-2 shrink-0 h-full w-28 flex flex-col overflow-hidden select-none border-l border-studio-700"
+          class="timeline-rail absolute top-0 right-0 bottom-0 z-20 w-32 flex flex-col overflow-visible select-none border-l border-studio-700 bg-studio-950/80"
         >
           <!-- 刻度线滚动区 (支持点击任意刻度线或年份即时平滑跳转，满屏展开) -->
           <div
@@ -235,9 +235,9 @@
         ref="scrollContainerRef"
         @scroll="handleGalleryScroll"
         :class="[
-          'library-scroll flex-1 h-full overflow-y-auto py-5 space-y-6 scroll-smooth pl-6',
+          'library-scroll h-full overflow-y-auto py-5 space-y-6 scroll-smooth pl-6',
           loading ? 'is-loading' : '',
-          'pr-6'
+          showSidebarTimeline && activeMainTab !== 'trash' ? 'pr-36' : 'pr-6'
         ]"
       >
         <!-- 日期精准筛选激活提示条 -->
@@ -823,30 +823,31 @@
               <button type="button" class="choice px-3 py-2 rounded-lg text-sm font-bold" :class="{ 'is-on': detailPane === 'tags' }" @click="detailPane = 'tags'">
                 <span class="choice-mark"></span>标签<span v-if="detailPane === 'tags'" class="choice-now">当前</span>
               </button>
-              <button type="button" class="choice px-3 py-2 rounded-lg text-sm font-bold" :class="{ 'is-on': detailPane === 'lineage' }" @click="detailPane = 'lineage'">
+              <button type="button" class="choice px-3 py-2 rounded-lg text-sm font-bold" :class="{ 'is-on': detailPane === 'lineage' }" @click="openLineagePane">
                 <span class="choice-mark"></span>血缘<span v-if="detailPane === 'lineage'" class="choice-now">当前</span>
               </button>
             </div>
 
             <div v-if="detailPane === 'lineage'" class="space-y-3 text-sm">
+              <button type="button" class="px-3 py-2 rounded-lg bg-studio-accent text-white text-xs font-bold" @click="lineageGraphOpen = true">局部图谱</button>
               <p v-if="!lineageView.record.prompt && !lineageView.parent" class="text-slate-400">这件没有父图。下面只保留上传记录。</p>
-              <div class="space-y-2">
-                <div v-if="lineageView.parent" class="flex items-center gap-2">
-                  <img :src="lineageView.parent.url" class="w-14 h-14 object-cover rounded-lg" alt="" />
-                  <span>父图 {{ lineageView.parent.file_name || lineageView.parent.fid }}</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <img :src="getAssetImageUrl(activeModalAsset.fid, activeModalAsset.mediaToken)" class="w-16 h-16 object-cover rounded-lg" alt="" />
-                  <span>这一张</span>
-                </div>
-                <div v-for="child in lineageView.children" :key="child.fid" class="flex items-center gap-2 pl-6">
-                  <img :src="child.url" class="w-12 h-12 object-cover rounded-lg" alt="" />
-                  <span>后来的衍生 {{ child.file_name || child.fid }}</span>
+              <p v-else-if="lineageView.parent">父图 {{ lineageView.parent.file_name || lineageView.parent.fid }}</p>
+              <p v-if="lineageView.refs.length">参考 {{ lineageView.refs.map((item) => item.file_name || item.fid).join('、') }}</p>
+              <p v-if="lineageView.children.length">后来的衍生 {{ lineageView.children.map((item) => item.file_name || item.fid).join('、') }}</p>
+              <p v-if="restageVersionNames.length">画幅衍生 {{ restageVersionNames.join('、') }}</p>
+              <div v-if="lineageView.usedByFilms && lineageView.usedByFilms.length" class="space-y-1">
+                <p class="text-[11px] text-slate-400">剪辑使用</p>
+                <div v-for="film in lineageView.usedByFilms" :key="film.fid" class="flex items-center gap-2">
+                  <span>成片 {{ film.file_name || film.fid }}</span>
                 </div>
               </div>
-              <div v-if="lineageView.refs.length" class="flex flex-wrap gap-2">
-                <img v-for="refItem in lineageView.refs" :key="refItem.fid" :src="refItem.url" class="w-12 h-12 object-cover rounded-lg" :alt="refItem.file_name || '参考图'" />
+              <div v-if="lineageView.record.editUses && lineageView.record.editUses.length" class="space-y-1">
+                <p class="text-[11px] text-slate-400">这条成片用过</p>
+                <p v-for="use in lineageView.record.editUses" :key="use.fid + use.start" class="text-[11px] text-slate-300">
+                  {{ use.role }} {{ use.fid }} · {{ Number(use.start).toFixed(2) }}s 起 · {{ Number(use.duration).toFixed(2) }}s
+                </p>
               </div>
+              <p v-if="lineageView.record.projectId && !lineageView.record.prompt">提示词 没有 · 模型 没有 · 模式 没有</p>
               <p v-if="lineageView.record.prompt"><span class="font-bold">源提示词</span> {{ lineageView.record.prompt }}</p>
               <p v-if="lineageView.record.negative"><span class="font-bold">负向提示词</span> {{ lineageView.record.negative }}</p>
               <p>模型 {{ lineageView.record.model || '—' }} · 模式 {{ lineageView.record.mode || '—' }} · 画幅 {{ lineageView.record.ratio || '—' }}</p>
@@ -856,9 +857,13 @@
 
             <!-- 智能分类与打标体系 -->
             <div v-else class="space-y-3 pt-2">
-              <span class="text-xs font-extrabold text-slate-200">标签</span>
-              <div class="grid grid-cols-2 gap-2">
-                <label class="space-y-1">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-extrabold text-slate-200">标签</span>
+                <button v-if="!detailTagEditing" type="button" class="px-3 py-2 rounded-lg border border-studio-700 text-xs font-bold" @click="beginTagEdit">编辑</button>
+              </div>
+              <p v-if="!detailTagEditing" class="text-sm text-slate-200">分类 {{ categoryLabel(classifyCategory) }}</p>
+              <div v-else class="space-y-2">
+                <label class="space-y-1 block">
                   <span class="text-slate-400">分类</span>
                   <select v-model="classifyCategory" class="w-full rounded-lg border border-studio-700 bg-studio-950 px-2 py-2">
                     <option value="interior">室内</option>
@@ -868,30 +873,53 @@
                     <option value="furniture">单品家具</option>
                   </select>
                 </label>
-                <label class="space-y-1">
+                <label v-if="classifyCategory === 'interior' || classifyCategory === 'exterior'" class="space-y-1 block">
                   <span class="text-slate-400">空间</span>
                   <select v-model="classifySpace" class="w-full rounded-lg border border-studio-700 bg-studio-950 px-2 py-2">
                     <option value="">不改空间</option>
                     <option v-for="opt in dynamicFilters.space" :key="opt.dir || opt.key" :value="opt.dir || opt.key">{{ opt.label }}</option>
                   </select>
                 </label>
+                <label v-for="dim in detailDimsFor(classifyCategory)" :key="dim.key" class="space-y-1 block">
+                  <span class="text-slate-400">{{ dim.title }}</span>
+                  <select v-model="classifyDims[dim.key]" class="w-full rounded-lg border border-studio-700 bg-studio-950 px-2 py-2">
+                    <option value="">不改</option>
+                    <option v-for="opt in dim.options" :key="opt.key" :value="opt.key">{{ opt.label }}</option>
+                  </select>
+                </label>
+                <div class="flex flex-wrap gap-2">
+                  <button type="button" class="px-3 py-2 rounded-lg bg-studio-accent text-white text-xs font-bold" @click="saveClassify">保存</button>
+                  <button type="button" class="px-3 py-2 rounded-lg border border-studio-700 text-xs font-bold" @click="cancelTagEdit">取消</button>
+                </div>
               </div>
               <div class="flex flex-wrap gap-2">
-                <button type="button" class="px-3 py-2 rounded-lg bg-studio-accent text-white text-xs font-bold" @click="saveClassify">保存分类和空间</button>
                 <button type="button" class="px-3 py-2 rounded-lg border border-studio-700 text-xs font-bold" @click="runRetag">按成图重打标签</button>
                 <button type="button" class="px-3 py-2 rounded-lg border border-studio-700 text-xs font-bold" @click="moveShelf('retouched')">移入精修</button>
                 <button type="button" class="px-3 py-2 rounded-lg border border-studio-700 text-xs font-bold" @click="moveShelf('original')">移出精修</button>
                 <button type="button" class="px-3 py-2 rounded-lg border border-studio-700 text-xs font-bold" @click="moveShelf('finished')">标为成品</button>
               </div>
 
-              <div class="space-y-2">
+              <div v-if="detailDimsFor(classifyCategory).length" class="space-y-2">
+                <div v-for="dim in detailDimsFor(classifyCategory)" :key="dim.key" class="flex items-start space-x-2">
+                  <span class="text-[11px] text-slate-400 font-bold shrink-0 w-16 pt-0.5">{{ dim.title }}:</span>
+                  <div class="flex items-center flex-wrap gap-1">
+                    <span
+                      v-for="t in labelsForDim(dim.key)"
+                      :key="t"
+                      class="px-2 py-0.5 rounded-full bg-studio-accent/15 text-studio-accent border border-studio-accent/30 text-[11px] font-medium"
+                    >{{ t }}</span>
+                    <span v-if="!labelsForDim(dim.key).length" class="text-[11px] text-slate-500">没有</span>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="space-y-2">
                 <div v-if="getAssetGroupedTags(activeModalAsset, currentDetail).spaces.length" class="flex items-start space-x-2">
                   <span class="text-[11px] text-slate-400 font-bold shrink-0 w-16 pt-0.5">空间区域:</span>
                   <div class="flex items-center flex-wrap gap-1">
                     <span
                       v-for="t in getAssetGroupedTags(activeModalAsset, currentDetail).spaces"
                       :key="t"
-                      class="px-2 py-0.5 rounded bg-studio-accent/15 text-studio-accent border border-studio-accent/30 text-[11px] font-medium"
+                      class="px-2 py-0.5 rounded-full bg-studio-accent/15 text-studio-accent border border-studio-accent/30 text-[11px] font-medium"
                     >
                       {{ t }}
                     </span>
@@ -904,7 +932,7 @@
                     <span
                       v-for="t in getAssetGroupedTags(activeModalAsset, currentDetail).styles"
                       :key="t"
-                      class="px-2 py-0.5 rounded bg-studio-cyan/15 text-studio-cyan border border-studio-cyan/30 text-[11px] font-medium"
+                      class="px-2 py-0.5 rounded-full bg-studio-cyan/15 text-studio-cyan border border-studio-cyan/30 text-[11px] font-medium"
                     >
                       {{ t }}
                     </span>
@@ -917,7 +945,7 @@
                     <span
                       v-for="t in getAssetGroupedTags(activeModalAsset, currentDetail).materials"
                       :key="t"
-                      class="px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/80 text-[11px] font-medium"
+                      class="px-2 py-0.5 rounded-full bg-emerald-950/60 text-emerald-300 border border-emerald-800/80 text-[11px] font-medium"
                     >
                       {{ t }}
                     </span>
@@ -930,7 +958,7 @@
                     <span
                       v-for="t in getAssetGroupedTags(activeModalAsset, currentDetail).others"
                       :key="t"
-                      class="px-2 py-0.5 rounded bg-studio-800 text-slate-300 border border-studio-700 text-[11px]"
+                      class="px-2 py-0.5 rounded-full bg-studio-800 text-slate-300 border border-studio-700 text-[11px]"
                     >
                       {{ t }}
                     </span>
@@ -1014,12 +1042,23 @@
         </div>
       </div>
     </div>
+
+    <LineageGraph
+      v-if="lineageGraphOpen && activeModalAsset"
+      :fid="activeModalAsset.fid"
+      :name="activeModalAsset.file_name || activeModalAsset.fileName || ''"
+      :lineage="currentDetail?.lineage || null"
+      :derivatives="currentDetail?.derivatives || []"
+      @close="lineageGraphOpen = false"
+      @open-detail="onGraphOpenDetail"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import StudioIcon from '../components/StudioIcon.vue';
+import LineageGraph from '../components/LineageGraph.vue';
 import {
   ensureToken,
   fetchAssets,
@@ -1125,10 +1164,16 @@ const SOURCE_PLATES = [
   { key: 'original', label: '原素材' },
   { key: 'retouched', label: '精修素材' },
   { key: 'finished', label: '成品素材' },
+  // 被云端剪辑工程引用的素材。只读视图，数据来自 clip_snapshot_assets 关联表，
+  // 不做物理复制（底层按 sha256 去重，复制只会让归属变模糊）。
+  { key: 'clip', label: '剪辑素材' },
   { key: 'trash', label: '回收站' }
 ];
 const sourcePlate = ref('original');
 const plateTabs = computed(() => {
+  if (sourcePlate.value === 'clip') {
+    return [{ key: 'clip', label: '剪辑素材', icon: 'video', subTitle: '被剪辑工程引用' }];
+  }
   if (sourcePlate.value === 'trash') return MAIN_TABS.filter((tab) => tab.key === 'trash');
   return MAIN_TABS.filter((tab) => tab.key !== 'trash');
 });
@@ -1138,7 +1183,10 @@ function setSourcePlate(key) {
   if (key === 'trash') {
     activeMainTab.value = 'trash';
     activeSubCategory.value = 'all';
-  } else if (activeMainTab.value === 'trash') {
+  } else if (key === 'clip') {
+    activeMainTab.value = 'clip';
+    activeSubCategory.value = 'all';
+  } else if (activeMainTab.value === 'trash' || activeMainTab.value === 'clip') {
     activeMainTab.value = 'image';
     activeSubCategory.value = 'interior_exterior';
   }
@@ -1147,8 +1195,55 @@ function setSourcePlate(key) {
 
 const finishedFileInput = ref(null);
 const detailPane = ref('tags');
+const lineageGraphOpen = ref(false);
+const detailTagEditing = ref(false);
 const classifyCategory = ref('interior');
 const classifySpace = ref('');
+const classifyDims = reactive({});
+const DETAIL_CATEGORY_DIMS = {
+  portrait: [
+    { key: 'pose', title: '人像姿态', options: ['站姿', '坐姿', '行走', '倚靠', '交谈/互动'] },
+    { key: 'character', title: '人物角色', options: ['商务精英', '居家男女', '亲子家庭', '青年学生', '休闲独处'] },
+    { key: 'shot_type', title: '景别类型', options: ['全身照', '半身特写', '面部微距'] }
+  ],
+  clothing: [
+    { key: 'clothing_category', title: '穿搭品类', options: ['上衣外套', '裤装裙装', '西服套装', '鞋履配饰'] },
+    { key: 'season', title: '季节', options: ['春季', '夏季', '秋季', '冬季'] }
+  ],
+  furniture: [
+    { key: 'furniture_item', title: '家具品类', options: FURNITURE_CATS },
+    { key: 'furniture_craft', title: '工艺材质', options: ['木蜡油天然', '拉丝金属', '哑光烤漆', '做旧复古', '真皮', '岩板'] }
+  ]
+};
+function detailDimsFor(category) {
+  return (DETAIL_CATEGORY_DIMS[category] || []).map((dim) => ({
+    ...dim,
+    options: dim.options.map((item) => (typeof item === 'string' ? { key: item, label: item } : { key: item.key, label: item.label }))
+  }));
+}
+function categoryLabel(category) {
+  return ({ interior: '室内', exterior: '室外', portrait: '空间人像', clothing: '服装服饰', furniture: '单品家具' })[category] || category || '没有';
+}
+function labelsForDim(dimension) {
+  const tags = currentDetail.value?.tags || activeModalAsset.value?.tags || [];
+  return tags.map((tag) => {
+    if ((tag.dimension || '') !== dimension) return '';
+    return tag.label || tag.value || '';
+  }).filter(Boolean);
+}
+function beginTagEdit() {
+  detailTagEditing.value = true;
+  for (const dim of detailDimsFor(classifyCategory.value)) {
+    const tags = currentDetail.value?.tags || [];
+    const hit = tags.find((tag) => tag.dimension === dim.key);
+    classifyDims[dim.key] = hit ? (hit.dir || hit.label || '') : '';
+  }
+}
+function cancelTagEdit() {
+  detailTagEditing.value = false;
+  classifyCategory.value = activeModalAsset.value?.category || 'interior';
+  classifySpace.value = '';
+}
 const activeMainTab = ref('image'); // 默认展示图片大类
 const activeSubCategory = ref('interior_exterior'); // 默认进入室内外设计
 const keyword = ref('');
@@ -1260,6 +1355,8 @@ const activeMainTabConfig = computed(() => {
 });
 
 const currentSubCategories = computed(() => {
+  // 剪辑素材没有品类细分，避免显示上一级的二级菜单
+  if (activeMainTab.value === 'clip') return [];
   return SUB_CATEGORIES_CONFIG[activeMainTab.value] || [];
 });
 
@@ -1772,7 +1869,7 @@ function buildQueryParams(page = 1) {
   if (onlyFavorite.value) {
     params.only_favorite = 1;
   }
-  if (sourcePlate.value !== 'trash') {
+  if (sourcePlate.value !== 'trash' && sourcePlate.value !== 'clip') {
     params.shelf = sourcePlate.value;
   }
 
@@ -1854,6 +1951,28 @@ async function reloadAssets(reset = true) {
   loading.value = true;
   try {
     await ensureToken();
+
+    // 剪辑素材：只读视图，数据来自 clip_snapshot_assets 关联表。
+    // 不参与分页搜索的常规参数（keyword/date 等），保持简单。
+    if (activeMainTab.value === 'clip') {
+      const token = localStorage.getItem('ml_token') || '';
+      const offset = (currentPage.value - 1) * pageSize;
+      const res = await fetch(`/editor-api/clip-assets?limit=${pageSize}&offset=${offset}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
+      const data = await res.json();
+      const items = (data.items || []).map((it) => ({
+        ...it,
+        // 卡片层同时兼容 file_name/fileName 与 thumb_url/thumbUrl 两种写法
+        fileName: it.file_name,
+        thumbUrl: it.thumb_url || null
+      }));
+      assetsList.value = items;
+      totalAssetsCount.value = Number(data.total) || items.length;
+      hasMore.value = items.length >= pageSize;
+      return;
+    }
 
     if (activeMainTab.value === 'trash') {
       const res = await fetchTrashAssets({
@@ -1939,7 +2058,14 @@ function setupIntersectionObserver() {
 // Pinterest 模式详情大弹窗核心调度
 // =============================================================================
 
-const lineageView = computed(() => currentDetail.value?.lineage || { record: {}, parent: null, refs: [], children: [] });
+const lineageView = computed(() => currentDetail.value?.lineage || { record: {}, parent: null, refs: [], children: [], usedByFilms: [] });
+const restageVersionNames = computed(() => {
+  const list = currentDetail.value?.derivatives || [];
+  const names = [];
+  if (list.some((item) => item.kind === 'restage_9_16')) names.push('9:16 净画重构');
+  if (list.some((item) => item.kind === 'restage_3_4')) names.push('3:4 净画重构');
+  return names;
+});
 
 async function uploadFinished(e) {
   const file = e.target.files?.[0];
@@ -1970,12 +2096,23 @@ async function moveShelf(shelf) {
 
 async function saveClassify() {
   if (!activeModalAsset.value?.fid) return;
-  await classifyAsset({
-    fid: activeModalAsset.value.fid,
-    category: classifyCategory.value,
-    space: classifySpace.value || undefined
-  });
+  const dims = {};
+  for (const dim of detailDimsFor(classifyCategory.value)) {
+    if (classifyDims[dim.key]) dims[dim.key] = classifyDims[dim.key];
+  }
+  try {
+    await classifyAsset({
+      fid: activeModalAsset.value.fid,
+      category: classifyCategory.value,
+      space: (classifyCategory.value === 'interior' || classifyCategory.value === 'exterior') ? (classifySpace.value || undefined) : undefined,
+      dims
+    });
+  } catch (err) {
+    alert(err.message || '保存失败');
+    return;
+  }
   activeModalAsset.value.category = classifyCategory.value;
+  detailTagEditing.value = false;
   await openAssetDetailModal(activeModalAsset.value);
 }
 
@@ -1985,11 +2122,25 @@ async function runRetag() {
   alert('已按成图重新打标。手动改过的分类和空间会保留，其余标签会换掉。');
 }
 
+function openLineagePane() {
+  detailPane.value = 'lineage';
+  lineageGraphOpen.value = true;
+}
+
+function onGraphOpenDetail(asset) {
+  if (!asset?.fid) return;
+  lineageGraphOpen.value = false;
+  const same = activeModalAsset.value?.fid === asset.fid ? activeModalAsset.value : null;
+  openAssetDetailModal(same || { fid: asset.fid, file_name: asset.name || '' });
+}
+
 async function openAssetDetailModal(item) {
+  lineageGraphOpen.value = false;
   activeModalAsset.value = item;
   activeDerivativeId.value = null;
   currentDetail.value = null;
   detailPane.value = 'tags';
+  detailTagEditing.value = false;
   classifyCategory.value = item.category || 'interior';
   classifySpace.value = '';
   isDetailLoading.value = true;
@@ -2031,6 +2182,13 @@ function navigateModalAsset(step) {
 
 function handleDetailKeydown(e) {
   if (!activeModalAsset.value) return;
+  if (e.key === 'Escape' && lineageGraphOpen.value) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    lineageGraphOpen.value = false;
+    return;
+  }
+  if (lineageGraphOpen.value) return;
   if (e.target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
   if (e.key === 'ArrowLeft') {
     e.preventDefault();
@@ -2056,6 +2214,7 @@ onUnmounted(() => {
 });
 
 function closeAssetDetailModal() {
+  lineageGraphOpen.value = false;
   activeModalAsset.value = null;
   currentDetail.value = null;
   activeDerivativeId.value = null;
@@ -2375,6 +2534,12 @@ function handleImageError(e) {
 }
 
 function handleKeyDown(e) {
+  if (e.key === 'Escape' && lineageGraphOpen.value) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    lineageGraphOpen.value = false;
+    return;
+  }
   if (e.key === 'Escape' && activeModalAsset.value) {
     closeAssetDetailModal();
   }

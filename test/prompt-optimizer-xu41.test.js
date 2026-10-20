@@ -96,12 +96,12 @@ function runTests() {
   });
   assert.deepStrictEqual(stdPayload.body.optimize_prompt_options, { mode: 'standard' });
 
-  // 4. 当选 fast 时，封装为 fast 对象
+  // 4. Flash 契约没有 fast。转换器是唯一决定处，fast 降为 standard。
   const fastPayload = assembleModelPayload({
     modelContract: contract,
     values: { prompt: '极简客厅', 'optimize_prompt_options.mode': 'fast' },
   });
-  assert.deepStrictEqual(fastPayload.body.optimize_prompt_options, { mode: 'fast' });
+  assert.deepStrictEqual(fastPayload.body.optimize_prompt_options, { mode: 'standard' });
   console.log('✔ 测试 3 通过');
 
   console.log('=== 测试 4：工作流真实提示词提取与双向同步 workflows.default ===');

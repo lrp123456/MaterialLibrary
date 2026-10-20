@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>创作页 · 参数面板设计稿</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+:root {
+  --paper: #e9e4d8;
+  --surface: #fbf9f4;
+  --surface-2: #f4f0e7;
+  --surface-3: #ece7db;
+  --ink: #1b1a17;
+  --ink-2: #3c3a34;
+  --muted: #7a7568;
+  --faint: #a49e90;
+  --line: rgba(27, 26, 23, 0.13);
+  --line-strong: rgba(27, 26, 23, 0.24);
+  --accent: #c8451d;
+  --accent-soft: rgba(200, 69, 29, 0.12);
+  --accent-ink: #8f2f12;
+  --ok: #3f6b53;
+  --warn: #a8752a;
+  --radius-s: 4px;
+  --radius-m: 7px;
+  --radius-l: 11px;
+  --shadow-1: 0 1px 2px rgba(27, 26, 23, 0.08);
+  --shadow-2: 0 6px 18px rgba(27, 26, 23, 0.1);
+  --shadow-3: 0 24px 60px rgba(27, 26, 23, 0.18);
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --font-display: "Archivo", "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-body: "Archivo", "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; font-family: var(--font-body); font-size: 12px; color: var(--ink);
+  background: var(--paper); overflow: hidden; -webkit-font-smoothing: antialiased;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+body::after {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 99; opacity: .03;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* 顶栏 */
+.topbar {
+  height: 50px; display: flex; align-items: center; gap: 14px; padding: 0 14px;
+  background: var(--surface); border-bottom: 1px solid var(--line-strong); position: relative; z-index: 10;
+}
+.brand { display: flex; align-items: center; gap: 8px; padding-right: 14px; border-right: 1px solid var(--line); }
+.brand-mark { width: 25px; height: 25px; border-radius: 6px; background: var(--ink); color: var(--paper); display: grid; place-items: center; font-family: var(--font-display); font-weight: 700; font-size: 12px; }
+.brand-name { font-family: var(--font-display); font-size: 13px; font-weight: 600; }
+.nav { display: flex; gap: 2px; background: var(--surface-2); padding: 3px; border: 1px solid var(--line); border-radius: 7px; }
+.nav button { height: 26px; padding: 0 12px; border: 0; background: transparent; border-radius: 5px; font-size: 11px; color: var(--muted); }
+.nav button.is-on { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: var(--shadow-1); }
+.top-right { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 10.5px; }
+.avatar { width: 26px; height: 26px; border-radius: 50%; background: linear-gradient(135deg, #c9b79a, #8f7c63); border: 1px solid var(--line-strong); }
+
+/* 主体 */
+.main { display: grid; grid-template-columns: 232px minmax(0, 1fr) 352px; height: calc(100vh - 50px); min-height: 0; }
+
+/* 左：会话历史 */
+.history { background: var(--surface); border-right: 1px solid var(--line-strong); display: flex; flex-direction: column; min-height: 0; }
+.history-head { padding: 12px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
+.history-title { font-family: var(--font-display); font-size: 12px; font-weight: 600; }
+.new-chat { height: 26px; padding: 0 9px; border: 1px solid var(--line-strong); background: var(--surface); border-radius: 5px; font-size: 10.5px; display: inline-flex; align-items: center; gap: 4px; }
+.new-chat:hover { background: var(--surface-2); }
+.history-list { overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+.history-item { text-align: left; border: 1px solid transparent; background: transparent; border-radius: 6px; padding: 8px 9px; }
+.history-item:hover { background: var(--surface-2); }
+.history-item.is-on { background: var(--accent-soft); border-color: rgba(200,69,29,.22); }
+.history-item b { display: block; font-size: 11px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-item span { display: block; font-family: var(--font-mono); font-size: 9px; color: var(--faint); margin-top: 3px; }
+.history-foot { margin-top: auto; padding: 10px 12px; border-top: 1px solid var(--line); font-family: var(--font-mono); font-size: 9px; color: var(--faint); display: flex; justify-content: space-between; }
+
+/* 中：对话 */
+.chat { display: flex; flex-direction: column; min-width: 0; background: var(--paper); }
+.chat-scroll { flex: 1; overflow-y: auto; padding: 22px 30px 12px; min-height: 0; }
+.chat-inner { max-width: 780px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+.chat-scroll::-webkit-scrollbar, .drawer-body::-webkit-scrollbar { width: 8px; }
+.chat-scroll::-webkit-scrollbar-thumb, .drawer-body::-webkit-scrollbar-thumb { background: rgba(27,26,23,.16); border-radius: 8px; border: 2px solid var(--paper); }
+
+.msg-user { align-self: flex-end; max-width: 78%; background: var(--surface); border: 1px solid var(--line); border-radius: 12px 12px 3px 12px; padding: 10px 12px; box-shadow: var(--shadow-1); }
+.msg-user p { margin: 0; font-size: 12px; line-height: 1.7; }
+.msg-meta { margin-top: 6px; display: flex; gap: 5px; flex-wrap: wrap; }
+.tag { font-family: var(--font-mono); font-size: 9px; color: var(--accent-ink); background: var(--accent-soft); border: 1px solid rgba(200,69,29,.2); padding: 1px 5px; border-radius: 3px; }
+.tag.neutral { color: var(--muted); background: var(--surface-2); border-color: var(--line); }
+
+.msg-ai { align-self: flex-start; max-width: 92%; width: 100%; }
+.ai-head { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; }
+.ai-avatar { width: 20px; height: 20px; border-radius: 5px; background: var(--ink); color: var(--paper); display: grid; place-items: center; font-family: var(--font-display); font-size: 9px; font-weight: 700; }
+.ai-name { font-size: 10.5px; font-weight: 600; }
+.ai-model { font-family: var(--font-mono); font-size: 9px; color: var(--faint); }
+.ai-time { margin-left: auto; font-family: var(--font-mono); font-size: 9px; color: var(--faint); }
+
+.result-card { border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius-l); overflow: hidden; box-shadow: var(--shadow-2); }
+.result-art { display: block; width: 100%; aspect-ratio: 16 / 10; }
+.result-bar { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--line); }
+.result-bar .meta { font-family: var(--font-mono); font-size: 9.5px; color: var(--muted); }
+.result-bar .spacer { flex: 1; }
+.mini-btn { height: 26px; padding: 0 9px; border: 1px solid var(--line-strong); background: var(--surface); border-radius: 5px; font-size: 10.5px; display: inline-flex; align-items: center; gap: 4px; }
+.mini-btn:hover { background: var(--surface-2); }
+.mini-btn.is-dark { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+/* 输入区 */
+.composer-wrap { padding: 0 30px 18px; }
+.composer {
+  max-width: 780px; margin: 0 auto; background: var(--surface); border: 1px solid var(--line-strong);
+  border-radius: 14px; box-shadow: 0 10px 30px rgba(27,26,23,.12); overflow: hidden;
+}
+.composer-top { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.mode { display: flex; gap: 1px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 2px; }
+.mode button { height: 25px; padding: 0 10px; border: 0; background: transparent; border-radius: 4px; font-size: 10.5px; color: var(--muted); display: inline-flex; align-items: center; gap: 4px; }
+.mode button.is-on { background: var(--ink); color: var(--paper); font-weight: 600; }
+.model-select { height: 27px; border: 1px solid var(--line-strong); background: var(--surface-2); border-radius: 5px; padding: 0 7px; font-size: 10.5px; font-weight: 600; outline: none; }
+.param-trigger {
+  margin-left: auto; height: 27px; padding: 0 9px; display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid rgba(200,69,29,.32); background: var(--accent-soft); color: var(--accent-ink);
+  border-radius: 5px; font-size: 10.5px; font-weight: 600;
+}
+.param-trigger:hover { background: rgba(200,69,29,.18); }
+.param-trigger .badge { font-family: var(--font-mono); font-size: 9px; background: var(--accent); color: #fff; border-radius: 999px; padding: 0 5px; line-height: 15px; }
+
+.editor-area { padding: 10px 11px 6px; }
+.ref-tray { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+.ref {
+  display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); background: var(--surface-2);
+  border-radius: 5px; padding: 3px 6px 3px 3px; font-size: 10px;
+}
+.ref i { width: 20px; height: 20px; border-radius: 3px; display: block; }
+.ref .x { color: var(--faint); border: 0; background: transparent; padding: 0 2px; }
+.prompt {
+  min-height: 64px; max-height: 150px; overflow-y: auto; outline: none; font-size: 12.5px; line-height: 1.75;
+  color: var(--ink);
+}
+.prompt:empty::before { content: attr(data-placeholder); color: var(--faint); }
+.prompt .inline-tag { color: var(--accent-ink); background: var(--accent-soft); border-radius: 3px; padding: 0 3px; font-size: 11px; }
+.composer-bottom { display: flex; align-items: center; gap: 6px; padding: 6px 10px 10px; }
+.tool { height: 26px; padding: 0 8px; border: 1px solid transparent; background: transparent; border-radius: 5px; font-size: 10.5px; color: var(--muted); display: inline-flex; align-items: center; gap: 4px; }
+.tool:hover { background: var(--surface-2); border-color: var(--line); }
+.tool.is-on { color: var(--accent-ink); background: var(--accent-soft); border-color: rgba(200,69,29,.22); }
+.composer-bottom .spacer { flex: 1; }
+.send {
+  height: 32px; padding: 0 16px; border-radius: 7px; border: 1px solid var(--accent);
+  background: var(--accent); color: #fff; font-weight: 600; font-size: 11.5px;
+  display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 1px 0 rgba(255,255,255,.18) inset;
+}
+.send:hover { filter: brightness(1.06); }
+.hint { max-width: 780px; margin: 7px auto 0; display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 9px; color: var(--faint); }
+
+/* 右：参数抽屉 */
+.drawer { background: var(--surface); border-left: 1px solid var(--line-strong); display: flex; flex-direction: column; min-height: 0; transition: margin-right 360ms var(--ease); }
+.drawer.is-closed { margin-right: -352px; }
+.drawer-head { padding: 12px 14px; border-bottom: 1px solid var(--line); display: flex; align-items: flex-start; gap: 8px; }
+.drawer-title { font-family: var(--font-display); font-size: 14px; font-weight: 600; letter-spacing: -.01em; }
+.drawer-sub { font-size: 10px; color: var(--muted); margin-top: 2px; }
+.drawer-head .close { margin-left: auto; }
+.icon-btn { width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid transparent; background: transparent; border-radius: 5px; color: var(--muted); }
+.icon-btn:hover { background: var(--surface-2); border-color: var(--line); }
+.drawer-body { overflow-y: auto; padding: 12px 14px 20px; display: flex; flex-direction: column; gap: 16px; }
+.group-label { font-family: var(--font-mono); font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); margin-bottom: 7px; display: flex; align-items: center; gap: 6px; }
+.group-label::after { content: ""; height: 1px; background: var(--line); flex: 1; }
+
+.ratio-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+.ratio {
+  border: 1px solid var(--line); background: var(--surface-2); border-radius: 5px; padding: 6px 4px;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+}
+.ratio.is-on { border-color: var(--accent); background: var(--accent-soft); }
+.ratio .glyph { border: 1.5px solid var(--muted); display: block; }
+.ratio.is-on .glyph { border-color: var(--accent); }
+.ratio span { font-family: var(--font-mono); font-size: 8.5px; color: var(--muted); }
+.ratio.is-on span { color: var(--accent-ink); }
+
+.row { display: grid; grid-template-columns: 66px 1fr; gap: 8px; align-items: center; margin-bottom: 8px; }
+.row:last-child { margin-bottom: 0; }
+.row-label { font-size: 10px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+.row-ctrl { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.seg { display: flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; flex: 1; }
+.seg button { flex: 1; height: 24px; border: 0; background: var(--surface-2); font-size: 10px; color: var(--muted); }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button.is-on { background: var(--ink); color: var(--paper); }
+.seg button:disabled { opacity: .4; cursor: not-allowed; }
+.num { width: 52px; height: 24px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface-2); text-align: right; padding: 0 5px; font-family: var(--font-mono); font-size: 10px; outline: none; }
+.num:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.select { flex: 1; height: 24px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface-2); padding: 0 5px; font-size: 10.5px; outline: none; }
+.slider { -webkit-appearance: none; appearance: none; flex: 1; height: 2px; background: var(--line-strong); border-radius: 2px; outline: none; }
+.slider::-webkit-slider-thumb { -webkit-appearance: none; width: 11px; height: 11px; border-radius: 50%; background: var(--surface); border: 1.5px solid var(--ink); }
+.slider::-moz-range-thumb { width: 11px; height: 11px; border-radius: 50%; background: var(--surface); border: 1.5px solid var(--ink); }
+.slider:focus-visible { box-shadow: 0 0 0 3px var(--accent-soft); }
+.val { width: 38px; text-align: right; font-family: var(--font-mono); font-size: 9.5px; color: var(--ink-2); }
+
+.switch { width: 30px; height: 17px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--surface-3); position: relative; padding: 0; transition: background 160ms; }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: var(--surface); border: 1px solid var(--line-strong); transition: transform 180ms var(--ease); }
+.switch.is-on { background: var(--ink); border-color: var(--ink); }
+.switch.is-on::after { transform: translateX(13px); border-color: var(--ink); }
+
+.lock-row {
+  grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 5px;
+  font-size: 9.5px; color: var(--warn); background: rgba(168,117,42,.09);
+  border: 1px solid rgba(168,117,42,.22); border-radius: 4px; padding: 5px 7px; line-height: 1.5;
+}
+.lock-row svg { width: 10px; height: 10px; flex: none; margin-top: 1px; }
+.locked { opacity: .55; }
+
+.presets { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+.preset { text-align: left; border: 1px solid var(--line); background: var(--surface-2); border-radius: 6px; padding: 7px 8px; }
+.preset.is-on { border-color: var(--accent); background: var(--accent-soft); }
+.preset b { display: block; font-size: 10.5px; font-weight: 600; }
+.preset span { display: block; font-family: var(--font-mono); font-size: 8.5px; color: var(--muted); margin-top: 2px; }
+
+.summary { border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); padding: 9px 10px; }
+.summary-row { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 9.5px; color: var(--muted); padding: 2px 0; }
+.summary-row b { color: var(--ink); font-weight: 500; }
+.summary-total { border-top: 1px dashed var(--line-strong); margin-top: 6px; padding-top: 6px; display: flex; justify-content: space-between; font-size: 10.5px; }
+.summary-total b { color: var(--accent-ink); font-family: var(--font-mono); }
+
+.drawer-foot { border-top: 1px solid var(--line); padding: 10px 14px; display: flex; gap: 7px; }
+.btn-ghost { flex: 1; height: 32px; border: 1px solid var(--line-strong); background: var(--surface); border-radius: 6px; font-size: 11px; }
+.btn-primary { flex: 2; height: 32px; border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 6px; font-size: 11.5px; font-weight: 600; }
+.btn-primary:hover { filter: brightness(1.06); }
+
+/* 高级折叠 */
+.adv-head { width: 100%; display: flex; align-items: center; gap: 6px; border: 0; background: transparent; padding: 0; margin-bottom: 7px; }
+.adv-head .caret { width: 10px; height: 10px; color: var(--faint); transition: transform 200ms var(--ease); }
+.adv-head.is-open .caret { transform: rotate(90deg); }
+.adv-body { display: none; }
+.adv-body.is-open { display: block; }
+
+/* 窄屏 */
+@media (max-width: 1180px) { .main { grid-template-columns: 196px minmax(0,1fr) 320px; } }
+@media (max-width: 980px) {
+  .main { grid-template-columns: minmax(0,1fr) 320px; }
+  .history { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark">G</div>
+    <div class="brand-name">工坊</div>
+  </div>
+  <nav class="nav" aria-label="板块">
+    <button>素材库</button>
+    <button class="is-on">创作</button>
+    <button>剪辑</button>
+    <button>设置</button>
+  </nav>
+  <div class="top-right">
+    <span style="font-family:var(--font-mono);font-size:9.5px">剩余额度 1,248</span>
+    <span>|</span>
+    <span>适老 关</span>
+    <div class="avatar" aria-hidden="true"></div>
+  </div>
+</header>
+
+<div class="main">
+
+  <!-- 左：历史 -->
+  <aside class="history">
+    <div class="history-head">
+      <span class="history-title">创作会话</span>
+      <button class="new-chat">＋ 新建</button>
+    </div>
+    <div class="history-list">
+      <button class="history-item is-on"><b>客厅晨光 · 多机位</b><span>今天 21:12 · 视频</span></button>
+      <button class="history-item"><b>主卧软装替换</b><span>今天 19:40 · 图像</span></button>
+      <button class="history-item"><b>餐厅材质特写</b><span>昨天 16:22 · 图像</span></button>
+      <button class="history-item"><b>北欧轻晨 30s 配乐</b><span>昨天 11:08 · 音乐</span></button>
+      <button class="history-item"><b>走廊纵深一镜到底</b><span>10-17 · 视频</span></button>
+    </div>
+    <div class="history-foot"><span>6 个会话</span><span>本地保存</span></div>
+  </aside>
+
+  <!-- 中：对话 -->
+  <main class="chat">
+    <div class="chat-scroll">
+      <div class="chat-inner">
+
+        <div class="msg-user">
+          <p>把客厅全景做成清晨暖光，镜头缓慢推近，保留原木和米白布艺的质感。输出 16:9，5 秒。</p>
+          <div class="msg-meta">
+            <span class="tag">@ 客厅全景 A.mp4</span>
+            <span class="tag"># 室内实拍真实感</span>
+            <span class="tag neutral">Seedance 2.5</span>
+          </div>
+        </div>
+
+        <div class="msg-ai">
+          <div class="ai-head">
+            <span class="ai-avatar">G</span>
+            <span class="ai-name">工坊助手</span>
+            <span class="ai-model">seedance-2.5 · 5s · 1080p</span>
+            <span class="ai-time">21:12</span>
+          </div>
+          <div class="result-card">
+            <svg class="result-art" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid slice" role="img" aria-label="生成结果预览">
+              <defs>
+                <linearGradient id="w2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f3ecdd"/><stop offset="1" stop-color="#ded2bd"/></linearGradient>
+                <linearGradient id="f2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b4a184"/><stop offset="1" stop-color="#8b7a61"/></linearGradient>
+                <linearGradient id="g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#dfeaec"/><stop offset="1" stop-color="#b6c9cb"/></linearGradient>
+                <filter id="b2"><feGaussianBlur stdDeviation="22"/></filter>
+              </defs>
+              <rect width="800" height="500" fill="url(#w2)"/>
+              <rect y="330" width="800" height="170" fill="url(#f2)"/>
+              <rect x="64" y="56" width="250" height="214" fill="#faf6ec"/>
+              <rect x="74" y="66" width="230" height="194" fill="url(#g2)"/>
+              <path d="M74 260 L304 66" stroke="#ccdcdb" stroke-width="60" opacity=".6"/>
+              <rect x="188" y="66" width="7" height="194" fill="#faf6ec"/>
+              <circle cx="262" cy="96" r="34" fill="#f2cf9b" opacity=".85" filter="url(#b2)"/>
+              <rect x="404" y="268" width="320" height="102" rx="12" fill="#a78f70"/>
+              <rect x="418" y="236" width="292" height="50" rx="10" fill="#c4b093"/>
+              <rect x="430" y="246" width="124" height="34" rx="6" fill="#d9c9ae"/>
+              <rect x="570" y="246" width="124" height="34" rx="6" fill="#cfbd9f"/>
+              <rect x="404" y="362" width="320" height="14" rx="3" fill="#877154"/>
+              <ellipse cx="548" cy="432" rx="108" ry="16" fill="#6e6251" opacity=".35"/>
+              <rect x="462" y="396" width="172" height="9" rx="3" fill="#8a7a63"/>
+              <rect x="752" y="188" width="3" height="160" fill="#5d5548"/>
+              <path d="M726 188 h56 l-10 -40 h-36z" fill="#e9dec9"/>
+              <path d="M330 462 Q560 436 760 462 L760 500 H330Z" fill="#c9bda9" opacity=".8"/>
+              <rect x="300" y="438" width="240" height="28" rx="3" fill="rgba(20,19,15,.45)"/>
+              <text x="420" y="457" font-family="'Archivo',sans-serif" font-size="12" fill="#fff" text-anchor="middle" letter-spacing="1">清晨光穿过客厅</text>
+            </svg>
+            <div class="result-bar">
+              <span class="meta">00:05 · 1920×1080 · 24.0 MB</span>
+              <span class="spacer"></span>
+              <button class="mini-btn">重生成</button>
+              <button class="mini-btn">变体</button>
+              <button class="mini-btn is-dark">送入剪辑</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- 输入区 -->
+    <div class="composer-wrap">
+      <div class="composer">
+        <div class="composer-top">
+          <div class="mode" role="tablist" aria-label="创作模式">
+            <button data-mode="chat">对话</button>
+            <button class="is-on" data-mode="image">图片</button>
+            <button data-mode="video">视频</button>
+            <button data-mode="music">音乐</button>
+          </div>
+          <select class="model-select" aria-label="模型">
+            <option>Seedream 5.0 Pro · 图像</option>
+            <option>Agnes Image 2.5 Flash</option>
+            <option>Seedance 2.5 · 视频</option>
+            <option>QwenImage Local</option>
+          </select>
+          <button class="param-trigger" id="paramTrigger">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>
+            参数
+            <span class="badge" id="paramBadge">4</span>
+          </button>
+        </div>
+
+        <div class="editor-area">
+          <div class="ref-tray">
+            <span class="ref"><i style="background:linear-gradient(135deg,#cfd9d3,#a99274)"></i>客厅全景 A.mp4<button class="x" aria-label="移除参考">×</button></span>
+            <span class="ref"><i style="background:linear-gradient(135deg,#e7dfd0,#b9a88e)"></i>材质参考.jpg<button class="x" aria-label="移除参考">×</button></span>
+          </div>
+          <div class="prompt" contenteditable="true" data-placeholder="描述你想要的画面。输入 @ 引用素材，# 调用配方…">清晨暖光从左侧落地窗进入，镜头缓慢推近沙发，保留<span class="inline-tag">@客厅全景 A.mp4</span> 的原木与米白布艺质感，低饱和、真实室内摄影。</div>
+        </div>
+
+        <div class="composer-bottom">
+          <button class="tool">@ 素材</button>
+          <button class="tool"># 配方</button>
+          <button class="tool">🧩 技能 1</button>
+          <button class="tool is-on">✨ 优化提示词</button>
+          <span class="spacer"></span>
+          <span style="font-family:var(--font-mono);font-size:9px;color:var(--faint);margin-right:6px">预计 1 次 · 1920×1080 · PNG</span>
+          <button class="send">
+            生成
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="hint"><span>Enter 发送 · Shift+Enter 换行</span><span>参数修改会实时写入本次提交</span></div>
+    </div>
+  </main>
+
+  <!-- 右：参数抽屉 -->
+  <aside class="drawer" id="drawer" aria-label="参数配置">
+    <div class="drawer-head">
+      <div>
+        <div class="drawer-title">参数配置</div>
+        <div class="drawer-sub" id="drawerSub">Seedream 5.0 Pro · 图片模式</div>
+      </div>
+      <button class="icon-btn close" id="closeDrawer" aria-label="收起参数面板">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+
+    <div class="drawer-body">
+
+      <!-- 画幅 -->
+      <section data-group="image video">
+        <div class="group-label">画幅</div>
+        <div class="ratio-grid">
+          <button class="ratio is-on" data-ratio="16:9"><span class="glyph" style="width:18px;height:10px"></span><span>16:9</span></button>
+          <button class="ratio" data-ratio="4:3"><span class="glyph" style="width:16px;height:12px"></span><span>4:3</span></button>
+          <button class="ratio" data-ratio="1:1"><span class="glyph" style="width:13px;height:13px"></span><span>1:1</span></button>
+          <button class="ratio" data-ratio="9:16"><span class="glyph" style="width:10px;height:17px"></span><span>9:16</span></button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <span class="row-label">尺寸</span>
+          <div class="row-ctrl">
+            <select class="select" id="sizeSelect">
+              <option>1920 × 1080</option>
+              <option>2560 × 1440</option>
+              <option>3840 × 2160</option>
+              <option>自定义…</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <!-- 输出 -->
+      <section data-group="image video music">
+        <div class="group-label">输出</div>
+        <div class="row">
+          <span class="row-label">数量</span>
+          <div class="row-ctrl">
+            <div class="seg" data-seg="count">
+              <button>1</button><button class="is-on">2</button><button>3</button><button>4</button>
+            </div>
+          </div>
+        </div>
+        <div class="row" data-mode-only="image">
+          <span class="row-label">格式</span>
+          <div class="row-ctrl">
+            <div class="seg" data-seg="format">
+              <button class="is-on">PNG</button><button>JPG</button><button>WEBP</button>
+            </div>
+          </div>
+        </div>
+        <div class="row" data-mode-only="video">
+          <span class="row-label">时长</span>
+          <div class="row-ctrl">
+            <div class="seg" data-seg="duration">
+              <button>3s</button><button class="is-on">5s</button><button>10s</button>
+            </div>
+          </div>
+        </div>
+        <div class="row" data-mode-only="video">
+          <span class="row-label">帧率</span>
+          <div class="row-ctrl">
+            <select class="select"><option>30 fps</option><option>24 fps</option><option>60 fps</option></select>
+          </div>
+        </div>
+      </section>
+
+      <!-- 风格 -->
+      <section data-group="image video">
+        <div class="group-label">风格与参考</div>
+        <div class="row">
+          <span class="row-label">风格</span>
+          <div class="row-ctrl">
+            <select class="select" id="styleSelect">
+              <option>室内实拍 · 真实感</option>
+              <option>北欧轻晨 · 柔光</option>
+              <option>现代轻奢 · 暖木</option>
+              <option>清水泥 · 冷灰</option>
+              <option>无风格</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <span class="row-label">参考强度</span>
+          <div class="row-ctrl">
+            <input class="slider" type="range" min="0" max="100" value="65" id="refStrength" aria-label="参考强度" />
+            <span class="val" id="refVal">65%</span>
+          </div>
+        </div>
+        <div class="row">
+          <span class="row-label">结构保留</span>
+          <div class="row-ctrl">
+            <button class="switch is-on" role="switch" aria-checked="true" aria-label="结构保留"></button>
+            <span style="font-size:9.5px;color:var(--muted)">锁墙面、窗位与家具布局</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 高级 -->
+      <section data-group="image video music">
+        <button class="adv-head" id="advHead" aria-expanded="false">
+          <svg class="caret" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m4 2 4 4-4 4"/></svg>
+          <span class="group-label" style="margin:0">高级参数 <span style="font-family:var(--font-mono);color:var(--faint)">4 项</span></span>
+        </button>
+        <div class="adv-body" id="advBody">
+          <div class="row">
+            <span class="row-label">种子</span>
+            <div class="row-ctrl">
+              <input class="num" value="824193" aria-label="种子" />
+              <button class="mini-btn" style="height:24px;padding:0 7px;font-size:9.5px">随机</button>
+            </div>
+          </div>
+          <div class="row">
+            <span class="row-label">采样步数</span>
+            <div class="row-ctrl">
+              <input class="num" value="32" aria-label="采样步数" />
+              <input class="slider" type="range" min="8" max="80" value="32" />
+            </div>
+          </div>
+          <div class="row">
+            <span class="row-label">引导强度</span>
+            <div class="row-ctrl">
+              <input class="num" value="7.5" aria-label="引导强度" />
+              <input class="slider" type="range" min="1" max="20" step="0.5" value="7.5" />
+            </div>
+          </div>
+          <div class="row">
+            <span class="row-label">负面词</span>
+            <div class="row-ctrl">
+              <input class="num" style="width:100%;text-align:left" value="过曝, 畸变, 塑料感" aria-label="负面词" />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 联动锁定示例 -->
+      <section data-group="image">
+        <div class="group-label">联动规则</div>
+        <div class="row locked">
+          <span class="row-label">输出格式</span>
+          <div class="row-ctrl">
+            <div class="seg"><button class="is-on">PNG</button><button disabled>JPG</button><button disabled>WEBP</button></div>
+          </div>
+        </div>
+        <div class="lock-row">
+          <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="2" y="5" width="8" height="6" rx="1"/><path d="M4 5V3.5a2 2 0 0 1 4 0V5"/></svg>
+          「结构保留」开启时透明底不可用，已锁定为 PNG。关闭后可选 JPG / WEBP。
+        </div>
+      </section>
+
+      <!-- 预设 -->
+      <section data-group="image video music">
+        <div class="group-label">预设</div>
+        <div class="presets">
+          <button class="preset is-on"><b>室内实拍</b><span>真实感 · 结构保留</span></button>
+          <button class="preset"><b>拆层重绘</b><span>auto · PNG · 16:9</span></button>
+          <button class="preset"><b>透明底精抠</b><span>PNG · 单品</span></button>
+          <button class="preset"><b>一镜到底</b><span>5s · 同步音频</span></button>
+        </div>
+      </section>
+
+      <!-- 摘要 -->
+      <section>
+        <div class="group-label">本次提交</div>
+        <div class="summary">
+          <div class="summary-row"><span>模型</span><b id="sumModel">Seedream 5.0 Pro</b></div>
+          <div class="summary-row"><span>画幅</span><b id="sumRatio">16:9 · 1920×1080</b></div>
+          <div class="summary-row"><span>数量</span><b id="sumCount">2 张</b></div>
+          <div class="summary-row"><span>格式</span><b id="sumFormat">PNG</b></div>
+          <div class="summary-total"><span>预计消耗</span><b>2 次额度</b></div>
+        </div>
+      </section>
+
+    </div>
+
+    <div class="drawer-foot">
+      <button class="btn-ghost" id="resetBtn">重置</button>
+      <button class="btn-primary" id="savePreset">存为预设</button>
+    </div>
+  </aside>
+
+</div>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+
+/* 模式切换：控制分组可见性 */
+const MODE_COPY = {
+  chat: ['纯对话', '只提交提示词，不加载生成参数'],
+  image: ['图片模式', 'Seedream 5.0 Pro · 图像'],
+  video: ['视频模式', 'Seedance 2.5 · 5s · 1080p'],
+  music: ['音乐模式', 'ACE-Step Local · 30s'],
+};
+$$('.mode button').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    $$('.mode button').forEach((b) => b.classList.remove('is-on'));
+    btn.classList.add('is-on');
+    const mode = btn.dataset.mode;
+    $('#drawerSub').textContent = MODE_COPY[mode][1];
+    $$('.drawer-body section[data-group]').forEach((sec) => {
+      sec.style.display = sec.dataset.group.split(' ').includes(mode) ? '' : 'none';
+    });
+    $$('[data-mode-only]').forEach((row) => {
+      row.style.display = row.dataset.modeOnly === mode ? '' : 'none';
+    });
+    if (mode === 'chat') {
+      $('#paramTrigger').style.display = 'none';
+    } else {
+      $('#paramTrigger').style.display = '';
+    }
+  });
+});
+/* 默认隐藏视频专属行 */
+$$('[data-mode-only]').forEach((row) => {
+  row.style.display = row.dataset.modeOnly === 'image' ? '' : 'none';
+});
+
+/* 比例选择 */
+$$('.ratio').forEach((r) => {
+  r.addEventListener('click', () => {
+    $$('.ratio').forEach((x) => x.classList.remove('is-on'));
+    r.classList.add('is-on');
+    $('#sumRatio').textContent = r.dataset.ratio + ' · 1920×1080';
+  });
+});
+
+/* 分段控件 */
+$$('[data-seg]').forEach((seg) => {
+  seg.addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if (!btn || btn.disabled) return;
+    $$('button', seg).forEach((b) => b.classList.remove('is-on'));
+    btn.classList.add('is-on');
+    if (seg.dataset.seg === 'count') $('#sumCount').textContent = btn.textContent + ' 张';
+  });
+});
+
+/* 参考强度 */
+$('#refStrength').addEventListener('input', (e) => {
+  $('#refVal').textContent = e.target.value + '%';
+});
+
+/* 高级折叠 */
+$('#advHead').addEventListener('click', () => {
+  const open = $('#advBody').classList.toggle('is-open');
+  $('#advHead').classList.toggle('is-open', open);
+  $('#advHead').setAttribute('aria-expanded', String(open));
+});
+
+/* 开关 */
+$$('.switch').forEach((sw) => {
+  sw.addEventListener('click', () => {
+    const on = sw.classList.toggle('is-on');
+    sw.setAttribute('aria-checked', String(on));
+  });
+});
+
+/* 预设 */
+$$('.preset').forEach((p) => {
+  p.addEventListener('click', () => {
+    $$('.preset').forEach((x) => x.classList.remove('is-on'));
+    p.classList.add('is-on');
+  });
+});
+
+/* 参数抽屉开关 */
+$('#paramTrigger').addEventListener('click', () => {
+  $('#drawer').classList.remove('is-closed');
+});
+$('#closeDrawer').addEventListener('click', () => {
+  $('#drawer').classList.add('is-closed');
+});
+
+/* 摘要同步 */
+$('#styleSelect').addEventListener('change', (e) => {
+  /* 演示：只更新预设选中态 */
+  $$('.preset').forEach((p) => p.classList.remove('is-on'));
+});
+$('#sizeSelect').addEventListener('change', (e) => {
+  const r = $('.ratio.is-on')?.dataset.ratio || '16:9';
+  $('#sumRatio').textContent = r + ' · ' + e.target.value.replace(/\s/g, '');
+});
+
+/* 重置 */
+$('#resetBtn').addEventListener('click', () => {
+  $$('.ratio').forEach((x, i) => x.classList.toggle('is-on', i === 0));
+  $('#refStrength').value = 65;
+  $('#refVal').textContent = '65%';
+  $('#sumRatio').textContent = '16:9 · 1920×1080';
+  $('#sumCount').textContent = '2 张';
+  $('#sumFormat').textContent = 'PNG';
+});
+
+/* 存预设 */
+$('#savePreset').addEventListener('click', () => {
+  const btn = $('#savePreset');
+  const old = btn.textContent;
+  btn.textContent = '已保存 ✓';
+  setTimeout(() => { btn.textContent = old; }, 1400);
+});
+</script>
+</body>
+</html>

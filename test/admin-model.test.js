@@ -350,6 +350,29 @@ async function testStep3() {
     normalizeArkSeedreamPayload(bodyInvalidRatio, bodyInvalidRatio, bodyInvalidRatio, mockCtx);
   }, /不支持尺寸档位和比例组合/, '未收录组合必须报错');
 
+  // 5. Pro 走同一条发出前归一化：2K 9:16 仍是像素，拆层不被丢掉
+  const bodyProPixels = {
+    prompt: '轻奢主卧',
+    model: 'doubao-seedream-5-0-pro-260628',
+    size: '2K',
+    ratio: '9:16'
+  };
+  const payloadProPixels = normalizeArkSeedreamPayload(bodyProPixels, bodyProPixels, bodyProPixels, mockCtx);
+  assert.strictEqual(payloadProPixels.size, '1584x2816', 'Pro 关闭拆层时发出前 size 必须是 1584x2816');
+  assert.strictEqual(payloadProPixels.ratio, undefined);
+  assert.strictEqual(payloadProPixels.layer_decomposition, undefined);
+
+  const bodyProDecomp = {
+    prompt: '拆分客厅图层',
+    model: 'doubao-seedream-5-0-pro-260628',
+    extras: { decompose: true }
+  };
+  const payloadProDecomp = normalizeArkSeedreamPayload(bodyProDecomp, bodyProDecomp, bodyProDecomp, mockCtx);
+  assert.strictEqual(payloadProDecomp.layer_decomposition, true, 'Pro 拆层标记必须留到发出前');
+  assert.strictEqual(payloadProDecomp.size, 'auto');
+  assert.strictEqual(payloadProDecomp.ratio, undefined);
+  assert.strictEqual(payloadProDecomp.model, 'doubao-seedream-5-0-pro-260628');
+
   console.log('✔ 第 3 步测试通过');
 }
 

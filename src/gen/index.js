@@ -177,6 +177,28 @@ function normalizeArkSeedreamPayload(body, v, inp, ctx) {
   if (!prompt) throw new Error('[火山方舟 Seedream] prompt 为必填参数且不能为空');
 
   const { officialId, caps } = probeCaps(probeModel);
+  const adapterId = String(adapter.id || '');
+  const isSeedream = /seedream/i.test(officialId) || /seedream/i.test(probeModel) || adapterId.includes('seedream');
+  if (isSeedream) {
+    const { convertArkSeedreamRequest } = require('../converters');
+    let modelContract = null;
+    try {
+      const { resolveModelExecution } = require('../models-contract');
+      modelContract = resolveModelExecution(ctx && ctx.db, officialId || probeModel)?.model || null;
+    } catch (_) {}
+    const converted = convertArkSeedreamRequest({
+      rawInput: {
+        ...(inp || {}),
+        ...(v || {}),
+        ...(body || {}),
+        prompt,
+        model: probeModel,
+      },
+      modelContract,
+    });
+    return converted.body;
+  }
+
   const inputCaps = caps.input || {};
 
   /**
@@ -212,57 +234,10 @@ function normalizeArkSeedreamPayload(body, v, inp, ctx) {
     payload.image = capped.length === 1 ? capped[0] : capped;
   }
 
-  const isSeedreamFlash = officialId === 'seedream5flash' || /seedream-5-0-flash/i.test(probeModel);
-  const isLayerDecomp = Boolean(
-    body.layer_decomposition ||
-    inp.layerDecomposition ||
-    v.layer_decomposition ||
-    body.decompose ||
-    inp.decompose ||
-    v.decompose ||
-    (body.extras && (body.extras.decompose || body.extras.layer_decomposition)) ||
-    (inp.extras && (inp.extras.decompose || inp.extras.layer_decomposition)) ||
-    (v.extras && (v.extras.decompose || v.extras.layer_decomposition))
-  );
-
-  // ---- size 规范化 ----
+  // Seedream 已在上面交给契约转换器。这里只给非 Seedream 的方舟图保留档位或像素校验。
   const rawSize = body.size != null ? body.size : (v.size != null ? v.size : inp.size);
-  if (isSeedreamFlash) {
-    if (isLayerDecomp) {
-      payload.layer_decomposition = true;
-      const allowedDecomp = ['1K', '1.5K', '2K', 'auto'];
-      const candidateSize = body.layer_decomposition_size || inp.layerDecompositionSize || v.layer_decomposition_size || v.layer_size || (body.extras && (body.extras.layer_decomposition_size || body.extras.decompose_size)) || rawSize;
-      const decompSize = candidateSize ? String(candidateSize).trim() : 'auto';
-      if (!allowedDecomp.includes(decompSize)) {
-        throw new Error(`Seedream Flash 图层分解 size 仅支持 1K, 1.5K, 2K, auto，收到: ${decompSize}`);
-      }
-      payload.size = decompSize;
-    } else {
-      const rawSizeStr = String(rawSize || '').trim();
-      if (/^\d+\s*x\s*\d+$/i.test(rawSizeStr)) {
-        payload.size = rawSizeStr.toLowerCase();
-      } else {
-        const { SEEDREAM_FLASH_SIZE_TABLE } = require('../models-contract');
-        const upperTier = String(rawSizeStr).toUpperCase();
-        const tier = ['1K', '1.5K', '2K'].includes(upperTier) ? upperTier : (rawSizeStr ? upperTier : '2K');
-        const ratio = body.ratio || v.ratio || inp.ratio || '1:1';
-        const key = `${tier}_${ratio}`;
-        const px = SEEDREAM_FLASH_SIZE_TABLE[key];
-        if (!px) {
-          throw new Error(`Seedream Flash 换算表不支持尺寸档位和比例组合: ${key}`);
-        }
-        payload.size = px;
-      }
-    }
-  } else {
-    const size = normalizeArkSize(rawSize, officialId);
-    if (size) payload.size = size;
-  }
-
-  // 确保提示词不包含画面比例句子
-  if (isSeedreamFlash && payload.prompt) {
-    payload.prompt = payload.prompt.replace(/\s*画面比例\s*[\w:]+/g, '').trim();
-  }
+  const size = normalizeArkSize(rawSize, officialId);
+  if (size) payload.size = size;
 
   // ---- 组图：仅支持的代际才下发 ----
   const seqReq = body.sequential_image_generation || inp.sequentialImageGeneration;
@@ -298,6 +273,16 @@ function normalizeArkSeedreamPayload(body, v, inp, ctx) {
   }
 
   return payload;
+}
+
+function noteVendorOutcome(input, ok, errText) {
+  const id = input && input.contractId;
+  if (!id) return;
+  try {
+    const { globalCircuitBreaker } = require('../converters');
+    if (ok) globalCircuitBreaker.recordSuccess(id);
+    else globalCircuitBreaker.recordFailure(id, errText || '');
+  } catch (_) {}
 }
 
 async function executeAdapter(services, adapter, input) {
@@ -357,6 +342,13 @@ async function executeAdapter(services, adapter, input) {
       jobId: input.jobId || `music_${Date.now()}`,
     });
     return { ok: true, success: true, files: result.files || [], ...result };
+  }
+
+  if (adapter.protocol === 'indextts_local' || adapter.id === 'indextts_local') {
+    return require('./indextts-local').runVoiceJob(services, adapter, input);
+  }
+  if (adapter.protocol === 'acestep_local' || adapter.id === 'acestep_local') {
+    return require('./acestep-local').runMusicJob(services, adapter, input);
   }
 
   const requestedModel = input.model || defaultModelFromCfg || fallbackModel;
@@ -564,55 +556,31 @@ async function executeAdapter(services, adapter, input) {
     const isAgnes = (body.model || v.model || '').includes('agnes-image') ||
                     (adapter.id || '').includes('agnes') ||
                     baseUrl.includes('agnes-ai.com') || baseUrl.includes('agnes-ai.cn');
-    if (!isAgnes) return body;
+    if (!isAgnes || (body.model || v.model || '').includes('agnes-video')) return body;
 
-    const finalModel = body.model || v.model || 'agnes-image-2.5-flash';
     const prompt = body.prompt || v.prompt;
     if (!prompt || !String(prompt).trim()) {
       throw new Error('[Agnes Image] prompt 为必填参数且不能为空');
     }
-
-    // 宽高比白名单约束
-    const VALID_RATIOS = ['1:1', '3:4', '4:3', '16:9', '9:16', '2:3', '3:2', '21:9'];
-    let ratio = body.ratio || v.ratio || inp.ratio || '9:16';
-    if (!VALID_RATIOS.includes(ratio)) ratio = '9:16';
-
-    // 尺寸档位推荐约束
-    let size = body.size || v.size || inp.size || '2K';
-    if (!['1K', '2K', '3K', '4K'].includes(size)) size = '2K';
-
-    const payload = {
-      model: finalModel,
-      prompt: String(prompt).trim(),
-      size,
-      ratio,
-      extra_body: {
-        response_format: 'url',
-        ...(body.extra_body || {})
-      }
-    };
-
-    // 图生图 / 多图合成约束: 必须放在 extra_body.image 中，单图传字符串，多图传数组
-    const images = [];
-    if (v.image_data_url) images.push(v.image_data_url);
-    if (Array.isArray(v.extra_image_data_urls)) {
-      v.extra_image_data_urls.forEach(u => { if (u && !images.includes(u)) images.push(u); });
-    }
-    // 若未能转出 Data URL，才回退透传原始公网 URL
-    if (images.length === 0 && Array.isArray(v.image_urls)) {
-      v.image_urls.forEach(u => { if (u && !images.includes(u)) images.push(u); });
-    }
-
-    if (images.length > 0) {
-      payload.extra_body.image = images.length === 1 ? images[0] : images;
-    }
-
-    // 严禁顶层携带 image / tags / response_format
-    delete payload.image;
-    delete payload.tags;
-    delete payload.response_format;
-
-    return payload;
+    const ratio = body.ratio || v.ratio || inp.ratio || '9:16';
+    const { convertAgnesImageRequest } = require('../converters');
+    let modelContract = null;
+    try {
+      const { resolveModelExecution } = require('../models-contract');
+      modelContract = resolveModelExecution(services.db, body.model || v.model || 'agnes_image_2_5_flash')?.model || null;
+    } catch (_) {}
+    const converted = convertAgnesImageRequest({
+      rawInput: {
+        ...(inp || {}),
+        ...(v || {}),
+        ...(body || {}),
+        prompt: String(prompt).trim(),
+        ratio,
+        model: body.model || v.model || 'agnes-image-2.5-flash',
+      },
+      modelContract,
+    });
+    return converted.body || converted.payload;
   }
 
   /**
@@ -622,85 +590,36 @@ async function executeAdapter(services, adapter, input) {
     const isAgnesVideo = (body.model || v.model || '').includes('agnes-video') ||
                          (adapter.id || '').includes('agnes_video') ||
                          baseUrl.includes('agnes-ai.com') || baseUrl.includes('agnes-ai.cn');
-    if (!isAgnesVideo) return body;
+    if (!isAgnesVideo || (body.model || v.model || '').includes('agnes-image')) return body;
 
     if (!apiKey) {
       throw new Error('[Agnes AI] 请先在提供商设置中配置 Agnes AI 的 API Key');
     }
 
-    const finalModel = body.model || v.model || 'agnes-video-2.5-flash';
     const prompt = body.prompt || v.prompt;
     if (!prompt || !String(prompt).trim()) {
       throw new Error('[Agnes Video] prompt 为必填参数且不能为空');
     }
-
-    const isHttp = (u) => u && (String(u).startsWith('http://') || String(u).startsWith('https://'));
-
-    // 图像与参考图约束 (必须是可访问的 HTTP URL)
-    const images = [];
-    if (Array.isArray(v.image_urls)) {
-      v.image_urls.forEach(u => { if (isHttp(u)) images.push(u); });
-    }
-    if (isHttp(v.image_data_url)) images.push(v.image_data_url);
-
-    // 客户端显式模式优先：first_last_frame → keyframe
-    const clientMode = String(inp.genMode || v.gen_mode || body.client_mode || '');
-    const firstFrame = isHttp(v.first_frame) ? v.first_frame : (isHttp(body.first_frame) ? body.first_frame : null);
-    const lastFrame = isHttp(v.last_frame) ? v.last_frame : (isHttp(body.last_frame) ? body.last_frame : null);
-
-    let mode = 'text';
-    if (clientMode === 'first_last_frame' || firstFrame || lastFrame) {
-      mode = 'keyframe';
-    } else if (images.length > 0 || clientMode === 'image_to_video' || clientMode === 'image_reference') {
-      mode = 'reference';
-    }
-
-    // Flash 专属画幅支持白名单: 21:9, 16:9, 4:3, 1:1, 3:4, 9:16
-    const VALID_RATIOS = ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'];
-    let aspect_ratio = body.aspect_ratio || v.ratio || inp.ratio || '16:9';
-    if (!VALID_RATIOS.includes(aspect_ratio)) aspect_ratio = '16:9';
-
-    // 持续时间秒数字符串: "4" ~ "12"
-    let seconds = String(body.seconds || v.duration || '5');
-    const secNum = parseInt(seconds, 10);
-    if (isNaN(secNum) || secNum < 4 || secNum > 12) seconds = '5';
-
-    const payload = {
-      model: finalModel,
-      prompt: String(prompt).trim(),
-      mode,
-      size: '720P', // Flash 严格限定 720P
-      aspect_ratio,
-      seconds,
-      n: 1
-    };
-
-    if (mode === 'keyframe') {
-      // 官方：至少一个 first_frame / last_frame；禁止 images/audios/videos
-      if (firstFrame) payload.first_frame = firstFrame;
-      if (lastFrame) payload.last_frame = lastFrame;
-      if (!payload.first_frame && !payload.last_frame) {
-        throw new Error('[Agnes Video keyframe] 需要至少一张可公网访问的首帧或尾帧 URL');
-      }
-      delete payload.images;
-      delete payload.audios;
-      delete payload.videos;
-    } else if (mode === 'reference') {
-      payload.images = images.slice(0, 5); // Flash 最大 5 张参考图
-      delete payload.first_frame;
-      delete payload.last_frame;
-      delete payload.audios;
-      delete payload.videos;
-    } else {
-      // 官方规范: text 模式不允许携带 images, first_frame, last_frame, audios, videos
-      delete payload.first_frame;
-      delete payload.last_frame;
-      delete payload.images;
-      delete payload.audios;
-      delete payload.videos;
-    }
-
-    return payload;
+    const { convertAgnesVideoRequest } = require('../converters');
+    let modelContract = null;
+    try {
+      const { resolveModelExecution } = require('../models-contract');
+      modelContract = resolveModelExecution(services.db, body.model || v.model || 'agnes_video_2_5_flash')?.model || null;
+    } catch (_) {}
+    const converted = convertAgnesVideoRequest({
+      rawInput: {
+        ...(inp || {}),
+        ...(v || {}),
+        ...(body || {}),
+        prompt: String(prompt).trim(),
+        model: body.model || v.model || 'agnes-video-2.5-flash',
+        mode: inp.genMode || v.gen_mode || body.mode || body.client_mode,
+        ratio: body.aspect_ratio || body.ratio || v.ratio || inp.ratio || '16:9',
+        seconds: body.seconds || v.duration || inp.durationSec || '5',
+      },
+      modelContract,
+    });
+    return converted.body || converted.payload;
   }
 
   /**
@@ -808,13 +727,16 @@ async function executeAdapter(services, adapter, input) {
         signal: AbortSignal.timeout(timeoutMs)
       });
     } catch (e) {
+      noteVendorOutcome(input, false, e.message || '');
       throw enrichFetchError(e, '生成服务网络请求失败');
     }
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
+      noteVendorOutcome(input, false, errText);
       throw new Error(`生成服务请求失败 HTTP ${res.status}: ${errText.slice(0, 300)}`);
     }
+    noteVendorOutcome(input, true);
 
     const data = await res.json();
     const isPngOut = Boolean(bodyObj && (bodyObj.output_format === 'png' || bodyObj.background === 'transparent' || bodyObj.layer_decomposition === true));
@@ -934,6 +856,7 @@ async function executeAdapter(services, adapter, input) {
           signal: AbortSignal.timeout(60000)
         });
       } catch (e) {
+        noteVendorOutcome(input, false, e.message || '');
         throw enrichFetchError(e, '异步任务提交网络失败');
       }
       if (submitRes.ok) {
@@ -949,6 +872,7 @@ async function executeAdapter(services, adapter, input) {
     }
 
     if (!submitRes || !submitRes.ok) {
+      noteVendorOutcome(input, false, lastErrText);
       throw new Error(`异步任务提交失败 HTTP ${submitRes?.status || 500}: ${lastErrText.slice(0, 300)}`);
     }
 
@@ -997,6 +921,7 @@ async function executeAdapter(services, adapter, input) {
 
         await downloadToFile(resultUrl, outPath, { timeoutMs: 120000 });
         const previewUrl = `/api/cache/temp/${outFileName}`;
+        noteVendorOutcome(input, true);
         return {
           ok: true,
           success: true,
@@ -1008,11 +933,13 @@ async function executeAdapter(services, adapter, input) {
 
       if (failVals.includes(status)) {
         const errMsg = getNested(pollData, cfg.errorPath || 'error') || '异步生成任务失败';
+        noteVendorOutcome(input, false, String(errMsg));
         throw new Error(String(errMsg));
       }
     }
 
     if (input.allowPendingTimeout) {
+      noteVendorOutcome(input, true);
       return {
         ok: true,
         success: true,
@@ -1022,6 +949,7 @@ async function executeAdapter(services, adapter, input) {
       };
     }
 
+    noteVendorOutcome(input, false, '异步生成超时');
     throw new Error(`异步生成超时 (${Math.round(timeoutMs/1000)}s), 任务 ID: ${taskId}`);
   }
 

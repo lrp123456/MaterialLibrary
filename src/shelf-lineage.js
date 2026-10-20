@@ -55,6 +55,13 @@ function lineageTree(db, fid) {
     WHERE (parent_fid=? OR source_asset_id=?) AND fid!=?
     ORDER BY created_at ASC
   `).all(fid, fid, fid).map((row) => ({ ...row, url: thumbUrl(row.fid) }));
+  let usedByFilms = [];
+  try {
+    usedByFilms = require('./editor-projects').filmsUsing(db, fid).map((row) => ({
+      ...row,
+      url: thumbUrl(row.fid),
+    }));
+  } catch { usedByFilms = []; }
   return {
     record: {
       thumbFid: fid,
@@ -67,12 +74,15 @@ function lineageTree(db, fid) {
       ratio: record.ratio || '',
       resolution: record.resolution || '',
       at: record.at || self.created_at || null,
-      sessionId: record.sessionId || ''
+      sessionId: record.sessionId || '',
+      projectId: record.projectId || '',
+      editUses: Array.isArray(record.editUses) ? record.editUses : []
     },
     self: { ...self, url: thumbUrl(fid) },
     parent: briefAsset(db, parentFid),
     refs: refFids.map((id) => briefAsset(db, id)),
-    children
+    children,
+    usedByFilms
   };
 }
 
@@ -219,23 +229,30 @@ async function registerGenerated(services, input = {}) {
   return { fid, deduped: false };
 }
 
-function setManualSpace(db, fid, spaceKey) {
+function setManualTag(db, fid, dimension, tagKey) {
   ensureColumns(db);
-  const key = String(spaceKey || '').trim();
+  const dim = String(dimension || '').trim();
+  const key = String(tagKey || '').trim();
+  const allowed = ['space', 'furniture_item', 'furniture_craft', 'pose', 'character', 'shot_type', 'clothing_category', 'season'];
+  if (!allowed.includes(dim)) {
+    const err = new Error('这个维度不能在详情里改');
+    err.code = 400;
+    throw err;
+  }
   const tag = db.prepare(`
     SELECT id, dir, label FROM tag_dict
-    WHERE dimension='space' AND deprecated=0 AND (dir=? OR label=?)
-  `).get(key, key);
+    WHERE dimension=? AND deprecated=0 AND (dir=? OR label=?)
+  `).get(dim, key, key);
   if (!tag) {
-    const err = new Error('空间标签不存在');
+    const err = new Error('词表里没有这项');
     err.code = 400;
     throw err;
   }
   const old = db.prepare(`
     SELECT at.tag_id FROM asset_tags at
     JOIN tag_dict t ON t.id = at.tag_id
-    WHERE at.asset_fid=? AND t.dimension='space'
-  `).all(fid);
+    WHERE at.asset_fid=? AND t.dimension=?
+  `).all(fid, dim);
   const del = db.prepare('DELETE FROM asset_tags WHERE asset_fid=? AND tag_id=?');
   for (const row of old) del.run(fid, row.tag_id);
   db.prepare(`
@@ -243,6 +260,10 @@ function setManualSpace(db, fid, spaceKey) {
     VALUES (?, ?, '', 'manual', 1, ?)
   `).run(fid, tag.id, Date.now());
   return { dir: tag.dir, label: tag.label };
+}
+
+function setManualSpace(db, fid, spaceKey) {
+  return setManualTag(db, fid, 'space', spaceKey);
 }
 
 function requeueRetag(db, fid) {
@@ -266,5 +287,6 @@ module.exports = {
   lineageTree,
   registerGenerated,
   setManualSpace,
+  setManualTag,
   requeueRetag
 };

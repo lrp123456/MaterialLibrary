@@ -88,7 +88,7 @@ const OFFICIAL_STUDIO = {
       M({
         id: 'gemma_4_26b', name: 'Gemma 4 26B', model_code: 'gemma-4-26b-a4b-it',
         provider: 'gemini', providerName: 'Google', badge: '开源视觉', capabilities: 'chat,vision',
-        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: true },
+        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, contextTokens: 262144, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: true },
       }),
       M({
         id: 'gemma_4_31b', name: 'Gemma 4 31B', model_code: 'gemma-4-31b-it',
@@ -114,7 +114,7 @@ const OFFICIAL_STUDIO = {
       M({
         id: 'doubao_seed_2_1_lite', dbId: 'volc_doubao_seed_2_1_lite', name: 'Doubao-Seed-2.1-lite', model_code: 'doubao-seed-2-1-lite-260915',
         provider: 'volcengine', providerName: '火山方舟', badge: '2.1 Lite(付费)', capabilities: 'vision,tag,chat',
-        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: false },
+        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, contextTokens: 1048576, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: false },
       }),
       M({
         id: 'doubao_seed_2_1_turbo', dbId: 'volc_doubao_seed_2_1_turbo', name: 'Doubao-Seed-2.1-turbo', model_code: 'doubao-seed-2-1-turbo-260628',
@@ -230,6 +230,27 @@ const OFFICIAL_STUDIO = {
           freeTier: true,
         },
       }),
+      M({
+        id: 'qwenimage_local',
+        name: 'Qwen-Image 2.1',
+        model_code: 'qwen2.1-image',
+        provider: 'local',
+        providerName: '本机',
+        badge: '文生图 · 可垫图',
+        capabilities: 'image',
+        dbId: 'qwenimage_local',
+        params: { ratio: true, size: ['1K', '2K'], refs: 10 },
+        caps: {
+          output: 'image',
+          input: { images: 10, videos: 0, audios: 0 },
+          region: R_DESCRIBE_ONLY,
+          multiRef: false,
+          ratioFromImage1: false,
+          refStyle: 'generic',
+          polishId: 'qwenimage_local',
+          freeTier: false,
+        },
+      }),
     ],
   },
 
@@ -318,6 +339,16 @@ const OFFICIAL_STUDIO = {
         id: 'doubao_bgm_v5', name: '豆包纯音乐 v5', model_code: 'doubao-bgm-v5',
         provider: 'volcengine', providerName: '火山方舟', badge: '纯音乐', capabilities: 'music',
         caps: { output: 'audio', input: { images: 0, videos: 0, audios: 0 }, region: R_NONE, multiRef: false, ratioFromImage1: false, refStyle: 'generic', polishId: 'doubao_bgm_v5', freeTier: false },
+      }),
+      M({
+        id: 'acestep_local', name: 'ACE-Step 1.5', model_code: 'acestep-1.5',
+        provider: 'local', providerName: '本机', badge: '本地音乐', capabilities: 'music',
+        caps: { output: 'audio', input: { images: 0, videos: 0, audios: 0 }, region: R_NONE, multiRef: false, ratioFromImage1: false, refStyle: 'generic', polishId: 'acestep_local', freeTier: false },
+      }),
+      M({
+        id: 'indextts_local', name: 'IndexTTS 2.5', model_code: 'index-tts-2.5',
+        provider: 'local', providerName: '本机', badge: '声音克隆', capabilities: 'music',
+        caps: { output: 'audio', input: { images: 0, videos: 0, audios: 2 }, region: R_NONE, multiRef: false, ratioFromImage1: false, refStyle: 'generic', polishId: 'indextts_local', freeTier: false },
       }),
     ],
   },

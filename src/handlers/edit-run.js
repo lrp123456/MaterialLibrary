@@ -371,13 +371,25 @@ ${extraPrompt ? `【用户特别要求】${extraPrompt}。\n` : ''}
     };
   }
 
-  // clarity：超分高清增强
+  // clarity：超分高清增强。正文只来自超分模板和节点勾选的积木。
   if (op === 'clarity') {
-    const finalPrompt = `【专业室内设计 · 超分画质极致增强】
-对图1室内设计实景空间进行极致超分重绘：
-1. 保持原图的构图、色彩、家具物件、光影和材质纹理 100% 严格一致；
-2. 消除画面噪点、压缩块与模糊感，极大提升微水泥、木纹、石材、织物面料的微观毛孔与纤维细节；
-3. 输出 8K 超高清商业杂志室内摄影品质。`;
+    let finalPrompt = '';
+    if (services && services.db) {
+      try {
+        const { compileNodePrompt } = require('../prompt-compiler');
+        const compiled = compileNodePrompt(services.db, {
+          mountPointId: 'precision_edit',
+          nodeType: 'edit_upscale',
+          promptId: 'upscale_enhance',
+          modelId: opts.model || 'seedream5pro',
+        });
+        if (compiled && compiled.prompt) finalPrompt = compiled.prompt;
+      } catch (_) {}
+    }
+    if (!finalPrompt) {
+      const { OFFICIAL_PROMPT_TEMPLATES } = require('../nodes/operator-catalog');
+      finalPrompt = OFFICIAL_PROMPT_TEMPLATES.upscale_enhance.template;
+    }
 
     const generated = await runAdapter(services, [sceneImageBuffer], finalPrompt, opts.model);
     return {

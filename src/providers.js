@@ -75,6 +75,16 @@ const DEFAULT_PROVIDERS = [
     secrets_json: JSON.stringify({}),
     config_json: JSON.stringify({ description: '阿里达摩院魔搭开源大模型与图生图/视频社区' }),
     enabled: 1
+  },
+  {
+    id: 'local',
+    name: '本机',
+    protocol: 'local',
+    base_url: 'http://192.168.1.107:9000',
+    api_key: '',
+    secrets_json: JSON.stringify({}),
+    config_json: JSON.stringify({ description: '局域网 Qwen-Image、IndexTTS 与 ACE-Step' }),
+    enabled: 1
   }
 ];
 
@@ -332,7 +342,13 @@ function initProvidersTables(db) {
     });
   }
 
+  const providerIds = new Set(DEFAULT_PROVIDERS.map((p) => p.id));
   for (const m of DEFAULT_MODELS) {
+    // 生图适配器（如本机 Qwen）留在官方目录，不进 llm_models。没有对应供应商时插入会撞外键，启动直接失败。
+    if (!providerIds.has(m.provider_id)) {
+      console.warn('[providers] 跳过没有供应商的目录模型', m.id, m.provider_id);
+      continue;
+    }
     insModel.run({ ...m, now });
   }
 
@@ -375,6 +391,11 @@ function initProvidersTables(db) {
     ensureQwenImageAdapter(db);
   } catch (e) {
     console.warn('[providers] qwenimage_local 适配器跳过', e.message);
+  }
+  try {
+    ensureLocalAudioAdapters(db);
+  } catch (e) {
+    console.warn('[providers] 本机语音/音乐适配器跳过', e.message);
   }
   try {
     collapseDuplicateTextModels(db);
@@ -460,6 +481,38 @@ function ensureQwenImageAdapter(db) {
     now,
     now
   );
+}
+
+function ensureLocalAudioAdapters(db) {
+  const now = Date.now();
+  const base = process.env.QWENIMAGE_API_BASE || 'http://192.168.1.107:9000';
+  const rows = [
+    {
+      id: 'indextts_local',
+      label: 'IndexTTS 2.5',
+      protocol: 'indextts_local',
+      config: { apiBase: base, timeoutMs: 600000 },
+    },
+    {
+      id: 'acestep_local',
+      label: 'ACE-Step 1.5',
+      protocol: 'acestep_local',
+      config: { apiBase: base, timeoutMs: 600000, batchSize: 1 },
+    },
+  ];
+  for (const row of rows) {
+    const hit = db.prepare('SELECT id FROM gen_adapters WHERE id=?').get(row.id);
+    if (hit) {
+      db.prepare('UPDATE gen_adapters SET base_url=?, config_json=?, protocol=?, enabled=1, updated_at=? WHERE id=?')
+        .run(base, JSON.stringify(row.config), row.protocol, now, row.id);
+      continue;
+    }
+    db.prepare(`
+      INSERT OR IGNORE INTO gen_adapters
+        (id, label, kind, builtin, protocol, base_url, secrets_json, config_json, enabled, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)
+    `).run(row.id, row.label, 'music', 1, row.protocol, base, '{}', JSON.stringify(row.config), 1, now, now);
+  }
 }
 
 /**

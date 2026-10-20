@@ -13,8 +13,8 @@ export const STUDIO_SKILLS_REGISTRY = [
     name: '空间自然采光大师',
     badge: '光影强化',
     modality: ['image', 'video', 'chat'],
-    promptSuffix: '，大师级建筑室内摄影，柔和漫反射自然光，真实物理材质高光与环境光遮蔽(AO)，8K超清细节',
-    desc: '自动注入建筑摄影级自然采光与物理材质光影约束',
+    snippetIds: ['snippet_interior_realism'],
+    desc: '提交公共积木「室内实拍真实感」，正文由服务端编译',
   },
   {
     id: 'skill_layer_decompose',
@@ -22,8 +22,7 @@ export const STUDIO_SKILLS_REGISTRY = [
     badge: '图层拆分',
     modality: ['image'],
     autoParams: { layer_decomposition: true, size: 'auto', output_format: 'png' },
-    promptSuffix: '，主体边缘清晰独立，分层结构明确，前景单品与背景空间无粘连',
-    desc: '一键开启 Seedream 5.0 图层分解 (layer_decomposition)，输出独立前景 PNG 图层与干净背景层',
+    desc: '只打开图层拆分、尺寸 auto 和 PNG，不另写提示词',
   },
   {
     id: 'skill_transparent_cutout',
@@ -31,8 +30,7 @@ export const STUDIO_SKILLS_REGISTRY = [
     badge: '透明 PNG',
     modality: ['image'],
     autoParams: { background: 'transparent', output_format: 'png' },
-    promptSuffix: '，纯净透明背景，边缘抗锯齿毛发级精抠，无杂色环境溢色',
-    desc: '针对单张参考图自动开启 transparent 透明底并强制锁定 PNG 格式输出',
+    desc: '只打开透明底并锁定 PNG，不另写提示词',
   },
   {
     id: 'skill_seedance_director',
@@ -40,8 +38,7 @@ export const STUDIO_SKILLS_REGISTRY = [
     badge: '影视运镜',
     modality: ['video'],
     autoParams: { generate_audio: true },
-    promptSuffix: '，平滑斯坦尼康推进运镜，空间纵深透视自然流转，光影随镜头位移细腻变化，同步真实空间环境声',
-    desc: '按主体+运镜+光影+声音四要素公式强化视频漫游表现',
+    desc: '只打开同步音频，不另写提示词',
   },
 ];
 
@@ -76,7 +73,7 @@ export function evaluateClientModelRules(schema, activeMode, currentParams = {},
     if (Array.isArray(mc.lock)) {
       for (const k of mc.lock) {
         lockedKeys.add(k);
-        lockReasons[k] = `当前模式「${activeMode}」已自动锁定该参数`;
+        lockReasons[k] = mc.reason || '已由模型契约锁定';
       }
     }
   }
@@ -91,12 +88,11 @@ export function evaluateClientModelRules(schema, activeMode, currentParams = {},
     if (vc.set && typeof vc.set === 'object') {
       Object.assign(nextParams, vc.set);
     }
+    const ruleReason = vc.reason || (vc.effect && vc.effect.reason) || '已由模型契约锁定';
     if (Array.isArray(vc.lock)) {
       for (const k of vc.lock) {
         lockedKeys.add(k);
-        lockReasons[k] = vc.type === 'layer_decomposition'
-          ? '开启图层拆分时，宽高比不提交，由模型按原图自动裁定'
-          : '受联动条件约束已自动锁定';
+        lockReasons[k] = ruleReason;
       }
     }
     if (vc.effect) {
@@ -104,7 +100,7 @@ export function evaluateClientModelRules(schema, activeMode, currentParams = {},
         for (const k of vc.effect.suppress) {
           suppressedKeys.add(k);
           lockedKeys.add(k);
-          lockReasons[k] = '开启图层拆分时宽高比自动隐藏/不提交';
+          lockReasons[k] = ruleReason;
         }
       }
       if (vc.effect.force && typeof vc.effect.force === 'object') {

@@ -1,7 +1,7 @@
 <template>
-  <div class="flex w-full flex-col gap-2">
+  <div class="contents">
     <!-- 1. 模式胶囊切换栏 -->
-    <div v-if="schema && Array.isArray(schema.modes) && schema.modes.length" class="flex flex-wrap items-center justify-between gap-2">
+    <div v-if="schema && Array.isArray(schema.modes) && schema.modes.length" class="flex flex-wrap items-center gap-2">
       <div class="flex flex-wrap gap-1.5">
         <button
           v-for="mode in schema.modes"
@@ -32,11 +32,11 @@
     </div>
 
     <!-- 2. 常用参数 (Common Tier) + 高级参数折叠开关 -->
-    <div v-if="effectiveCommonFields.length || effectiveAdvancedFields.length" class="flex flex-wrap items-end gap-2.5">
+    <div v-if="effectiveCommonFields.length || effectiveAdvancedFields.length" class="flex flex-wrap items-center gap-2">
       <label
         v-for="field in effectiveCommonFields"
         :key="'c-' + field.key"
-        class="flex flex-col gap-1 text-xs relative"
+        class="inline-flex items-center gap-1.5 text-xs relative"
         :title="lockReasons[field.key] || ''"
       >
         <span class="text-slate-400 font-bold flex items-center gap-1">
@@ -125,12 +125,12 @@
     <!-- 3. 高级参数展开抽屉 (Advanced Tier) -->
     <div
       v-if="showAdvanced && effectiveAdvancedFields.length"
-      class="flex flex-wrap items-end gap-2.5 p-2.5 rounded-xl bg-studio-950/70 border border-studio-800"
+      class="basis-full flex flex-wrap items-center gap-2.5 p-2.5 rounded-xl bg-studio-950/70 border border-studio-800"
     >
       <label
         v-for="field in effectiveAdvancedFields"
         :key="'a-' + field.key"
-        class="flex flex-col gap-1 text-xs"
+        class="inline-flex items-center gap-1.5 text-xs"
         :title="lockReasons[field.key] || ''"
       >
         <span class="text-slate-400 font-bold flex items-center gap-1">
@@ -193,7 +193,7 @@
     </div>
 
     <!-- 4. 条件联动提示条 -->
-    <div v-if="ruleEval.warnings.length" class="flex flex-wrap items-center gap-2 text-[11px] text-amber-300 bg-amber-950/30 border border-amber-700/40 px-2.5 py-1 rounded-lg">
+    <div v-if="ruleEval.warnings.length" class="basis-full flex flex-wrap items-center gap-2 text-[11px] text-amber-200 bg-amber-950/40 border border-amber-700/40 px-2.5 py-1 rounded-lg">
       <span>⚠️ 契约联动提示：</span>
       <span v-for="(w, i) in ruleEval.warnings" :key="i">{{ w }}</span>
     </div>

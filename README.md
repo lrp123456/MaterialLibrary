@@ -55,8 +55,8 @@ start.sh fg        # 前台调试（无自动重启）
 
 ```text
 http://127.0.0.1:30001/                    → 200 管理台
-POST /api/viewer/auth/login viewer/
-POST /api/auth/login 504391119/
+POST /api/viewer/auth/login <账号>/<口令>
+POST /api/auth/login <账号>/<口令>
 ```
 
 ## 停止

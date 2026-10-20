@@ -109,18 +109,32 @@ async function readLocalAssetImage(services, fid, derivativeId) {
   return null;
 }
 
+function cacheTempFile(config, raw) {
+  const m = String(raw || '').match(/\/api\/cache\/temp\/([^/?#]+)/);
+  if (!m || !config?.dataDir) return '';
+  const name = path.basename(decodeURIComponent(m[1]));
+  if (!name || name === '.' || name === '..') return '';
+  return path.join(config.dataDir, 'cache', 'temp', name);
+}
+
 async function resolveAssetBuffer(services, raw) {
   if (!raw) return null;
   const s = String(raw).trim();
-  if (s.startsWith('data:image/')) {
-    const parts = s.split(',');
-    return Buffer.from(parts[1], 'base64');
+  if (s.startsWith('data:image/') || s.startsWith('data:audio/') || s.startsWith('data:video/')) {
+    const comma = s.indexOf(',');
+    if (comma < 0) return null;
+    return Buffer.from(s.slice(comma + 1), 'base64');
   }
   if (fs.existsSync(s) && fs.statSync(s).isFile()) {
     return fs.readFileSync(s);
   }
-  const db = services.db;
   const config = services.config;
+  const cached = cacheTempFile(config, s);
+  if (cached && fs.existsSync(cached) && fs.statSync(cached).isFile()) {
+    return fs.readFileSync(cached);
+  }
+  const db = services.db;
+  if (!db) return null;
   const asset = db.prepare('SELECT * FROM assets WHERE fid=?').get(s);
   if (asset) {
     const local = await readLocalAssetImage(services, s, '');

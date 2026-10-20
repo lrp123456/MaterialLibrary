@@ -9,6 +9,8 @@ const path = require('path');
 
 const PORT = Number(process.env.WEB_PRO_PORT || process.argv[2] || 30002);
 const API_TARGET = process.env.API_TARGET || 'http://127.0.0.1:30001';
+// 剪辑子应用（fork 自 OpenCut Classic），Next.js 以 basePath=/editor 启动。
+const EDITOR_TARGET = process.env.EDITOR_TARGET || 'http://127.0.0.1:3000';
 const DIST_DIR = path.resolve(__dirname, 'dist');
 
 const MIME = {
@@ -29,9 +31,9 @@ const MIME = {
   '.gltf': 'model/gltf+json',
 };
 
-// 代理 /api 请求至 30001 后端
-function proxyRequest(req, res) {
-  const targetUrl = new URL(req.url, API_TARGET);
+// 代理请求至指定后端（默认 30001）
+function proxyRequest(req, res, target = API_TARGET) {
+  const targetUrl = new URL(req.url, target);
   const options = {
     hostname: targetUrl.hostname,
     port: targetUrl.port || (targetUrl.protocol === 'https:' ? 443 : 80),
@@ -52,7 +54,7 @@ function proxyRequest(req, res) {
     console.error('[proxy error]', err.message);
     if (!res.headersSent) {
       res.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ error: `后端服务不可达 (${API_TARGET}): ${err.message}` }));
+      res.end(JSON.stringify({ error: `后端服务不可达 (${target}): ${err.message}` }));
     }
   });
 
@@ -63,9 +65,21 @@ const server = http.createServer((req, res) => {
   const urlObj = new URL(req.url, 'http://127.0.0.1');
   const pathname = urlObj.pathname;
 
-  // 1. /api 路由代理到 30001
-  if (pathname.startsWith('/api/') || pathname === '/api') {
+  // 1. /api 与 /editor-api 路由代理到 30001
+  //    剪辑工程的读写、导出帧上传、ffmpeg 合成全在 /editor-api 下；
+  //    只代理 /api 会让这些请求落到 SPA fallback，返回 index.html。
+  if (
+    pathname.startsWith('/api/') || pathname === '/api' ||
+    pathname.startsWith('/editor-api/') || pathname === '/editor-api'
+  ) {
     return proxyRequest(req, res);
+  }
+
+  // 1b. 剪辑子应用：/editor、/editor/* 代理到 Next（basePath=/editor）。
+  //     必须精确匹配 '/editor' 或 '/editor/' 前缀 —— 写成 startsWith('/editor')
+  //     会把上面的 /editor-api 一起吞掉，导致工程读写全挂。
+  if (pathname === '/editor' || pathname.startsWith('/editor/')) {
+    return proxyRequest(req, res, EDITOR_TARGET);
   }
 
   // 2. 静态资源托管

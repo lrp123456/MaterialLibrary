@@ -195,7 +195,7 @@ function addBlacklist(db, entries, { reason = 'user_delete', createdBy = '' } = 
  *        不传则由 deletedBy 推断。判定原文（AI 闸门/网关的理由）会一并存进回收站，
  *        供客户端展示「为何进入回收站」。
  */
-function softDeleteAsset(services, fid, { deletedBy = '', reason = 'user_delete', disposeSource = '', disposeDetail = '' } = {}) {
+function softDeleteAsset(services, fid, { deletedBy = '', reason = 'user_delete', disposeSource = '', disposeDetail = '', allowReferenced = false } = {}) {
   const { db, config, logger } = services;
   ensureTables(db);
   const asset = db.prepare('SELECT fid, file_name, size, sha256, client_asset_id, status, error_note, reject_reason, reject_detail FROM assets WHERE fid=?').get(fid);
@@ -204,6 +204,28 @@ function softDeleteAsset(services, fid, { deletedBy = '', reason = 'user_delete'
     err.code = 'not_found';
     throw err;
   }
+
+  // 被云端剪辑工程引用的素材不能直接删：删了之后别的机器拉下来就是黑块。
+  // 调用方需先解除引用（或显式传 allowReferenced 走强制删除）。
+  if (!allowReferenced) {
+    try {
+      const { assetsUsedByProjects } = require('./clip-snapshots');
+      const used = assetsUsedByProjects(db, fid);
+      if (used.length) {
+        const err = new Error(
+          `素材被 ${used.length} 个剪辑工程引用：${used.slice(0, 3).map((x) => x.name).join('、')}${used.length > 3 ? ' 等' : ''}`,
+        );
+        err.status = 409;
+        err.code = 'referenced_by_clip_projects';
+        err.usedBy = used;
+        throw err;
+      }
+    } catch (e) {
+      if (e && e.status === 409) throw e;
+      // 剪辑表还没建（未启用剪辑板块）时不应阻断正常删除。
+    }
+  }
+
   if (asset.status === 'deleted') {
     return { fid, alreadyDeleted: true };
   }

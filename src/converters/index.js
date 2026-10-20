@@ -188,7 +188,7 @@ function convertArkSeedreamRequest({
   });
 
   let promptText = compiled.prompt;
-  if (!promptText) {
+  if (!promptText && !rawInput.allowEmptyPrompt) {
     throw new Error('[火山方舟 Seedream] prompt 为必填参数且不能为空');
   }
   if (isFlashOrPro5) {
@@ -718,6 +718,30 @@ function inferConverterType(modelContract, fallbackId = '') {
   return 'openai-chat';
 }
 
+/**
+ * 发出前的唯一熔断选择。契约上的 failover_model_id 是唯一备选声明。
+ * 主模型可以执行时原样返回。打开后只换一次备选契约，由调用方用同一份标准词再编译。
+ */
+function selectSubmitContract(contract, loadContract) {
+  if (!contract || !contract.id) return { contract, switched: false };
+  if (globalCircuitBreaker.canExecute(contract.id)) {
+    return { contract, switched: false };
+  }
+  const backupId = String(contract.failover_model_id || '').trim();
+  if (!backupId) {
+    const err = new Error(`模型 ${contract.id} 连续失败已熔断，没有备选模型`);
+    err.code = 'circuit_open';
+    throw err;
+  }
+  const backup = typeof loadContract === 'function' ? loadContract(backupId) : null;
+  if (!backup || !backup.id) {
+    const err = new Error(`模型 ${contract.id} 已熔断，备选 ${backupId} 不存在`);
+    err.code = 'circuit_open';
+    throw err;
+  }
+  return { contract: backup, switched: true, fromId: contract.id };
+}
+
 function previewUnifiedConversion(arg = {}) {
   const modelContract = arg.modelContract || arg.contract || null;
   const rawInput = arg.rawInput || arg.canonicalInput || {};
@@ -766,6 +790,7 @@ module.exports = {
   globalCircuitBreaker,
   CONVERTER_SPECS,
   inferConverterType,
+  selectSubmitContract,
   convertArkSeedreamRequest,
   normalizeArkSeedreamResponse,
   convertAgnesImageRequest,

@@ -1,11 +1,19 @@
+import os
 import urllib.request
 import json
 import urllib.parse
 
 # 1. Login
+# 账号与口令从环境变量读取：本文件会进版本库，不写死任何真实凭据。
+# 用法：set ML_USER=<账号> & set ML_PASSWORD=<口令> && python scripts/verify-api.py
+USERNAME = os.environ.get('ML_USER', '')
+PASSWORD = os.environ.get('ML_PASSWORD', '')
+if not USERNAME:
+    raise SystemExit('请先设置环境变量 ML_USER（本地登录账号），口令可用 ML_PASSWORD（无口令后端留空）')
+
 req = urllib.request.Request(
     'http://127.0.0.1:30001/api/auth/login',
-    data=json.dumps({'username': '504391119', 'password': ''}).encode('utf-8'),
+    data=json.dumps({'username': USERNAME, 'password': PASSWORD}).encode('utf-8'),
     headers={'Content-Type': 'application/json'}
 )
 resp = urllib.request.urlopen(req)

@@ -11,9 +11,8 @@ function pickAdapterId(kind, modelCode, adapters) {
     return hit ? hit.id : null;
   };
 
-  // 本地 Qwen 生图在 8003。9000 只是 GPU 控制台。
-  // 以后的本地音频再按 kind==='music' 另加分支，这一轮不建模型。
-  if (code.includes('qwenimage') || code === 'qwenimage_local') {
+  // 目录 model_code 是 qwen2.1-image，必须在 /-image$/ 的 Gemini 规则之前命中。
+  if (code.includes('qwen')) {
     return findId((a) => a.id === 'qwenimage_local' || String(a.protocol || '') === 'qwenimage_local' || String(a.id).includes('qwenimage'));
   }
   if (code.includes('lyria')) {
@@ -54,6 +53,12 @@ function pickAdapterId(kind, modelCode, adapters) {
   //   ARK 当前并无 music/audio 域（见 PLAN.md Q1），所以这里宁可返回 null，
   //   让调用方抛出「未找到就绪的音乐适配器」，也不要回落到图像/视频适配器。
   if (kind === 'music') {
+    if (code.includes('indextts') || code.includes('index-tts') || code.includes('index_tts')) {
+      return findId((a) => a.id === 'indextts_local' || String(a.protocol || '') === 'indextts_local');
+    }
+    if (code.includes('acestep') || code.includes('ace-step') || code.includes('ace_step')) {
+      return findId((a) => a.id === 'acestep_local' || String(a.protocol || '') === 'acestep_local');
+    }
     // ARK 系音乐（豆包歌曲/BGM）必须有专属 music 适配器；没有就返回 null，
     // 不允许借用 gemini_lyria —— 那等于把豆包的提示词发到 Google 端点。
     if (code.includes('doubao') || code.includes('ark') || code.includes('song') || code.includes('bgm')) {

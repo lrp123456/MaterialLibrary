@@ -2,8 +2,12 @@
  * Lab HTTP smoke：登录 admin → GET /lab/capabilities → 校验结构
  */
 const BASE = process.env.ML_BASE || 'http://127.0.0.1:30001';
-const USER = process.env.ML_USER || '504391119';
+const USER = process.env.ML_USER;
 const PASS = process.env.ML_PASS || '';
+if (!USER) {
+  console.error('请先设置环境变量 ML_USER（登录账号）');
+  process.exit(1);
+}
 
 async function main() {
   const loginRes = await fetch(`${BASE}/api/auth/login`, {

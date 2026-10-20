@@ -10,7 +10,7 @@
           <h2 class="text-sm font-extrabold text-white flex items-center gap-2">
             常用媒体工具箱
             <span class="px-2 py-0.5 rounded text-[11px] bg-studio-cyan/15 text-studio-cyan font-mono font-bold border border-studio-cyan/30">
-              WebCodecs 逐帧读取 + FFmpeg 工具箱
+              视频元素寻帧 + 画布
             </span>
           </h2>
         </div>
@@ -47,7 +47,7 @@
             <span class="text-lg">🎞️</span>
             <div>
               <h3 class="text-sm font-extrabold text-white">
-                WebCodecs Video Frame Reader · 逐帧精准解码与提取
+                视频元素寻帧，再画到画布
               </h3>
               <p class="text-xs text-slate-400">
                 支持键盘左右方向键（← / →）单帧极速步进，本地毫秒级画面响应，超高准确度截取
@@ -56,11 +56,8 @@
           </div>
 
           <div class="flex items-center space-x-2">
-            <span class="px-2 py-1 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-xs font-mono font-bold">
-              FastSeek 0ms 优化 ✓
-            </span>
             <span class="px-2 py-1 rounded bg-studio-cyan/10 text-studio-cyan border border-studio-cyan/30 text-xs font-mono font-bold">
-              WebCodecs Ready ✓
+              视频元素寻帧
             </span>
             <button
               @click="triggerVideoInput"
@@ -173,7 +170,7 @@
                 </div>
                 <div class="flex justify-between py-1">
                   <span class="text-slate-400">解码策略:</span>
-                  <span class="text-emerald-400 font-bold">本地内存加速 FastSeek</span>
+                  <span class="text-emerald-400 font-bold">视频元素寻帧</span>
                 </div>
               </div>
             </div>
@@ -729,7 +726,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import StudioIcon from '../../components/StudioIcon.vue';
 
 const toolTabs = [
-  { key: 'frames', label: 'WebCodecs 逐帧读取与抽帧', icon: '🎬' },
+  { key: 'frames', label: '视频元素寻帧', icon: '🎬' },
   { key: 'convert', label: '格式转换/音频提取', icon: '🔄' },
   { key: 'compress', label: '视频智能压缩', icon: '🗜️' }
 ];

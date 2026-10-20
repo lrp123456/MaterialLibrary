@@ -297,7 +297,9 @@ const DEFAULT_ENDPOINTS = [
     credentials: [],
     enabled: 1,
     capabilities: [
-      { id: 'qwenimage_local', name: '本机 Qwen2.1-Image', kind: 'image', type: 'path', path: '/api/qw/generate', poll_path: '/api/qw/tasks/{{taskId}}', method: 'POST' },
+      { id: 'qwenimage_local', name: '本机 Qwen-Image 2.1', kind: 'image', type: 'path', path: '/api/qw/generate', poll_path: '/api/qw/tasks/{{taskId}}', method: 'POST' },
+      { id: 'indextts_local', name: 'IndexTTS 2.5', kind: 'music', type: 'path', path: '/api/voice/tts', poll_path: '/api/voice/tasks/{{taskId}}', method: 'POST' },
+      { id: 'acestep_local', name: 'ACE-Step 1.5', kind: 'music', type: 'path', path: '/api/music/release_task', poll_path: '/api/music/query_result', method: 'POST' },
     ]
   },
   {
@@ -878,11 +880,22 @@ const DEFAULT_MODEL_CONTRACTS = [
   },
   {
     id: 'qwenimage_local',
-    name: '本地 Qwen2.1-Image',
+    name: 'Qwen-Image 2.1',
     vendor_model_id: 'qwen2.1-image',
     capability_id: 'qwenimage_local',
     enabled: 1,
     params: [
+      {
+        key: 'qwen_model',
+        label: '模型',
+        type: 'enum',
+        default: 'base',
+        options: ['base', 'turbo'],
+        option_labels: { base: '标准', turbo: '加速 8 步' },
+        visibility: 'public',
+        location: 'body',
+        body_field: 'qwen_model'
+      },
       {
         key: 'size',
         label: '尺寸档',
@@ -902,6 +915,11 @@ const DEFAULT_MODEL_CONTRACTS = [
         location: 'table',
       }
     ],
+    modes: [
+      { id: 'text_to_image', label: '文生图' },
+      { id: 'image_to_image', label: '图像编辑' },
+    ],
+    slots: { images: 10, videos: 0, audios: 0 },
     table_mappings: {
       size_ratio: QWEN_SIZE_TABLE
     },
@@ -911,6 +929,84 @@ const DEFAULT_MODEL_CONTRACTS = [
       optimizer_model_id: 'agnes3_0flash',
       prompt: ''
     }
+  },
+  {
+    id: 'indextts_local',
+    name: 'IndexTTS 2.5',
+    vendor_model_id: 'index-tts-2.5',
+    capability_id: 'indextts_local',
+    enabled: 1,
+    params: [
+      {
+        key: 'lang',
+        label: '语言',
+        type: 'enum',
+        default: 'ZH',
+        options: ['ZH', 'EN', 'JA', 'ES', 'AR'],
+        option_labels: { ZH: '中文', EN: '英文', JA: '日文', ES: '西班牙文', AR: '阿拉伯文' },
+        visibility: 'public',
+        location: 'body',
+        body_field: 'lang'
+      },
+      {
+        key: 'duration_factor',
+        label: '语速',
+        type: 'number',
+        default: 1,
+        min: 0.5,
+        max: 2,
+        step: 0.1,
+        visibility: 'public',
+        location: 'body',
+        body_field: 'duration_factor'
+      }
+    ],
+    modes: [{ id: 'voice_clone', label: '声音克隆' }],
+    slots: { images: 0, videos: 0, audios: 2 },
+    table_mappings: {},
+    conditional_rules: [],
+    mutex_groups: [],
+    optimizer: { optimizer_model_id: 'agnes3_0flash', prompt: '' }
+  },
+  {
+    id: 'acestep_local',
+    name: 'ACE-Step 1.5',
+    vendor_model_id: 'acestep-1.5',
+    capability_id: 'acestep_local',
+    enabled: 1,
+    params: [
+      {
+        key: 'duration',
+        label: '时长',
+        type: 'number',
+        default: 30,
+        min: 10,
+        max: 240,
+        visibility: 'public',
+        location: 'body',
+        body_field: 'audio_duration'
+      },
+      {
+        key: 'batch_size',
+        label: '数量',
+        type: 'number',
+        default: 1,
+        min: 1,
+        max: 4,
+        visibility: 'advanced',
+        location: 'body',
+        body_field: 'batch_size'
+      }
+    ],
+    modes: [
+      { id: 'text_to_bgm', label: '纯音乐' },
+      { id: 'text_to_song', label: '人声歌曲' },
+    ],
+    slots: { images: 0, videos: 0, audios: 0 },
+    table_mappings: {},
+    conditional_rules: [],
+    mutex_groups: [],
+    optimizer: { optimizer_model_id: 'agnes3_0flash', prompt: '' }
   },
   ...LITELLM_TEXT_CONTRACTS,
 ];
@@ -2037,6 +2133,13 @@ function seedStoredContract(db, insContract, mc, now) {
     return;
   }
 
+  if (mc.id === 'qwenimage_local' && Array.isArray(params) && !params.some((p) => p && p.key === 'qwen_model')) {
+    const extra = (mc.params || []).filter((p) => p && p.key === 'qwen_model');
+    params = params.concat(extra);
+    db.prepare('UPDATE model_contracts SET name=?, params_json=?, updated_at=? WHERE id=?')
+      .run(mc.name, JSON.stringify(params), now, mc.id);
+  }
+
   if (optChanged) {
     db.prepare(`
       UPDATE model_contracts
@@ -2203,6 +2306,8 @@ function resolveModelExecution(db, modelIdOrCode) {
     else if (/song/i.test(canonicalId) || /song/i.test(modelCode)) capId = 'doubao_music_song';
     else if (/agnes.*image/i.test(canonicalId) || /agnes-image/i.test(modelCode)) capId = 'agnes_image';
     else if (/agnes.*video/i.test(canonicalId) || /agnes-video/i.test(modelCode)) capId = 'agnes_video';
+    else if (/indextts|index-tts/i.test(canonicalId) || /indextts|index-tts/i.test(modelCode)) capId = 'indextts_local';
+    else if (/acestep|ace-step/i.test(canonicalId) || /acestep|ace-step/i.test(modelCode)) capId = 'acestep_local';
     else if (/qwen/i.test(canonicalId) || /qwen/i.test(modelCode)) capId = 'qwenimage_local';
     else if (/portrait/i.test(canonicalId)) capId = 'portrait_group';
     else {
@@ -2237,12 +2342,28 @@ function resolveModelExecution(db, modelIdOrCode) {
 
   const auth = resolveEndpointAuth(db, endpoint);
 
+  const parseStored = (raw, fallback) => {
+    if (raw == null || raw === '') return fallback;
+    if (typeof raw === 'string') {
+      try { return JSON.parse(raw); } catch (_) { return fallback; }
+    }
+    return raw;
+  };
+  const seeded = DEFAULT_MODEL_CONTRACTS.find((m) => m.id === canonicalId) || {};
+  const dialect = parseStored(contract?.dialect_json, null)
+    || (contract?.dialect && typeof contract.dialect === 'object' ? contract.dialect : null)
+    || defaultDialectForModel(canonicalId);
+
   return {
     model: {
       id: canonicalId,
       name: contract?.name || hit?.model?.name || canonicalId,
       vendor_model_id: contract?.vendor_model_id || modelCode,
       capability_id: capability.id,
+      converter: contract?.converter || seeded.converter || '',
+      failover_model_id: contract?.failover_model_id || seeded.failover_model_id || '',
+      modes: parseStored(contract?.modes_json, contract?.modes || seeded.modes || []),
+      dialect,
       enabled: contract ? (contract.enabled !== 0 && contract.enabled !== false) : true,
       params: contract?.params_json ? (typeof contract.params_json === 'string' ? JSON.parse(contract.params_json) : contract.params_json) : (contract?.params || []),
       table_mappings: contract?.table_mappings_json ? (typeof contract.table_mappings_json === 'string' ? JSON.parse(contract.table_mappings_json) : contract.table_mappings_json) : (contract?.table_mappings || {}),
@@ -2274,6 +2395,17 @@ function resolveModelExecution(db, modelIdOrCode) {
  * 4. 写请求体：直接字段、换算表、条件改交法。
  * 5. 若厂商优化参数开着，带上 optimize_prompt_options。
  */
+function isArkSeedreamContract(contract) {
+  if (!contract) return false;
+  if (contract.converter === 'ark-seedream') return true;
+  const id = String(contract.id || '');
+  const vendor = String(contract.vendor_model_id || '');
+  return id === 'seedream5flash' || id === 'seedream5pro' || id === 'seedream5lite'
+    || /seedream/i.test(id)
+    || /seedream-5-0-(flash|pro)/i.test(vendor)
+    || /seedream/i.test(vendor);
+}
+
 function assembleModelPayload({
   modelContract,
   values = {},
@@ -2282,6 +2414,8 @@ function assembleModelPayload({
   image = null,
   images = [],
   nodeOverrides = {},
+  db = null,
+  snippetIds = null,
 }) {
   const contract = modelContract || {};
   const params = contract.params || [];
@@ -2350,45 +2484,43 @@ function assembleModelPayload({
     throw new Error(`[${contract.name || 'Seedream 5.0 Flash'}] 透明背景必须且仅支持传入单张参考图`);
   }
 
+  if (db && Array.isArray(snippetIds) && snippetIds.length) {
+    const compiledSnippets = compileNodePrompt(db, {
+      promptTemplate: promptText,
+      snippetIds,
+      modelId: contract.id || contract.vendor_model_id || '',
+    });
+    if (compiledSnippets && compiledSnippets.prompt) promptText = compiledSnippets.prompt;
+  }
+
+  // 4. Seedream 的尺寸、拆层、透明底只交给契约转换器，这里不再保留第二张换算表。
+  if (isArkSeedreamContract(contract)) {
+    const { convertArkSeedreamRequest } = require('./converters');
+    const converted = convertArkSeedreamRequest({
+      rawInput: {
+        prompt: promptText,
+        allowEmptyPrompt: true,
+        model: contract.vendor_model_id || contract.id,
+        values: { ...mergedValues, ...forcedValues },
+        images: allRefs,
+        mode: mergedValues.mode,
+      },
+      modelContract: contract,
+      sizeTable: (tableMappings && tableMappings.size_ratio) || null,
+    });
+    return {
+      prompt: converted.prompt || promptText,
+      body: converted.body,
+    };
+  }
+
   // 4. 写请求体
   const body = {
     model: contract.vendor_model_id,
     prompt: promptText,
   };
 
-  // 处理换算表 (如 Seedream 5.0 Flash / Pro 的 尺寸档 + 宽高比 -> size=宽x高)
-  const isSeedreamFlashOrPro = contract.id === 'seedream5flash' || contract.id === 'seedream5pro' ||
-    contract.vendor_model_id === 'doubao-seedream-5-0-flash-260915' || contract.vendor_model_id === 'doubao-seedream-5-0-pro-260628';
-  const isLayerDecomp = Boolean(mergedValues.layer_decomposition);
-
-  if (isSeedreamFlashOrPro) {
-    if (isLayerDecomp) {
-      // 图层拆分打开：宽高比不提交，工坊不给填。尺寸档改交请求体 size，可选 1K、1.5K、2K、auto，默认 auto。不再查换算表。
-      const allowedDecompSizes = ['1K', '1.5K', '2K', 'auto'];
-      const passedSize = String(mergedValues.size || mergedValues.layer_size || '').trim();
-      if (passedSize) {
-        if (!allowedDecompSizes.includes(passedSize)) {
-          throw new Error(`[Seedream 5.0 Flash] 图层分解 size 仅支持 1K, 1.5K, 2K, auto，收到: ${passedSize}`);
-        }
-        body.size = passedSize;
-      } else {
-        body.size = 'auto';
-      }
-      body.ratio = undefined;
-    } else {
-      // 关掉后：查换算表
-      const sizePreset = mergedValues.size || '2K';
-      const ratio = mergedValues.ratio || '1:1';
-      const tableKey = `${sizePreset}_${ratio}`;
-      const sizeTable = (tableMappings && tableMappings.size_ratio) || SEEDREAM_FLASH_SIZE_TABLE;
-      const mappedSize = sizeTable[tableKey];
-      if (!mappedSize) {
-        throw new Error(`[Seedream 5.0 Flash] 不支持的尺寸与宽高比组合: ${sizePreset} ${ratio}，表里没有的组合不给选`);
-      }
-      body.size = mappedSize;
-      body.ratio = undefined;
-    }
-  } else if (contract.id === 'qwenimage_local') {
+  if (contract.id === 'qwenimage_local') {
     const sizePreset = mergedValues.size || '1K';
     const ratio = mergedValues.ratio || '1:1';
     const tableKey = `${sizePreset}_${ratio}`;
@@ -2558,6 +2690,7 @@ function getModelPublicCatalog(db) {
         name: m.name,
         kind: d,
         badge: m.badge || '',
+        contextTokens: Number(m.caps?.contextTokens) > 0 ? Number(m.caps.contextTokens) : null,
         common_controls: commonControls,
         public_params: publicParams,
       };
@@ -2609,7 +2742,7 @@ function buildSchemaForContract(c) {
   const submitMap = {};
 
   for (const p of rawParams) {
-    if (!p || !p.key || p.key === 'mode') continue;
+    if (!p || !p.key || p.key === 'mode' || p.key === 'omni_reference_task_type') continue;
     let uiKey = p.key;
     if (p.key === 'seconds' || p.key === 'Duration') {
       uiKey = 'duration';
@@ -2644,7 +2777,8 @@ function buildSchemaForContract(c) {
     }
     if (p.min !== undefined) fieldObj.min = p.min;
     if (p.max !== undefined) fieldObj.max = p.max;
-    if (uiType === 'range') fieldObj.step = p.step || (uiKey === 'duration' && (p.min >= 30) ? 10 : 1);
+    if (p.step !== undefined) fieldObj.step = p.step;
+    else if (uiType === 'range') fieldObj.step = (uiKey === 'duration' && (p.min >= 30) ? 10 : 1);
     if (Array.isArray(p.extra_stops) && p.extra_stops.length) fieldObj.extraStops = p.extra_stops;
     const labels = p.option_labels || p.extra_labels || p.labels;
     if (labels && Object.keys(labels).length) fieldObj.labels = labels;
@@ -2686,6 +2820,7 @@ function buildSchemaForContract(c) {
       modeConstraints[r.when.mode] = {
         set: r.set || (r.effect && r.effect.force) || {},
         lock: r.lock || (r.effect && r.effect.suppress) || [],
+        reason: r.reason || (r.effect && r.effect.reason) || '',
       };
     } else {
       const entries = Object.entries(r.when);
@@ -2698,6 +2833,7 @@ function buildSchemaForContract(c) {
           set: r.set || (r.effect && r.effect.force) || {},
           lock: r.lock || (r.effect && r.effect.suppress) || [],
           effect: r.effect || null,
+          reason: r.reason || (r.effect && r.effect.reason) || '',
         });
       }
     }
@@ -4012,6 +4148,46 @@ function deleteMountModule(db, id) {
   return true;
 }
 
+/**
+ * 工坊、试验场、/gen 共用的一次编译。
+ * 先按契约 failover_model_id 决定用哪一份契约，再用同一份标准词编译报文。
+ */
+function prepareGovernedSubmit({
+  db = null,
+  modelId = '',
+  editablePrompt = '',
+  optimizedPrompt = null,
+  values = {},
+  images = [],
+  snippetIds = null,
+} = {}) {
+  let contract = null;
+  if (modelId) {
+    const exec = resolveModelExecution(db, modelId);
+    contract = exec?.model || null;
+  }
+  if (contract && contract.id) {
+    const { selectSubmitContract } = require('./converters');
+    const picked = selectSubmitContract(contract, (id) => {
+      const next = resolveModelExecution(db, id);
+      return next?.model || null;
+    });
+    contract = picked.contract;
+  }
+  if (!contract) return { contract: null, assembled: null };
+  const assembled = assembleModelPayload({
+    modelContract: contract,
+    editablePrompt,
+    optimizedPrompt,
+    values,
+    images,
+    image: Array.isArray(images) ? (images[0] || null) : null,
+    db,
+    snippetIds,
+  });
+  return { contract, assembled };
+}
+
 function reorderMountModules(db, mountPointId, orderedIds) {
   if (!db || !mountPointId || !Array.isArray(orderedIds)) return [];
   const stmt = db.prepare('UPDATE workflow_modules SET order_num=?, updated_at=? WHERE id=? AND mount_point_id=?');
@@ -4045,6 +4221,7 @@ module.exports = {
   resolveModelExecution,
   resolveEndpointAuth,
   assembleModelPayload,
+  prepareGovernedSubmit,
   pickRoundRobin,
   getModelPublicCatalog,
   getWorkflowsDocument,

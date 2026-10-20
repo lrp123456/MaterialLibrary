@@ -21,12 +21,18 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const sharp = require('sharp');
+const { lanFetch } = require('./lan-fetch');
 
-/** 只在发给 Qwen 时把边长收到最近的 32 倍数。0 表示调用方没给尺寸。 */
-function snapMultipleOf32(n) {
+/** 文生图对齐 16，带参考图的编辑对齐 32。0 表示调用方没给尺寸。 */
+function snapMultiple(n, multiple) {
   const v = Math.round(Number(n));
+  const step = multiple === 16 ? 16 : 32;
   if (!Number.isFinite(v) || v <= 0) return 0;
-  return Math.max(32, Math.round(v / 32) * 32);
+  return Math.max(step, Math.round(v / step) * step);
+}
+
+function snapMultipleOf32(n) {
+  return snapMultiple(n, 32);
 }
 
 function qwenRoutes(baseUrl) {
@@ -52,19 +58,24 @@ async function imageFileToBase64(filePath) {
  * 提交生成任务。
  * @returns {{task_id:string}}
  */
-async function submitJob({ baseUrl, prompt, negative, width, height, steps, cfg, seed, refs, timeoutMs, logger }) {
+async function submitJob({ baseUrl, prompt, negative, width, height, steps, cfg, seed, refs, model, timeoutMs, logger }) {
   const form = new FormData();
+  const qwenModel = model === 'turbo' ? 'turbo' : 'base';
+  const attached = (refs || []).filter(Boolean).slice(0, 10);
   form.append('prompt', String(prompt || ''));
-  if (negative) form.append('negative', String(negative));
-  const snappedW = snapMultipleOf32(width);
-  const snappedH = snapMultipleOf32(height);
+  const cfgNum = cfg == null ? 1 : Number(cfg);
+  if (negative && cfgNum > 1) form.append('negative', String(negative));
+  const snappedW = snapMultiple(width, attached.length ? 32 : 16);
+  const snappedH = snapMultiple(height, attached.length ? 32 : 16);
   if (snappedW) form.append('width', String(snappedW));
   if (snappedH) form.append('height', String(snappedH));
-  if (steps) form.append('steps', String(steps));
+  const stepNum = qwenModel === 'turbo' ? 8 : steps;
+  if (stepNum) form.append('steps', String(stepNum));
   if (cfg != null) form.append('cfg', String(cfg));
-  if (seed != null) form.append('seed', String(seed));
+  if (seed != null && Number(seed) !== -1) form.append('seed', String(seed));
   form.append('batch', '1');
-  for (const r of (refs || [])) {
+  form.append('model', qwenModel);
+  for (const r of attached) {
     if (!r) continue;
     if (Buffer.isBuffer(r)) {
       form.append('refs', new Blob([r], { type: 'image/jpeg' }), 'ref.jpg');
@@ -79,7 +90,7 @@ async function submitJob({ baseUrl, prompt, negative, width, height, steps, cfg,
   }
 
   const url = qwenRoutes(baseUrl).submit;
-  const res = await fetch(url, {
+  const res = await lanFetch(url, {
     method: 'POST',
     body: form,
     signal: AbortSignal.timeout(Math.min(timeoutMs || 60000, 120000)),
@@ -94,7 +105,7 @@ async function submitJob({ baseUrl, prompt, negative, width, height, steps, cfg,
 /** 查询任务状态 */
 async function fetchTask(baseUrl, taskId, timeoutMs = 30000) {
   const url = qwenRoutes(baseUrl).task(taskId);
-  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+  const res = await lanFetch(url, { signal: AbortSignal.timeout(timeoutMs) });
   if (!res.ok) {
     const txt = await res.text().catch(() => '');
     throw new Error(`QwenImage 查询失败 HTTP ${res.status}: ${txt.slice(0, 200)}`);
@@ -109,7 +120,7 @@ async function downloadOutputs({ productBase, outputs, destDir, prefix, logger }
   for (const name of (outputs || [])) {
     if (!name) continue;
     const url = `${String(productBase).replace(/\/$/, '')}/product/qw/${encodeURIComponent(name)}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(120000) });
+    const res = await lanFetch(url, { signal: AbortSignal.timeout(120000) });
     if (!res.ok) {
       logger?.warn?.(`[qwenimage] 产物下载失败 ${name}: HTTP ${res.status}`);
       continue;
@@ -160,28 +171,34 @@ async function runImageJob(services, adapter, input) {
     }
   }
 
+  const extras = input.extras || {};
   const seed = cfg.fixedSeed != null
     ? Number(cfg.fixedSeed)
-    : (input.seed != null ? Number(input.seed) : Math.floor(Math.random() * 2147483647));
+    : (input.seed != null ? Number(input.seed) : (extras.seed != null ? Number(extras.seed) : Math.floor(Math.random() * 2147483647)));
+  const qwenModel = extras.qwen_model === 'turbo' || extras.model === 'turbo' ? 'turbo' : 'base';
 
   let submitted;
   try {
     submitted = await submitJob({
       baseUrl,
       prompt: input.prompt,
-      negative: input.negativePrompt || cfg.negative || '',
-      width: input.width,
-      height: input.height,
+      negative: input.negativePrompt || extras.negative || cfg.negative || '',
+      width: input.width || extras.width,
+      height: input.height || extras.height,
       steps: Number(cfg.steps || 20),
       cfg: Number(cfg.cfgScale != null ? cfg.cfgScale : 1.0),
       seed,
       refs,
+      model: qwenModel,
       timeoutMs,
       logger,
     });
   } catch (e) {
     logger?.warn?.(`[qwenimage] 提交异常: ${e.message}`);
-    return { ok: false, success: false, error: `QwenImage 提交失败: ${e.message}`, files: [] };
+    const unreachable = e?.name === 'AbortError' || e?.cause?.code === 'ECONNREFUSED'
+      || /fetch failed|ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|ECONNRESET/i.test(String(e.message || ''));
+    const error = unreachable ? '连不上本机 Qwen 生图地址' : `QwenImage 提交失败: ${e.message}`;
+    return { ok: false, success: false, error, files: [] };
   }
 
   const taskId = submitted.task_id || submitted.id;
@@ -234,4 +251,4 @@ async function runImageJob(services, adapter, input) {
   return { ok: true, success: true, files, taskId, seed, elapsedMs: Date.now() - start };
 }
 
-module.exports = { runImageJob, submitJob, fetchTask, downloadOutputs, imageFileToBase64, snapMultipleOf32, qwenRoutes };
+module.exports = { runImageJob, submitJob, fetchTask, downloadOutputs, imageFileToBase64, snapMultipleOf32, snapMultiple, qwenRoutes };

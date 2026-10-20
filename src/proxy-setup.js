@@ -85,16 +85,14 @@ function applyDispatcher(proxyUrl) {
   const np = process.env.NO_PROXY || process.env.no_proxy || '127.0.0.1,localhost,::1';
   process.env.NO_PROXY = np;
   process.env.no_proxy = np;
-  const { ProxyAgent, setGlobalDispatcher, EnvHttpProxyAgent } = require('undici');
-  // 优先显式 ProxyAgent：EnvHttpProxyAgent 依赖 env 解析，主机探测已确认可达后
-  // 直接绑定目标代理更稳（避免 NO_PROXY/大小写环境变量差异导致旁路）。
-  try {
-    setGlobalDispatcher(new ProxyAgent(proxyUrl));
-  } catch {
-    if (typeof EnvHttpProxyAgent === 'function') {
-      setGlobalDispatcher(new EnvHttpProxyAgent());
-    }
-  }
+  const { setGlobalDispatcher, EnvHttpProxyAgent } = require('undici');
+  // ProxyAgent 不看 NO_PROXY，会把 127.0.0.1:4000 也送进 Clash，对话只得到 fetch failed。
+  // EnvHttpProxyAgent 对 NO_PROXY 里的本机地址直连，其余仍走代理。
+  setGlobalDispatcher(new EnvHttpProxyAgent({
+    httpProxy: proxyUrl,
+    httpsProxy: proxyUrl,
+    noProxy: np
+  }));
   try {
     const https = require('https');
     const { HttpsProxyAgent } = require('https-proxy-agent');

@@ -116,6 +116,24 @@ const SERVICES = [
       cwd: APP,
     }
   },
+  {
+    id: 'clip-editor',
+    name: '剪辑编辑器 (OpenCut)',
+    desc: 'fork 自 OpenCut Classic · 由 30002 以 /editor 反代（端口 3000）',
+    port: 3000,
+    url: 'http://127.0.0.1:30002/editor',
+    kind: 'node',
+    // 首次启动前必须在 editor/apps/web 下跑过一次 next build；
+    // 本机有批量删除保护，Next 无法清理 .next，构建产物落在 .next-buildN，
+    // 由 editor/start.cjs 固定 NEXT_DIST_DIR 后再拉起。
+    get startCmd() {
+      return process.execPath || 'node';
+    },
+    get startArgs() {
+      return [path.join(ROOT, 'editor', 'start.cjs')];
+    },
+    cwd: path.join(ROOT, 'editor'),
+  },
 ];
 
 const children = new Map(); // id -> ChildProcess

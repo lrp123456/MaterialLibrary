@@ -137,8 +137,65 @@ const MIME = {
   '.json': 'application/json',
   '.webp': 'image/webp',
   '.ico': 'image/x-icon',
-  '.webmanifest': 'application/manifest+json'
+  '.webmanifest': 'application/manifest+json',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.mov': 'video/quicktime',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.m4a': 'audio/mp4'
 };
+
+function serveStaticFile(req, res, fp) {
+  const ext = path.extname(fp).toLowerCase();
+  const mime = MIME[ext] || 'application/octet-stream';
+  const isHtml = ext === '.html';
+  const isMedia = ext === '.mp4' || ext === '.webm' || ext === '.mov' || ext === '.mp3' || ext === '.wav' || ext === '.m4a';
+  if (!isMedia) {
+    res.writeHead(200, {
+      'Content-Type': mime,
+      'Cache-Control': isHtml ? 'no-cache, no-store, must-revalidate' : 'public, max-age=31536000',
+    });
+    return fs.createReadStream(fp).pipe(res);
+  }
+  const total = fs.statSync(fp).size;
+  const range = req.headers.range;
+  if (range) {
+    const matched = /^bytes=(\d*)-(\d*)$/.exec(String(range).trim());
+    if (matched) {
+      let start = matched[1] === '' ? null : parseInt(matched[1], 10);
+      let end = matched[2] === '' ? null : parseInt(matched[2], 10);
+      if (start == null && end != null) {
+        start = Math.max(0, total - end);
+        end = total - 1;
+      } else {
+        if (start == null) start = 0;
+        if (end == null || end >= total) end = total - 1;
+      }
+      if (Number.isFinite(start) && Number.isFinite(end) && start <= end && start < total) {
+        res.writeHead(206, {
+          'Content-Type': mime,
+          'Content-Length': end - start + 1,
+          'Content-Range': `bytes ${start}-${end}/${total}`,
+          'Accept-Ranges': 'bytes',
+          'Cache-Control': 'public, max-age=3600',
+        });
+        if (req.method === 'HEAD') return res.end();
+        return fs.createReadStream(fp, { start, end }).pipe(res);
+      }
+      res.writeHead(416, { 'Content-Range': `bytes */${total}` });
+      return res.end();
+    }
+  }
+  res.writeHead(200, {
+    'Content-Type': mime,
+    'Content-Length': total,
+    'Accept-Ranges': 'bytes',
+    'Cache-Control': 'public, max-age=3600',
+  });
+  if (req.method === 'HEAD') return res.end();
+  return fs.createReadStream(fp).pipe(res);
+}
 
 const server = http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://127.0.0.1');
@@ -227,6 +284,13 @@ const webProServer = http.createServer(async (req, res) => {
   const p = u.pathname;
 
   try {
+    if (p.startsWith('/editor-api')) {
+      // 新增接口优先：快照 / 资源包 / AI 任务 / 剪辑素材视图。
+      // 未命中再交回原来的工程读写与导出接口，避免动到已经稳定的链路。
+      const handled = await require('./src/clip-api').handleClipApi(services, req, res);
+      if (handled) return;
+      return require('./src/editor-projects').handleEditorApi(services, req, res);
+    }
     // 1. API 路由直通后端 handleApi（同进程极速处理）
     if (p.startsWith('/api/') || p === '/api') {
       return await handleApi(services, req, res, '/api');
@@ -241,15 +305,7 @@ const webProServer = http.createServer(async (req, res) => {
       fp = path.join(webProDir, 'index.html');
     }
 
-    if (fs.existsSync(fp)) {
-      const ext = path.extname(fp).toLowerCase();
-      const isHtml = ext === '.html';
-      res.writeHead(200, {
-        'Content-Type': MIME[ext] || 'application/octet-stream',
-        'Cache-Control': isHtml ? 'no-cache, no-store, must-revalidate' : 'public, max-age=31536000',
-      });
-      return fs.createReadStream(fp).pipe(res);
-    }
+    if (fs.existsSync(fp)) return serveStaticFile(req, res, fp);
 
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('前端尚未构建（web-pro/dist 不存在）');

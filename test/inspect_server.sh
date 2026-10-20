@@ -21,7 +21,7 @@ node -e '
 const crypto=require("crypto");
 const Database=require("/home/lrp/my_folder/smu/dsh_plugins/material_library/node_modules/better-sqlite3");
 const db=new Database("/home/lrp/.dsh-material-library/material.db",{readonly:true});
-const u=db.prepare("SELECT username,salt,password_hash FROM users WHERE username=?").get("504391119");
+const u=db.prepare("SELECT username,salt,password_hash FROM users WHERE username=?").get(process.env.ML_USER||"");
 const h=crypto.scryptSync("", u.salt, 64).toString("hex");
 console.log("match", h===u.password_hash, "salt", u.salt);
 '

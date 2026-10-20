@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>剪辑板块 M0 前置验证</title>
+<style>
+  :root { --paper:#f3efe6; --surface:#fbf9f4; --ink:#1b1a17; --muted:#6b665c; --line:#d8d1c2; --accent:#c8451d; --ok:#1f7a4d; --warn:#a86a00; --bad:#b3261e; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:32px 20px 64px; background:var(--paper); color:var(--ink);
+         font:15px/1.6 "Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
+  .wrap { max-width:860px; margin:0 auto; }
+  h1 { font-size:24px; margin:0 0 6px; letter-spacing:-.01em; }
+  .sub { color:var(--muted); font-size:13px; margin-bottom:24px; }
+  .card { background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:18px 20px; margin-bottom:14px; }
+  .row { display:flex; align-items:flex-start; gap:12px; padding:10px 0; border-bottom:1px dashed var(--line); }
+  .row:last-child { border-bottom:0; }
+  .badge { flex:0 0 auto; min-width:64px; text-align:center; font:600 11px/20px ui-monospace,monospace;
+           border-radius:999px; padding:0 10px; border:1px solid currentColor; }
+  .pass { color:var(--ok); } .fail { color:var(--bad); } .pend { color:var(--warn); }
+  .name { font-weight:600; }
+  .detail { color:var(--muted); font-size:13px; word-break:break-all; }
+  button { font:inherit; padding:8px 16px; border-radius:8px; border:1px solid var(--line);
+           background:var(--surface); cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+  pre { background:#12110f; color:#e8e4da; padding:14px; border-radius:8px; overflow:auto; font-size:12px; }
+  .hint { font-size:12px; color:var(--muted); margin-top:8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>剪辑板块 M0 前置验证</h1>
+  <div class="sub">在<b>目标机器</b>的 Chrome / Edge 里打开本页（建议通过 http://localhost 提供，避免 file:// 的安全上下文限制）。结果可一键复制回传。</div>
+
+  <div class="card" id="list"></div>
+
+  <div class="card">
+    <button class="primary" onclick="runAll()">重新检测</button>
+    <button onclick="copyReport()">复制报告</button>
+    <div class="hint">V4 导出内存为近似测试：连续编码 120 帧 1080p，观察是否抛错与耗时。</div>
+  </div>
+
+  <pre id="out" style="display:none"></pre>
+</div>
+
+<script>
+const rows = [];
+const el = document.getElementById('list');
+
+function add(name, key, status, detail) {
+  rows.push({ name, key, status, detail: String(detail) });
+  render();
+}
+function render() {
+  el.innerHTML = rows.map(r => `
+    <div class="row">
+      <span class="badge ${r.status}">${r.status === 'pass' ? '通过' : r.status === 'fail' ? '不通过' : '待定'}</span>
+      <div>
+        <div class="name">${r.name}</div>
+        <div class="detail">${r.detail}</div>
+      </div>
+    </div>`).join('');
+}
+
+async function checkWebGPU() {
+  try {
+    if (!('gpu' in navigator)) {
+      add('V2 WebGPU', 'gpu', 'fail', 'navigator.gpu 不存在。若 WebGL2 可用，编辑器会走 WebGL 回退；两者都不可用则整条路线作废。');
+      return;
+    }
+    const adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) { add('V2 WebGPU', 'gpu', 'fail', 'requestAdapter() 返回 null（无可用适配器）'); return; }
+    let info = {};
+    try { info = adapter.info || (adapter.requestAdapterInfo ? await adapter.requestAdapterInfo() : {}); } catch {}
+    const device = await adapter.requestDevice();
+    const limit = adapter.limits ? adapter.limits.maxTextureDimension2D : '?';
+    add('V2 WebGPU', 'gpu', 'pass',
+      `适配器可用 · vendor=${info.vendor || '?'} architecture=${info.architecture || '?'} · maxTexture2D=${limit} · device=${device ? 'ok' : 'null'}`);
+  } catch (e) {
+    add('V2 WebGPU', 'gpu', 'fail', String(e && e.message || e));
+  }
+}
+
+function checkWebGL() {
+  try {
+    const c = document.createElement('canvas');
+    const gl = c.getContext('webgl2');
+    if (!gl) { add('V2b WebGL2 回退', 'webgl2', 'fail', 'webgl2 上下文创建失败，WebGPU 不可用时将无路可退'); return; }
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    const renderer = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+    add('V2b WebGL2 回退', 'webgl2', 'pass', `可用 · renderer=${renderer} · maxTex=${gl.getParameter(gl.MAX_TEXTURE_SIZE)}`);
+  } catch (e) {
+    add('V2b WebGL2 回退', 'webgl2', 'fail', String(e && e.message || e));
+  }
+}
+
+async function checkStorage() {
+  try {
+    const est = await navigator.storage.estimate();
+    const quotaGB = (est.quota / 1024 ** 3).toFixed(2);
+    const usageGB = (est.usage / 1024 ** 3).toFixed(3);
+    const ratio = est.quota ? (est.usage / est.quota * 100).toFixed(2) : '?';
+    add('V3 存储配额', 'quota', est.quota > 5 * 1024 ** 3 ? 'pass' : 'pend',
+      `quota=${quotaGB} GB · usage=${usageGB} GB (${ratio}%) · persisted=${navigator.storage.persisted ? await navigator.storage.persisted() : 'n/a'}`);
+  } catch (e) {
+    add('V3 存储配额', 'quota', 'fail', String(e && e.message || e));
+  }
+
+  try {
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle('m0-probe', { create: true });
+    const fh = await dir.getFileHandle('probe.bin', { create: true });
+    const w = await fh.createWritable();
+    await w.write(new Uint8Array(1024 * 1024));
+    await w.close();
+    const f = await fh.getFile();
+    await root.removeEntry('m0-probe', { recursive: true });
+    add('V3b OPFS 可写', 'opfs', f.size === 1048576 ? 'pass' : 'fail', `写入 1 MiB 并读回 size=${f.size}`);
+  } catch (e) {
+    add('V3b OPFS 可写', 'opfs', 'fail', String(e && e.message || e) + '（Safari 私有模式或无痕窗口常见）');
+  }
+
+  try {
+    const ok = await new Promise((res) => {
+      const req = indexedDB.open('m0-idb', 1);
+      req.onupgradeneeded = () => req.result.createObjectStore('s');
+      req.onsuccess = () => { req.result.close(); indexedDB.deleteDatabase('m0-idb'); res(true); };
+      req.onerror = () => res(false);
+    });
+    add('V3c IndexedDB', 'idb', ok ? 'pass' : 'fail', ok ? '可读写' : '打开失败');
+  } catch (e) {
+    add('V3c IndexedDB', 'idb', 'fail', String(e && e.message || e));
+  }
+}
+
+async function checkDecodeAndExport() {
+  // 构造 1 秒彩色视频帧序列，测 MediaRecorder 与 canvas.toBlob 吞吐
+  const W = 1920, H = 1080, N = 120;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+  const t0 = performance.now();
+  let bytes = 0;
+  try {
+    for (let i = 0; i < N; i++) {
+      ctx.fillStyle = `hsl(${(i * 3) % 360} 60% 45%)`;
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#000';
+      ctx.font = '64px sans-serif';
+      ctx.fillText('frame ' + i, 80, 120);
+      const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.92));
+      if (!blob) throw new Error('toBlob 返回 null（画布尺寸过大或显存不足）');
+      bytes += blob.size;
+    }
+    const ms = (performance.now() - t0) / 1000;
+    const fps = (N / ms).toFixed(1);
+    add('V4 导出帧吞吐', 'export',
+      Number(fps) >= 10 ? 'pass' : 'pend',
+      `${N} 帧 1080p JPEG · 用时 ${ms.toFixed(2)}s · ${fps} 帧/秒 · 平均 ${(bytes / N / 1024).toFixed(0)} KB/帧`);
+  } catch (e) {
+    add('V4 导出帧吞吐', 'export', 'fail', String(e && e.message || e));
+  }
+
+  try {
+    add('V4b 编码能力', 'codec',
+      typeof VideoEncoder !== 'undefined' ? 'pass' : 'pend',
+      typeof VideoEncoder !== 'undefined' ? 'WebCodecs VideoEncoder 可用' : '无 VideoEncoder，导出将走兼容路径');
+  } catch (e) { add('V4b 编码能力', 'codec', 'fail', String(e && e.message || e)); }
+}
+
+function checkEnv() {
+  const ua = navigator.userAgent;
+  add('环境', 'env', 'pass', `${ua} · cores=${navigator.hardwareConcurrency} · mem=${navigator.deviceMemory || '?'}GB · dpr=${devicePixelRatio}`);
+  add('安全上下文', 'secure', window.isSecureContext ? 'pass' : 'fail',
+    window.isSecureContext ? 'isSecureContext=true' : '非安全上下文（OPFS/WebGPU 可能受限），请用 http://localhost 或 https');
+}
+
+async function runAll() {
+  rows.length = 0; render();
+  checkEnv();
+  checkWebGL();
+  await checkWebGPU();
+  await checkStorage();
+  await checkDecodeAndExport();
+  document.getElementById('out').style.display = 'block';
+  document.getElementById('out').textContent = report();
+}
+
+function report() {
+  const head = {
+    at: new Date().toISOString(),
+    ua: navigator.userAgent,
+    platform: navigator.platform,
+  };
+  return JSON.stringify({ ...head, results: rows }, null, 2);
+}
+
+function copyReport() {
+  const text = report();
+  navigator.clipboard?.writeText(text).then(
+    () => alert('已复制，可直接粘贴回传'),
+    () => { const p = document.getElementById('out'); p.style.display = 'block'; p.textContent = text; }
+  );
+}
+
+runAll();
+</script>
+</body>
+</html>

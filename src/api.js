@@ -109,16 +109,12 @@ async function executeChatCompletion(db, config, {
 
   let msgs = Array.isArray(messages) ? messages.map((m) => ({ ...m })) : [];
   if (extraImages.length) {
-    const toUrl = (img) => {
-      if (!img) return null;
-      if (typeof img === 'string') {
-        return img.startsWith('data:') || /^https?:\/\//i.test(img) ? img : `data:image/jpeg;base64,${img}`;
-      }
-      if (img.url) return img.url;
-      if (img.b64 || img.data) return `data:${img.mime || 'image/jpeg'};base64,${img.b64 || img.data}`;
-      return null;
-    };
-    const imageParts = extraImages.map(toUrl).filter(Boolean).map((url) => ({ type: 'image_url', image_url: { url } }));
+    const { chatImageDataUrl } = require('./chat-images');
+    const imageParts = [];
+    for (const img of extraImages) {
+      const url = await chatImageDataUrl(db, config, img);
+      if (url) imageParts.push({ type: 'image_url', image_url: { url } });
+    }
     const lastUser = [...msgs].reverse().find((m) => m.role === 'user');
     if (lastUser) {
       if (typeof lastUser.content === 'string') {
@@ -1567,6 +1563,10 @@ async function handleApi(services, req, res, prefix = '/api') {
         const body = missingAssetBody(db, fid);
         return sendJson(res, body.code, body);
       }
+      // 被剪辑工程引用：409 + 引用方清单
+      if (e.status === 409) {
+        return sendJson(res, 409, { error: e.message, code: e.code, usedBy: e.usedBy || [] });
+      }
       return sendJson(res, 400, { error: e.message });
     }
   }
@@ -1584,6 +1584,10 @@ async function handleApi(services, req, res, prefix = '/api') {
         const { missingAssetBody } = require('./asset-missing');
         const body = missingAssetBody(db, fid);
         return sendJson(res, body.code, body);
+      }
+      // 被剪辑工程引用：409 + 引用方清单，前端据此提示"先解除引用"
+      if (e.status === 409) {
+        return sendJson(res, 409, { error: e.message, code: e.code, usedBy: e.usedBy || [] });
       }
       return sendJson(res, 400, { error: e.message });
     }
@@ -1706,8 +1710,21 @@ async function handleApi(services, req, res, prefix = '/api') {
         return sendJson(res, e.code === 404 ? 404 : 400, { error: e.message });
       }
     }
-    if (!category && !space) return sendJson(res, 400, { error: '要改分类或空间' });
-    return sendJson(res, 200, { ok: true, fid, category: category || null, space });
+    const dims = body.dims && typeof body.dims === 'object' ? body.dims : null;
+    const savedDims = {};
+    if (dims) {
+      try {
+        const { setManualTag } = require('./shelf-lineage');
+        for (const [dim, label] of Object.entries(dims)) {
+          if (!label) continue;
+          savedDims[dim] = setManualTag(db, fid, dim, label);
+        }
+      } catch (e) {
+        return sendJson(res, e.code === 404 ? 404 : 400, { error: e.message });
+      }
+    }
+    if (!category && !space && !Object.keys(savedDims).length) return sendJson(res, 400, { error: '要改分类或空间' });
+    return sendJson(res, 200, { ok: true, fid, category: category || null, space, dims: savedDims });
   }
 
   if (pathname === '/assets/retag' && req.method === 'POST') {
@@ -2764,13 +2781,15 @@ async function handleApi(services, req, res, prefix = '/api') {
       ...(Array.isArray(b.images) ? b.images : []),
       ...(b.image ? [b.image] : [])
     ].filter(Boolean);
+    const priorContext = String(b.priorContext || '').trim().slice(0, 6000);
 
     const userMsg = [
       `原文：\n${rawPrompt}`,
       `当前生成模型: ${modelId}`,
       `当前模式: ${mode}`,
       `已挂槽位: ${JSON.stringify(slots)}`,
-      refImages.length ? `已挂载参考图: ${refImages.length} 张（请结合图片中的真实空间结构、家具材质、光影氛围进行具体扩写，而非空洞套话）` : '',
+      refImages.length ? `已挂载参考图 ${refImages.length} 张。请结合图片里的真实空间、材质和光影来写。正文必须保留 @图片1 到 @图片${refImages.length}，每个编号都要出现，不要删掉，也不要改成「参考图」「这张图」或「图1」。` : '',
+      priorContext ? `同一会话里先前的对话和分析（改写时保留其中的空间、材质和光影，不要换成另一种风格）：\n${priorContext}` : '',
       `已锁定参数（不要写进提示词）: ${JSON.stringify(locked)}`,
     ].filter(Boolean).join('\n');
 
@@ -2808,10 +2827,15 @@ async function handleApi(services, req, res, prefix = '/api') {
     }
   }
 
-  // ===== 企业级 AI 创作库 (配方模板、原图、目标图与参数复用) (/api/creation-templates) =====
+  // ===== 企业级 AI 创作库 (配方模板、原图、目标图、分类筛选与参数复用) (/api/creation-templates) =====
   if (pathname === '/creation-templates' && req.method === 'GET') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
     const kw = (urlObj.searchParams.get('q') || '').trim();
+    const filterType = (urlObj.searchParams.get('type') || '').trim(); // 'image' | 'video' | 'audio'
+    const filterSpace = (urlObj.searchParams.get('space') || '').trim();
+    const filterStyle = (urlObj.searchParams.get('style') || '').trim();
+    const pinnedOnly = urlObj.searchParams.get('pinned_only') === '1';
+
     db.exec(`
       CREATE TABLE IF NOT EXISTS creation_templates (
         id TEXT PRIMARY KEY,
@@ -2823,66 +2847,47 @@ async function handleApi(services, req, res, prefix = '/api') {
         result_images TEXT DEFAULT '[]',
         params_json TEXT DEFAULT '{}',
         tags TEXT DEFAULT '[]',
+        type TEXT DEFAULT 'image',
+        space TEXT DEFAULT '',
+        style TEXT DEFAULT '',
+        is_pinned INTEGER DEFAULT 0,
+        use_count INTEGER DEFAULT 0,
         created_at INTEGER,
         updated_at INTEGER
       );
     `);
+    try { db.exec("ALTER TABLE creation_templates ADD COLUMN type TEXT DEFAULT 'image';"); } catch (e) {}
+    try { db.exec("ALTER TABLE creation_templates ADD COLUMN space TEXT DEFAULT '';"); } catch (e) {}
+    try { db.exec("ALTER TABLE creation_templates ADD COLUMN style TEXT DEFAULT '';"); } catch (e) {}
+    try { db.exec("ALTER TABLE creation_templates ADD COLUMN is_pinned INTEGER DEFAULT 0;"); } catch (e) {}
+    try { db.exec("ALTER TABLE creation_templates ADD COLUMN use_count INTEGER DEFAULT 0;"); } catch (e) {}
+    try { db.exec("CREATE INDEX IF NOT EXISTS idx_creation_tpl_sort ON creation_templates(is_pinned DESC, use_count DESC, updated_at DESC);"); } catch (e) {}
 
-    const count = db.prepare('SELECT COUNT(*) as c FROM creation_templates').get()?.c || 0;
-    if (count === 0) {
-      const now = Date.now();
-      const insertTpl = db.prepare(`
-        INSERT INTO creation_templates (id, user_id, title, prompt, aspect_ratio, origin_images, result_images, params_json, tags, created_at, updated_at)
-        VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-      insertTpl.run(
-        'tpl_sofa_replace',
-        '意式极简真皮沙发置换',
-        '将客厅中部的老旧布艺沙发精准替换为[参考图: 意式极简三人真皮沙发]，保留周围木地板倒影与地毯纹理，保持暖色调自然采光与透视一致。',
-        '16:9',
-        JSON.stringify([{ name: '意式极简沙发', url: 'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&w=400&q=80', weight: 85 }]),
-        JSON.stringify([{ url: 'https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&w=800&q=80', resolution: '3840×2160', engine: 'Seedream 5.0' }]),
-        JSON.stringify({ mode: 'replace', fidelity: 'A', slb_model: 'sofa_model.glb', rotation: 45 }),
-        JSON.stringify(['家居换装', '3D替换', '高保真']),
-        now - 86400000,
-        now - 86400000
-      );
-      insertTpl.run(
-        'tpl_switch_install',
-        '智能触控开关面板墙面贴合',
-        '在背景墙床头柜上方精准安装[参考图: 极简智能中控开关面板]，材质为磨砂深灰铝合金，自然贴合墙面平整度，带有微弱柔光指示灯。',
-        '4:3',
-        JSON.stringify([{ name: '智能开关面板', url: 'https://images.unsplash.com/photo-1558002038-1055907df827?auto=format&fit=crop&w=400&q=80', weight: 90 }]),
-        JSON.stringify([{ url: 'https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=800&q=80', resolution: '2560×1920', engine: 'Seedream 5.0' }]),
-        JSON.stringify({ mode: 'install', fidelity: 'A', surface: 'wall' }),
-        JSON.stringify(['面板安装', '贴合表面', '保真度A']),
-        now - 43200000,
-        now - 43200000
-      );
-      insertTpl.run(
-        'tpl_expand_living',
-        '超宽全景画幅空间自然延展',
-        '将原本竖向或局部构图的客餐厅视角，向左右两侧横向扩画至 21:9 电影级全画幅，自然补全落地窗外的城市天际线与右侧开放式岛台。',
-        '21:9',
-        JSON.stringify([{ name: '空间原图', url: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=400&q=80', weight: 80 }]),
-        JSON.stringify([{ url: 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1200&q=80', resolution: '5120×2160', engine: 'Jimeng Outpainting' }]),
-        JSON.stringify({ mode: 'expand', expand_ratio: '21:9', direction: 'both' }),
-        JSON.stringify(['扩图模式', '超宽全景', '即梦扩展']),
-        now - 21600000,
-        now - 21600000
-      );
+    let sql = 'SELECT * FROM creation_templates WHERE 1=1';
+    const params = [];
+
+    if (filterType && filterType !== 'all') {
+      sql += ' AND type = ?';
+      params.push(filterType);
     }
-
-    let rows;
+    if (filterSpace && filterSpace !== 'all' && filterSpace !== '全部空间') {
+      sql += ' AND space = ?';
+      params.push(filterSpace);
+    }
+    if (filterStyle && filterStyle !== 'all' && filterStyle !== '全部风格') {
+      sql += ' AND style = ?';
+      params.push(filterStyle);
+    }
+    if (pinnedOnly) {
+      sql += ' AND is_pinned = 1';
+    }
     if (kw) {
-      rows = db.prepare(`
-        SELECT * FROM creation_templates 
-        WHERE title LIKE ? OR prompt LIKE ? OR tags LIKE ? 
-        ORDER BY updated_at DESC LIMIT 50
-      `).all(`%${kw}%`, `%${kw}%`, `%${kw}%`);
-    } else {
-      rows = db.prepare('SELECT * FROM creation_templates ORDER BY updated_at DESC LIMIT 50').all();
+      sql += ' AND (LOWER(title) LIKE ? OR LOWER(prompt) LIKE ? OR LOWER(tags) LIKE ? OR LOWER(space) LIKE ? OR LOWER(style) LIKE ?)';
+      params.push(`%${kw.toLowerCase()}%`, `%${kw.toLowerCase()}%`, `%${kw.toLowerCase()}%`, `%${kw.toLowerCase()}%`, `%${kw.toLowerCase()}%`);
     }
+
+    sql += ' ORDER BY is_pinned DESC, use_count DESC, updated_at DESC LIMIT 100';
+    const rows = db.prepare(sql).all(...params);
 
     return sendJson(res, 200, {
       success: true,
@@ -2895,12 +2900,23 @@ async function handleApi(services, req, res, prefix = '/api') {
         try { result_images = JSON.parse(r.result_images || '[]'); } catch {}
         try { params = JSON.parse(r.params_json || '{}'); } catch {}
         try { tags = JSON.parse(r.tags || '[]'); } catch {}
-        return { ...r, origin_images, result_images, params, tags };
+        return {
+          ...r,
+          type: r.type || 'image',
+          space: r.space || '',
+          style: r.style || '',
+          is_pinned: Number(r.is_pinned || 0),
+          use_count: Number(r.use_count || 0),
+          origin_images,
+          result_images,
+          params,
+          tags
+        };
       })
     });
   }
 
-  // 保存/收藏创作配方
+  // 保存/收藏创作配方 (新建或全量保存)
   if (pathname === '/creation-templates' && req.method === 'POST') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
     const b = await parseBody(req);
@@ -2914,11 +2930,16 @@ async function handleApi(services, req, res, prefix = '/api') {
     const resultImages = JSON.stringify(b.result_images || b.resultImages || []);
     const paramsJson = JSON.stringify(b.params || {});
     const tagsJson = JSON.stringify(b.tags || ['用户自定义']);
+    const type = b.type || 'image'; // image / video / audio
+    const space = (b.space || '').trim();
+    const style = (b.style || '').trim();
+    const isPinned = b.is_pinned ? 1 : 0;
+    const useCount = Number(b.use_count || 0);
     const now = Date.now();
 
     db.prepare(`
-      INSERT INTO creation_templates (id, user_id, title, prompt, aspect_ratio, origin_images, result_images, params_json, tags, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO creation_templates (id, user_id, title, prompt, aspect_ratio, origin_images, result_images, params_json, tags, type, space, style, is_pinned, use_count, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         title=excluded.title,
         prompt=excluded.prompt,
@@ -2927,10 +2948,64 @@ async function handleApi(services, req, res, prefix = '/api') {
         result_images=excluded.result_images,
         params_json=excluded.params_json,
         tags=excluded.tags,
+        type=excluded.type,
+        space=excluded.space,
+        style=excluded.style,
+        is_pinned=excluded.is_pinned,
+        use_count=excluded.use_count,
         updated_at=excluded.updated_at
-    `).run(id, sessionUser?.id || 1, title, prompt, aspectRatio, originImages, resultImages, paramsJson, tagsJson, b.createdAt || now, now);
+    `).run(id, sessionUser?.id || 1, title, prompt, aspectRatio, originImages, resultImages, paramsJson, tagsJson, type, space, style, isPinned, useCount, b.createdAt || now, now);
 
-    return sendJson(res, 200, { success: true, data: { id, title, prompt, updated_at: now } });
+    return sendJson(res, 200, {
+      success: true,
+      data: { id, title, prompt, type, space, style, is_pinned: isPinned, use_count: useCount, updated_at: now }
+    });
+  }
+
+  // 快捷更新创作配方 (重命名、置顶/常用切换、复用自增、修改标签)
+  const mPatchTpl = pathname.match(/^\/creation-templates\/([^\/]+)$/);
+  if (mPatchTpl && req.method === 'PATCH') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const tplId = decodeURIComponent(mPatchTpl[1]);
+    const b = await parseBody(req);
+    const existing = db.prepare('SELECT * FROM creation_templates WHERE id=?').get(tplId);
+    if (!existing) return sendJson(res, 404, { error: '作品配方不存在' });
+
+    let newTitle = b.title !== undefined ? String(b.title).trim() : existing.title;
+    if (!newTitle) return sendJson(res, 400, { error: '作品名称不可为空' });
+    let newIsPinned = b.is_pinned !== undefined ? (b.is_pinned ? 1 : 0) : Number(existing.is_pinned || 0);
+    let newUseCount = Number(existing.use_count || 0);
+    if (b.action === 'use') {
+      newUseCount += 1;
+    } else if (b.use_count !== undefined) {
+      newUseCount = Number(b.use_count) || 0;
+    }
+    let newSpace = b.space !== undefined ? String(b.space).trim() : (existing.space || '');
+    let newStyle = b.style !== undefined ? String(b.style).trim() : (existing.style || '');
+    let newType = b.type !== undefined ? String(b.type).trim() : (existing.type || 'image');
+    let newPrompt = b.prompt !== undefined ? String(b.prompt).trim() : existing.prompt;
+    let newTags = b.tags !== undefined ? JSON.stringify(b.tags) : existing.tags;
+    const now = Date.now();
+
+    db.prepare(`
+      UPDATE creation_templates 
+      SET title=?, is_pinned=?, use_count=?, space=?, style=?, type=?, prompt=?, tags=?, updated_at=?
+      WHERE id=?
+    `).run(newTitle, newIsPinned, newUseCount, newSpace, newStyle, newType, newPrompt, newTags, now, tplId);
+
+    return sendJson(res, 200, {
+      success: true,
+      data: {
+        id: tplId,
+        title: newTitle,
+        is_pinned: newIsPinned,
+        use_count: newUseCount,
+        space: newSpace,
+        style: newStyle,
+        type: newType,
+        updated_at: now
+      }
+    });
   }
 
   // 删除创作配方
@@ -6523,18 +6598,18 @@ module.exports = {
       const b = await parseBody(req);
       const { executeAdapter } = require('./gen');
       const { engineStatus } = require('./lab');
-      const { resolveModelExecution, assembleModelPayload } = require('./models-contract');
+      const { resolveModelExecution, prepareGovernedSubmit } = require('./models-contract');
       const rawPrompt = (b.prompt || '').trim();
       let finalPrompt = rawPrompt;
 
       const modelExec = b.model ? resolveModelExecution(db, b.model) : null;
-      const modelContract = modelExec?.model;
+      const requestedContract = modelExec?.model;
 
       // 双轨机制：若指定 auto_optimize，调用对应生成模型的 Skill 自动优化
       let optimizedPrompt = null;
       if (b.auto_optimize && rawPrompt && b.model) {
         try {
-          const polish = modelContract?.optimizer?.prompt ? modelContract.optimizer : genGov.polishFor(db, b.model);
+          const polish = requestedContract?.optimizer?.prompt ? requestedContract.optimizer : genGov.polishFor(db, b.model);
           if (polish && polish.prompt) {
             const opt = genGov.resolveOptimizerModel(db, b.model);
             const optData = await executeChatCompletion(db, config, {
@@ -6568,17 +6643,19 @@ module.exports = {
         ...(b.format != null ? { output_format: b.format } : {}),
       };
 
-      let assembled = null;
-      if (modelContract) {
-        assembled = assembleModelPayload({
-          modelContract,
-          editablePrompt: rawPrompt,
-          optimizedPrompt,
-          values,
-          image: b.image || (b.imageUrls && b.imageUrls[0])
-        });
-        finalPrompt = assembled.prompt;
-      }
+      const snippetIds = Array.isArray(b.snippetIds) ? b.snippetIds : (Array.isArray(b.snippet_ids) ? b.snippet_ids : null);
+      const prepared = b.model ? prepareGovernedSubmit({
+        db,
+        modelId: b.model,
+        editablePrompt: rawPrompt,
+        optimizedPrompt,
+        values,
+        images: b.imageUrls || (b.image ? [b.image] : []),
+        snippetIds,
+      }) : { contract: requestedContract, assembled: null };
+      const modelContract = prepared.contract || requestedContract;
+      const assembled = prepared.assembled;
+      if (assembled?.prompt) finalPrompt = assembled.prompt;
 
       const engines = engineStatus(db);
       const imgAdapters = engines.gen?.imageAdapters || [];
@@ -6599,6 +6676,7 @@ module.exports = {
 
       const result = await executeAdapter(services, adapterRow, {
         kind: 'image',
+        contractId: modelContract?.id || '',
         prompt: finalPrompt,
         model: mCode,
         size: assembled?.body?.size || b.size,
@@ -6624,17 +6702,17 @@ module.exports = {
       const b = await parseBody(req);
       const { executeAdapter } = require('./gen');
       const { engineStatus } = require('./lab');
-      const { resolveModelExecution, assembleModelPayload } = require('./models-contract');
+      const { resolveModelExecution, prepareGovernedSubmit } = require('./models-contract');
       const rawPrompt = (b.prompt || '').trim();
       let finalPrompt = rawPrompt;
 
       const modelExec = b.model ? resolveModelExecution(db, b.model) : null;
-      const modelContract = modelExec?.model;
+      const requestedContract = modelExec?.model;
 
       let optimizedPrompt = null;
       if (b.auto_optimize && rawPrompt && b.model) {
         try {
-          const polish = modelContract?.optimizer?.prompt ? modelContract.optimizer : genGov.polishFor(db, b.model);
+          const polish = requestedContract?.optimizer?.prompt ? requestedContract.optimizer : genGov.polishFor(db, b.model);
           if (polish && polish.prompt) {
             const opt = genGov.resolveOptimizerModel(db, b.model);
             const optData = await executeChatCompletion(db, config, {
@@ -6665,19 +6743,19 @@ module.exports = {
         ...(b.extras || {}),
       };
 
-      let assembled = null;
-      if (modelContract) {
-        assembled = assembleModelPayload({
-          modelContract,
-          editablePrompt: rawPrompt,
-          optimizedPrompt,
-          values,
-          image: b.image || (b.imageUrls && b.imageUrls[0]),
-          firstFrame: b.firstFrame || b.first_frame,
-          lastFrame: b.lastFrame || b.last_frame,
-        });
-        finalPrompt = assembled.prompt;
-      }
+      const snippetIds = Array.isArray(b.snippetIds) ? b.snippetIds : (Array.isArray(b.snippet_ids) ? b.snippet_ids : null);
+      const prepared = b.model ? prepareGovernedSubmit({
+        db,
+        modelId: b.model,
+        editablePrompt: rawPrompt,
+        optimizedPrompt,
+        values,
+        images: b.imageUrls || (b.image ? [b.image] : []),
+        snippetIds,
+      }) : { contract: requestedContract, assembled: null };
+      const modelContract = prepared.contract || requestedContract;
+      const assembled = prepared.assembled;
+      if (assembled?.prompt) finalPrompt = assembled.prompt;
 
       const engines = engineStatus(db);
       const vidAdapters = engines.gen?.videoAdapters || [];
@@ -6704,6 +6782,7 @@ module.exports = {
 
       const result = await executeAdapter(services, adapterRow, {
         kind: 'video',
+        contractId: modelContract?.id || '',
         prompt: finalPrompt,
         model: mCode,
         size: assembled?.body?.size || b.size,
@@ -6728,12 +6807,71 @@ module.exports = {
     }
   }
 
+  if (pathname === '/gen/audio' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const b = await parseBody(req, 12 * 1024 * 1024);
+      if (b.__bodyTooLarge) return sendJson(res, 413, { error: '参考音频过大' });
+      const { executeAdapter } = require('./gen');
+      const { engineStatus } = require('./lab');
+      const { resolveModelExecution, prepareGovernedSubmit } = require('./models-contract');
+      const rawPrompt = (b.prompt || '').trim();
+      const modelExec = b.model ? resolveModelExecution(db, b.model) : null;
+      const prepared = b.model ? prepareGovernedSubmit({
+        db,
+        modelId: b.model,
+        editablePrompt: rawPrompt,
+        values: {
+          ...(b.params || {}),
+          ...(b.extras || {}),
+          duration: b.duration || b.durationSec,
+          mode: b.genMode || b.mode,
+        },
+        images: [],
+        snippetIds: Array.isArray(b.snippetIds) ? b.snippetIds : null,
+      }) : { contract: modelExec?.model || null, assembled: null };
+      const modelContract = prepared.contract || modelExec?.model;
+      const assembled = prepared.assembled;
+      const engines = engineStatus(db);
+      const musicAdapters = engines.musicAdapters || [];
+      const { pickAdapterId, adapterMissingError } = require('./adapter-match');
+      const mCode = String(modelContract?.vendor_model_id || b.model || '');
+      const pickedId = pickAdapterId('music', mCode, musicAdapters);
+      const adapterRow = pickedId ? db.prepare('SELECT * FROM gen_adapters WHERE id=?').get(pickedId) : null;
+      if (!adapterRow) return sendJson(res, 503, { error: adapterMissingError('music', mCode) });
+      const audioUrls = []
+        .concat(Array.isArray(b.audioUrls) ? b.audioUrls : [])
+        .concat(Array.isArray(b.audios) ? b.audios : [])
+        .filter(Boolean);
+      const result = await executeAdapter(services, adapterRow, {
+        kind: 'audio',
+        contractId: modelContract?.id || '',
+        prompt: assembled?.prompt || rawPrompt,
+        model: mCode,
+        genMode: b.genMode || b.mode,
+        durationSec: assembled?.body?.audio_duration || assembled?.body?.duration || b.duration || b.durationSec,
+        audioUrls,
+        timeoutMs: 600000,
+        extras: {
+          ...(b.extras || b.params || {}),
+          ...(assembled?.body || {}),
+          mode: b.genMode || b.mode,
+        },
+      });
+      return sendJson(res, 200, result);
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
   if (pathname === '/gen/chat' && req.method === 'POST') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
     try {
       const b = await parseBody(req);
       const model = b.model || 'agnes-3.0-flash';
       const { resolveModelExecution, assembleModelPayload } = require('./models-contract');
+      const { capsFor } = require('./studio-catalog');
+      const { contextBudgetTokens, trimChatMessages } = await import('./chat-context.mjs');
       const exec = resolveModelExecution(db, model);
       let messages = Array.isArray(b.messages) ? b.messages.map(m => ({ ...m })) : [];
       let promptText = String(b.prompt || '');
@@ -6765,14 +6903,29 @@ module.exports = {
         messages = [{ role: 'user', content: promptText }];
       }
 
+      const modelCaps = capsFor(model, db);
+      const budget = contextBudgetTokens(modelCaps && modelCaps.contextTokens);
+      const trimmed = trimChatMessages(messages, budget);
+      messages = trimmed.messages.length ? trimmed.messages : messages;
+
       const data = await executeChatCompletion(db, config, {
         model,
         messages,
+        images: b.images,
         temperature: b.temperature ?? 0.4,
         max_tokens: b.max_tokens ?? 1024,
-        timeoutMs: b.timeoutMs || 10000
+        timeoutMs: b.timeoutMs || 90000
       });
-      return sendJson(res, 200, data);
+      return sendJson(res, 200, {
+        ...data,
+        context: {
+          kept: trimmed.kept,
+          dropped: trimmed.dropped,
+          tokens: trimmed.tokens,
+          budget: trimmed.budget,
+          modelWindow: modelCaps && modelCaps.contextTokens ? modelCaps.contextTokens : null,
+        },
+      });
     } catch (e) {
       return sendJson(res, 500, { error: e.message });
     }

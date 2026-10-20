@@ -26,23 +26,17 @@ const portraitLib = require('./portrait-library');
 const { assertSeedanceOrEmpty } = require('./portrait-contract');
 const doubaoMusic = require('./doubao-music');
 
-function convertLabRefs(text, modelId, mode) {
-  let s = String(text || '');
-  const id = String(modelId || '').toLowerCase();
-  if (id.includes('agnes')) {
-    s = s.replace(/@图片(\d+)/g, (_, n) => `<Picture ${n}>`);
-    s = s.replace(/@视频(\d+)/g, (_, n) => `<Video ${n}>`);
-    s = s.replace(/@音频(\d+)/g, (_, n) => `<Audio ${n}>`);
-  } else if (id.includes('omni')) {
-    if (mode === 'first_last_frame') {
-      s = s.replace(/@图片1/g, '<FIRST_FRAME>');
-      s = s.replace(/@图片2/g, '<LAST_FRAME>');
-    }
-    s = s.replace(/@图片(\d+)/g, (_, n) => `<IMAGE_REF_${Number(n) - 1}>`);
-    s = s.replace(/@视频(\d+)/g, (_, n) => `<VIDEO_REF_${Number(n) - 1}>`);
-    s = s.replace(/@音频(\d+)/g, (_, n) => `<AUDIO_REF_${Number(n) - 1}>`);
-  }
-  return s;
+function convertLabRefs(text) {
+  return String(text || '');
+}
+
+function contractModesFor(db, modelCode) {
+  try {
+    const { resolveModelExecution } = require('./models-contract');
+    const modes = resolveModelExecution(db, modelCode)?.model?.modes;
+    if (Array.isArray(modes) && modes.length) return modes;
+  } catch (_) {}
+  return null;
 }
 
 const GROUPS = [
@@ -63,30 +57,17 @@ const MODE_TEMPLATES = {
     { id: 'image_reference', label: '图参考', apiMode: 'image', requiresImages: true, multiImage: true },
     { id: 'omni_reference', label: '全能参考', apiMode: 'image', requiresImages: true, multiImage: true },
   ],
-  video_agnes: [
-    { id: 'text_to_video', label: '文生视频', apiMode: 'text', requiresImages: false },
-    { id: 'image_to_video', label: '图生视频', apiMode: 'reference', requiresImages: true },
-    { id: 'first_last_frame', label: '首尾帧', apiMode: 'keyframe', requiresImages: true, minImages: 1, maxImages: 2 },
-  ],
-  video_seedance: [
-    { id: 'text_to_video', label: '文生视频', apiMode: 'text', requiresImages: false },
-    { id: 'image_to_video', label: '图生视频', apiMode: 'reference', requiresImages: true },
-  ],
   video_generic: [
     { id: 'text_to_video', label: '文生视频', apiMode: 'text', requiresImages: false },
     { id: 'image_to_video', label: '图生视频', apiMode: 'reference', requiresImages: true },
   ],
 };
 
-function resolveModes(kind, modelCode, declared) {
+function resolveModes(kind, _modelCode, declared) {
   if (Array.isArray(declared) && declared.length) return declared;
-  const code = String(modelCode || '');
-  if (kind === 'image') return MODE_TEMPLATES.image;
-  if (code.includes('agnes')) return MODE_TEMPLATES.video_agnes;
-  if (code.includes('seedance') || code.includes('doubao') || code.includes('ark')) {
-    return MODE_TEMPLATES.video_seedance;
-  }
-  return MODE_TEMPLATES.video_generic;
+  if (kind === 'image' || kind === 'portrait') return MODE_TEMPLATES.image;
+  if (kind === 'video') return MODE_TEMPLATES.video_generic;
+  return [];
 }
 
 /** 同步 gen 结果的短时缓存，便于 lab status 回读 */
@@ -965,7 +946,7 @@ function buildStudioCatalog(db, engines) {
         entryId,
         // ★ 能力描述符：客户端与管线 B 的唯一真相源（客户端不再自带模型表）
         caps: capsFor(code) || null,
-        modes: resolveModes(kind === 'video' ? 'video' : 'image', code, rowParams.modes),
+        modes: resolveModes(kind === 'video' ? 'video' : 'image', code, contractModesFor(db, om.id) || contractModesFor(db, code) || rowParams.modes),
         ratios: rowParams.ratios || (kind === 'video'
           ? ['16:9', '9:16', '1:1', '3:4', '4:3', '21:9']
           : ['9:16', '16:9', '1:1', '3:4', '4:3', '2:3', '3:2', '21:9']),
@@ -1032,7 +1013,7 @@ function buildStudioCatalog(db, engines) {
         default: false,
         adapterId,
         entryId: kind === 'video' ? 'gen.video' : kind === 'image' ? 'gen.image' : `gen.${kind}`,
-        modes: resolveModes(kind, code, params.modes),
+        modes: resolveModes(kind, code, contractModesFor(db, code) || params.modes),
         ratios: params.ratios,
         durations: params.durations,
         params: params,
@@ -1614,19 +1595,55 @@ async function submitLabRun(services, { entryId, fid = null, fids = null, params
       } catch (_) {}
     }
 
+    let promptForModel = promptText;
+    let modelForExec = resolveModelCode(p.model) || p.model || undefined;
+    let extrasForExec = extras;
+    let contractId = '';
+    let compiledSize = p.size;
+    let compiledRatio = p.ratio || undefined;
+    let compiledDuration = p.duration != null ? Number(p.duration) : undefined;
+    const { prepareGovernedSubmit } = require('./models-contract');
+    const prepared = prepareGovernedSubmit({
+      db,
+      modelId: p.model,
+      editablePrompt: promptText,
+      values: {
+        ...extras,
+        ratio: p.ratio,
+        size: p.size || extras.size,
+        duration: p.duration,
+        seconds: p.duration,
+        mode: genMode,
+      },
+      images: genImages,
+      snippetIds: Array.isArray(p.snippetIds) ? p.snippetIds : (Array.isArray(p.snippet_ids) ? p.snippet_ids : null),
+    });
+    if (prepared.assembled) {
+      promptForModel = prepared.assembled.prompt || promptText;
+      modelForExec = prepared.contract?.vendor_model_id || modelForExec;
+      contractId = prepared.contract?.id || '';
+      extrasForExec = { ...extras, ...prepared.assembled.body };
+      if (prepared.assembled.body?.size != null) compiledSize = prepared.assembled.body.size;
+      if (prepared.assembled.body?.ratio != null) compiledRatio = prepared.assembled.body.ratio;
+      const dur = prepared.assembled.body?.duration ?? prepared.assembled.body?.seconds;
+      if (dur != null && dur !== '') compiledDuration = dur;
+    }
+
     const execInput = {
       kind,
-      prompt: convertLabRefs(promptText, p.model, genMode),
-      model: resolveModelCode(p.model) || p.model || undefined,
-      ratio: p.ratio || undefined,
-      durationSec: p.duration != null ? Number(p.duration) : undefined,
+      contractId,
+      prompt: promptForModel,
+      model: modelForExec,
+      ratio: compiledRatio,
+      size: compiledSize,
+      durationSec: compiledDuration,
       imageLocalPaths,
       imageUrls: genImages,
       firstFrame,
       lastFrame,
       genMode,
       timeoutMs: kind === 'video' ? 480000 : 180000,
-      extras,
+      extras: extrasForExec,
       onProgress: (prog) => {
         cacheGenResult(runId, {
           entryId: entry.id,

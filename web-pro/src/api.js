@@ -353,6 +353,19 @@ export async function generateAiImage(params) {
 /**
  * 真实 AI 视频生成接口 (/gen/videos)
  */
+export async function generateAiAudio(params) {
+  const res = await authFetch('/api/gen/audio', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params)
+  });
+  const json = await res.json();
+  if (!res.ok || json.error) {
+    throw new Error(json.error || `音频生成请求失败: HTTP ${res.status}`);
+  }
+  return json.data || json;
+}
+
 export async function generateAiVideo(params) {
   const res = await authFetch('/api/gen/videos', {
     method: 'POST',
