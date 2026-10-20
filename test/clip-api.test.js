@@ -19,7 +19,6 @@ require.cache[authPath] = {
   id: authPath, filename: authPath, loaded: true,
   exports: {
     verifySession: () => ({ id: 1, username: 'tester', role: 'admin' }),
-    lanInternalSession: () => null,
   },
 };
 

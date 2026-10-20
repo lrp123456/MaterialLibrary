@@ -67,12 +67,18 @@ try {
             Write-Log "已将局域网物理接口设为 Private"
         }
     }
-    # 确保 30001 端口入站规则开启
+    # 确保 30001/30002 端口入站规则开启（30002 = web-pro 工作台 + /editor 剪辑页入口）
     if (-not (Get-NetFirewallRule -DisplayName 'MaterialLibrary-30001' -ErrorAction SilentlyContinue)) {
         New-NetFirewallRule -DisplayName 'MaterialLibrary-30001' -Direction Inbound -LocalPort 30001 -Protocol TCP -Action Allow | Out-Null
         Write-Log "已创建防火墙规则 MaterialLibrary-30001"
     } else {
         Set-NetFirewallRule -DisplayName 'MaterialLibrary-30001' -Enabled True -Action Allow -ErrorAction SilentlyContinue | Out-Null
+    }
+    if (-not (Get-NetFirewallRule -DisplayName 'MaterialLibrary-30002' -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -DisplayName 'MaterialLibrary-30002' -Direction Inbound -LocalPort 30002 -Protocol TCP -Action Allow | Out-Null
+        Write-Log "已创建防火墙规则 MaterialLibrary-30002"
+    } else {
+        Set-NetFirewallRule -DisplayName 'MaterialLibrary-30002' -Enabled True -Action Allow -ErrorAction SilentlyContinue | Out-Null
     }
 } catch {
     Write-Log ("网络与防火墙初始化异常: " + $_.Exception.Message)
@@ -128,9 +134,38 @@ if (Test-Port $Port) {
     }
 }
 
+# 3b) 启动 Web 工作台网关（LOGIC-001：30002 归 web-pro/server.cjs 常驻，
+#     提供 web-pro 静态资源 + /editor-api 反代 30001 + /editor 反代 Next:3010）
+if (Test-Port 30002) {
+    Write-Log "端口 30002 已在监听，跳过 web-h5 启动"
+} else {
+    Write-Log "端口 30002 未监听，启动 web-pro/server.cjs..."
+    try {
+        $w = Invoke-Wsl "cd $WslProject/web-pro && nohup node server.cjs 30002 >> $DataDir/webpro.log 2>&1 & echo started" -TimeoutSec 20
+        Write-Log ("web-h5 启动输出: " + ($w.StdOut + ' ' + $w.StdErr).Trim())
+    } catch {
+        Write-Log "web-h5 启动异常: $_"
+    }
+    $webReady = $false
+    for ($i = 1; $i -le 10; $i++) {
+        Start-Sleep -Seconds 2
+        if (Test-Port 30002) { $webReady = $true; break }
+    }
+    if ($webReady) {
+        Write-Log "Web 工作台已就绪: http://127.0.0.1:30002"
+    } else {
+        Write-Log "Web 工作台启动超时，最近日志:"
+        try {
+            $lg2 = Invoke-Wsl "tail -20 $DataDir/webpro.log 2>/dev/null" -TimeoutSec 15
+            Write-Log ($lg2.StdOut -replace "`r?`n", ' | ')
+        } catch {}
+    }
+}
+
 # 4) 探活汇总
 $checks = @(
     @{ Name = 'material-library-local'; Port = $Port; Host = '127.0.0.1' },
+    @{ Name = 'web-pro-gateway';        Port = 30002; Host = '127.0.0.1' },
     @{ Name = 'litellm';                Port = 4000;  Host = '127.0.0.1' },
     @{ Name = 'postgres';               Port = 5432;  Host = '127.0.0.1' },
     @{ Name = 'redis';                  Port = 6379;  Host = '127.0.0.1' },

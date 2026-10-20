@@ -99,6 +99,19 @@ ${lines}
       console.error('[auth] 写入初始凭据文件失败:', e.message);
     }
   }
+
+  // 安全收口（SEC-009）：历史版本曾允许空密码账号存在，其长效 session token
+  // 在修复登录逻辑后依然有效。每次启动幂等清理一次，成本可忽略。
+  try {
+    const purged = db.prepare(
+      "DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE password_hash = '' OR password_hash IS NULL)"
+    ).run();
+    if (purged.changes > 0) {
+      console.log(`[auth] 已吊销空密码账户的存量会话 ${purged.changes} 条`);
+    }
+  } catch (e) {
+    console.warn('[auth] 清理空密码会话失败:', e.message);
+  }
 }
 
 const loginAttempts = new Map();
@@ -109,6 +122,13 @@ const ATTEMPT_WINDOW_MS = 60 * 1000; // 统计窗口 1 分钟
 function checkLoginRateLimit(key) {
   if (!key) return { allowed: true };
   const now = Date.now();
+  // SEC-010：Map 无上限增长会内存泄漏——超过阈值时顺手清扫过期条目。
+  if (loginAttempts.size > 500) {
+    for (const [k, v] of loginAttempts) {
+      const expired = (!v.lockUntil || v.lockUntil <= now) && (now - (v.firstAttempt || 0) > ATTEMPT_WINDOW_MS);
+      if (expired) loginAttempts.delete(k);
+    }
+  }
   const entry = loginAttempts.get(key);
   if (!entry) return { allowed: true };
   if (entry.lockUntil && entry.lockUntil > now) {
@@ -158,6 +178,12 @@ function login(db, username, password, clientIp = '') {
     return null;
   }
 
+  // LOGIC-007：锁定账户禁止登录（is_locked 语义收敛）。
+  if (Number(user.is_locked) === 1) {
+    recordLoginResult(rateKey, false);
+    return null;
+  }
+
   const expectedHash = hashPassword(password, user.salt);
   const hashBuf = Buffer.from(expectedHash, 'hex');
   const storedBuf = Buffer.from(user.password_hash, 'hex');
@@ -187,9 +213,13 @@ function verifySession(db, token) {
   if (!token) return null;
   const now = Date.now();
   const session = db.prepare(
-    'SELECT s.token, s.role, s.expires_at, u.id, u.username, COALESCE(u.is_locked, 0) AS is_locked FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ?'
+    'SELECT s.token, s.role, s.expires_at, u.id, u.username, COALESCE(u.is_locked, 0) AS is_locked, u.password_hash FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ?'
   ).get(token, now);
   if (!session) return null;
+  // SEC-009：空密码账户（历史遗留）的会话一律无效。
+  if (!session.password_hash) return null;
+  // LOGIC-007：is_locked 语义收敛——锁定账户禁止持有有效会话。
+  if (Number(session.is_locked) === 1) return null;
   return {
     id: session.id,
     username: session.username,
@@ -199,10 +229,25 @@ function verifySession(db, token) {
   };
 }
 
+function normalizeIp(s) {
+  return String(s || '').replace(/^::ffff:/i, '').replace(/^\[|\]$/g, '').trim();
+}
+
+function isLoopbackIp(ip) {
+  const s = String(ip || '');
+  return s === '127.0.0.1' || s === '::1' || s === 'localhost';
+}
+
 function clientIp(req) {
-  // Socket IP only — X-Forwarded-For is spoofable and must not grant admin.
-  const socketIp = req?.socket?.remoteAddress || req?.connection?.remoteAddress || '';
-  return String(socketIp).replace(/^::ffff:/i, '').replace(/^\[|\]$/g, '');
+  // 安全基线：socket 对端地址是唯一天然可信的来源。
+  // X-Real-IP 仅在「对端是本机回环」时采信 —— 该场景只可能是我们自己的
+  // 反代（web-pro/server.cjs）注入的真实客户端 IP；外部直连伪造无效。
+  const peer = normalizeIp(req?.socket?.remoteAddress || req?.connection?.remoteAddress || '');
+  if (isLoopbackIp(peer) && req?.headers?.['x-real-ip']) {
+    const forwarded = normalizeIp(req.headers['x-real-ip']);
+    if (forwarded) return forwarded;
+  }
+  return peer;
 }
 
 function isPrivateLanIp(ip) {
@@ -213,24 +258,6 @@ function isPrivateLanIp(ip) {
   if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(s)) return true;
   if (/^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(s)) return true;
   return false;
-}
-
-/** umbra 画布/引擎在局域网内调用网关：视为内部 admin，无需登录页。 */
-function lanInternalSession(req) {
-  // Only the real peer socket address may unlock LAN-internal admin.
-  // Never trust X-Forwarded-For or a client-supplied header alone.
-  const ip = clientIp(req);
-  if (!isPrivateLanIp(ip)) return null;
-  const isInternal = req.headers && (req.headers['x-umbra-internal'] || req.headers['x-internal-call']);
-  if (!isInternal) return null;
-  return {
-    id: 0,
-    username: 'umbra-lan',
-    role: 'admin',
-    token: '',
-    lan: true,
-    ip,
-  };
 }
 
 function logout(db, token) {
@@ -366,7 +393,8 @@ function generateMediaToken(fid, ttlSeconds = 900, dataDir = null) {
   const secret = getMediaSecret(dataDir);
   const expires = Math.floor(Date.now() / 1000) + ttlSeconds;
   const data = `${fid}:${expires}`;
-  const hmac = crypto.createHmac('sha256', secret).update(data).digest('hex').slice(0, 16);
+  // SEC-010：128bit 截断（32 hex），原 64bit 过短可被暴力枚举。
+  const hmac = crypto.createHmac('sha256', secret).update(data).digest('hex').slice(0, 32);
   return `${expires}:${hmac}`;
 }
 
@@ -378,7 +406,9 @@ function verifyMediaToken(fid, mediaToken, dataDir = null) {
   const expires = parseInt(expStr, 10);
   if (isNaN(expires) || Math.floor(Date.now() / 1000) > expires) return false;
   const secret = getMediaSecret(dataDir);
-  const expected = crypto.createHmac('sha256', secret).update(`${fid}:${expires}`).digest('hex').slice(0, 16);
+  // 兼容历史 64bit token 与新 128bit token：按请求方提供的长度重算比对。
+  const hexLen = hmac.length === 16 ? 16 : 32;
+  const expected = crypto.createHmac('sha256', secret).update(`${fid}:${expires}`).digest('hex').slice(0, hexLen);
   const hmacBuf = Buffer.from(hmac);
   const expBuf = Buffer.from(expected);
   if (hmacBuf.length !== expBuf.length) return false;
@@ -390,7 +420,6 @@ module.exports = {
   initDefaultUsers,
   login,
   verifySession,
-  lanInternalSession,
   clientIp,
   isPrivateLanIp,
   logout,

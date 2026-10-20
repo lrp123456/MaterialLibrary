@@ -48,7 +48,8 @@ async function handleClipApi(services, req, res) {
   const token = String(req.headers.authorization || '').startsWith('Bearer ')
     ? String(req.headers.authorization).slice(7).trim()
     : '';
-  const user = auth.verifySession(db, token) || auth.lanInternalSession(req);
+  // SEC-001：已移除免密内部会话，剪辑接口一律真实登录。
+  const user = auth.verifySession(db, token);
   if (!user) {
     sendJson(res, 401, { error: '需要登录' });
     return true;

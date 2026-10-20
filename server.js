@@ -202,6 +202,14 @@ const server = http.createServer(async (req, res) => {
   const p = u.pathname;
 
   try {
+    // 0. 剪辑接口（LOGIC-001）：/editor-api 原本只挂在 30002 内嵌服务上，
+    //    导致 web-pro/server.cjs 把 /editor-api 反代到 30001 时落入 SPA fallback
+    //    返回 HTML。这里在 30001 主实例同样挂载，剪辑链路不再依赖端口归属。
+    if (p === '/editor-api' || p.startsWith('/editor-api/')) {
+      const handled = await require('./src/clip-api').handleClipApi(services, req, res);
+      if (handled) return;
+      return require('./src/editor-projects').handleEditorApi(services, req, res);
+    }
     // 1. API 路由 (支持 /api/ 前缀与标准网关根端点)
     if (p.startsWith('/api/') || p === '/api') {
       return await handleApi(services, req, res, '/api');
@@ -275,16 +283,21 @@ server.listen(PORT, () => {
   }
 });
 
-// ---- 30002 端口：全新桌面端工作台 (web-pro) 常驻服务 ----
+// ---- 30002 端口：web-pro 桌面工作台 ----
+// LOGIC-001：30002 的常驻归属改为 web-pro/server.cjs（service-hub 的 web-h5 服务，
+// 带完整 /editor 反代）。这里仅作为旧单进程部署模式的兜底，默认不启动；
+// 显式设置 EMBED_WEB_PRO=1 才启用，且监听冲突时只告警不崩溃。
+const EMBED_WEB_PRO = String(process.env.EMBED_WEB_PRO || '') === '1';
 const WEB_PRO_PORT = Number(process.env.WEB_PRO_PORT || 30002);
 const webProDir = path.join(__dirname, 'web-pro/dist');
 
+if (EMBED_WEB_PRO) {
 const webProServer = http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://127.0.0.1');
   const p = u.pathname;
 
   try {
-    if (p.startsWith('/editor-api')) {
+    if (p === '/editor-api' || p.startsWith('/editor-api/')) {
       // 新增接口优先：快照 / 资源包 / AI 任务 / 剪辑素材视图。
       // 未命中再交回原来的工程读写与导出接口，避免动到已经稳定的链路。
       const handled = await require('./src/clip-api').handleClipApi(services, req, res);
@@ -321,6 +334,13 @@ const webProServer = http.createServer(async (req, res) => {
 webProServer.listen(WEB_PRO_PORT, '0.0.0.0', () => {
   console.log(`[web-pro] Material Studio Pro 桌面工作台常驻服务已就绪: http://127.0.0.1:${WEB_PRO_PORT}`);
 });
+// LOGIC-001：30002 已归 web-pro/server.cjs 常驻，内嵌模式与它撞端口时只告警，绝不让主服务崩溃。
+webProServer.on('error', (e) => {
+  console.warn(`[web-pro] 内嵌工作台监听 ${WEB_PRO_PORT} 失败（${e.code}）。30002 应由 web-pro/server.cjs 常驻提供；如需单进程模式请先停掉外部 web-h5。`);
+});
+} else {
+  console.log('[web-pro] 内嵌工作台未启用（EMBED_WEB_PRO 未设置）：30002 由 web-pro/server.cjs 常驻提供');
+}
 
 process.on('SIGINT', () => {
   interpreter.stop();

@@ -34,15 +34,23 @@ const MIME = {
 // 代理请求至指定后端（默认 30001）
 function proxyRequest(req, res, target = API_TARGET) {
   const targetUrl = new URL(req.url, target);
+  // SEC-001/SEC-010：转发前剥离外部伪造的内部特权头，并把真实客户端 IP
+  // 通过 X-Real-IP 注入（后端 auth.clientIp 仅在回环来源时采信该头）。
+  const safeHeaders = { ...req.headers, host: targetUrl.host };
+  delete safeHeaders['x-umbra-internal'];
+  delete safeHeaders['x-internal-call'];
+  const realIp = String(req.socket?.remoteAddress || '').replace(/^::ffff:/i, '');
+  if (realIp && realIp !== '127.0.0.1' && realIp !== '::1') {
+    safeHeaders['x-real-ip'] = realIp;
+  } else {
+    delete safeHeaders['x-real-ip'];
+  }
   const options = {
     hostname: targetUrl.hostname,
     port: targetUrl.port || (targetUrl.protocol === 'https:' ? 443 : 80),
     path: targetUrl.pathname + targetUrl.search,
     method: req.method,
-    headers: {
-      ...req.headers,
-      host: targetUrl.host,
-    },
+    headers: safeHeaders,
   };
 
   const proxyReq = http.request(options, (proxyRes) => {

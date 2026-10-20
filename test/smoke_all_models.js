@@ -20,7 +20,6 @@ async function req(path, { method = 'GET', token, body, ms = 25000 } = {}) {
       headers: {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        'X-Umbra-Internal': '1',
       },
       body: body ? JSON.stringify(body) : undefined,
       signal: t.signal,

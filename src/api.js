@@ -1117,7 +1117,7 @@ async function handleApi(services, req, res, prefix = '/api') {
 
   // 跨域头与预检
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Filename, X-Source, X-Client-Asset-Id, X-Upload-Id, X-Chunk-Index, X-Total-Chunks, X-Umbra-Internal');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Filename, X-Source, X-Client-Asset-Id, X-Upload-Id, X-Chunk-Index, X-Total-Chunks');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   if (req.method === 'OPTIONS') {
     res.writeHead(204);
@@ -1130,7 +1130,8 @@ async function handleApi(services, req, res, prefix = '/api') {
     allowQuery: req.method === 'GET' && /(image|poster|file|mask|temp|masks)/.test(pathname || urlObj.pathname || ''),
   });
   const isViewerRoute = pathname === '/viewer' || pathname.startsWith('/viewer/');
-  const sessionUser = auth.verifySession(db, token) || (!isViewerRoute ? auth.lanInternalSession(req) : null);
+  // SEC-001：已移除 lanInternalSession 免密提权后门——会话只认真实登录 token。
+  const sessionUser = auth.verifySession(db, token);
   const isAdmin = sessionUser?.role === 'admin';
   const isViewerOrAdmin = !!sessionUser;
 
@@ -1413,9 +1414,10 @@ async function handleApi(services, req, res, prefix = '/api') {
   }
 
   // 鉴权拦截（临时生成预览产物同样需要会话；前端 <img> 标签走 ml_session Cookie 鉴权；或走 15min media_token）
+  // SEC-002：/tools/* 不再免鉴权直达——未登录只放行公共模型目录与合法 media_token 的媒体读取。
   if (!isViewerOrAdmin) {
-    if (pathname === '/studio/catalog' || pathname === '/tools/convert-video' || pathname === '/tools/extract-frames') {
-      // 允许公共媒体工具与模型目录直达
+    if (pathname === '/studio/catalog') {
+      // 仅允许公共模型目录直达
     } else {
       const mImgCheck = pathname.match(/^\/assets\/([^\/]+)\/image$/);
       const mMaskCheck = pathname.match(/^\/ai\/masks\/([^\/]+)$/);
@@ -1468,10 +1470,26 @@ async function handleApi(services, req, res, prefix = '/api') {
   }
 
   // ===== FFmpeg 媒体实用工具 (视频抽帧、格式转换、音频分离) =====
+  // SEC-002：客户端直传的 videoPath 必须落在受控目录（dataDir/nasDir）内，
+  // 防止未受信路径被塞进 ffmpeg 读取任意本地文件；fid 解析路径为服务端自产，免检。
+  const isAllowedMediaPath = (p) => {
+    try {
+      const resolved = path.resolve(String(p));
+      const roots = [path.resolve(config.dataDir || '')];
+      if (config.nasDir) roots.push(path.resolve(config.nasDir));
+      return roots.some((r) => r && (resolved === r || resolved.startsWith(r + path.sep)));
+    } catch {
+      return false;
+    }
+  };
+
   if (pathname === '/tools/extract-frames' && req.method === 'POST') {
     try {
       const body = await parseBody(req);
       let videoPath = body.videoPath;
+      if (videoPath && !isAllowedMediaPath(videoPath)) {
+        return sendJson(res, 403, { error: 'videoPath 超出允许的目录范围' });
+      }
       if (!videoPath && body.fid) {
         const deriv = db.prepare("SELECT * FROM derivatives WHERE asset_fid=? ORDER BY CASE kind WHEN 'origin' THEN 0 ELSE 1 END LIMIT 1").get(body.fid);
         if (deriv) videoPath = await resolveDerivativeFile(services, deriv);
@@ -1497,6 +1515,9 @@ async function handleApi(services, req, res, prefix = '/api') {
     try {
       const body = await parseBody(req);
       let videoPath = body.videoPath;
+      if (videoPath && !isAllowedMediaPath(videoPath)) {
+        return sendJson(res, 403, { error: 'videoPath 超出允许的目录范围' });
+      }
       if (!videoPath && body.fid) {
         const deriv = db.prepare("SELECT * FROM derivatives WHERE asset_fid=? ORDER BY CASE kind WHEN 'origin' THEN 0 ELSE 1 END LIMIT 1").get(body.fid);
         if (deriv) videoPath = await resolveDerivativeFile(services, deriv);
@@ -3195,7 +3216,9 @@ async function handleApi(services, req, res, prefix = '/api') {
 
   const mProdPreview = pathname.match(/^\/products\/previews\/([^\/]+)$/);
   if (mProdPreview && req.method === 'GET') {
-    const fn = decodeURIComponent(mProdPreview[1]);
+    // SEC-003：先解码再取 basename，杜绝 ..%2F..%2F 型 URL 编码路径穿越。
+    const fn = path.basename(decodeURIComponent(mProdPreview[1]));
+    if (!fn || fn === '.' || fn === '..') return sendJson(res, 400, { error: '非法文件名' });
     const candidateDirs = [
       path.join(__dirname, '../data/previews'),
       path.join(process.env.ML_DATA_DIR || path.join(require('os').homedir(), '.dsh-material-library'), 'previews')
@@ -3216,7 +3239,9 @@ async function handleApi(services, req, res, prefix = '/api') {
 
   const mProdGlb = pathname.match(/^\/products\/models\/([^\/]+)$/);
   if (mProdGlb && req.method === 'GET') {
-    const fn = decodeURIComponent(mProdGlb[1]);
+    // SEC-003：同 previews，basename 防穿越。
+    const fn = path.basename(decodeURIComponent(mProdGlb[1]));
+    if (!fn || fn === '.' || fn === '..') return sendJson(res, 400, { error: '非法文件名' });
     const candidatePaths = [
       path.join(__dirname, '../data/models', fn),
       path.join(process.env.ML_DATA_DIR || path.join(require('os').homedir(), '.dsh-material-library'), 'models', fn),

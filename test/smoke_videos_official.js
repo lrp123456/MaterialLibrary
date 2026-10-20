@@ -5,7 +5,7 @@ async function req(path, token, body, ms = 100000) {
   try {
     const res = await fetch(BASE + path, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token, 'X-Umbra-Internal': '1' },
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
       body: JSON.stringify(body),
       signal: c.signal,
     })

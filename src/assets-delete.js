@@ -655,10 +655,11 @@ function purgeTrashAssetOne(services, fid) {
     db.prepare('DELETE FROM asset_colors WHERE asset_fid=?').run(fid);
     db.prepare('DELETE FROM assets WHERE fid=?').run(fid);
     db.prepare('DELETE FROM asset_trash WHERE fid=?').run(fid);
-    // 连带清理附属表的孤儿行，避免指纹比对命中幽灵 fid。
+    // 连带清理附属表的孤儿行。
     // 注意各表外键列名不统一：asset_vectors 用 asset_fid，其余用 fid。
-    for (const [t, key] of [['asset_aliases', 'fid'], ['asset_vectors', 'asset_fid'],
-      ['asset_blacklist', 'fid'], ['phash_blacklist', 'fid']]) {
+    // LOGIC-002：绝不清理 asset_blacklist / phash_blacklist——黑名单正是防止
+    // 已彻底删除的照片在下次手机同步时重新回传的机制；清掉会导致死循环回传。
+    for (const [t, key] of [['asset_aliases', 'fid'], ['asset_vectors', 'asset_fid']]) {
       try { db.prepare(`DELETE FROM ${t} WHERE ${key}=?`).run(fid); } catch (_) {}
     }
   } catch (e) {
