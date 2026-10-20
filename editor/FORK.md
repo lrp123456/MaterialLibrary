@@ -96,6 +96,29 @@ uniform 只有 4 个标量槽 + 1 个方向向量。资源包里用：
 `cargo run --release -- <shaders 目录>`，工具在
 `C:\Users\lrp\rea-install\tools\wgsl-check`（只依赖 naga，能同时做 parse + validate）。
 
+## 本地运行（挂到主应用的 /editor）
+
+```bash
+# 1) 构建（输出目录必须是全新的：本机有批量删除保护，Next 无法清理已有目录）
+cd editor/apps/web
+NEXT_DIST_DIR=.next-build5 node node_modules/next/dist/bin/next build
+
+# 2) 启动（默认 3010，可用 PORT 覆盖）
+cd ../.. && node editor/start.cjs
+```
+
+链路：`web-pro`（30002）把 `/editor/*` 反代到 `http://127.0.0.1:3010`，
+前端在 `web-pro/src/views/studio/OpenCutView.vue` 里用同域 iframe 嵌入。
+
+**三个坑**：
+
+1. **不要用 `output: "standalone"`**。它与 `next start` 互斥，进程会打印
+   `next start does not work with output: standalone` 然后直接退出。
+2. **端口用 3010，不要用 3000**。3000 常被 WSL 里的另一份 OpenCut 占着。
+3. **改了 `vite.config.js` 的代理必须重启 dev server**，否则 `/editor/*` 不会被代理，
+   Vite 会把 index.html 返回给 iframe，导致页面套娃。客户端另有递归守卫兜底
+   （检测到自身在 iframe 内就不再渲染编辑器）。
+
 ## 许可提醒
 
 MIT 只授权代码，不授权「OpenCut」名称与图标。对外发布前需替换 `src/site/brand.ts`

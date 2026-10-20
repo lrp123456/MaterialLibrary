@@ -3438,7 +3438,7 @@ async function handleApi(services, req, res, prefix = '/api') {
 
       let refImageBuffer = null;
       if (b.refImage || b.ref_image || (b.glb && b.glb.viewDataUrl)) {
-        refImageBuffer = await resolveAssetBuffer(services, b.refImage || b.ref_image || b.glb.viewDataUrl);
+        refImageBuffer = await resolveAssetBuffer(services, b.refImage || b.ref_image || (b.glb && b.glb.viewDataUrl));
       }
       let productImageBuffer = null;
       if (b.productImage || b.product_image) {
@@ -3456,18 +3456,20 @@ async function handleApi(services, req, res, prefix = '/api') {
         strengthLevel: b.strengthLevel || b.strength,
         extraPrompt: b.extraPrompt || b.extra_prompt,
         assetFid: b.assetFid || b.fid,
-        yaw: (b.glb && b.glb.yaw) || b.yaw,
+        yaw: (b.glb && b.glb.yaw) != null ? b.glb.yaw : (b.yaw != null ? b.yaw : b.modelYaw),
         refImageBuffer,
         productImageBuffer,
         glbFid: (b.glb && b.glb.modelUrl) || b.glbFid,
         pasteback: b.pasteback,
-        installMode: b.installMode || 'B',
+        installMode: b.installMode || b.fidelity || 'B',
         expandRatios: b.expandRatios,
         expandRatio: b.expandRatio,
         useJimeng: b.useJimeng !== false,
         model: b.model,
         vlmInfo: b.vlmInfo || b.vlm_info || null,
         describeRegion: b.describeRegion,
+        avoidBBox: b.avoidBBox || b.clearBBox,
+        gapPct: b.gapPct || b.addGapPct,
       });
 
       return sendJson(res, 200, {
@@ -3483,6 +3485,7 @@ async function handleApi(services, req, res, prefix = '/api') {
         },
       });
     } catch (e) {
+      console.error('[edit/run] 执行失败:', e);
       return sendJson(res, 502, { success: false, error: e.message });
     }
   }
@@ -3558,6 +3561,7 @@ async function handleApi(services, req, res, prefix = '/api') {
         }
       });
     } catch (e) {
+      console.error('[edit/run] 执行失败:', e);
       return sendJson(res, 502, { success: false, error: e.message });
     }
   }

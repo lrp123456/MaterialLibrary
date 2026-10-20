@@ -151,11 +151,13 @@
           <span v-else class="text-studio-cyan font-bold">右键: 立即完成闭合绘制 | 左键: 落点添加锚点 | 双击: 闭合</span>
         </div>
 
-        <!-- 对比视图 -->
+        <!-- 对比视图 (支持同轴滑动卷帘 / 左右并排双图对比) -->
         <BeforeAfterSlider
           v-if="showCompare && resultImage"
           :beforeImage="currentImage"
           :afterImage="resultImage"
+          @close="showCompare = false"
+          @apply-as-base="applyResultAsBase"
           class="w-full h-full max-h-[720px] rounded-xl border border-studio-750"
         />
 
@@ -1593,6 +1595,44 @@ const modelPitch = ref(0);
 const modelOrientation = computed(() => `0deg ${modelPitch.value}deg ${modelRotation.value}deg`);
 const modelFileInput = ref(null);
 
+const modelViewerRef = ref(null);
+const addModelViewerRef = ref(null);
+
+function getModelNameCn(glbPath, uploadedName) {
+  if (uploadedName) return uploadedName.replace(/\.[^.]+$/, '');
+  const p = String(glbPath || '');
+  if (p.includes('sofa_electric_single')) return '单人电动功能沙发';
+  if (p.includes('sofa_model')) return '意式极简三人真皮沙发';
+  if (p.includes('sofa_default')) return '北欧布艺双人沙发';
+  if (p.includes('user_model')) return '现代人体工学单人椅';
+  return '现代品质单品家具';
+}
+
+async function captureViewerSnapshot() {
+  const viewer = (selectedMode.value === 'add' ? addModelViewerRef.value : modelViewerRef.value) || modelViewerRef.value || addModelViewerRef.value;
+  if (!viewer || typeof viewer.toBlob !== 'function') return null;
+  try {
+    const blob = await viewer.toBlob({ mimeType: 'image/png', idealAspect: true });
+    return await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch (e) {
+    console.warn('[3D Snapshot] 捕获视角截图失败:', e);
+    return null;
+  }
+}
+
+function applyResultAsBase(newImg) {
+  if (!newImg) return;
+  currentImage.value = newImg;
+  resultImage.value = '';
+  showCompare.value = false;
+  clearAnnotation();
+}
+
 function triggerModelUpload() {
   modelFileInput.value?.click();
 }
@@ -1903,7 +1943,7 @@ async function runExecute() {
         }
       }
     } else {
-      // 精准局部编辑模式：调用服务端 /edit/run 真实管线
+      // 精准局部编辑模式：调用服务端 /edit/run 真实管线 (6大专业模式完整对接)
       let regionPayload = null;
       if (annoTool.value === 'rect' && rectBBox.value) {
         regionPayload = {
@@ -1920,22 +1960,72 @@ async function runExecute() {
         };
       }
 
+      // 选区校验：除扩图外，其余精准模式必须提供选区
+      if (!regionPayload) {
+        throw new Error('请先在左侧底图上使用【拉框标注】或【自由多边形】标定目标区域');
+      }
+
+      // 捕获当前 3D 模型视角渲染截图（作为图2参考图）
+      let refImage = null;
+      if (['replace', 'add'].includes(selectedMode.value)) {
+        refImage = await captureViewerSnapshot();
+      }
+
+      // 避让区约束 (如果用户绘制了避让保护区)
+      let avoidPayload = null;
+      if (avoidBBox.value) {
+        avoidPayload = {
+          x1: Math.min(avoidBBox.value.x1, avoidBBox.value.x2),
+          y1: Math.min(avoidBBox.value.y1, avoidBBox.value.y2),
+          x2: Math.max(avoidBBox.value.x1, avoidBBox.value.x2),
+          y2: Math.max(avoidBBox.value.y1, avoidBBox.value.y2)
+        };
+      }
+
+      // 模式名称与后端操作对齐 (install -> insert, gap -> space)
+      const opMapping = {
+        replace: 'replace',
+        install: 'insert',
+        add: 'add',
+        gap: 'space',
+        remove: 'remove',
+      };
+      const targetOp = opMapping[selectedMode.value] || selectedMode.value;
+
+      let resolvedProductName = '';
+      if (selectedMode.value === 'add') {
+        resolvedProductName = addItemPrompt.value?.trim() || getModelNameCn(selectedModelGlb.value, uploadedModelName.value);
+      } else if (selectedMode.value === 'replace') {
+        resolvedProductName = getModelNameCn(selectedModelGlb.value, uploadedModelName.value);
+      } else if (selectedMode.value === 'install') {
+        resolvedProductName = installFileName.value || '软装/开关面板单品';
+      }
+
       const res = await runEditPipeline({
         image: currentImage.value,
         assetFid: currentAssetFid.value || undefined,
-        op: selectedMode.value,
+        op: targetOp,
         region: regionPayload,
-        productName: selectedMode.value === 'add' ? addItemPrompt.value : (installFileName.value || undefined),
+        refImage: refImage || undefined,
         productImage: selectedMode.value === 'install' ? installPreview.value : undefined,
         fidelity: selectedMode.value === 'install' ? activeFidelity.value : undefined,
+        productName: resolvedProductName,
         modelYaw: modelRotation.value,
         modelPitch: modelPitch.value,
-        prompt: addItemPrompt.value || undefined
+        model: precisionModelKey.value || undefined,
+        prompt: selectedMode.value === 'add' ? (addItemPrompt.value || undefined) : undefined,
+        avoidBBox: avoidPayload,
+        gapPct: selectedMode.value === 'add' ? (addPaddingPercent.value || 30) : (gapWidth.value || 0),
       });
-      if (res.data?.image?.b64) {
-        resultImage.value = `data:image/jpeg;base64,${res.data.image.b64}`;
-      } else if (res.image?.b64) {
-        resultImage.value = `data:image/jpeg;base64,${res.image.b64}`;
+
+      const b64 = res.data?.image?.b64 || res.image?.b64;
+      const imgUrl = res.data?.image?.url || res.image?.url || res.url;
+      if (b64) {
+        resultImage.value = `data:image/jpeg;base64,${b64}`;
+      } else if (imgUrl) {
+        resultImage.value = imgUrl;
+      } else {
+        throw new Error('编辑服务未返回有效图片结果');
       }
     }
     showCompare.value = true;

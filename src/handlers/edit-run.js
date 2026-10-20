@@ -22,7 +22,7 @@ const { findImageAdapter, readAdapterOutput } = require('./adapter-io');
 const { regionClause, regionNoteOf, routeFor, reconcilePrompt, stripCoordSyntax } = require('./region-route');
 const { describeRegion, needsVlm } = require('./region-vlm');
 
-const OPS = new Set(['replace', 'insert', 'add', 'space', 'remove', 'expand', 'style_transfer', 'clarity']);
+const OPS = new Set(['replace', 'insert', 'add', 'space', 'remove', 'expand', 'style_transfer', 'clarity', 'install', 'gap']);
 
 function apiBoxFromBounds(minX, minY, maxX, maxY, sw, sh) {
   return {
@@ -133,8 +133,20 @@ async function runAdapter(services, imageBuffers, prompt, preferredModel, extra)
   return out;
 }
 
-/** 增加：参考图 + 空地框，不贴回（物体可占框） */
-async function handleAdd(services, { sceneImageBuffer, refImageBuffer, selection, prompt, productName, model, clauseText, maskPath }) {
+/** 增加：参考图(或纯文本) + 空地框，支持留白约束与避让区保护 */
+async function handleAdd(services, {
+  sceneImageBuffer,
+  refImageBuffer,
+  selection,
+  prompt,
+  productName,
+  model,
+  clauseText,
+  maskPath,
+  avoidBBox,
+  gapPct,
+  pasteback = false,
+}) {
   const meta = await sharp(sceneImageBuffer).metadata();
   const sw = meta.width;
   const sh = meta.height;
@@ -142,6 +154,25 @@ async function handleAdd(services, { sceneImageBuffer, refImageBuffer, selection
   const box = apiBoxFromBounds(minX, minY, maxX, maxY, sw, sh);
   // 选区子句由 region-route 按模型能力生成；缺省才退回本地 bbox 文案
   const boxStr = clauseText || `<bbox>${box.x1} ${box.y1} ${box.x2} ${box.y2}</bbox>`;
+
+  // 1. 留白约束子句
+  let gapClause = '';
+  const gPct = Number(gapPct) || 0;
+  if (gPct > 0) {
+    gapClause = `\n【留白约束】新增物件与周边现有物体（茶几、沙发、电视柜等）之间必须留出明显空隙（不小于标记框宽度的 ${gPct}%），不得挤靠或紧贴任何现有家具。`;
+  }
+
+  // 2. 避让保护区子句
+  let avoidClause = '';
+  if (avoidBBox && avoidBBox.x1 != null) {
+    const ax1 = Math.min(avoidBBox.x1, avoidBBox.x2);
+    const ay1 = Math.min(avoidBBox.y1, avoidBBox.y2);
+    const ax2 = Math.max(avoidBBox.x1, avoidBBox.x2);
+    const ay2 = Math.max(avoidBBox.y1, avoidBBox.y2);
+    const abox = apiBoxFromBounds(ax1, ay1, ax2, ay2, sw, sh);
+    avoidClause = `\n【避让保护区约束】图1 <bbox>${abox.x1} ${abox.y1} ${abox.x2} ${abox.y2}</bbox> 为严格保护区域：禁止任何新增物体或阴影侵入该区域，该区域所有像素绝对严格保持原样！`;
+  }
+
   let compiledAddPrompt = '';
   if (!prompt && services && services.db) {
     try {
@@ -160,15 +191,30 @@ async function handleAdd(services, { sceneImageBuffer, refImageBuffer, selection
       if (compiled && compiled.prompt) compiledAddPrompt = compiled.prompt;
     } catch (_) {}
   }
-  const finalPrompt =
-    prompt ||
-    compiledAddPrompt ||
-    `图1是室内场景，图2是${productName || '物件'}参考图。【任务】将图2主体新增到 ${boxStr} 空地区域，不要删除或改动任何现有物体；底部贴地、接触阴影自然、完整落在框内；框外像素保持不变。只输出编辑后的照片。`;
+
+  let finalPrompt = prompt || compiledAddPrompt;
+  if (!finalPrompt) {
+    if (refImageBuffer) {
+      finalPrompt = `图1是待编辑的室内场景实拍照片，图2是${productName || '物件'}的款式与朝向参考图。
+【任务】在图1 ${boxStr} 标记的区域内新增图2所示款式的${productName || '物件'}：该处目前没有这个物体，把它添加进去——不要删除、移动或改动画面中的任何现有物体。
+【位置与落地】${productName || '物件'}必须完整落在 ${boxStr} 标记框内，随地面透视自然落位，底部贴合地面/地毯面，带真实自然的接触阴影与漫反射投影，不悬浮、不倾斜。${gapClause}${avoidClause}
+【保持不变】除新增的${productName || '物件'}及其阴影外，图1其余所有物体、家具、墙面、地面、光影完全保持原样不变。只输出这一张修改后的高清实景照片。`;
+    } else {
+      finalPrompt = `图1是待编辑的室内场景实拍照片。
+【任务】在图1 ${boxStr} 标记的区域内新增一件纯正优雅的【${productName || '现代软装家具'}】：该处目前没有这个物体，把它添加进去——不要删除、移动或改动画面中的任何现有物体。
+【位置与落地】新增物件必须完整落在 ${boxStr} 标记框内，随地面透视自然落位，底部贴合地面/地毯面，带真实自然的接触阴影与漫反射投影，不悬浮、不倾斜。${gapClause}${avoidClause}
+【保持不变】除新增的物件及其阴影外，图1其余所有物体、家具、墙面、地面、光影完全保持原样不变。只输出这一张修改后的高清实景照片。`;
+    }
+  }
+
   const images = refImageBuffer ? [sceneImageBuffer, refImageBuffer] : [sceneImageBuffer];
   const generated = await runAdapter(services, images, finalPrompt, model, { maskPath });
-  // add 不强制贴回（新物体会占满框），但框外仍贴回保护
+  const finalBuf = pasteback
+    ? await pastebackComposite(sceneImageBuffer, generated, { left: 0, top: 0, width: sw, height: sh }, selection)
+    : generated;
+
   return {
-    buffer: await pastebackComposite(sceneImageBuffer, generated, { left: 0, top: 0, width: sw, height: sh }, selection),
+    buffer: finalBuf,
     apiBox: box,
     bounds: { minX, minY, maxX, maxY },
     prompt: finalPrompt,
@@ -229,7 +275,9 @@ async function handleSpace(services, { sceneImageBuffer, selection, prompt, side
  * @param {object} opts
  */
 async function handleEditRun(services, opts) {
-  const op = String(opts.op || 'replace').toLowerCase();
+  let op = String(opts.op || 'replace').toLowerCase();
+  if (op === 'install') op = 'insert';
+  if (op === 'gap') op = 'space';
   if (!OPS.has(op)) throw new Error('不支持的操作: ' + op);
   const sceneImageBuffer = opts.sceneImageBuffer;
   if (!sceneImageBuffer) throw new Error('缺少场景图');
@@ -519,6 +567,9 @@ ${extraPrompt ? `【用户特别要求】${extraPrompt}。\n` : ''}
       model: opts.model,
       clauseText: clause.text,
       maskPath: clause.mask ? clause.mask.destPath : null,
+      avoidBBox: opts.avoidBBox,
+      gapPct: opts.gapPct,
+      pasteback: opts.pasteback,
     });
   } else if (op === 'space') {
     result = await handleSpace(services, {

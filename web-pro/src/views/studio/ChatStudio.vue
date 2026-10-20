@@ -1655,14 +1655,18 @@
           </div>
 
           <!-- 网格卡片列表 -->
-          <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-5">
             <div
               v-for="tpl in filteredTemplates"
               :key="tpl.id"
               class="rounded-2xl bg-studio-850 border border-studio-750 hover:border-studio-accent/70 transition-all shadow-md hover:shadow-2xl flex flex-col overflow-hidden group/card"
             >
               <!-- 卡片大预览区域 -->
-              <div class="relative aspect-video bg-studio-950 overflow-hidden border-b border-studio-800">
+              <div
+                class="relative aspect-video bg-studio-950 overflow-hidden border-b border-studio-800 cursor-pointer"
+                @click="openTemplateDetail(tpl)"
+                title="点击查看配方详情"
+              >
                 <!-- 图片模式：展示成果大图 + 角标原图 -->
                 <template v-if="!tpl.type || tpl.type === 'image'">
                   <img
@@ -1677,8 +1681,9 @@
                   <!-- 原图画中画浮窗 -->
                   <div
                     v-if="tpl.origin_images?.[0]?.url"
-                    class="absolute bottom-2 left-2 flex items-center space-x-1.5 bg-black/70 backdrop-blur-xs p-1 rounded-lg border border-white/10"
-                    title="参考原图"
+                    class="absolute bottom-2 left-2 flex items-center space-x-1.5 bg-black/70 backdrop-blur-xs p-1 rounded-lg border border-white/10 hover:border-studio-accent transition-colors"
+                    title="点击查看原图"
+                    @click.stop="openMediaPreview(tpl.origin_images[0], 'image')"
                   >
                     <span class="text-[9px] text-slate-400 font-bold px-1">原图</span>
                     <img :src="tpl.origin_images[0].url" class="w-9 h-9 rounded object-cover border border-white/20" />
@@ -1831,7 +1836,7 @@
       </div>
     </div>
 
-    <div v-if="retryDialog.visible" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+    <div v-if="retryDialog.visible" class="fixed inset-0 z-[95] flex items-center justify-center bg-black/70 p-4">
       <div class="w-full max-w-md rounded-2xl bg-studio-900 border border-studio-700 p-5 space-y-4">
         <p class="text-sm font-bold text-white">按刚才的提示词、参考图和模型再提交一次。</p>
         <div class="flex gap-2">
@@ -1840,7 +1845,7 @@
         </div>
       </div>
     </div>
-    <div v-if="retryNotice" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+    <div v-if="retryNotice" class="fixed inset-0 z-[95] flex items-center justify-center bg-black/70 p-4">
       <div class="w-full max-w-md rounded-2xl bg-studio-900 border border-studio-700 p-5 space-y-4">
         <p class="text-sm text-slate-100">已重新提交。视频队列满时可能还会失败，可以稍后再试。</p>
         <button type="button" class="w-full py-2 rounded-lg bg-studio-accent text-white text-xs font-bold cursor-pointer" @click="retryNotice = false">知道了</button>
@@ -1850,7 +1855,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, nextTick } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import StudioIcon from '../../components/StudioIcon.vue';
 import DynamicModelParamBar from '../../components/DynamicModelParamBar.vue';
 import { STUDIO_SKILLS_REGISTRY, evaluateClientModelRules, normalizeClientLayerStack } from '../../utils/model-protocol';
@@ -2156,8 +2161,17 @@ const tplSpaceFilter = ref('全部空间');
 const tplStyleFilter = ref('全部风格');
 const tplPinnedOnly = ref(false);
 const showExpandedLibrary = ref(false);
+const isLibraryFullscreen = ref(false);
 const editingTemplateId = ref('');
 const editingTemplateTitle = ref('');
+
+function openCreationLibraryModal() {
+  showExpandedLibrary.value = true;
+}
+
+function toggleLibraryFullscreen() {
+  isLibraryFullscreen.value = !isLibraryFullscreen.value;
+}
 
 const SPACE_OPTIONS = [
   '全部空间', '客厅', '主卧', '次卧', '餐厅', '厨房', '阳台', '玄关', '卫浴', '书房', '商业展厅', '建筑庭院'
@@ -2458,10 +2472,35 @@ onMounted(async () => {
     console.warn('模型参数表读取失败', e);
   }
   resetSchemaForModel();
+  window.addEventListener('keydown', handleGlobalKeydown);
   await loadTemplates();
   await loadDamAssets();
   await loadSessions();
 });
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleGlobalKeydown);
+});
+
+function handleGlobalKeydown(e) {
+  if (e.key === 'Escape') {
+    if (previewModal.value.visible) {
+      previewModal.value.visible = false;
+    } else if (detailModal.value.visible) {
+      detailModal.value.visible = false;
+    } else if (saveModal.value.visible) {
+      saveModal.value.visible = false;
+    } else if (showAssetSelector.value) {
+      showAssetSelector.value = false;
+    } else if (showExpandedLibrary.value) {
+      if (isLibraryFullscreen.value) {
+        isLibraryFullscreen.value = false;
+      } else {
+        showExpandedLibrary.value = false;
+      }
+    }
+  }
+}
 
 // 加载真实素材库 DAM 资产 (支持全量检索、品类过滤与分页)
 async function loadDamAssets(page = 1) {
