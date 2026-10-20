@@ -54,12 +54,12 @@ function size(p) { try { return fs.statSync(p).size; } catch { return 0; } }
 
 (async function main() {
   const srv = await request(
-    'http://39.107.120.55:30001/api/app/update?platform=android&versionCode=100&wgtVersion=100&channel=internal',
+    (process.env.PUBLIC_BASE_URL || '') + '/api/app/update?platform=android&versionCode=100&wgtVersion=100&channel=internal',
     { method: 'GET', headers: {}, timeout: 30000 }
   );
   const d = (srv.json && srv.json.data) || {};
   const want = String(d.wgtVersion);
-  const url = 'http://39.107.120.55:30001' + (d.url || '');
+  const url = (process.env.PUBLIC_BASE_URL || '') + '' + (d.url || '');
   console.log('服务端 wgtVersion = ' + want);
   console.log('下载地址 = ' + url);
 

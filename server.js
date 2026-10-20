@@ -22,7 +22,7 @@ const config = {
   rootFid: process.env.QUARK_ROOT_FID || '225f01205b7942b1a75bb0c2d7a0565a',
   systemFid: process.env.QUARK_SYSTEM_FID || 'a082098178f74add99cbf6de2c4caa8a',
   dataDir,
-  // NAS 素材库：\\192.168.1.34\文件服务\ai_video\material → WSL /mnt/synology/material
+  // NAS 素材库：\\<NAS_HOST>\文件服务\ai_video\material → WSL /mnt/synology/material
   nasDir: process.env.ML_NAS_DIR || '/mnt/synology/material',
   litellmBaseUrl: process.env.LITELLM_BASE_URL || 'http://127.0.0.1:4000',
   litellmApiKey: process.env.LITELLM_API_KEY || '',

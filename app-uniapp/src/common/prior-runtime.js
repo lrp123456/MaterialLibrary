@@ -193,8 +193,8 @@ const DEFAULT_SERVER_URL = "http://127.0.0.1:30001";
 const SERVER_URL_CANDIDATES = [
   "http://127.0.0.1:30001",
   "http://192.168.1.59:30001",
-  "http://10.0.2.2:30001",
-  "http://39.107.120.55:30001"
+  "http://10.0.2.2:30001"
+  // 公网地址不入库：在应用内手动填写，或构建时注入 PUBLIC_BASE_URL
 ];
 const API_SNAPSHOT_PATH = "/api/snapshot";
 const PAGE_SIZE = 500;

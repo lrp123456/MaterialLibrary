@@ -21,7 +21,8 @@ const PKG = 'lrp.aibum';
 const APPID = '__UNI__F183218';
 const WWW = `/data/data/${PKG}/files/apps/${APPID}/www`;
 const BK = '/data/local/tmp/www_bk';
-const BASE = 'http://39.107.120.55:30001';
+const BASE = process.env.PUBLIC_BASE_URL;
+if (!BASE) { console.error('请设置环境变量 PUBLIC_BASE_URL'); process.exit(1); }
 const MARKERS = ['home_library_tab', 'trash-src-bar', 'disposeSource', 'back-to-top', 'takeRemovals'];
 
 function req2(url, method, headers, body) {

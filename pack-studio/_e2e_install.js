@@ -120,7 +120,7 @@ let EXPECT = {};
     action: 'pack-and-push-wgt',
     note: '修复热更新安装：wgt 持久化+安装前校验',
     channel: 'internal',
-    server: 'http://39.107.120.55:30001',
+    server: (process.env.PUBLIC_BASE_URL || '') + '',
     user: 'admin',
     pass: process.env.PACK_PASS || '',
   });
@@ -159,7 +159,7 @@ let EXPECT = {};
 
   console.log('\n════════ 阶段 2：回读服务器，确认指针已切换 ════════');
   const upd = await new Promise((res) => {
-    http.get('http://39.107.120.55:30001/api/app/update?platform=android&versionCode=100&wgtVersion=100&channel=internal',
+    http.get((process.env.PUBLIC_BASE_URL || '') + '/api/app/update?platform=android&versionCode=100&wgtVersion=100&channel=internal',
       (rr) => { let b = ''; rr.on('data', (d) => (b += d)); rr.on('end', () => res(JSON.parse(b))); }).on('error', () => res(null));
   });
   const d = (upd && (upd.data || upd)) || {};

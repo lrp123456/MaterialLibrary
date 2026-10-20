@@ -1,5 +1,5 @@
 /**
- * NAS 本地素材库：\\192.168.1.34\文件服务\ai_video\material
+ * NAS 本地素材库：\\<NAS_HOST>\文件服务\ai_video\material
  * WSL 挂载点默认 /mnt/synology/material，可用 ML_NAS_DIR 覆盖。
  */
 const fs = require('fs');

@@ -10,7 +10,7 @@ curl -sS -m 20 -o /tmp/loc.jpg -w 'http=%{http_code} size=%{size_download} time=
   "http://127.0.0.1:30001/api/viewer/assets/${FID}/image?token=${TOKEN}"
 echo public:
 curl -sS -m 90 -o /tmp/pub.jpg -w 'http=%{http_code} size=%{size_download} time=%{time_total}\n' \
-  "http://39.107.120.55:30001/api/viewer/assets/${FID}/image?token=${TOKEN}"
+  "${PUBLIC_BASE_URL:?未设置}/api/viewer/assets/${FID}/image?token=${TOKEN}"
 echo list thumb_url sample:
 curl -sS -m 15 "http://127.0.0.1:30001/api/viewer/assets?page=1&pageSize=3" -H "Authorization: Bearer $TOKEN" \
   | python3 -c 'import sys,json;d=json.load(sys.stdin)["data"]["items"];

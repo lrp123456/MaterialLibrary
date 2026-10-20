@@ -31,7 +31,7 @@ function main() {
   const files = listFiles(WWW);
   const svc = fs.readFileSync(path.join(WWW, 'app-service.js'), 'utf8');
   console.log('[www] files=' + files.length + ' svc=' + svc.length);
-  console.log('  39.107=' + svc.includes('39.107.120.55') +
+  console.log('  39.107=' + (process.env.PUBLIC_HOST && svc.includes(process.env.PUBLIC_HOST)) +
     ' 192.168=' + svc.includes('192.168.1.59') +
     ' demo=' + svc.includes('体验演示模式') +
     ' tabsBug=' + svc.includes('versionTabs:versionTabs'));
@@ -101,7 +101,7 @@ ra = z.getinfo('resources.arsc')
 js = z.read(prefix + 'app-service.js').decode('utf-8', 'ignore')
 print('repack replaced', replaced, 'added', added, 'kept', kept)
 print('resources.arsc method', ra.compress_type)
-print('new www flags 39.107', '39.107.120.55' in js, '192.168', '192.168.1.59' in js, 'demo', '体验演示模式' in js, 'tabsBug', 'versionTabs:versionTabs' in js)
+print('new www flags 39.107', (process.env.PUBLIC_HOST && js.includes(process.env.PUBLIC_HOST)), '192.168', '192.168.1.59' in js, 'demo', '体验演示模式' in js, 'tabsBug', 'versionTabs:versionTabs' in js)
 print('dcloud_file_provider', 'res/xml/dcloud_file_provider.xml' in z.namelist())
 `);
   console.log('[1] repack with new www');

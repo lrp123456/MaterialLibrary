@@ -42,7 +42,7 @@ function sh(c) {
 
   console.log('\n═══ 服务端返回 ═══');
   const upd = await request(
-    'http://39.107.120.55:30001/api/app/update?platform=android&versionCode=100&wgtVersion=100&channel=internal',
+    (process.env.PUBLIC_BASE_URL || '') + '/api/app/update?platform=android&versionCode=100&wgtVersion=100&channel=internal',
     { method: 'GET', headers: {}, timeout: 30000 }
   );
   const d = (upd.json && upd.json.data) || {};
@@ -56,7 +56,7 @@ function sh(c) {
   try { const j = JSON.parse(mf); localCode = Number(j.version.code) || 100; localName = j.version.name; } catch {}
   for (const q of [String(localCode), String(localCode).replace(/0+$/, '') || '1']) {
     const r = await request(
-      'http://39.107.120.55:30001/api/app/update?platform=android&versionCode=' + localCode +
+      (process.env.PUBLIC_BASE_URL || '') + '/api/app/update?platform=android&versionCode=' + localCode +
       '&wgtVersion=' + q + '&channel=internal',
       { method: 'GET', headers: {}, timeout: 30000 }
     );

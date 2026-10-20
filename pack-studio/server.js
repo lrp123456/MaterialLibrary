@@ -466,7 +466,7 @@ function runAction(action, body) {
   const releaseMode = String(body.releaseMode || 'full').toLowerCase();
   const channel = String(body.channel || (releaseMode === 'canary' ? 'canary' : 'internal'));
   const force = !!body.force;
-  const server = String(body.server || process.env.PACK_SERVER || 'http://39.107.120.55:30001');
+  const server = String(body.server || process.env.PACK_SERVER || process.env.PUBLIC_BASE_URL || '');
   const user = String(body.user || process.env.PACK_USER || 'admin');
   let pass = String(body.pass || process.env.PACK_PASS || '');
 
@@ -967,7 +967,7 @@ const server = http.createServer(async (req, res) => {
   const TARGET_CANDIDATES = [
     process.env.PACK_SERVER,
     'http://127.0.0.1:30001',
-    'http://39.107.120.55:30001',
+    process.env.PUBLIC_BASE_URL,
   ].filter(Boolean);
 
   async function resolveTargetServer() {

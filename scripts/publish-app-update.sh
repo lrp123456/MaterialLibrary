@@ -6,7 +6,7 @@
 #   bash scripts/publish-app-update.sh /path/to/app.wgt 1.0.2 "三区工坊+删除" internal
 #
 # 环境变量:
-#   ML_BASE   默认 http://39.107.120.55:30001
+#   ML_BASE   未设置时回退到 PUBLIC_BASE_URL
 #   ML_USER   默认 admin
 #   ML_PASS   默认 
 set -euo pipefail
@@ -15,7 +15,7 @@ FILE="${1:?用法: publish-app-update.sh <file.wgt|apk> [versionName] [note] [ch
 VNAME="${2:-}"
 NOTE="${3:-App 更新}"
 CHANNEL="${4:-internal}"
-BASE="${ML_BASE:-http://39.107.120.55:30001}"
+BASE="${ML_BASE:-${PUBLIC_BASE_URL:?未设置 ML_BASE 或 PUBLIC_BASE_URL}}"
 USER="${ML_USER:-admin}"
 PASS="${ML_PASS:-}"
 

@@ -3,7 +3,9 @@
  * 目的：拿到服务端真实行为（而不是 App 截图），确认 SQL 报错来源
  */
 const http = require('http');
-const BASE = { host: '39.107.120.55', port: 30001 };
+const PUBLIC_HOST = process.env.PUBLIC_HOST;
+if (!PUBLIC_HOST) { console.error('请设置环境变量 PUBLIC_HOST'); process.exit(1); }
+const BASE = { host: PUBLIC_HOST, port: Number(process.env.PUBLIC_PORT || 30001) };
 
 function call(path, method, headers, body) {
   return new Promise((resolve) => {

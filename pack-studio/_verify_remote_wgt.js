@@ -9,7 +9,7 @@ const path = require('path');
 const crypto = require('crypto');
 const zlib = require('zlib');
 
-const BASE = 'http://39.107.120.55:30001';
+const BASE = (process.env.PUBLIC_BASE_URL || '') + '';
 const MARKERS = [
   'home_library_tab',
   'trash-src-bar',

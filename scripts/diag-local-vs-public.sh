@@ -9,5 +9,5 @@ curl -sS -m 15 -o /tmp/a.jpg -w 'http=%{http_code} size=%{size_download} time=%{
   "http://127.0.0.1:30001/api/viewer/assets/${FID}/image?token=${TOKEN}"
 echo -n "public "
 curl -sS -m 15 -o /dev/null -w 'http=%{http_code} time=%{time_total}\n' \
-  "http://39.107.120.55:30001/api/viewer/assets/${FID}/image?token=${TOKEN}"
+  "${PUBLIC_BASE_URL:?未设置}/api/viewer/assets/${FID}/image?token=${TOKEN}"
 file /tmp/a.jpg

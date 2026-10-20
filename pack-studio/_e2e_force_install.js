@@ -145,7 +145,7 @@ function clearThrottle() {
   console.log('  已启动，观察 150 秒（检测到 wgt_cache 出现文件就尝试点确认）');
 
   const srv = await request(
-    'http://39.107.120.55:30001/api/app/update?platform=android&versionCode=100&wgtVersion=100&channel=internal',
+    (process.env.PUBLIC_BASE_URL || '') + '/api/app/update?platform=android&versionCode=100&wgtVersion=100&channel=internal',
     { method: 'GET', headers: {}, timeout: 30000 }
   );
   const d = (srv.json && srv.json.data) || {};

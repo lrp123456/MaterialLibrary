@@ -12,7 +12,8 @@ const ADB = 'C:\\Users\\lrp\\Downloads\\HBuilderX\\plugins\\launcher-tools\\tool
 const S = '127.0.0.1:21503';
 const PKG = 'lrp.aibum';
 const WWW = `/data/data/${PKG}/files/apps/__UNI__F183218/www`;
-const SRV = 'http://39.107.120.55:30001';
+const SRV = process.env.PUBLIC_BASE_URL;
+if (!SRV) { console.error('请设置环境变量 PUBLIC_BASE_URL'); process.exit(1); }
 const SHOTS = path.join('C:\\Users\\lrp\\DevEcoStudioProjects\\MaterialLibraryServer\\pack-studio', '_shots');
 const NEW_BYTES = 493128;
 

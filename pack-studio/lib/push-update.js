@@ -152,7 +152,7 @@ function inspectPackage(file) {
  */
 async function pushUpdate(opt) {
   const onLog = opt.onLog || (() => {});
-  const server = String(opt.server || process.env.PACK_SERVER || 'http://39.107.120.55:30001').replace(/\/+$/, '');
+  const server = String(opt.server || process.env.PACK_SERVER || process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, '');
   const releaseMode = String(opt.releaseMode || (opt.channel === 'canary' ? 'canary' : 'full')).toLowerCase();
   const channel = String(opt.channel || (releaseMode === 'canary' ? 'canary' : 'internal'));
   const file = opt.file;

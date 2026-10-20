@@ -49,7 +49,7 @@ curl -sS -m 40 -o /tmp/m3.jpg -w "http=%{http_code} size=%{size_download} ctype=
 # public via 39
 echo "=== public 39 image ==="
 curl -sS -m 30 -o /tmp/m4.jpg -w "http=%{http_code} size=%{size_download}\n" \
-  "http://39.107.120.55:30001/api/viewer/assets/${FID}/image?token=${TOKEN}"
+  "${PUBLIC_BASE_URL:?未设置}/api/viewer/assets/${FID}/image?token=${TOKEN}"
 file /tmp/m1.jpg /tmp/m4.jpg 2>/dev/null
 # how mobile index.html builds image url
 grep -n "image" /mnt/c/Users/lrp/DevEcoStudioProjects/AlbumSyncUniAppX/index.html | grep -i "src\|url\|viewer" | head -20

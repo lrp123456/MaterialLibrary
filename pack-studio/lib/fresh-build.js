@@ -46,7 +46,7 @@ const MIN_SVC_BYTES = 50 * 1024; // 正常 app-service.js 在 400KB 量级，50K
  * 与 scripts/pack-wgt.ps1 的 Get-WwwScore 保持同一套判据。
  */
 const FINGERPRINT = {
-  needPublicServer: '39.107.120.55',
+  needPublicServer: process.env.PUBLIC_HOST || '',
   banned: ['体验演示模式', 'versionTabs:versionTabs'],
 };
 

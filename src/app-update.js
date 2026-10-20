@@ -70,7 +70,7 @@ function pickLatest(manifest, channel, deviceId, userAgent, clientIp) {
         if (dev && (dev === target || dev.includes(target) || target.includes(dev))) return true;
         // 匹配 User-Agent 中的手机型号（如 HD1910）
         if (ua && (ua === target || ua.includes(target))) return true;
-        // 只有当目标是纯 IP 格式（如 192.168.1.100，不带端口）时才匹配客户端 IP；带端口的属于 ADB 序列号，不按 IP 泛匹配
+        // 只有当目标是纯 IP 格式（如 <LAN_HOST>，不带端口）时才匹配客户端 IP；带端口的属于 ADB 序列号，不按 IP 泛匹配
         const isPureIp = /^(\d{1,3}\.){3}\d{1,3}$/.test(target);
         if (isPureIp && ip && (ip === target || ip.includes(target))) return true;
         return false;

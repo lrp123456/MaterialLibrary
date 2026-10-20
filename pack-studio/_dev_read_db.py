@@ -19,7 +19,10 @@ cur = con.cursor()
 tabs = [r[0] for r in cur.execute("select name from sqlite_master where type='table'")]
 print("表:", tabs)
 
-KEYS = ["server", "url", "token", "user", "app_update", "wgt", "39.107.120.55", "30001"]
+KEYS = ["server", "url", "token", "user", "app_update", "wgt", "30001"]
+# 主机地址不入库：从环境变量补充搜索关键字
+if os.environ.get("PUBLIC_HOST"):
+    KEYS.append(os.environ["PUBLIC_HOST"])
 for t in tabs:
     try:
         n = cur.execute(f'select count(*) from "{t}"').fetchone()[0]

@@ -40,7 +40,7 @@
 | 新鲜度 | `app-service.js` 的 mtime 晚于编译开始时间 | 中止（防止编到别处 / 静默跳过） |
 | 体积 | `> 50KB` | 中止（排除空壳、半成品） |
 | 源码同源 | `home_library_tab` / `trash-src-bar` / `disposeSource` / `back-to-top` / `takeRemovals` 全部命中 | 中止，并列出缺哪些标识符 |
-| 生产指纹 | 含 `39.107.120.55`、无 `体验演示模式`、无 `versionTabs:versionTabs` | 中止 |
+| 生产指纹 | 含 `<公网IP>`、无 `体验演示模式`、无 `versionTabs:versionTabs` | 中止 |
 | 出包同源 | 解开 wgt 比对 `app-service.js` 的 **sha256** 与本次编译完全一致 | 中止，不推送 |
 
 > 标识符一律用 **CSS 类名 / storage key / 业务文案**，

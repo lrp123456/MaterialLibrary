@@ -25,7 +25,7 @@ const APPID = '__UNI__F183218';
 const WWW = `/data/data/${PKG}/files/apps/${APPID}/www`;
 const WWW_BK = '/data/local/tmp/www_old_for_e2e';
 const PS = 'http://127.0.0.1:3789';
-const SRV = 'http://39.107.120.55:30001';
+const SRV = (process.env.PUBLIC_BASE_URL || '') + '';
 const SHOTS = path.join('C:\\Users\\lrp\\DevEcoStudioProjects\\MaterialLibraryServer\\pack-studio', '_shots');
 
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
