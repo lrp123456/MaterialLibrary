@@ -20,8 +20,10 @@ const nextConfig: NextConfig = {
 		removeConsole: process.env.NODE_ENV === "production",
 	},
 	reactStrictMode: true,
-	productionBrowserSourceMaps: true,
-	output: "standalone",
+	// 生产环境不输出 source map：构建体积小一半，也避免把完整源码随镜像/仓库外泄
+	productionBrowserSourceMaps: false,
+	// 不用 standalone：本fork 是通过 30002 反代挂在 /editor 下的子应用，
+	// 用 next start 起在主进程即可。standalone 与 next start 互斥，会导致进程起来就退出。
 	images: {
 		remotePatterns: [
 			{

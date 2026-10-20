@@ -24,7 +24,7 @@ export default defineConfig({
       // 顺序敏感：必须排在 /editor-api 之后。Vite 按插入顺序匹配第一个前缀，
       // 若 /editor 在前，/editor-api 的请求会被错误地转发到 Next。
       '/editor': {
-        target: 'http://127.0.0.1:3000',
+        target: 'http://127.0.0.1:3010',
         changeOrigin: true,
         ws: true,
       }
@@ -47,7 +47,7 @@ export default defineConfig({
       // 顺序敏感：必须排在 /editor-api 之后。Vite 按插入顺序匹配第一个前缀，
       // 若 /editor 在前，/editor-api 的请求会被错误地转发到 Next。
       '/editor': {
-        target: 'http://127.0.0.1:3000',
+        target: 'http://127.0.0.1:3010',
         changeOrigin: true,
         ws: true,
       }

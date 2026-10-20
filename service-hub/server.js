@@ -120,7 +120,7 @@ const SERVICES = [
     id: 'clip-editor',
     name: '剪辑编辑器 (OpenCut)',
     desc: 'fork 自 OpenCut Classic · 由 30002 以 /editor 反代（端口 3000）',
-    port: 3000,
+    port: 3010,
     url: 'http://127.0.0.1:30002/editor',
     kind: 'node',
     // 首次启动前必须在 editor/apps/web 下跑过一次 next build；

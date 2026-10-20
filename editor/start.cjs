@@ -12,8 +12,8 @@ const { spawn } = require('child_process');
 
 const webDir = path.join(__dirname, 'apps', 'web');
 const nextBin = path.join(webDir, 'node_modules', 'next', 'dist', 'bin', 'next');
-const distDir = process.env.NEXT_DIST_DIR || '.next-build4';
-const port = process.env.PORT || process.env.EDITOR_PORT || '3000';
+const distDir = process.env.NEXT_DIST_DIR || '.next-build5';
+const port = process.env.PORT || process.env.EDITOR_PORT || '3010';
 
 if (!fs.existsSync(nextBin)) {
   console.error(`[editor] 找不到 Next：${nextBin}`);

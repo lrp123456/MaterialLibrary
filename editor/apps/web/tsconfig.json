@@ -42,14 +42,8 @@
     "../../use-frame-cache.ts",
     "src/stores/timeline-store.ts",
     ".next/dev/types/**/*.ts",
-    ".next-build1/types/**/*.ts",
-    ".next-build1/dev/types/**/*.ts",
-    ".next-build2/types/**/*.ts",
-    ".next-build2/dev/types/**/*.ts",
-    ".next-build3/types/**/*.ts",
-    ".next-build3/dev/types/**/*.ts",
-    ".next-build4/types/**/*.ts",
-    ".next-build4/dev/types/**/*.ts"
+    ".next*/types/**/*.ts",
+    ".next*/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

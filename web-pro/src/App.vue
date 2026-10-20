@@ -42,7 +42,7 @@ import SettingsView from './views/SettingsView.vue';
 
 const activeTab = ref('library'); // 默认展示素材库板块 (DAM)
 const studioPayload = ref(null);
-const mediaSub = ref('clip');
+const mediaSub = ref('opencut');
 
 function onTabChange(tab) {
   activeTab.value = tab;

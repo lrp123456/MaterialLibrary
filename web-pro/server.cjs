@@ -10,7 +10,7 @@ const path = require('path');
 const PORT = Number(process.env.WEB_PRO_PORT || process.argv[2] || 30002);
 const API_TARGET = process.env.API_TARGET || 'http://127.0.0.1:30001';
 // 剪辑子应用（fork 自 OpenCut Classic），Next.js 以 basePath=/editor 启动。
-const EDITOR_TARGET = process.env.EDITOR_TARGET || 'http://127.0.0.1:3000';
+const EDITOR_TARGET = process.env.EDITOR_TARGET || 'http://127.0.0.1:3010';
 const DIST_DIR = path.resolve(__dirname, 'dist');
 
 const MIME = {
