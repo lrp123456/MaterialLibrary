@@ -265,8 +265,8 @@ async function ingestBuffer(services, {
   db.prepare(`
     INSERT INTO assets (
       fid, kind, category, file_name, size, width, height, orientation, origin_orientation,
-      status, is_representative, source, sha256, client_asset_id, created_at, discovered_at, updated_at
-    ) VALUES (?, 'image', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      status, source, sha256, client_asset_id, created_at, discovered_at, updated_at
+    ) VALUES (?, 'image', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     fid,
     targetCategory,
@@ -277,7 +277,6 @@ async function ingestBuffer(services, {
     height && width && height > width * 1.05 ? 'portrait' : (width > height * 1.05 ? 'landscape' : 'square'),
     originOrientation,
     initialStatus,
-    isFinished ? 1 : 0,
     source,
     sha,
     clientId || null,

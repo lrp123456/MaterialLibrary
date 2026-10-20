@@ -15,8 +15,10 @@
  * 关键安全约束：
  *   - 只处理**指定设备**的 frozen 条目，不跨设备
  *   - 只处理**超过宽限期**仍 frozen 的（默认 7 天），给「误删相册照片后恢复」留时间
- *   - 命中的 assets 必须是**非代表项或无组**（代表项被删会让整组素材消失）
  *   - 逐条 try/catch，单条失败不影响整批
+ *
+ * 注（2026-10-20 审计整改）：重复组已退役（CONFLICT-002），原
+ * 「代表项保护」逻辑随之移除——每个素材独立判断、独立清理。
  */
 const path = require('path');
 
@@ -62,7 +64,7 @@ function findStaleFrozenItems(db, { deviceId = '', graceDays = 0 } = {}) {
  * 把快照条目匹配到 assets 行。
  * 匹配键：asset_aliases.item_key 优先（历史改名/多别名），其次 file_name|size。
  *
- * @returns {Array<{fid,fileName,itemKey,isRepresentative,dupGroupId}>}
+ * @returns {Array<{fid,fileName,itemKey,daysSinceFrozen}>}
  */
 function matchAssets(db, items) {
   const out = [];
@@ -73,8 +75,6 @@ function matchAssets(db, items) {
 
   for (const it of items) {
     let fid = null;
-    let isRep = null;
-    let grp = null;
 
     if (hasAliases) {
       const a = db.prepare(
@@ -93,19 +93,10 @@ function matchAssets(db, items) {
     if (!fid || seen.has(fid)) continue;
     seen.add(fid);
 
-    const row = db.prepare(
-      'SELECT is_representative, dup_group_id FROM assets WHERE fid = ?'
-    ).get(fid);
-    if (row) {
-      isRep = row.is_representative;
-      grp = row.dup_group_id;
-    }
     out.push({
       fid,
       fileName: it.name,
       itemKey: it.itemKey,
-      isRepresentative: isRep,
-      dupGroupId: grp,
       daysSinceFrozen: it.daysSinceFrozen,
     });
   }
@@ -113,9 +104,11 @@ function matchAssets(db, items) {
 }
 
 /**
- * 预览：将清理哪些素材（无副作用）
+ * 共享计算：preview / apply 都基于同一份完整待清理列表。
+ * 修复 2026-10-20 审计发现的 samples 截断 bug——apply 曾从 20 条的
+ * preview.samples 取目标，导致 limit=500 实际每次最多只清 20 条。
  */
-function previewReconcile(services, { deviceId = '', graceDays = null } = {}) {
+function computeReconcile(services, { deviceId = '', graceDays = null } = {}) {
   const { db, config } = services;
   const grace = graceDays === null || graceDays === undefined
     ? graceDaysFor(config)
@@ -124,19 +117,20 @@ function previewReconcile(services, { deviceId = '', graceDays = null } = {}) {
   const items = findStaleFrozenItems(db, { deviceId, graceDays: grace });
   const matched = matchAssets(db, items);
 
-  // 代表项保护：组内代表项被删会让整组素材从列表消失
-  const safe = [];
-  const skippedRep = [];
-  for (const m of matched) {
-    if (m.isRepresentative === 1) skippedRep.push(m);
-    else safe.push(m);
-  }
-
   // 已在回收站 / 已删除的不再处理
-  const stillAlive = safe.filter((m) => {
+  const stillAlive = matched.filter((m) => {
     const a = db.prepare('SELECT status FROM assets WHERE fid=?').get(m.fid);
     return a && a.status !== 'deleted';
   });
+
+  return { db, grace, items, matched, stillAlive };
+}
+
+/**
+ * 预览：将清理哪些素材（无副作用）
+ */
+function previewReconcile(services, { deviceId = '', graceDays = null } = {}) {
+  const { grace, items, matched, stillAlive } = computeReconcile(services, { deviceId, graceDays });
 
   return {
     deviceId,
@@ -144,9 +138,7 @@ function previewReconcile(services, { deviceId = '', graceDays = null } = {}) {
     staleFrozenCount: items.length,
     matchedCount: matched.length,
     willRemoveCount: stillAlive.length,
-    skippedRepresentative: skippedRep.length,
     samples: stillAlive.slice(0, 20),
-    skippedSamples: skippedRep.slice(0, 10),
   };
 }
 
@@ -157,8 +149,9 @@ function applyReconcile(services, { deviceId = '', graceDays = null, limit = 200
   const { db, logger } = services;
   const assetsDelete = require('./assets-delete');
 
-  const preview = previewReconcile(services, { deviceId, graceDays });
-  const targets = preview.samples.slice(0, Math.max(1, Math.min(500, Number(limit) || 200)));
+  // 用完整的 stillAlive 列表（非 preview.samples 的 20 条展示子集）
+  const { grace, matched, stillAlive } = computeReconcile(services, { deviceId, graceDays });
+  const targets = stillAlive.slice(0, Math.max(1, Math.min(500, Number(limit) || 200)));
 
   const removed = [];
   const failed = [];
@@ -189,12 +182,11 @@ function applyReconcile(services, { deviceId = '', graceDays = null, limit = 200
 
   return {
     deviceId,
-    graceDays: preview.graceDays,
+    graceDays: grace,
     removed,
     failed,
     removedCount: removed.length,
-    skippedRepresentative: preview.skippedRepresentative,
-    scanned: preview.matchedCount,
+    scanned: matched.length,
   };
 }
 

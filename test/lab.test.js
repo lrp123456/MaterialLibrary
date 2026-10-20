@@ -34,8 +34,8 @@ function ok(name) { console.log('✅ ' + name); }
 function seedAsset(fid, kind = 'image') {
   const now = Date.now();
   db.prepare(`
-    INSERT OR IGNORE INTO assets (fid, kind, file_name, status, is_representative, has_watermark, in_managed_zone, created_at, discovered_at, updated_at)
-    VALUES (?, ?, ?, 'ready', 1, 0, 0, ?, ?, ?)
+    INSERT OR IGNORE INTO assets (fid, kind, file_name, status, has_watermark, in_managed_zone, created_at, discovered_at, updated_at)
+    VALUES (?, ?, ?, 'ready', 0, 0, ?, ?, ?)
   `).run(fid, kind, `${fid}.jpg`, now, now, now);
   // 落原图供 gateway 使用
   const origDir = path.join(testDir, 'cache', 'originals');

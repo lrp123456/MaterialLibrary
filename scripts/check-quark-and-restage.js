@@ -31,11 +31,11 @@ const restage916 = db.prepare("SELECT count(*) c FROM derivatives WHERE kind='re
 const restage34 = db.prepare("SELECT count(*) c FROM derivatives WHERE kind='restage_3_4'").get().c;
 console.log(`9:16 重构图数量: ${restage916}, 3:4 重构图数量: ${restage34}`);
 
-// 检查代表图中的重构覆盖情况
-const repCount = db.prepare("SELECT count(*) c FROM assets WHERE is_representative=1").get().c;
-const repWithRestage = db.prepare(`
+// 检查素材的重构覆盖情况（CONFLICT-002：重复组退役，不再有「代表图」概念，改用 ready 素材口径）
+const readyCount = db.prepare("SELECT count(*) c FROM assets WHERE status='ready' AND kind='image'").get().c;
+const readyWithRestage = db.prepare(`
   SELECT count(DISTINCT a.fid) c FROM assets a
   JOIN derivatives d ON a.fid = d.asset_fid
-  WHERE a.is_representative=1 AND d.kind IN ('restage_9_16', 'restage_3_4')
+  WHERE a.status='ready' AND a.kind='image' AND d.kind IN ('restage_9_16', 'restage_3_4')
 `).get().c;
-console.log(`代表图总数: ${repCount}, 已有重构图的代表图数: ${repWithRestage}`);
+console.log(`ready 图片总数: ${readyCount}, 已有重构图的: ${readyWithRestage}`);

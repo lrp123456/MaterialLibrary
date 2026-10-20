@@ -89,7 +89,7 @@ function scanLibraryDuplicates(services, options = {}) {
 
   const assets = db.prepare(`
     SELECT fid, file_name, kind, size, width, height, sha256, md5, phash,
-           created_at, source_asset_id, main_derivative_id, is_representative, dup_group_id, status
+           created_at, source_asset_id, main_derivative_id, status
     FROM assets
     WHERE (status IS NULL OR status != 'deleted')
     ORDER BY COALESCE(created_at, 0) ASC, fid ASC
@@ -157,7 +157,6 @@ function scanLibraryDuplicates(services, options = {}) {
       sourceAssetId: a.source_asset_id || '',
       exportTag,
       lineage: lineageKeys(a, ds),
-      isRepresentative: !!a.is_representative,
       raw: a,
     });
   }
@@ -167,7 +166,8 @@ function scanLibraryDuplicates(services, options = {}) {
 
   /** 一般去留：更早 / 更像母素材 */
   const preferKeep = (a, b) => {
-    const score = (x) => (x.hasRestage ? 3 : 0) + (x.isRepresentative ? 1 : 0) + (x.exportTag ? -3 : 0);
+    // CONFLICT-002：重复组退役，isRepresentative 权重移除
+    const score = (x) => (x.hasRestage ? 3 : 0) + (x.exportTag ? -3 : 0);
     const sa = score(a);
     const sb = score(b);
     if (sa !== sb) return sa > sb ? a : b;
@@ -301,26 +301,8 @@ function scanLibraryDuplicates(services, options = {}) {
       let drop = keep.fid === a.fid ? b : a;
       if (dropSet.has(drop.fid)) continue;
 
-      // —— 代表项保护（2026-10-03 修根因）——
-      // 之前只防「同一条被删两次」，但完全不检查 drop 是不是某个重复组的
-      // is_representative=1 项。一组 N 个成员逐对比较时，最后一轮会把
-      // 刚被选为 keep 的代表项当成 drop 删掉 → 整组素材从列表消失。
-      // 实测历史数据里 200 条代表项就是这样被误标进回收站的。
-      //
-      // 根因是权重：preferKeep 给 hasRestage +3 分、isRepresentative 只 +1 分，
-      // 所以「带 restage 衍生的非代表项」会打败「代表项」成为 keep。
-      //
-      // 修法是**交换 keep/drop**（让代表项当 keep、另一条当 drop），
-      // 不能用 `continue` 跳过 —— 那会让 keep 侧的那条永远进不了 dropSet，
-      // 每一轮都重复选它当 keep，8 条重复只能删掉 6 条，重复素材仍留在列表里
-      //（实测：8 条组只删 6 条，d1 残留）。
-      if (drop.isRepresentative && !keep.isRepresentative) {
-        drop = keep;
-        keep = keep.fid === a.fid ? b : a;
-      }
-      // 两条都是代表项：不动它们（保守，避免误删同组的其它代表）
-      if (drop.isRepresentative) continue;
-      if (dropSet.has(drop.fid)) continue;
+      // CONFLICT-002：重复组退役——原「代表项保护」逻辑（isRepresentative
+      // 交换 keep/drop）随之移除，isRepresentative 恒 false 已是死分支。
 
       dropSet.add(drop.fid);
 

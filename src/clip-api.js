@@ -54,6 +54,11 @@ async function handleClipApi(services, req, res) {
     sendJson(res, 401, { error: '需要登录' });
     return true;
   }
+  // SEC-007：角色区分——viewer 只读，剪辑写操作（快照/工程/AI 任务）一律 admin。
+  if (user.role !== 'admin' && !['GET', 'HEAD'].includes(req.method)) {
+    sendJson(res, 403, { error: '剪辑接口的写操作需要管理员账号' });
+    return true;
+  }
 
   const p = url.pathname;
   try {

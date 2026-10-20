@@ -8,15 +8,15 @@ const path = require('path');
 const crypto = require('crypto');
 const { Quark, resolveQuarkCli } = require('./quark');
 const { searchSimilar, getVectorStatus, embedCaption, storeVector } = require('./vector');
-const { getDerivatives, getDerivativeById, setMainDerivative, resolveDerivativeFile, ensurePreviewJpeg } = require('./derivatives');
+const {
+  getDerivatives, getDerivativeById, setMainDerivative, resolveDerivativeFile, ensurePreviewJpeg
+} = require('./derivatives');
 const {
   parseDerivativeParams,
   isQualifiedAgnes,
   findQualifiedKind,
   pickBrowseMain,
-  restageStatusForAsset,
-  representativeFid,
-  sameDupGroup
+  restageStatusForAsset
 } = require('./restage');
 const { orientationLabelMap } = require('./ratio');
 const { executeAdapter } = require('./gen');
@@ -242,7 +242,8 @@ function extractToken(req, urlObj, opts = {}) {
 // gating_passed / tagging_done 写值 —— 它们在白名单里意味着
 // 「流水线跑到一半的半成品素材会被当成可用素材返回」。
 // 判据收敛为唯一真源 asset-status.js 的 BROWSE_READY_SQL。
-const BROWSE_READY = `(${BROWSE_READY_SQL} AND (a.is_representative = 1 OR a.dup_group_id IS NULL) AND ${AUTH_VISIBLE_SQL})`;
+// CONFLICT-002：重复组概念已退役——is_representative / dup_group_id 不再参与可见性。
+const BROWSE_READY = `(${BROWSE_READY_SQL} AND ${AUTH_VISIBLE_SQL})`;
 
 let cachedFilterOptions = null;
 let cachedFilterOptionsTs = 0;
@@ -495,7 +496,7 @@ function queryAssets(db, query = {}) {
   }
 
   if (!all) {
-    where.push('(a.is_representative = 1 OR a.dup_group_id IS NULL)');
+    // CONFLICT-002：重复组已退役，不再隐藏任何素材。
   }
 
   // 精准日期过滤 (YYYY-MM-DD 或 YYYY-MM)
@@ -690,8 +691,8 @@ function queryAssets(db, query = {}) {
   const items = db.prepare(`
     SELECT a.fid, a.file_name, a.width, a.height, a.orientation, a.origin_orientation,
            COALESCE(a.category, 'interior') AS category, a.dominant_color,
-           a.thumb_url, a.main_derivative_id, a.status, a.ready_flags, a.dup_group_id,
-           a.is_representative, a.has_watermark, a.auth_state, COALESCE(a.created_at, a.discovered_at, 0) AS created_at,
+           a.thumb_url, a.main_derivative_id, a.status, a.ready_flags,
+           a.has_watermark, a.auth_state, COALESCE(a.created_at, a.discovered_at, 0) AS created_at,
            a.kind, a.is_ai, a.source_asset_id, a.poster_path, a.duration_s, a.size,
            a.phash, a.md5, a.sha256, a.favorited_at
     FROM assets a
@@ -756,19 +757,7 @@ function queryAssets(db, query = {}) {
       derivById.set(d.id, d);
     }
 
-    // 4. 批量获取 dupCount
-    const dupGroupIds = [...new Set(items.map(it => it.dup_group_id).filter(Boolean))];
-    const dupCountMap = new Map();
-    if (dupGroupIds.length > 0) {
-      const dupPlaceholders = dupGroupIds.map(() => '?').join(',');
-      const dupCounts = db.prepare(`
-        SELECT dup_group_id, COUNT(*) as c
-        FROM assets
-        WHERE dup_group_id IN (${dupPlaceholders})
-        GROUP BY dup_group_id
-      `).all(...dupGroupIds);
-      for (const dc of dupCounts) dupCountMap.set(dc.dup_group_id, dc.c);
-    }
+    // CONFLICT-002：重复组退役，dupCount 批量统计已移除（列表恒为独立素材）。
 
     // 5. 批量获取 AI 产物的母素材 source_asset
     const sourceFids = [...new Set(items.map(it => it.source_asset_id).filter(Boolean))];
@@ -828,7 +817,8 @@ function queryAssets(db, query = {}) {
         it.mainDerivative = it.main_derivative_id ? (derivById.get(it.main_derivative_id) || null) : null;
       }
 
-      it.dupCount = it.dup_group_id ? (dupCountMap.get(it.dup_group_id) || 1) : 1;
+      // CONFLICT-002：重复组退役，dupCount 恒为 1（兼容旧客户端字段）
+      it.dupCount = 1;
       try { it.readyFlags = JSON.parse(it.ready_flags || '[]'); } catch { it.readyFlags = []; }
       it.mediaToken = auth.generateMediaToken(it.fid, 900);
 
@@ -959,39 +949,13 @@ function getAssetDetail(services, fid, { allowNonReady = false } = {}) {
   const colors = db.prepare('SELECT hex, role, name, weight, basic_color FROM asset_colors WHERE asset_fid = ?').all(fid);
   const derivatives = getDerivatives(db, fid);
 
-  let effectiveGroupId = asset.dup_group_id;
-  if (!effectiveGroupId) {
-    const child = db.prepare('SELECT dup_group_id FROM assets WHERE dup_group_id = ? LIMIT 1').get(asset.fid);
-    if (child) effectiveGroupId = asset.fid;
-  }
-
-  let dupMembers = [];
-  if (effectiveGroupId) {
-    dupMembers = db.prepare(`
-      SELECT a.fid, a.file_name, a.width, a.height, a.origin_orientation, a.thumb_url, a.is_representative, a.main_derivative_id, a.ready_flags, a.status
-      FROM assets a WHERE (a.dup_group_id = ? OR a.fid = ?) AND ${AUTH_VISIBLE_SQL}
-      ORDER BY a.is_representative DESC, a.created_at ASC
-    `).all(effectiveGroupId, effectiveGroupId);
-    if (!asset.dup_group_id) {
-      asset.dup_group_id = effectiveGroupId;
-    }
-  }
+  // CONFLICT-002：重复组概念已退役，组员/组长查询全部移除。
 
   const similar = searchSimilar(services, fid, { limit: 8 });
   const originIdStmt = db.prepare("SELECT id FROM derivatives WHERE asset_fid=? AND kind='origin' LIMIT 1");
-  for (const m of dupMembers) {
-    m.origin_derivative_id = originIdStmt.get(m.fid)?.id || null;
-  }
   for (const s of similar || []) {
     const sfid = s.fid || s.asset_fid;
     if (sfid) s.origin_derivative_id = originIdStmt.get(sfid)?.id || null;
-  }
-
-  let matchReason = null;
-  if (effectiveGroupId) {
-    try {
-      matchReason = db.prepare('SELECT match_reason FROM dup_groups WHERE id=?').get(effectiveGroupId)?.match_reason || null;
-    } catch { matchReason = null; }
   }
 
   const parsedDerivs = (derivatives || []).map(d => {
@@ -999,7 +963,8 @@ function getAssetDetail(services, fid, { allowNonReady = false } = {}) {
     return { ...d, params, generated: isQualifiedAgnes({ ...d, params }) };
   });
 
-  const restageOwnerFid = representativeFid(db, asset);
+  // CONFLICT-002：重复组退役，血缘归属就是素材本身
+  const restageOwnerFid = asset.fid;
   let restageOwnerDerivs = parsedDerivs;
   if (restageOwnerFid && restageOwnerFid !== fid) {
     restageOwnerDerivs = (getDerivatives(db, restageOwnerFid) || []).map(d => {
@@ -1033,9 +998,10 @@ function getAssetDetail(services, fid, { allowNonReady = false } = {}) {
     allDerivatives: parsedDerivs,
     restageOwnerFid,
     restageStatus,
-    dupMembers,
+    // CONFLICT-002：重复组退役，组员/组原因字段保留为空以兼容旧客户端
+    dupMembers: [],
     similar,
-    matchReason
+    matchReason: null
   };
 }
 
@@ -1178,18 +1144,14 @@ async function handleApi(services, req, res, prefix = '/api') {
     ['GET', /^\/stats$/],
     ['GET', /^\/vectors\/status$/],
     ['POST', /^\/snapshot$/],
-    ['GET', /^\/sync\/reconcile$/],
-    ['POST', /^\/sync\/reconcile$/],
+    // SEC-007：/sync/reconcile 为批量删除对账，仅管理员（已移出 viewer 白名单）
     ['POST', /^\/assets\/[^\/]+\/restage$/],
     ['POST', /^\/assets\/[^\/]+\/main-derivative$/],
     ['GET', /^\/lab\/capabilities$/],
     ['GET', /^\/lab\/model-caps$/],
     ['GET', /^\/lab\/filter-vocabulary$/],
     ['GET', /^\/lab\/quick-models$/],
-    ['POST', /^\/lab\/stale-tags$/],
-    ['POST', /^\/lab\/gate-preview$/],
     ['GET', /^\/lab\/local-models$/],
-    ['GET', /^\/lab\/local-models\/[^\/]+\/download$/],
     ['POST', /^\/lab\/runs$/],
     ['GET', /^\/lab\/runs\/[^\/]+\/[^\/]+$/],
     ['GET', /^\/cache\/temp\/[^\/]+$/],
@@ -1197,8 +1159,7 @@ async function handleApi(services, req, res, prefix = '/api') {
     ['GET', /^\/app\/update$/],
     ['DELETE', /^\/assets\/[^\/]+$/],
     ['POST', /^\/assets\/[^\/]+\/delete$/],
-    ['POST', /^\/assets\/dedupe-scan$/],
-    ['POST', /^\/assets\/dedupe-library$/],
+    // SEC-007：dedupe-scan / dedupe-library（含 apply 全库软删）与 purge 同级，仅管理员
     ['GET', /^\/rejected$/],
     ['GET', /^\/rejected\/[^\/]+$/],
     ['POST', /^\/rejected\/[^\/]+\/restore$/],
@@ -1222,49 +1183,22 @@ async function handleApi(services, req, res, prefix = '/api') {
     ['GET', /^\/products\/presets$/],
     ['GET', /^\/products\/models\/[^\/]+$/],
     ['GET', /^\/products\/previews\/[^\/]+$/],
+    // SEC-007：治理台读接口对 viewer 保留，写接口（POST/PUT/DELETE/accept/沙盒）
+    // 一律移出白名单，仅管理员经 /api/* 访问。
     ['GET', /^\/governance\/gen-models$/],
-    ['POST', /^\/governance\/gen-models$/],
-    ['PUT', /^\/governance\/gen-models\/[^\/]+\/schema$/],
-    ['DELETE', /^\/governance\/gen-models\/[^\/]+$/],
-    ['PUT', /^\/governance\/gen-models\/[^\/]+\/polish$/],
-    ['POST', /^\/governance\/gen-models\/[^\/]+\/polish\/reset$/],
     ['GET', /^\/governance\/gen-jobs$/],
-    ['PUT', /^\/governance\/gen-jobs\/[^\/]+$/],
-    ['POST', /^\/governance\/gen-jobs\/[^\/]+\/reset$/],
     ['GET', /^\/governance\/workflows$/],
-    ['PUT', /^\/governance\/workflows$/],
-    ['POST', /^\/governance\/workflows$/],
     ['GET', /^\/governance\/prompts$/],
-    ['POST', /^\/governance\/prompts$/],
-    ['DELETE', /^\/governance\/prompts\/[^\/]+$/],
-    ['POST', /^\/governance\/prompts\/[^\/]+\/restore$/],
     ['GET', /^\/governance\/mount-points$/],
-    ['POST', /^\/governance\/mount-points$/],
-    ['DELETE', /^\/governance\/mount-points\/[^\/]+$/],
     ['GET', /^\/governance\/mount-points\/[^\/]+\/modules$/],
-    ['POST', /^\/governance\/mount-points\/[^\/]+\/modules$/],
-    ['DELETE', /^\/governance\/mount-points\/[^\/]+\/modules\/[^\/]+$/],
-    ['POST', /^\/governance\/mount-points\/[^\/]+\/reorder$/],
-    ['POST', /^\/governance\/mount-points\/[^\/]+\/execute$/],
     ['GET', /^\/governance\/operators$/],
     ['GET', /^\/governance\/dict-macros$/],
     ['GET', /^\/governance\/snippets$/],
-    ['POST', /^\/governance\/snippets$/],
-    ['DELETE', /^\/governance\/snippets\/[^\/]+$/],
-    ['POST', /^\/governance\/snippets\/[^\/]+\/restore$/],
     ['POST', /^\/governance\/prompts\/preview-compile$/],
-    ['POST', /^\/governance\/sandbox\/run-node$/],
-    ['GET', /^\/providers\/env-keys$/],
     ['GET', /^\/runs\/[^\/]+\/unpack$/],
-    ['POST', /^\/runs\/[^\/]+\/rerun-gen$/],
-    ['POST', /^\/governance\/draft-from-doc$/],
-    ['GET', /^\/governance\/skill-drafts$/],
-    ['POST', /^\/governance\/skill-drafts\/[^\/]+\/accept$/],
-    ['POST', /^\/governance\/models\/[^\/]+\/deprecate-skill$/],
     ['POST', /^\/gen\/images$/],
     ['POST', /^\/gen\/videos$/],
     ['POST', /^\/gen\/chat$/],
-    ['POST', /^\/skills\/create$/],
     ['GET', /^\/portrait-library$/],
     ['GET', /^\/portrait-library\/catalog$/],
     ['GET', /^\/portrait-library\/consent$/],
@@ -1279,8 +1213,7 @@ async function handleApi(services, req, res, prefix = '/api') {
     ['POST', /^\/ai\/walkthrough\/infer-sequence$/],
     ['POST', /^\/ai\/walkthrough\/confirm-sequence$/],
     ['GET', /^\/studio\/presets$/],
-    ['POST', /^\/studio\/presets$/],
-    ['DELETE', /^\/studio\/presets\/[^\/]+$/],
+    // SEC-007：presets 写操作移出 viewer 白名单（管理员经 /api/* 操作）
     ['POST', /^\/tools\/extract-frames$/],
     ['POST', /^\/tools\/convert-video$/]
   ];
@@ -1288,6 +1221,14 @@ async function handleApi(services, req, res, prefix = '/api') {
     pathname = pathname.slice('/viewer'.length) || '/';
     const hit = VIEWER_WHITELIST.some(([m, re]) => req.method === m && re.test(pathname));
     if (!hit) return sendJson(res, 404, { error: `视角端不支持的端点: ${pathname}` });
+  }
+
+  // SEC-007：治理台写操作 / 技能流水线 / 沙盒执行一律管理员。
+  // viewer 只保留治理台读接口与提示词编译预览。
+  const isGovernanceWrite = pathname.startsWith('/governance/') && req.method !== 'GET'
+    && pathname !== '/governance/prompts/preview-compile';
+  if ((isGovernanceWrite || pathname === '/skills/create') && !isAdmin) {
+    return sendJson(res, 403, { error: '需要管理员权限' });
   }
   if (pathname.startsWith('/v1/gen/')) {
     pathname = pathname.slice('/v1'.length);
@@ -1450,6 +1391,7 @@ async function handleApi(services, req, res, prefix = '/api') {
   }
 
   if (pathname === '/studio/presets' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '需要管理员权限（SEC-007）' });
     try {
       const body = await parseBody(req);
       const created = studioPresets.createPreset(db, body);
@@ -1461,6 +1403,7 @@ async function handleApi(services, req, res, prefix = '/api') {
 
   const mPresetDel = pathname.match(/^\/studio\/presets\/([^\/]+)$/);
   if (mPresetDel && req.method === 'DELETE') {
+    if (!isAdmin) return sendJson(res, 403, { error: '需要管理员权限（SEC-007）' });
     try {
       const ok = studioPresets.deletePreset(db, mPresetDel[1]);
       return sendJson(res, 200, { success: true, deleted: ok });
@@ -1786,6 +1729,7 @@ async function handleApi(services, req, res, prefix = '/api') {
 
   // POST /assets/trash/purge — 彻底粉碎删除（支持 fid 或 fids 批量）
   if (pathname === '/assets/trash/purge' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '需要管理员权限（SEC-007）' });
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
     const b = await parseBody(req);
     const list = Array.isArray(b.fids) ? b.fids : (b.fid ? [b.fid] : []);
@@ -1811,7 +1755,7 @@ async function handleApi(services, req, res, prefix = '/api') {
 
       const assets = db.prepare(`
         SELECT fid, file_name, size, width, height, sha256, md5, phash,
-               created_at, main_derivative_id, is_representative, dup_group_id
+               created_at, main_derivative_id
         FROM assets
         WHERE status IS NULL OR status != 'deleted'
         ORDER BY COALESCE(created_at, 0) ASC, fid ASC
@@ -1851,11 +1795,10 @@ async function handleApi(services, req, res, prefix = '/api') {
       const deletedSet = new Set();
 
       const rankKeep = (a, b) => {
-        // 保留：有 restage 衍生 / 衍生更多 / 更早 / 代表图
+        // 保留：有 restage 衍生 / 衍生更多 / 更早（CONFLICT-002：代表图概念已退役）
         const score = (x) =>
           (x.restageKinds.size > 0 ? 4 : 0) +
           (x.phashes.length > 1 ? 2 : 0) +
-          (x.is_representative ? 1 : 0) +
           (x.main_derivative_id ? 1 : 0);
         const sa = score(a);
         const sb = score(b);
@@ -2008,6 +1951,7 @@ async function handleApi(services, req, res, prefix = '/api') {
   // 全库图片多手段去重：原图×原图×衍生（MD5/SHA/pHash/导出标记/血缘）
   // body: { apply?: boolean, phashStrict?, phashNear?, readExportTags? }
   if (pathname === '/assets/dedupe-library' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '需要管理员权限（SEC-007）' });
     try {
       const body = await parseBody(req);
       const apply = body.apply === true;
@@ -2085,7 +2029,7 @@ async function handleApi(services, req, res, prefix = '/api') {
     try {
       const mediaType = urlObj.searchParams.get('media_type');
       const category = urlObj.searchParams.get('category');
-      const whereParts = [BROWSE_READY_SQL, '(a.is_representative = 1 OR a.dup_group_id IS NULL)', AUTH_VISIBLE_SQL];
+      const whereParts = [BROWSE_READY_SQL, AUTH_VISIBLE_SQL];
       const args = [];
       if (category === 'interior_exterior' || category === 'interior') {
         whereParts.push("(a.kind = 'image' AND COALESCE(a.category, 'interior') IN ('interior', 'exterior'))");
@@ -2141,6 +2085,7 @@ async function handleApi(services, req, res, prefix = '/api') {
   // preview 只统计无副作用；apply 会把条目移入回收站（可恢复）。
   // 不自动执行：素材库是共享资产，必须由用户主动触发。
   if (pathname === '/sync/reconcile' && (req.method === 'POST' || req.method === 'GET')) {
+    if (!isAdmin) return sendJson(res, 403, { error: '需要管理员权限（SEC-007）' });
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
     const b = req.method === 'POST' ? await parseBody(req) : {};
     const q = urlObj.searchParams;
@@ -2617,6 +2562,17 @@ async function handleApi(services, req, res, prefix = '/api') {
 
   // ===== 企业级 AI 对话流持久化 (/api/chat/*) =====
   // 1. 会话列表
+  // ===== Chat 会话与消息 =====
+  // SEC-007：chat 会话属主校验。规则：管理员全通；会话不存在视为可创建（无数据可泄露）；
+  // user_id=0 为共享默认会话；其余仅属主可读写。
+  const chatSessionOwned = (sId) => {
+    if (isAdmin) return true;
+    const row = db.prepare('SELECT user_id FROM chat_sessions WHERE id=?').get(String(sId || ''));
+    if (!row) return true;
+    const uid = Number(row.user_id || 0);
+    return uid === 0 || uid === Number(sessionUser?.id || 0);
+  };
+
   if (pathname === '/chat/sessions' && req.method === 'GET') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
     const sessions = db.prepare('SELECT * FROM chat_sessions WHERE user_id=? OR user_id=0 ORDER BY updated_at DESC LIMIT 50')
@@ -2644,6 +2600,7 @@ async function handleApi(services, req, res, prefix = '/api') {
   if (mDelSess && req.method === 'DELETE') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
     const sId = decodeURIComponent(mDelSess[1]);
+    if (!chatSessionOwned(sId)) return sendJson(res, 403, { error: '无权操作该会话' });
     db.prepare('DELETE FROM chat_messages WHERE session_id=?').run(sId);
     db.prepare('DELETE FROM chat_sessions WHERE id=?').run(sId);
     return sendJson(res, 200, { success: true });
@@ -2653,6 +2610,7 @@ async function handleApi(services, req, res, prefix = '/api') {
   if (pathname === '/chat/messages' && req.method === 'GET') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
     const sId = urlObj.searchParams.get('sessionId') || 'default_session';
+    if (!chatSessionOwned(sId)) return sendJson(res, 403, { error: '无权读取该会话' });
     const limit = Math.min(200, parseInt(urlObj.searchParams.get('limit') || '100', 10));
     const messages = db.prepare(`
       SELECT * FROM chat_messages
@@ -2674,8 +2632,9 @@ async function handleApi(services, req, res, prefix = '/api') {
   if (pathname === '/chat/messages' && req.method === 'POST') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
     const b = await parseBody(req);
-    const msgId = b.id || `msg_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
     const sessionId = b.sessionId || 'default_session';
+    if (!chatSessionOwned(sessionId)) return sendJson(res, 403, { error: '无权写入该会话' });
+    const msgId = b.id || `msg_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
     const now = Date.now();
     const role = b.role || 'user';
     const mode = b.mode || 'text_to_image';
@@ -2757,6 +2716,7 @@ async function handleApi(services, req, res, prefix = '/api') {
   if (pathname === '/chat/messages' && req.method === 'DELETE') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
     const sId = urlObj.searchParams.get('sessionId') || 'default_session';
+    if (!chatSessionOwned(sId)) return sendJson(res, 403, { error: '无权操作该会话' });
     db.prepare('DELETE FROM chat_messages WHERE session_id=?').run(sId);
     return sendJson(res, 200, { success: true });
   }
@@ -2991,6 +2951,10 @@ async function handleApi(services, req, res, prefix = '/api') {
     const b = await parseBody(req);
     const existing = db.prepare('SELECT * FROM creation_templates WHERE id=?').get(tplId);
     if (!existing) return sendJson(res, 404, { error: '作品配方不存在' });
+    // SEC-007：仅属主或管理员可改他人配方
+    if (!isAdmin && Number(existing.user_id) !== Number(sessionUser?.id)) {
+      return sendJson(res, 403, { error: '无权修改他人配方' });
+    }
 
     let newTitle = b.title !== undefined ? String(b.title).trim() : existing.title;
     if (!newTitle) return sendJson(res, 400, { error: '作品名称不可为空' });
@@ -3034,6 +2998,11 @@ async function handleApi(services, req, res, prefix = '/api') {
   if (mDelTpl && req.method === 'DELETE') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
     const tplId = decodeURIComponent(mDelTpl[1]);
+    // SEC-007：仅属主或管理员可删
+    const tplRow = db.prepare('SELECT user_id FROM creation_templates WHERE id=?').get(tplId);
+    if (tplRow && !isAdmin && Number(tplRow.user_id) !== Number(sessionUser?.id)) {
+      return sendJson(res, 403, { error: '无权删除他人配方' });
+    }
     db.prepare('DELETE FROM creation_templates WHERE id=?').run(tplId);
     return sendJson(res, 200, { success: true, data: { id: tplId } });
   }
@@ -3088,11 +3057,28 @@ async function handleApi(services, req, res, prefix = '/api') {
           const r = await fetch(rawImg, { signal: AbortSignal.timeout(3000) });
           if (r.ok) imgBuf = Buffer.from(await r.arrayBuffer());
         } else {
-          // 尝试作为 fid 查询并从本服务资产端点拉取真实流
+          // LOGIC-003：原实现走 HTTP 自环 fetch，且引用了本模块不存在的 PORT 变量——
+          // 必然 ReferenceError 被空 catch 吞掉，imgBuf 恒为 null，YOLO 必失败，
+          // 最终退回 buildFallbackDetections 的硬编码假坐标。改为进程内直接解析：
+          // 缩略图优先（与原 /image 端点行为一致），缺失时回退主产物/origin。
           try {
-            const tok = auth.generateMediaToken(rawImg, 300);
-            const r = await fetch(`http://127.0.0.1:${PORT}/api/viewer/assets/${encodeURIComponent(rawImg)}/image?media_token=${encodeURIComponent(tok)}`);
-            if (r.ok) imgBuf = Buffer.from(await r.arrayBuffer());
+            const thumb = path.join(config.dataDir, 'cache', 'thumbs', `${rawImg}.jpg`);
+            if (fs.existsSync(thumb)) {
+              imgBuf = fs.readFileSync(thumb);
+            } else {
+              let deriv = db.prepare("SELECT * FROM derivatives WHERE asset_fid=? AND kind='origin' LIMIT 1").get(rawImg);
+              if (!deriv) {
+                const a = db.prepare('SELECT main_derivative_id FROM assets WHERE fid=?').get(rawImg);
+                if (a?.main_derivative_id) deriv = db.prepare('SELECT * FROM derivatives WHERE id=?').get(a.main_derivative_id);
+              }
+              if (!deriv) {
+                deriv = db.prepare("SELECT * FROM derivatives WHERE asset_fid=? ORDER BY CASE kind WHEN 'origin' THEN 0 ELSE 1 END LIMIT 1").get(rawImg);
+              }
+              if (deriv) {
+                const fp = await resolveDerivativeFile(services, deriv);
+                if (fp && fs.existsSync(fp)) imgBuf = fs.readFileSync(fp);
+              }
+            }
           } catch (e) {}
         }
 
@@ -3597,31 +3583,27 @@ async function handleApi(services, req, res, prefix = '/api') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
     const b = await parseBody(req);
     try {
-      const { completeChat } = require('./vlm');
+      // LOGIC-004：原实现把 services 当 completeChat 首参传入（其签名是单对象解构），
+      // 100% 抛「LiteLLM 未配置 base_url」后退化为空兜底。改用 chatVision + 治理台端点解析。
+      const { chatVision } = require('./vlm');
+      const genGov = require('./gen-governance');
+      const ep = genGov.resolveVlmEndpoint(services.db, services.config, b.model);
       const prompt =
         '识别图中指定区域（若有 bbox 则为该框内）的家具/物件。只返回 JSON：' +
-        '{"name_cn":"中文名","attributes":"材质/颜色/风格一句话","summary":"一句定位描述"}';
-      const messages = [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: prompt + (b.region ? `\nbbox=${JSON.stringify(b.region)}` : '') },
-          ],
-        },
-      ];
-      // 若 completeChat 支持 image_url/base64，由调用方注入；此处尽力而为
-      const txt = await completeChat(services, {
-        messages,
-        image: b.image,
-        temperature: 0.3,
-      }).catch(() => '');
-      let info = { name_cn: b.fallbackName || '目标物体', attributes: '', summary: '' };
-      const m = String(txt || '').match(/\{[\s\S]*\}/);
-      if (m) {
-        try {
-          const parsed = JSON.parse(m[0]);
-          info = { ...info, ...parsed };
-        } catch (e) {}
+        '{"name_cn":"中文名","attributes":"材质/颜色/风格一句话","summary":"一句定位描述"}' +
+        (b.region ? `\nbbox=${JSON.stringify(b.region)}` : '');
+      let info = null;
+      if (b.image && ep && ep.baseUrl) {
+        info = await chatVision({
+          baseUrl: ep.baseUrl,
+          apiKey: ep.apiKey,
+          model: ep.modelCode || b.model,
+          prompt,
+          images: [String(b.image)],
+        }).catch(() => null);
+      }
+      if (!info || !info.name_cn) {
+        info = { name_cn: b.fallbackName || '目标物体', attributes: '', summary: '' };
       }
       return sendJson(res, 200, { success: true, data: info });
     } catch (e) {
@@ -3956,12 +3938,7 @@ async function handleApi(services, req, res, prefix = '/api') {
     cfg.replaceExisting = cfg.replaceExisting !== false;
     cfg.forceMember = true;
     let target = asset;
-    if (asset.dup_group_id && !asset.is_representative && !b?.forceMember) {
-      const repFid = representativeFid(db, asset);
-      if (repFid && repFid !== asset.fid) {
-        target = db.prepare('SELECT * FROM assets WHERE fid=?').get(repFid) || asset;
-      }
-    }
+    // CONFLICT-002：重复组退役，不再重定向到组长，直接对素材本身执行
     const resRestage = await executeRestageDual(services, cfg, target, { lastOutput: {} });
     const updatedDetail = getAssetDetail(services, fid);
 
@@ -4034,7 +4011,7 @@ async function handleApi(services, req, res, prefix = '/api') {
     let deriv = null;
     if (derivativeId) {
       deriv = getDerivativeById(db, derivativeId);
-      if (deriv && deriv.asset_fid !== fid && !sameDupGroup(db, fid, deriv.asset_fid)) deriv = null;
+      if (deriv && deriv.asset_fid !== fid) deriv = null;
     } else {
       // 浏览网格：无 derivative 时允许共享缩略图；raw=1 时强制拉高清原图
       if (!isFileOrVideo && !isDl && !isRaw && fs.existsSync(thumb)) {
@@ -4615,15 +4592,9 @@ async function handleApi(services, req, res, prefix = '/api') {
       const nrs = db.prepare(`
         SELECT * FROM node_runs WHERE run_id=? AND asset_fid=? ORDER BY id ASC
       `).all(runId, inspectFid);
-      const asset = db.prepare('SELECT fid, file_name, status, is_representative, dup_group_id FROM assets WHERE fid=?').get(inspectFid) || null;
-      let cluster = null;
-      if (asset?.dup_group_id) {
-        const members = db.prepare(`
-          SELECT fid, file_name, is_representative FROM assets WHERE dup_group_id=?
-        `).all(asset.dup_group_id);
-        const reason = db.prepare('SELECT match_reason FROM dup_groups WHERE id=?').get(asset.dup_group_id);
-        cluster = { groupId: asset.dup_group_id, reason: reason?.match_reason || null, members };
-      }
+      const asset = db.prepare('SELECT fid, file_name, status FROM assets WHERE fid=?').get(inspectFid) || null;
+      // CONFLICT-002：重复组退役，cluster 信息恒为 null（字段保留兼容旧客户端）
+      const cluster = null;
       inspect = {
         fid: inspectFid,
         asset,
@@ -4996,14 +4967,8 @@ async function handleApi(services, req, res, prefix = '/api') {
       input: parse(nr.input_summary),
       output: parse(nr.output_summary)
     }));
-    let cluster = null;
-    if (asset?.dup_group_id) {
-      const members = db.prepare(`
-        SELECT fid, file_name, is_representative FROM assets WHERE dup_group_id=?
-      `).all(asset.dup_group_id);
-      const reason = db.prepare('SELECT match_reason FROM dup_groups WHERE id=?').get(asset.dup_group_id);
-      cluster = { groupId: asset.dup_group_id, reason: reason?.match_reason || null, members };
-    }
+    // CONFLICT-002：重复组退役，cluster 信息恒为 null（字段保留兼容旧客户端）
+    const cluster = null;
     return sendJson(res, 200, { success: true, data: { run, asset, nodes, cluster } });
   }
 
@@ -5472,34 +5437,9 @@ async function handleApi(services, req, res, prefix = '/api') {
     });
   }
 
-  // 管理员专用：重复组代表切换
-  const mRep = pathname.match(/^\/dup-groups\/([^\/]+)\/representative$/);
-  if (mRep && req.method === 'POST') {
-    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
-    const groupId = decodeURIComponent(mRep[1]);
-    const b = await parseBody(req);
-    if (!b.fid) return sendJson(res, 400, { error: '缺少 fid' });
-
-    db.prepare('UPDATE assets SET dup_group_id = ? WHERE fid = ? OR dup_group_id = ?').run(groupId, groupId, groupId);
-    db.prepare("UPDATE assets SET rep_source='auto' WHERE dup_group_id=? OR fid=?").run(groupId, groupId);
-    db.prepare("UPDATE assets SET is_representative = CASE WHEN fid=? THEN 1 ELSE 0 END, rep_source = CASE WHEN fid=? THEN 'human' ELSE 'auto' END WHERE dup_group_id=? OR fid=?").run(b.fid, b.fid, groupId, groupId);
-    db.prepare(`
-      INSERT INTO dup_groups (id, representative_fid, member_count, updated_at)
-      VALUES (?, ?, (SELECT COUNT(*) FROM assets WHERE dup_group_id=? OR fid=?), ?)
-      ON CONFLICT(id) DO UPDATE SET representative_fid=excluded.representative_fid, member_count=excluded.member_count, updated_at=excluded.updated_at
-    `).run(groupId, b.fid, groupId, groupId, Date.now());
-    return sendJson(res, 200, { success: true });
-  }
-
-  const mUngroup = pathname.match(/^\/dup-groups\/([^\/]+)\/ungroup$/);
-  if (mUngroup && req.method === 'POST') {
-    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
-    const b = await parseBody(req);
-    if (!b.fid) return sendJson(res, 400, { error: '缺少 fid' });
-    const { ungroupAsset } = require('./cluster');
-    const r = ungroupAsset(db, b.fid);
-    return sendJson(res, 200, { success: true, data: r });
-  }
+  // CONFLICT-002：重复组概念已退役——/dup-groups/representative、/dup-groups/ungroup、
+  // /dup-groups/recluster 三条路由连同 cluster.js 模块一并移除。
+  // 旧客户端调用将得到 404（进入下方兜底）。
 
   // 网关配置写入（管理员，热生效）
   if (pathname === '/gateway/config' && (req.method === 'PUT' || req.method === 'POST')) {
@@ -5540,12 +5480,7 @@ async function handleApi(services, req, res, prefix = '/api') {
     }
   }
 
-  if (pathname === '/dup-groups/recluster' && req.method === 'POST') {
-    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
-    const { reclusterAllAssets } = require('./cluster');
-    const r = reclusterAllAssets(db);
-    return sendJson(res, 200, { success: true, data: r });
-  }
+  // CONFLICT-002：/dup-groups/recluster 已随重复组退役移除。
 
   const mMainDeriv = pathname.match(/^\/assets\/([^\/]+)\/main-derivative$/);
   if (mMainDeriv && req.method === 'POST') {

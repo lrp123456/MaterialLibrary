@@ -12,10 +12,10 @@ db.pragma('busy_timeout = 8000');
 db.pragma('journal_mode = WAL');
 
 const now = Date.now();
+// CONFLICT-002：is_representative 已退役，不再写入
 const r = db.prepare(`
   UPDATE assets
   SET status = 'ready',
-      is_representative = 1,
       updated_at = ?
   WHERE kind = 'video'
     AND status = 'discovered'

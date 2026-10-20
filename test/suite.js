@@ -186,22 +186,13 @@ const services = { db, config: { dataDir: testDir }, logger: console };
   assert(recoveredNodeRun.status === 'queued', 'NodeRun 应重置为 queued');
   console.log('✅ 崩溃恢复单条 SQL 自动对账通过');
 
-  console.log('=== 8. 测试多层次查重归组与 AI 重构代表图推选 ===');
-  const { reElectGroupRepresentative } = require('../src/cluster');
-
+  console.log('=== 8. 画幅动态联动检索（CONFLICT-002：查重归组区块已随重复组退役移除） ===');
   const fidClean = 'asset_cluster_clean';
-  const fidWatermark = 'asset_cluster_wm';
-  const testGroup = 'group_test_kitchen';
 
   db.prepare(`
-    INSERT INTO assets (fid, kind, file_name, width, height, origin_orientation, status, has_watermark, dup_group_id, is_representative, phash, created_at)
-    VALUES (?, 'image', 'kitchen_wm.jpg', 1920, 1080, 'landscape', 'ready', 1, ?, 0, '1111222233334444', ?)
-  `).run(fidWatermark, testGroup, 1000);
-
-  db.prepare(`
-    INSERT INTO assets (fid, kind, file_name, width, height, origin_orientation, status, has_watermark, dup_group_id, is_representative, phash, created_at)
-    VALUES (?, 'image', 'kitchen_clean.jpg', 1080, 1920, '9:16', 'ready', 0, ?, 0, '1111222233334445', ?)
-  `).run(fidClean, testGroup, 2000);
+    INSERT INTO assets (fid, kind, file_name, width, height, origin_orientation, status, has_watermark, phash, created_at)
+    VALUES (?, 'image', 'kitchen_clean.jpg', 1080, 1920, '9:16', 'ready', 0, '1111222233334445', ?)
+  `).run(fidClean, 2000);
 
   // 为 fidClean 添加 restage_9_16 衍生图
   db.prepare(`
@@ -209,17 +200,13 @@ const services = { db, config: { dataDir: testDir }, logger: console };
     VALUES (?, 'restage_9_16', 'local_cache', 'dummy_path.jpg', 1080, 1920, ?, ?)
   `).run(fidClean, JSON.stringify({ generated: true }), Date.now());
 
-  // 重选代表图，fidClean 拥有 restage_9_16 衍生图且无水印，应当被选为代表图
-  const rep = reElectGroupRepresentative(db, testGroup);
-  assert(rep && rep.fid === fidClean, '拥有 AI 重构衍生图的资产应被优先推选为代表图');
-
   // 测试画幅动态联动检索：
   const res916 = queryAssets(db, { orientation: '9:16' });
   const hit = res916.items.find(i => i.fid === fidClean);
   assert(hit, '9:16 检索应命中 fidClean');
   assert(hit.mainDerivative.kind === 'restage_9_16', '主图应切换至 9:16 衍生图');
 
-  console.log('✅ 多层次查重归组与代表图动态推选验证通过');
+  console.log('✅ 画幅动态联动检索验证通过');
 
   console.log('=== 9. 画幅真值分桶与本地校准 ===');
   const { classifyOrientation, calibrateGeneratedImage } = require('../src/ratio');
@@ -252,71 +239,10 @@ const services = { db, config: { dataDir: testDir }, logger: console };
   assert(restagePromptForRatio('3:4').includes('严禁拉伸'));
   console.log('✅ 画幅分桶通过；净画重构只复制字节，扩图垫边函数仍在');
 
-  console.log('=== 10. 查重：mmexport 不同空间不得成组 ===');
-  const { findGroupForAsset, isGenericExportPrefix } = require('../src/cluster');
-  assert(isGenericExportPrefix('mmexport'));
-  assert(isGenericExportPrefix('FB_IMG_'));
-  const fidHall = 'mm_hall';
-  const fidBed = 'mm_bed';
-  db.prepare(`
-    INSERT INTO assets (fid, kind, file_name, width, height, origin_orientation, status, phash, created_at)
-    VALUES (?, 'image', 'mmexport1700000000001.jpg', 1000, 1500, '2:3', 'ready', '0000000000000000', ?)
-  `).run(fidHall, Date.now());
-  db.prepare(`
-    INSERT INTO assets (fid, kind, file_name, width, height, origin_orientation, status, phash, created_at)
-    VALUES (?, 'image', 'mmexport1700000000002.jpg', 1000, 1500, '2:3', 'ready', '0000000000000fff', ?)
-  `).run(fidBed, Date.now());
-  const spaceEntry = db.prepare("SELECT id FROM tag_dict WHERE dimension='space' AND dir='entryway'").get();
-  const spaceBed = db.prepare("SELECT id FROM tag_dict WHERE dimension='space' AND dir='bedroom'").get();
-  db.prepare("INSERT INTO asset_tags (asset_fid, tag_id, role, source, confidence, updated_at) VALUES (?, ?, NULL, 'ai', 0.9, ?)")
-    .run(fidHall, spaceEntry.id, Date.now());
-  db.prepare("INSERT INTO asset_tags (asset_fid, tag_id, role, source, confidence, updated_at) VALUES (?, ?, NULL, 'ai', 0.9, ?)")
-    .run(fidBed, spaceBed.id, Date.now());
-  const falseGroup = findGroupForAsset(db, db.prepare('SELECT * FROM assets WHERE fid=?').get(fidHall), { phashThreshold: 5 });
-  assert(!falseGroup, '门厅与卧室因 mmexport 前缀不得成组');
+  // CONFLICT-002：重复组已退役（2026-10-20 审计整改），查重测试块随之移除。
+  // P2「去重工作台」将以 phash 现算方式重建，不复用 dup_groups。
 
-  const twinA = 'twin_a';
-  const twinB = 'twin_b';
-  db.prepare(`
-    INSERT INTO assets (fid, kind, file_name, width, height, origin_orientation, status, phash, created_at)
-    VALUES (?, 'image', 'shot_a.jpg', 1080, 1920, '9:16', 'ready', 'aaaaaaaaaaaaaaaa', ?)
-  `).run(twinA, Date.now());
-  db.prepare(`
-    INSERT INTO assets (fid, kind, file_name, width, height, origin_orientation, status, phash, created_at)
-    VALUES (?, 'image', 'shot_b.jpg', 1080, 1920, '9:16', 'ready', 'aaaaaaaaaaaaaaaa', ?)
-  `).run(twinB, Date.now());
-  const livingId = db.prepare("SELECT id FROM tag_dict WHERE dimension='space' AND dir='living_room'").get();
-  db.prepare("INSERT INTO asset_tags (asset_fid, tag_id, role, source, confidence, updated_at) VALUES (?, ?, NULL, 'ai', 0.9, ?)")
-    .run(twinA, livingId.id, Date.now());
-  db.prepare("INSERT INTO asset_tags (asset_fid, tag_id, role, source, confidence, updated_at) VALUES (?, ?, NULL, 'ai', 0.9, ?)")
-    .run(twinB, livingId.id, Date.now());
-  const trueGroup = findGroupForAsset(db, db.prepare('SELECT * FROM assets WHERE fid=?').get(twinA), { phashThreshold: 5 });
-  assert(trueGroup && trueGroup.groupId, '同空间近重复应成组');
-  assert(String(trueGroup.reason).startsWith('phash:'), '近重复应记录 phash 原因');
-
-  const kA = 'kit_a';
-  const kB = 'kit_b';
-  db.prepare(`
-    INSERT INTO assets (fid, kind, file_name, width, height, origin_orientation, status, phash, created_at)
-    VALUES (?, 'image', 'mmexport1800000000001.jpg', 1080, 1920, '9:16', 'ready', '1111111111111111', ?)
-  `).run(kA, Date.now());
-  db.prepare(`
-    INSERT INTO assets (fid, kind, file_name, width, height, origin_orientation, status, phash, created_at)
-    VALUES (?, 'image', 'mmexport1800000000002.jpg', 1080, 1920, '9:16', 'ready', 'eeeeeeeeeeeeeeee', ?)
-  `).run(kB, Date.now());
-  const kitchenId = db.prepare("SELECT id FROM tag_dict WHERE dimension='space' AND dir='kitchen'").get();
-  db.prepare("INSERT INTO asset_tags (asset_fid, tag_id, role, source, confidence, updated_at) VALUES (?, ?, NULL, 'ai', 0.9, ?)")
-    .run(kA, kitchenId.id, Date.now());
-  db.prepare("INSERT INTO asset_tags (asset_fid, tag_id, role, source, confidence, updated_at) VALUES (?, ?, NULL, 'ai', 0.9, ?)")
-    .run(kB, kitchenId.id, Date.now());
-  const sameCaption = '空间:厨房 风格:美式乡村/农舍 文件:mmexport.jpg';
-  storeVector(db, kA, generateSemanticVector(sameCaption, 64), 'local_semantic_hash_v1');
-  storeVector(db, kB, generateSemanticVector(sameCaption, 64), 'local_semantic_hash_v1');
-  const hashGroup = findGroupForAsset(db, db.prepare('SELECT * FROM assets WHERE fid=?').get(kA), { phashThreshold: 5 });
-  assert(!hashGroup, '标签文本哈希向量不得把同空间不同照片判成重复');
-  console.log('✅ 查重收紧规则通过');
-
-  console.log('=== 11. 指定衍生图预览不得被共享缩略图劫持 ===');
+  console.log('=== 10. 指定衍生图预览不得被共享缩略图劫持 ===');
   const { handleApi } = require('../src/api');
   const { Writable } = require('stream');
   const hijackFid = dummyFid;
@@ -385,45 +311,35 @@ const services = { db, config: { dataDir: testDir }, logger: console };
   const dualSpec = NODE_CATALOG.find(n => n.type === 'restage_dual');
   assert.strictEqual(dualSpec.defaultConfig.skipIfAlreadyExact, false);
 
-  const gRep = 'share_rep';
-  const gMem = 'share_mem';
-  const gId = 'group_share_main';
+  // CONFLICT-002：重复组退役——组成员不再共享代表图成果，血缘归属是素材本身。
+  const soloOwner = 'solo_owner';
   db.prepare(`
-    INSERT INTO assets (fid, kind, file_name, width, height, origin_orientation, status, dup_group_id, is_representative, created_at)
-    VALUES (?, 'image', 'rep.jpg', 1080, 1920, '9:16', 'ready', ?, 1, ?)
-  `).run(gRep, gId, Date.now());
-  db.prepare(`
-    INSERT INTO assets (fid, kind, file_name, width, height, origin_orientation, status, dup_group_id, is_representative, created_at)
-    VALUES (?, 'image', 'mem.jpg', 1080, 1920, '9:16', 'ready', ?, 0, ?)
-  `).run(gMem, gId, Date.now());
+    INSERT INTO assets (fid, kind, file_name, width, height, origin_orientation, status, created_at)
+    VALUES (?, 'image', 'solo.jpg', 1080, 1920, '9:16', 'ready', ?)
+  `).run(soloOwner, Date.now());
   db.prepare(`
     INSERT INTO derivatives (asset_fid, kind, storage_type, storage_ref, width, height, params, created_at)
     VALUES (?, 'origin', 'local_cache', 'x.jpg', 1080, 1920, NULL, ?)
-  `).run(gMem, Date.now());
-  db.prepare(`
-    INSERT INTO derivatives (asset_fid, kind, storage_type, storage_ref, width, height, params, created_at)
-    VALUES (?, 'origin', 'local_cache', 'y.jpg', 1080, 1920, NULL, ?)
-  `).run(gRep, Date.now());
+  `).run(soloOwner, Date.now());
   db.prepare(`
     INSERT INTO derivatives (asset_fid, kind, storage_type, storage_ref, width, height, params, created_at)
     VALUES (?, 'restage_9_16', 'local_cache', 'z.jpg', 1080, 1920, ?, ?)
-  `).run(gRep, JSON.stringify({ generated: true }), Date.now());
+  `).run(soloOwner, JSON.stringify({ generated: true }), Date.now());
   const { getAssetDetail } = require('../src/api');
-  const memDetail = getAssetDetail(services, gMem);
-  const shared = memDetail.derivatives.find(d => d.kind === 'restage_9_16');
-  assert(shared && shared.generated, '组员详情应展示代表图的合格 9:16');
-  assert(memDetail.restageOwnerFid === gRep);
-  assert(memDetail.asset.is_representative === 0);
+  const soloDetail = getAssetDetail(services, soloOwner);
+  const soloRestage = soloDetail.derivatives.find(d => d.kind === 'restage_9_16');
+  assert(soloRestage && soloRestage.generated, '素材自身的合格 9:16 应展示');
+  assert(soloDetail.restageOwnerFid === soloOwner, '血缘归属是素材本身，不再重定向到组代表');
 
-  storeVector(db, gRep, generateSemanticVector('空间:客厅', 64));
-  const stored = db.prepare('SELECT model, dimensions FROM asset_vectors WHERE asset_fid=?').get(gRep);
+  storeVector(db, soloOwner, generateSemanticVector('空间:客厅', 64));
+  const stored = db.prepare('SELECT model, dimensions FROM asset_vectors WHERE asset_fid=?').get(soloOwner);
   assert.ok(stored.model === 'local_semantic_hash_v1' || stored.model === 'local_feature_v2', '默认哈希不得写成 3-small');
   assert.strictEqual(stored.dimensions, 64);
   const { getVectorStatus } = require('../src/vector');
   const vs = getVectorStatus(db, { configuredModel: 'text-embedding-3-small' });
   assert(vs && typeof vs.rows === 'number');
   assert(findQualifiedKind([{ kind: 'restage_3_4', params: { recast: 'contain_pad_from_origin' } }], 'restage_3_4') === null);
-  console.log('✅ 合格重构、组主图共享与向量诚实通过');
+  console.log('✅ 合格重构、血缘归属与向量诚实通过');
 
   console.log('=== 14. 巡检画布执行历史取有效状态而非末条 skipped ===');
   const inspectRunId = 'run_inspect_status';

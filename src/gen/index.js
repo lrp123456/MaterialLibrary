@@ -361,21 +361,56 @@ async function executeAdapter(services, adapter, input) {
   }
 
   // 智能参考图解析器：支持本地文件路径、本地遮罩路径、资产库缩略图/原图、缓存文件、以及 HTTP(S) 地址（自动回环拉取）转 Base64 Data URL
+
+  // SEC-006：受控本地目录白名单（与 ai-tasks.resolveAssetBuffer 同规则）
+  function isControlledLocalPath(p) {
+    try {
+      const os = require('os');
+      const roots = [
+        config?.dataDir,
+        process.env.ML_DATA_DIR,
+        path.join(os.homedir(), '.dsh-material-library'),
+      ];
+      try { roots.push(require('../nasstore').nasMaterialDir(config)); } catch {}
+      const resolved = path.resolve(String(p));
+      return roots.filter(Boolean).map((r) => path.resolve(r))
+        .some((r) => resolved === r || resolved.startsWith(r + path.sep));
+    } catch {
+      return false;
+    }
+  }
+
+  // SEC-006：内网/元数据地址判定（10.0.2.2 为安卓模拟器宿主别名，豁免）
+  function isPrivateFetchHost(host) {
+    const h = String(host || '').toLowerCase().replace(/^\[|\]$/g, '');
+    if (!h) return true;
+    if (h === 'localhost' || h === '::1' || /^127\./.test(h) || /^0\./.test(h)) return false; // 自身回环：参考图转换逻辑需要
+    if (/^169\.254\./.test(h)) return true;
+    if (/^10\./.test(h)) return h !== '10.0.2.2';
+    if (/^192\.168\./.test(h) || /^172\.(1[6-9]|2\d|3[0-1])\./.test(h)) return true;
+    if (h === 'metadata.google.internal') return true;
+    return false;
+  }
+
   async function resolveImageToDataUrl(raw) {
     if (!raw) return null;
     const s = String(raw).trim();
     if (!s) return null;
     if (s.startsWith('data:image/')) return s;
 
-    // 1. 本地文件绝对路径
+    // 1. 本地文件绝对路径（SEC-006：仅受控目录内可读，防任意路径读取）
     if (fs.existsSync(s) && fs.statSync(s).isFile()) {
-      try {
-        const buf = fs.readFileSync(s);
-        const ext = path.extname(s).toLowerCase();
-        const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
-        return `data:${mime};base64,${buf.toString('base64')}`;
-      } catch (e) {
-        if (logger?.warn) logger.warn('[gen] 读取本地参考图失败:', e.message);
+      if (!isControlledLocalPath(s)) {
+        if (logger?.warn) logger.warn('[gen] 参考图路径超出受控目录，拒绝读取（SEC-006）:', s.slice(0, 120));
+      } else {
+        try {
+          const buf = fs.readFileSync(s);
+          const ext = path.extname(s).toLowerCase();
+          const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+          return `data:${mime};base64,${buf.toString('base64')}`;
+        } catch (e) {
+          if (logger?.warn) logger.warn('[gen] 读取本地参考图失败:', e.message);
+        }
       }
     }
 
@@ -445,6 +480,16 @@ async function executeAdapter(services, adapter, input) {
           }
         } catch (e) {}
       }
+      // SEC-006：SSRF 防护——非自身回环的内网/元数据目标一律拒绝
+      //（回环转换后的 fetchUrl 恒为 127.0.0.1:自端口，属自身访问，放行）。
+      try {
+        const fu = new URL(fetchUrl);
+        const selfLoopback = fu.hostname === '127.0.0.1' && fu.port === portStr;
+        if (!selfLoopback && isPrivateFetchHost(fu.hostname)) {
+          if (logger?.warn) logger.warn('[gen] 参考图 URL 指向内网，已拒绝（SEC-006）:', fetchUrl.slice(0, 120));
+          return null;
+        }
+      } catch (e) {}
       try {
         const r = await fetch(fetchUrl, { signal: AbortSignal.timeout(15000) });
         if (r.ok) {

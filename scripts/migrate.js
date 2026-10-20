@@ -1499,37 +1499,17 @@ function restoreRevokedAssetsIfNeeded(db) {
 }
 
 function ungroupVideoExtractsIfNeeded(db) {
-  const extractVer = db.prepare("SELECT value FROM kv WHERE key='video_extract_ungroup_v1'").get()?.value;
-  if (extractVer === '1') return;
-  const { ungroupVideoFrameClusters } = require('../src/cluster');
-  const r = ungroupVideoFrameClusters(db);
+  // CONFLICT-002：重复组概念已退役，视频抽帧拆组逻辑已无对象可操作。
+  // 保留 kv 标记防止旧日志语义混乱；存量分组数据由 migrate-audit-20261020.js 统一清空。
   db.prepare(`
     INSERT INTO kv (key, value) VALUES ('video_extract_ungroup_v1', '1')
     ON CONFLICT(key) DO UPDATE SET value='1'
   `).run();
-  console.log(`[migrate] 视频抽帧拆组: ${r.extracts} 张独立可见, 触及 ${r.groupsTouched} 组`);
 }
 
 function alignDupGroupsAndVectors(db) {
-  try {
-    const { clusterAllAssets, reclusterAllAssets } = require('../src/cluster');
-    ungroupVideoExtractsIfNeeded(db);
-    const ver = db.prepare("SELECT value FROM kv WHERE key='cluster_rules_version'").get()?.value;
-    if (ver !== '3') {
-      const { totalGroups, repCount } = reclusterAllAssets(db);
-      db.prepare(`
-        INSERT INTO kv (key, value) VALUES ('cluster_rules_version', '3')
-        ON CONFLICT(key) DO UPDATE SET value='3'
-      `).run();
-      console.log(`[migrate] 查重规则 v3 全库重算: ${totalGroups} 组, ${repCount} 个代表图`);
-    } else {
-      const { totalGroups, repCount } = clusterAllAssets(db);
-      console.log(`[migrate] 多层次查重归组完成: 共对齐 ${totalGroups} 组, 选定 ${repCount} 个代表图`);
-    }
-  } catch (err) {
-    console.warn('[migrate] 多层次查重归组对齐警告:', err.message);
-  }
-
+  // CONFLICT-002：重复组聚类已随概念退役整体移除。
+  // 本函数只保留原有的「向量补齐」职责。
   const missingVecAssets = db.prepare(`
     SELECT a.fid, a.file_name FROM assets a
     LEFT JOIN asset_vectors av ON av.asset_fid = a.fid

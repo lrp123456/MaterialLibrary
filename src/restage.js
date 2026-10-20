@@ -76,10 +76,8 @@ function restageStatusForAsset(db, asset, derivatives) {
   const list = derivatives || [];
   const q916 = !!findQualifiedKind(list, 'restage_9_16');
   const q34 = !!findQualifiedKind(list, 'restage_3_4');
-  const queueFid = (asset.dup_group_id && !asset.is_representative)
-    ? (db.prepare('SELECT fid FROM assets WHERE (dup_group_id=? OR fid=?) AND is_representative=1 LIMIT 1')
-        .get(asset.dup_group_id, asset.dup_group_id)?.fid || asset.fid)
-    : asset.fid;
+  // CONFLICT-002：重复组退役，血缘归属就是素材本身
+  const queueFid = asset.fid;
   const queue = restageQueueRow(db, queueFid);
   return {
     restage_9_16: slotStatusFromQueue(q916, queue),
@@ -88,30 +86,6 @@ function restageStatusForAsset(db, asset, derivatives) {
     queueStatus: queue?.status || null,
     queueError: queue?.error || null
   };
-}
-
-function representativeFid(db, asset) {
-  if (!asset) return null;
-  if (!asset.dup_group_id || asset.is_representative) return asset.fid;
-  const row = db.prepare(`
-    SELECT fid FROM assets
-    WHERE (dup_group_id = ? OR fid = ?) AND is_representative = 1
-    LIMIT 1
-  `).get(asset.dup_group_id, asset.dup_group_id);
-  return row?.fid || asset.fid;
-}
-
-function sameDupGroup(db, fidA, fidB) {
-  if (!fidA || !fidB) return false;
-  if (fidA === fidB) return true;
-  const a = db.prepare('SELECT fid, dup_group_id FROM assets WHERE fid=?').get(fidA);
-  const b = db.prepare('SELECT fid, dup_group_id FROM assets WHERE fid=?').get(fidB);
-  if (!a || !b) return false;
-  const ga = a.dup_group_id || (db.prepare('SELECT 1 FROM assets WHERE dup_group_id=? LIMIT 1').get(a.fid) ? a.fid : null);
-  const gb = b.dup_group_id || (db.prepare('SELECT 1 FROM assets WHERE dup_group_id=? LIMIT 1').get(b.fid) ? b.fid : null);
-  if (ga && gb && ga === gb) return true;
-  if (a.dup_group_id === b.fid || b.dup_group_id === a.fid) return true;
-  return false;
 }
 
 const T_BACKLOG_DEADLINE = 1789056000000; // 2026-09-11 00:00:00+08:00
@@ -137,7 +111,6 @@ function listAssetsNeedingRestage(db, limit = 2000) {
     FROM assets a
     WHERE a.kind = 'image'
       AND a.status = 'ready'
-      AND (a.is_representative = 1 OR a.dup_group_id IS NULL)
       AND a.fid NOT IN (
         SELECT asset_fid FROM node_runs
         WHERE node_type IN ('restage_dual', 'restage_9_16')
@@ -216,8 +189,6 @@ module.exports = {
   nextRestageBackoff,
   restageQueueRow,
   restageStatusForAsset,
-  representativeFid,
-  sameDupGroup,
   listAssetsNeedingRestage,
   resetUnqualifiedMains,
   patchSkipIfAlreadyExact

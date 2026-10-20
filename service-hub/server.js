@@ -15,11 +15,20 @@ const ROOT = path.resolve(__dirname, '..'); // MaterialLibraryServer
 const APP = 'C:\\Users\\lrp\\DevEcoStudioProjects\\AlbumSyncUniAppX';
 
 function json(res, code, obj) {
+  // SEC-004：不再下发 Access-Control-Allow-Origin:*。总控面板只被同源页面使用，
+  // 它的「启停服务」能力绝不允许任意网页跨源调用。
   res.writeHead(code, {
     'Content-Type': 'application/json; charset=utf-8',
-    'Access-Control-Allow-Origin': '*',
   });
   res.end(JSON.stringify(obj));
+}
+
+// SEC-004：Host 校验防 DNS rebinding。
+function isLocalHost(req) {
+  const h = String((req && req.headers && req.headers.host) || '').toLowerCase();
+  if (!h) return false;
+  return h === '127.0.0.1' || h === 'localhost' || h === '[::1]'
+    || h.startsWith('127.0.0.1:') || h.startsWith('localhost:') || h.startsWith('[::1]:');
 }
 
 function portOpen(port, host = '127.0.0.1', timeout = 800) {
@@ -420,9 +429,13 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1');
   const p = url.pathname;
 
+  // SEC-004：非本机 Host 直接拒绝（DNS rebinding 纵深防御）。
+  if (!isLocalHost(req)) {
+    return json(res, 403, { ok: false, error: 'forbidden host' });
+  }
+
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
     });

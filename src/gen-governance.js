@@ -1094,7 +1094,14 @@ function acceptSkillDraft(db, draftId, actor) {
   // 2. 数据草稿：仅更新配置/提示词/作业绑定等 DB 记录
   if (schema.kind === 'data') {
     if (schema.customConfig) {
-      saveCustomModel(db, modelId, { ...schema.customConfig, fields: schema.fields || [] }, actor)
+      // LOGIC-005：saveCustomModel 不存在（调用即 ReferenceError 崩溃）。
+      // 正确函数是 createCustomModel(db, body, actor)，id 放在 body 内且以
+      // 草稿的规范 modelId 为准（draft 里的 customConfig.id 仅作默认值兜底）。
+      createCustomModel(db, {
+        ...(schema.customConfig || {}),
+        id: modelId,
+        fields: schema.fields || [],
+      }, actor)
     }
     if (draft.polish_draft) {
       savePolish(db, modelId, { prompt: draft.polish_draft, optimizer_model_id: schema.optimizer_model_id }, actor)

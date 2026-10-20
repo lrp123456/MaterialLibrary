@@ -62,8 +62,16 @@ function resolveSafePath(filename) {
 
 /**
  * 安全写入并热加载适配器文件（具备原子快照与回滚机制）
+ *
+ * SEC-005：动态落盘 + require() 等于在主进程执行任意代码，且可被
+ * /api/governance/skill-drafts 链路（含 LLM 生成内容）触达，叠加局域网
+ * 提权即成零凭据 RCE。默认禁用；确有需要时以 ALLOW_DYNAMIC_CODE_ADAPTERS=1
+ * 显式开启（仅限本机开发环境）。声明式 data 类草稿（JSON 模型契约）不走本函数，不受影响。
  */
 function safeInstallAdapter(filename, codeContent) {
+  if (String(process.env.ALLOW_DYNAMIC_CODE_ADAPTERS || '') !== '1') {
+    throw new Error('动态代码适配器安装已默认禁用（SEC-005）。确需启用请设置环境变量 ALLOW_DYNAMIC_CODE_ADAPTERS=1 并重启服务；data 类声明式草稿不受影响。');
+  }
   const { baseName, resolved } = resolveSafePath(filename);
 
   const existed = fs.existsSync(resolved);

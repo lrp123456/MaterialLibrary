@@ -616,7 +616,6 @@ class WorkflowInterpreter {
       source: runCtx.lastOutput?.originalPath || runCtx.lastOutput?.refPath || null,
       width: asset.width,
       height: asset.height,
-      dupGroupId: asset.dup_group_id || null,
       phash: asset.phash || null,
       spaceTag,
       previousNode: currentIndex > 0 ? sortedNodes[currentIndex - 1].id : null,

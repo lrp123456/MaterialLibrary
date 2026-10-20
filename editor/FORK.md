@@ -123,3 +123,10 @@ cd ../.. && node editor/start.cjs
 
 MIT 只授权代码，不授权「OpenCut」名称与图标。对外发布前需替换 `src/site/brand.ts`
 与 `app/brand` 下的品牌资源。
+
+## docker-compose 说明（2026-10-20 审计备注）
+
+`docker-compose.yml` 为 fork 基线原样保留，**生产部署不使用它**：
+- 其中引用的密钥/环境变量均为上游样例值，不是本项目真实凭据；
+- 实际部署走 `start.cjs`（端口 3010）+ 主应用反代，见上文「本地运行」；
+- 安全审计（SEC-008 相关项）确认其中无真实公网 IP / 密钥泄漏，仅上游样例。

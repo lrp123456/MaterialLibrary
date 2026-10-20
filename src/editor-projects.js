@@ -524,9 +524,9 @@ async function fileFinishedCut(services, { filePath, project, projectId, project
   db.prepare(`
     INSERT INTO assets (
       fid, kind, category, file_name, size, width, height, orientation,
-      status, is_representative, is_ai, source, source_asset_id, parent_fid,
+      status, is_ai, source, source_asset_id, parent_fid,
       sha256, library_shelf, lineage_json, created_at, discovered_at, updated_at
-    ) VALUES (?, 'video', 'video', ?, ?, ?, ?, ?, 'ready', 1, 0, 'edit', NULL, NULL, ?, 'finished', ?, ?, ?, ?)
+    ) VALUES (?, 'video', 'video', ?, ?, ?, ?, ?, 'ready', 0, 'edit', NULL, NULL, ?, 'finished', ?, ?, ?, ?)
   `).run(
     fid,
     fileName,
@@ -584,6 +584,11 @@ async function handleEditorApi(services, req, res) {
   const user = auth.verifySession(db, token);
   if (!user) {
     sendJson(res, 401, { error: '需要登录' });
+    return true;
+  }
+  // SEC-007：角色区分——viewer 只读，工程写操作（覆盖/删除/导出）一律 admin。
+  if (user.role !== 'admin' && !['GET', 'HEAD'].includes(req.method)) {
+    sendJson(res, 403, { error: '剪辑工程的写操作需要管理员账号' });
     return true;
   }
   ensureTables(db);

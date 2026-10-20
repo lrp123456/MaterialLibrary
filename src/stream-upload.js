@@ -312,15 +312,14 @@ async function registerMediaAsset(services, {
   db.prepare(`
     INSERT INTO assets (
       fid, kind, category, file_name, size, width, height, orientation, origin_orientation,
-      status, is_representative, source, sha256, client_asset_id, thumb_url,
+      status, source, sha256, client_asset_id, thumb_url,
       auth_state, auth_matched_at,
       created_at, discovered_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'live', ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'live', ?, ?, ?, ?)
     ON CONFLICT(fid) DO UPDATE SET
       category=COALESCE(excluded.category, assets.category),
       file_name=excluded.file_name, size=excluded.size,
       status=CASE WHEN excluded.status='ready' THEN 'ready' ELSE assets.status END,
-      is_representative=CASE WHEN excluded.is_representative=1 THEN 1 ELSE assets.is_representative END,
       updated_at=excluded.updated_at
   `).run(
     fid,
@@ -333,7 +332,6 @@ async function registerMediaAsset(services, {
     orientation,
     originOrientation,
     initialStatus,
-    (isVideo || isDirectAppUpload || isFinished) ? 1 : 0,
     source,
     sha256,
     clientAssetId || null,
@@ -429,7 +427,7 @@ async function registerMediaAsset(services, {
   // 视频、用户App主动上传或成品库：立即标记为 ready 可浏览（否则停在 discovered 等待AI打标）
   if (isVideo || isDirectAppUpload || isFinished) {
     db.prepare(`
-      UPDATE assets SET status='ready', is_representative=1, updated_at=? WHERE fid=?
+      UPDATE assets SET status='ready', updated_at=? WHERE fid=?
     `).run(Date.now(), fid);
   }
 

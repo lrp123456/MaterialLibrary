@@ -12,7 +12,7 @@ const { inspect, hamming } = require('../qc');
 const { calculateOriginOrientation, classifyOrientation, HARD_MATERIALS, SOFT_MATERIALS } = require('../tags-seed');
 const { createDerivative, setMainDerivative, markKindRecast, getDerivatives } = require('../derivatives');
 const { executeAdapter } = require('../gen');
-const { findGroupForAsset, reElectGroupRepresentative, assignToGroup, getAssetTags } = require('../cluster');
+const { getAssetTags } = require('../cluster');
 const { ensureOriginalFile } = require('../originals');
 const { calibrateGeneratedImage, pixelSizeFor, agnesSizeForPreset, kindForRatio, restagePromptForRatio, restageNegativePrompt } = require('../ratio');
 const { backupAsset } = require('../ingest');
@@ -1200,51 +1200,25 @@ async function executeTag(services, nodeConfig, asset, runCtx = {}) {
 }
 
 function executeClusterLogic(services, nodeConfig, asset, extras = {}) {
-  const { db } = services;
-  const fresh = db.prepare('SELECT * FROM assets WHERE fid=?').get(asset.fid) || asset;
-  const targetTags = getAssetTags(db, asset.fid);
-  const colors = extras.colors || db.prepare('SELECT hex, weight FROM asset_colors WHERE asset_fid = ?').all(asset.fid);
-  const found = findGroupForAsset(db, {
-    fid: fresh.fid,
-    file_name: fresh.file_name,
-    phash: extras.phash || fresh.phash,
-    width: extras.width || fresh.width,
-    height: extras.height || fresh.height
-  }, {
-    phashThreshold: nodeConfig.phashThreshold || 5,
-    targetTags,
-    targetColors: colors
-  });
-
-  if (found && found.groupId) {
-    assignToGroup(db, asset.fid, found.groupId, found.reason);
-    reElectGroupRepresentative(db, found.groupId);
-    return {
-      dupGroupId: found.groupId,
-      matchReason: found.reason,
-      dist: found.dist,
-      peerFid: found.peerFid
-    };
-  }
+  // CONFLICT-002：重复组概念已退役。cluster 工作流节点退化为空操作，
+  // 保持输出形状兼容（dupGroupId/matchReason 恒空），流水线不再归组。
   return { dupGroupId: null, matchReason: null };
 }
 
 async function executeCluster(services, nodeConfig, asset, runCtx = {}) {
+  // CONFLICT-002：重复组退役，cluster 节点恒为空操作，memberCount/members 恒空以兼容旧客户端
   const out = executeClusterLogic(services, nodeConfig, asset, {
     phash: runCtx.lastOutput?.phash,
     width: runCtx.lastOutput?.width,
     height: runCtx.lastOutput?.height,
     colors: runCtx.lastOutput?.colors
   });
-  const members = out.dupGroupId
-    ? services.db.prepare('SELECT fid, file_name FROM assets WHERE dup_group_id=?').all(out.dupGroupId)
-    : [];
   return {
     success: true,
     output: {
       ...out,
-      memberCount: members.length,
-      members: members.map(m => m.file_name)
+      memberCount: 0,
+      members: []
     }
   };
 }
@@ -1622,15 +1596,8 @@ async function executeRestageDual(services, nodeConfig, asset, runCtx) {
     };
   }
 
-  // 1. 成本与效率控制：仅组代表图或未归组独立资产生成 AI 重构图，同组次级切片跳过并共享代表图成果
-  if (asset.dup_group_id && !asset.is_representative && !nodeConfig.forceMember && !nodeConfig.replaceExisting) {
-    return {
-      success: true,
-      skipped: true,
-      reason: 'group_member_skipped',
-      output: { restaged: false, message: '同组副切片跳过生图，共享代表图重构主图' }
-    };
-  }
+  // 1. CONFLICT-002：重复组退役——原「组员切片跳过生图、共享代表图成果」逻辑已移除，
+  //    每个素材独立判断是否需要画幅重构（P2 去重工作台将另行提供批量去重生图）。
 
   // 2. 检查适配器 —— 构造「主通道 + 降级通道」候选链
   const adapterId = nodeConfig.adapterId || 'agnes_image';

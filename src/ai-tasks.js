@@ -117,6 +117,37 @@ function cacheTempFile(config, raw) {
   return path.join(config.dataDir, 'cache', 'temp', name);
 }
 
+/** SEC-006：受控本地目录白名单（dataDir / ML_DATA_DIR / NAS 素材目录） */
+function isControlledLocalPath(services, p) {
+  try {
+    const cfg = services?.config || {};
+    const os = require('os');
+    const roots = [
+      cfg.dataDir,
+      process.env.ML_DATA_DIR,
+      path.join(os.homedir(), '.dsh-material-library'),
+    ];
+    try { roots.push(require('./nasstore').nasMaterialDir(cfg)); } catch {}
+    const resolved = path.resolve(String(p));
+    return roots.filter(Boolean).map((r) => path.resolve(r))
+      .some((r) => resolved === r || resolved.startsWith(r + path.sep));
+  } catch {
+    return false;
+  }
+}
+
+/** SEC-006：内网/元数据地址判定（SSRF 防护）。10.0.2.2 为安卓模拟器宿主别名，现有流程在用，豁免。 */
+function isPrivateFetchHost(host) {
+  const h = String(host || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (!h) return true;
+  if (h === 'localhost' || h === '::1' || /^127\./.test(h) || /^0\./.test(h)) return true;
+  if (/^169\.254\./.test(h)) return true; // 云元数据
+  if (/^10\./.test(h)) return h !== '10.0.2.2';
+  if (/^192\.168\./.test(h) || /^172\.(1[6-9]|2\d|3[0-1])\./.test(h)) return true;
+  if (h === 'metadata.google.internal') return true;
+  return false;
+}
+
 async function resolveAssetBuffer(services, raw) {
   if (!raw) return null;
   const s = String(raw).trim();
@@ -126,7 +157,12 @@ async function resolveAssetBuffer(services, raw) {
     return Buffer.from(s.slice(comma + 1), 'base64');
   }
   if (fs.existsSync(s) && fs.statSync(s).isFile()) {
-    return fs.readFileSync(s);
+    // SEC-006：仅读受控目录（dataDir/NAS）内的文件，防低权限用户借
+    // /api/edit/run 等入口传任意路径读取宿主机敏感文件。
+    if (isControlledLocalPath(services, s)) {
+      return fs.readFileSync(s);
+    }
+    // 不在受控目录：不直接读，继续走 fid/URL 解析链。
   }
   const config = services.config;
   const cached = cacheTempFile(config, s);
@@ -152,15 +188,29 @@ async function resolveAssetBuffer(services, raw) {
   }
   if (/^https?:\/\//i.test(s)) {
     // 自己的素材地址已经在上面按 fid 读盘。走到这里的是外部 URL。
+    // SEC-006：SSRF 防护——拒绝环回/链路本地/内网段目标（防探测内网与云元数据）；
+    // 例外：10.0.2.2（安卓模拟器宿主别名，既有流程依赖）与 ML_SSRF_ALLOW_HOSTS 白名单。
+    let host = '';
+    try { host = new URL(s).hostname; } catch {}
+    const allowExtra = String(process.env.ML_SSRF_ALLOW_HOSTS || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+    if (isPrivateFetchHost(host) && !allowExtra.includes(host.toLowerCase().replace(/^\[|\]$/g, ''))) {
+      return null;
+    }
+    // 主机名可能经 DNS 解析到内网（rebinding）：非 IP 字面量时做一次 lookup 复核。
+    if (host && !/^\d{1,3}(\.\d{1,3}){3}$/.test(host) && !host.includes(':')) {
+      try {
+        const { lookup } = require('dns').promises;
+        const { address } = await lookup(host);
+        if (isPrivateFetchHost(address) && address !== '10.0.2.2' && !allowExtra.includes(address)) {
+          return null;
+        }
+      } catch {}
+    }
     // 全局代理会把 10.0.2.2 / 局域网地址也送进 Clash，undici 只抛 fetch failed。
     let dispatcher;
     try {
-      const host = new URL(s).hostname;
-      const localHost = host === '127.0.0.1' || host === 'localhost' || host === '::1'
-        || host === '10.0.2.2'
-        || /^192\.168\./.test(host) || /^10\./.test(host)
-        || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
-      if (localHost) dispatcher = new (require('undici').Agent)();
+      const h = new URL(s).hostname;
+      if (h === '10.0.2.2') dispatcher = new (require('undici').Agent)();
     } catch {}
     let res;
     try {
@@ -856,9 +906,9 @@ async function ingestAiVideo(services, {
     INSERT INTO assets (
       fid, kind, file_name, size, width, height, orientation, duration_s,
       status, is_ai, source_asset_id, poster_path, source,
-      is_representative, has_watermark, in_managed_zone,
+      has_watermark, in_managed_zone,
       created_at, discovered_at, updated_at
-    ) VALUES (?, 'video', ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 'ai', 1, 0, 0, ?, ?, ?)
+    ) VALUES (?, 'video', ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 'ai', 0, 0, ?, ?, ?)
   `).run(
     fid, fileName, size || null, width || null, height || null,
     (width && height) ? (width >= height ? 'landscape' : 'portrait') : null,

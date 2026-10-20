@@ -105,7 +105,7 @@ function buildStructuredVector({ dominant_color, colors = [], space, style_main,
 }
 
 function extractAssetVector(db, fid, assetHint = null) {
-  const asset = assetHint || db.prepare('SELECT fid, file_name, dominant_color, category, dup_group_id, phash FROM assets WHERE fid=?').get(fid);
+  const asset = assetHint || db.prepare('SELECT fid, file_name, dominant_color, category, phash FROM assets WHERE fid=?').get(fid);
   if (!asset) return null;
 
   const tags = db.prepare(`
@@ -153,7 +153,7 @@ function storeVector(db, assetFid, floatArray, model = VECTOR_MODEL) {
 }
 
 function rebuildStructuredVectors(db) {
-  const assets = db.prepare("SELECT fid, file_name, dominant_color, category, dup_group_id, phash FROM assets WHERE status = 'ready'").all();
+  const assets = db.prepare("SELECT fid, file_name, dominant_color, category, phash FROM assets WHERE status = 'ready'").all();
   const tx = db.transaction(() => {
     for (const a of assets) {
       const vec = extractAssetVector(db, a.fid, a);
@@ -168,14 +168,10 @@ function searchSimilar(services, targetFid, { limit = 8, filter = {} } = {}) {
   const { db } = services;
 
   // 1. 获取目标资产基本信息
-  const targetAsset = db.prepare('SELECT fid, file_name, phash, dup_group_id, ready_flags, status, dominant_color, category FROM assets WHERE fid = ?').get(targetFid);
+  // CONFLICT-002：重复组退役，组折叠逻辑随之移除；phash/文件名排重保留
+  const targetAsset = db.prepare('SELECT fid, file_name, phash, ready_flags, status, dominant_color, category FROM assets WHERE fid = ?').get(targetFid);
   if (!targetAsset) return [];
 
-  let targetGroupId = targetAsset.dup_group_id;
-  if (!targetGroupId) {
-    const child = db.prepare('SELECT dup_group_id FROM assets WHERE dup_group_id = ? LIMIT 1').get(targetFid);
-    if (child) targetGroupId = targetFid;
-  }
   const targetPhash = targetAsset.phash;
   const targetName = targetAsset.file_name;
 
@@ -214,10 +210,10 @@ function searchSimilar(services, targetFid, { limit = 8, filter = {} } = {}) {
     }
   }
 
-  // 4. 读取候选向量库：仅选取已就绪且为代表图或未归组资产
+  // 4. 读取候选向量库
   const candidates = db.prepare(`
     SELECT a.fid, a.file_name, a.phash, a.width, a.height, a.orientation, a.origin_orientation,
-           a.thumb_url, a.main_derivative_id, a.status, a.ready_flags, a.dup_group_id, a.is_representative,
+           a.thumb_url, a.main_derivative_id, a.status, a.ready_flags,
            a.dominant_color, COALESCE(a.category, 'interior') AS category,
            av.embedding, av.dimensions, av.model
     FROM assets a
@@ -225,7 +221,6 @@ function searchSimilar(services, targetFid, { limit = 8, filter = {} } = {}) {
     WHERE a.status = 'ready'
       AND ${AUTH_VISIBLE_SQL}
       AND a.fid != ?
-      AND (a.is_representative = 1 OR a.dup_group_id IS NULL)
   `).all(VECTOR_MODEL, targetFid);
 
   // 5. 批取候选者标签
@@ -266,17 +261,14 @@ function searchSimilar(services, targetFid, { limit = 8, filter = {} } = {}) {
   }
 
   // 6. 综合算分
-  const seenGroups = new Set();
   const seenHashes = new Set();
   const seenNames = new Set();
 
-  if (targetGroupId) seenGroups.add(targetGroupId);
   if (targetPhash) seenHashes.add(targetPhash);
   if (targetName) seenNames.add(targetName);
 
   const scored = [];
   for (const cand of candidates) {
-    if (targetGroupId && (cand.dup_group_id === targetGroupId || cand.fid === targetGroupId)) continue;
     if (targetPhash && cand.phash === targetPhash) continue;
     if (targetName && cand.file_name === targetName) continue;
 
@@ -361,12 +353,10 @@ function searchSimilar(services, targetFid, { limit = 8, filter = {} } = {}) {
   // 7. 排重过滤与结果折叠
   const results = [];
   for (const item of scored) {
-    if (item.dup_group_id && seenGroups.has(item.dup_group_id)) continue;
     if (item.phash && seenHashes.has(item.phash)) continue;
     if (item.file_name && seenNames.has(item.file_name)) continue;
 
     results.push(item);
-    if (item.dup_group_id) seenGroups.add(item.dup_group_id);
     if (item.phash) seenHashes.add(item.phash);
     if (item.file_name) seenNames.add(item.file_name);
 
@@ -377,26 +367,22 @@ function searchSimilar(services, targetFid, { limit = 8, filter = {} } = {}) {
   if (results.length < limit) {
     const fallbackItems = db.prepare(`
       SELECT a.fid, a.file_name, a.phash, a.width, a.height, a.orientation, a.origin_orientation,
-             a.thumb_url, a.main_derivative_id, a.status, a.ready_flags, a.dup_group_id, a.dominant_color
+             a.thumb_url, a.main_derivative_id, a.status, a.ready_flags, a.dominant_color
       FROM assets a
       WHERE a.status = 'ready'
         AND ${AUTH_VISIBLE_SQL}
         AND a.fid != ?
-        AND (a.is_representative = 1 OR a.dup_group_id IS NULL)
       ORDER BY a.created_at DESC LIMIT 100
     `).all(targetFid);
 
     for (const item of fallbackItems) {
       if (results.some(r => r.fid === item.fid)) continue;
-      if (targetGroupId && (item.dup_group_id === targetGroupId || item.fid === targetGroupId)) continue;
       if (targetPhash && item.phash === targetPhash) continue;
       if (targetName && item.file_name === targetName) continue;
-      if (item.dup_group_id && seenGroups.has(item.dup_group_id)) continue;
       if (item.phash && seenHashes.has(item.phash)) continue;
       if (item.file_name && seenNames.has(item.file_name)) continue;
 
       results.push(item);
-      if (item.dup_group_id) seenGroups.add(item.dup_group_id);
       if (item.phash) seenHashes.add(item.phash);
       if (item.file_name) seenNames.add(item.file_name);
 

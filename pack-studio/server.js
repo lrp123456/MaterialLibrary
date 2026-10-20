@@ -59,11 +59,22 @@ const LOGCAT_FILTERS = {
 
 function json(res, code, obj) {
   const body = JSON.stringify(obj);
+  // SEC-004：不再下发 Access-Control-Allow-Origin:*。本面板只被同源页面使用，
+  // 撤掉 ACAO 可阻断外部网页通过浏览器跨源调用 adb/powershell 类接口。
   res.writeHead(code, {
     'Content-Type': 'application/json; charset=utf-8',
-    'Access-Control-Allow-Origin': '*',
   });
   res.end(body);
+}
+
+// SEC-004：Host 校验防 DNS rebinding——浏览器被诱导解析到 127.0.0.1 时，
+// 合法同源页面的 Host 恒为本机地址；外部恶意页面的请求 Host 亦为本机，
+// 但配合上面的 CORS 收紧后无凭据读取能力，此处作为纵深防御保留。
+function isLocalHost(req) {
+  const h = String((req && req.headers && req.headers.host) || '').toLowerCase();
+  if (!h) return false;
+  return h === '127.0.0.1' || h === 'localhost' || h === '[::1]'
+    || h.startsWith('127.0.0.1:') || h.startsWith('localhost:') || h.startsWith('[::1]:');
 }
 
 function readBody(req) {
@@ -220,6 +231,10 @@ function fixWindowsPng(buf) {
 
 function requireSerial(q) {
   const serial = String(q || '').trim();
+  // SEC-004：serial 会进入 adb -s 参数，强约束字符集防参数注入。
+  if (serial && !/^[A-Za-z0-9._:-]+$/.test(serial)) {
+    throw new Error('非法的设备 serial: ' + serial.slice(0, 40));
+  }
   if (!serial) {
     const d = listDevices();
     const on = (d.devices || []).filter((x) => x.state === 'device');
@@ -635,24 +650,26 @@ function runAction(action, body) {
       });
     return { ok: true, id, action };
   } else if (action === 'check-update') {
-    // 不跑 PS，只 GET 服务端
+    // 不跑 PS，只 GET 服务端。LOGIC-008：原实现用 http.get，遇到 https:// 地址会
+    // 同步抛 ERR_INVALID_PROTOCOL 直接打崩进程；改用 fetch 并全程 try/catch。
     appendLog(`\n$ check ${server}/api/app/update?...\n`);
     const url = `${server}/api/app/update?platform=android&versionCode=${body.versionCode || 100}&wgtVersion=${body.wgtVersion || 100}&channel=${channel}`;
-    http.get(url, (r) => {
-      let d = '';
-      r.on('data', (c) => (d += c));
-      r.on('end', () => {
-        appendLog(d + '\n');
-        bus.emit('done', { action, code: r.statusCode, ok: r.statusCode === 200 });
+    const taskId = Date.now();
+    running = { id: taskId, action, child: null };
+    (async () => {
+      try {
+        const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
+        const d = await r.text();
+        appendLog(d.slice(0, 20000) + '\n');
+        bus.emit('done', { action, code: r.status, ok: r.status === 200 });
+      } catch (e) {
+        appendLog('ERR ' + e.message + '\n');
+        bus.emit('done', { action, ok: false, error: e.message });
+      } finally {
         running = null;
-      });
-    }).on('error', (e) => {
-      appendLog('ERR ' + e.message + '\n');
-      bus.emit('done', { action, ok: false, error: e.message });
-      running = null;
-    });
-    running = { id: Date.now(), action, child: null };
-    return { ok: true, id: running.id, action };
+      }
+    })();
+    return { ok: true, id: taskId, action };
   } else {
     return { ok: false, error: '未知动作 ' + action };
   }
@@ -682,9 +699,13 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1');
   const p = url.pathname;
 
+  // SEC-004：非本机 Host 直接拒绝（DNS rebinding 纵深防御）。
+  if (!isLocalHost(req)) {
+    return json(res, 403, { ok: false, error: 'forbidden host' });
+  }
+
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
     });
@@ -801,7 +822,12 @@ const server = http.createServer(async (req, res) => {
     try { body = JSON.parse((await readBody(req)) || '{}'); } catch (e) {}
     try {
       const serial = requireSerial(body.serial);
+      // SEC-004：packageName 会拼进 adb shell（安卓端经 /system/bin/sh 执行），
+      // 必须强校验为合法安卓包名，杜绝 `pkg; id` 型命令注入。
       const pkg = String(body.packageName || 'lrp.aibum');
+      if (!/^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$/.test(pkg)) {
+        return json(res, 400, { ok: false, error: '非法的包名: ' + pkg.slice(0, 60) });
+      }
       adbSync(['-s', serial, 'shell', 'am', 'force-stop', pkg]);
       adbSync(['-s', serial, 'shell', 'logcat', '-c']);
       // 兼容 PandoraEntry / PandoraEntryActivity

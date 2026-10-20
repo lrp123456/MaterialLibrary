@@ -462,7 +462,11 @@ function listTrash(services, { page = 1, pageSize = 30, source = '', sort = '', 
   // 严格过滤：文件已被清理的幽灵记录绝不放入回收站列表（用户要求：不可恢复/文件已清理的绝不进入垃圾库）
   const restorableItems = items.filter((it) => !it.fileMissing);
 
-  return { items: restorableItems, total: restorableItems.length, page, pageSize };
+  // LOGIC-006：total 不能用当前页过滤后的条数（恒 ≤ pageSize，前端永远翻不了页）。
+  // 以 COUNT 为基准，剔除本页识别出的幽灵记录数量。
+  const total = Math.max(restorableItems.length, (Number(totalRow?.count) || 0) - (items.length - restorableItems.length));
+
+  return { items: restorableItems, total, page, pageSize };
 }
 
 /** 回收站单条详情：含判定原文全文、判定标准、素材元信息 */

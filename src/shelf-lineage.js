@@ -157,14 +157,23 @@ async function registerGenerated(services, input = {}) {
 
   if (existing) {
     record.thumbFid = existing.fid;
-    db.prepare(`
-      UPDATE assets
-      SET lineage_json=?, parent_fid=COALESCE(NULLIF(?, ''), parent_fid),
-          source_asset_id=COALESCE(NULLIF(?, ''), source_asset_id),
-          library_shelf='retouched', is_ai=1, updated_at=?
-      WHERE fid=?
-    `).run(JSON.stringify(record), parentFid, parentFid, now, existing.fid);
-    inheritTags(db, parentFid, existing.fid);
+    // BUG-003：sha256 命中存量时，原实现直接把该资产强改为
+    // library_shelf='retouched', is_ai=1 —— 会把货架上原本的实拍母素材污染成 AI 图。
+    // 收敛为：仅当命中对象自身已是生成图（且不是母素材本人）才刷新血缘元数据；
+    // 母素材/实拍图只返回去重命中，属性一律不动。
+    const existingRow = db.prepare('SELECT fid, library_shelf, is_ai FROM assets WHERE fid=?').get(existing.fid);
+    const isSameAsParent = parentFid && existingRow.fid === parentFid;
+    const alreadyGenerated = existingRow.library_shelf === 'retouched' || Number(existingRow.is_ai) === 1;
+    if (!isSameAsParent && alreadyGenerated) {
+      db.prepare(`
+        UPDATE assets
+        SET lineage_json=?, parent_fid=COALESCE(NULLIF(?, ''), parent_fid),
+            source_asset_id=COALESCE(NULLIF(?, ''), source_asset_id),
+            updated_at=?
+        WHERE fid=?
+      `).run(JSON.stringify(record), parentFid, parentFid, now, existing.fid);
+      inheritTags(db, parentFid, existing.fid);
+    }
     return { fid: existing.fid, deduped: true };
   }
 
@@ -190,9 +199,9 @@ async function registerGenerated(services, input = {}) {
   db.prepare(`
     INSERT INTO assets (
       fid, kind, category, file_name, size, width, height, orientation,
-      status, is_representative, is_ai, source, source_asset_id, parent_fid,
+      status, is_ai, source, source_asset_id, parent_fid,
       sha256, library_shelf, lineage_json, created_at, discovered_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ready', 1, 1, 'ai', ?, ?, ?, 'retouched', ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ready', 1, 'ai', ?, ?, ?, 'retouched', ?, ?, ?, ?)
   `).run(
     fid,
     kind,

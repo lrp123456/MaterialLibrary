@@ -145,16 +145,14 @@ async function runTests() {
     clientAssetId: 'v-1003',
     source: 'sync'
   });
-  const videoRow = db.prepare('SELECT kind, status, is_representative, auth_state FROM assets WHERE fid=?').get(videoUpload.fid);
+  const videoRow = db.prepare('SELECT kind, status, auth_state FROM assets WHERE fid=?').get(videoUpload.fid);
   if (!videoRow || videoRow.kind !== 'video') {
     throw new Error('视频未按 kind=video 入库: ' + JSON.stringify(videoRow));
   }
   if (videoRow.status !== 'ready') {
     throw new Error('视频入库后应为 ready，实际: ' + videoRow.status);
   }
-  if (Number(videoRow.is_representative) !== 1) {
-    throw new Error('视频应设为代表图，实际 is_representative=' + videoRow.is_representative);
-  }
+  // CONFLICT-002：is_representative 已退役，不再断言代表图标记
   if (triggered.length !== 0) {
     throw new Error('视频不应触发默认打标工作流: ' + JSON.stringify(triggered));
   }

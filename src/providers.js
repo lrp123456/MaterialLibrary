@@ -307,30 +307,19 @@ function initProvidersTables(db) {
   `);
 
   const now = Date.now();
+  // CONFLICT-001：种子必须幂等——只补缺、不覆写。原实现每次重启都会把
+  // 管理员改过的 base_url/secrets/config 全部刷回硬编码默认值，还会把
+  // api_key 强制清空。改为 ON CONFLICT DO NOTHING。
   const insProv = db.prepare(`
     INSERT INTO llm_providers (id, name, protocol, base_url, api_key, secrets_json, config_json, enabled, created_at, updated_at)
     VALUES (@id, @name, @protocol, @base_url, @api_key, @secrets_json, @config_json, @enabled, @now, @now)
-    ON CONFLICT(id) DO UPDATE SET
-      name=excluded.name,
-      protocol=excluded.protocol,
-      base_url=excluded.base_url,
-      api_key='',
-      secrets_json=excluded.secrets_json,
-      config_json=excluded.config_json,
-      updated_at=excluded.updated_at
+    ON CONFLICT(id) DO NOTHING
   `);
 
   const insModel = db.prepare(`
     INSERT INTO llm_models (id, provider_id, name, model_code, capabilities, params_json, is_default, enabled, created_at, updated_at)
     VALUES (@id, @provider_id, @name, @model_code, @capabilities, @params_json, @is_default, @enabled, @now, @now)
-    ON CONFLICT(id) DO UPDATE SET
-      provider_id=excluded.provider_id,
-      name=excluded.name,
-      model_code=excluded.model_code,
-      capabilities=excluded.capabilities,
-      params_json=excluded.params_json,
-      is_default=excluded.is_default,
-      updated_at=excluded.updated_at
+    ON CONFLICT(id) DO NOTHING
   `);
 
   for (const p of DEFAULT_PROVIDERS) {
@@ -352,11 +341,9 @@ function initProvidersTables(db) {
     insModel.run({ ...m, now });
   }
 
-  db.prepare("UPDATE llm_providers SET enabled=1 WHERE id='litellm'").run();
-  try {
-    db.prepare("UPDATE gen_adapters SET enabled=0 WHERE id IN ('litellm_images', 'openai_videos')").run();
-  } catch (_) {}
-  db.prepare("UPDATE llm_providers SET base_url='https://generativelanguage.googleapis.com/v1beta/openai', protocol='openai' WHERE id='gemini'").run();
+  // CONFLICT-001：以下三条强制 UPDATE 已移除——它们每次重启都会把管理员的
+  // 启停/地址修改刷回默认值。新库的初始状态由 DEFAULT_PROVIDERS 种子携带，
+  // 存量库保留管理员当前设置。
   scrubProviderSecretColumns(db);
   scrubKvSecrets(db);
 
@@ -460,8 +447,11 @@ function ensureQwenImageAdapter(db) {
   };
   const hit = db.prepare("SELECT id FROM gen_adapters WHERE id='qwenimage_local'").get();
   if (hit) {
-    db.prepare('UPDATE gen_adapters SET base_url=?, config_json=?, updated_at=? WHERE id=?')
-      .run(config.apiBase, JSON.stringify(config), now, 'qwenimage_local');
+    // CONFLICT-001：已存在时不覆写管理员改过的地址/配置；仅 base_url 为空时回填默认值。
+    const cur = db.prepare('SELECT base_url FROM gen_adapters WHERE id=?').get('qwenimage_local');
+    if (!cur || !cur.base_url) {
+      db.prepare('UPDATE gen_adapters SET base_url=? WHERE id=?').run(config.apiBase, 'qwenimage_local');
+    }
     return;
   }
   db.prepare(`
@@ -501,10 +491,12 @@ function ensureLocalAudioAdapters(db) {
     },
   ];
   for (const row of rows) {
-    const hit = db.prepare('SELECT id FROM gen_adapters WHERE id=?').get(row.id);
+    const hit = db.prepare('SELECT base_url FROM gen_adapters WHERE id=?').get(row.id);
     if (hit) {
-      db.prepare('UPDATE gen_adapters SET base_url=?, config_json=?, protocol=?, enabled=1, updated_at=? WHERE id=?')
-        .run(base, JSON.stringify(row.config), row.protocol, now, row.id);
+      // CONFLICT-001：不覆写已有配置/启停状态；仅 base_url 为空时回填默认值。
+      if (!hit.base_url) {
+        db.prepare('UPDATE gen_adapters SET base_url=? WHERE id=?').run(base, row.id);
+      }
       continue;
     }
     db.prepare(`
@@ -577,7 +569,9 @@ function reconcileModelFlagsWithCatalog(db) {
           }
         }
       }
-      enable.run(code);
+      // CONFLICT-001：不再无条件 enable.run(code)——管理员手动停用（enabled=0）的
+      // 内置模型重启后被重新点亮的问题根因就在这里。新补入的目录行由 INSERT
+      // 默认 enabled=1；存量行维持管理员当前状态。
     }
   }
 

@@ -1829,43 +1829,18 @@ function initModelRegistryTables(db) {
   try { db.exec("ALTER TABLE workflow_modules ADD COLUMN snippet_ids_json TEXT DEFAULT '[]'"); } catch (_) {}
 
   const now = Date.now();
+  // CONFLICT-001：种子必须幂等——只补缺、不覆写。原实现 ON CONFLICT DO UPDATE 会在
+  // 每次重启时把管理员改过的 base_url/名称/凭据/配置全部刷回硬编码默认值。
   const insEndpoint = db.prepare(`
     INSERT INTO llm_endpoints (id, provider_id, name, base_url, auth_type, sign_service, sign_version, credentials_json, config_json, enabled, created_at, updated_at)
     VALUES (@id, @provider_id, @name, @base_url, @auth_type, @sign_service, @sign_version, @credentials_json, @config_json, @enabled, @now, @now)
-    ON CONFLICT(id) DO UPDATE SET
-      name=excluded.name,
-      base_url=excluded.base_url,
-      auth_type=excluded.auth_type,
-      sign_service=excluded.sign_service,
-      sign_version=excluded.sign_version,
-      credentials_json=CASE
-        WHEN excluded.id='agnes_intl' THEN
-          CASE
-            WHEN llm_endpoints.credentials_json = (SELECT credentials_json FROM llm_endpoints WHERE id='agnes') THEN '[]'
-            WHEN REPLACE(REPLACE(REPLACE(COALESCE(llm_endpoints.credentials_json, ''), ' ', ''), '"', ''), '''', '') = '[AGNES_API_KEY]' THEN '[]'
-            ELSE COALESCE(llm_endpoints.credentials_json, '[]')
-          END
-        ELSE excluded.credentials_json
-      END,
-      config_json=excluded.config_json,
-      updated_at=excluded.updated_at
+    ON CONFLICT(id) DO NOTHING
   `);
 
   const insCapability = db.prepare(`
     INSERT INTO llm_capabilities (id, endpoint_id, name, kind, type, path, action, method, poll_path, poll_action, config_json, created_at, updated_at)
     VALUES (@id, @endpoint_id, @name, @kind, @type, @path, @action, @method, @poll_path, @poll_action, @config_json, @now, @now)
-    ON CONFLICT(id) DO UPDATE SET
-      endpoint_id=excluded.endpoint_id,
-      name=excluded.name,
-      kind=excluded.kind,
-      type=excluded.type,
-      path=excluded.path,
-      action=excluded.action,
-      method=excluded.method,
-      poll_path=excluded.poll_path,
-      poll_action=excluded.poll_action,
-      config_json=excluded.config_json,
-      updated_at=excluded.updated_at
+    ON CONFLICT(id) DO NOTHING
   `);
 
   const insContract = db.prepare(`

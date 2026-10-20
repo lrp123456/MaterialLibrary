@@ -156,14 +156,14 @@ async function rehostAudio(services, { filePath, jobId, durationS, title }) {
   if (!existing) {
     db.prepare(`
       INSERT INTO assets (
-        fid, kind, file_name, size, duration_s, status, is_representative,
+        fid, kind, file_name, size, duration_s, status,
         category, source, sha256, created_at, discovered_at, updated_at
-      ) VALUES (?, 'audio', ?, ?, ?, 'ready', 1, 'music', 'doubao_music', ?, ?, ?, ?)
+      ) VALUES (?, 'audio', ?, ?, ?, 'ready', 'music', 'doubao_music', ?, ?, ?, ?)
     `).run(fid, fileName, size, durationS || null, sha, now, now, now);
   } else {
     db.prepare(`
       UPDATE assets
-      SET kind='audio', status='ready', is_representative=1, category='music', updated_at=?
+      SET kind='audio', status='ready', category='music', updated_at=?
       WHERE fid=?
     `).run(now, fid);
   }

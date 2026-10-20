@@ -33,7 +33,7 @@ async function main() {
   if (videoRows.length > 0) {
     const updVideo = db.prepare(`
       UPDATE assets
-      SET status = 'ready', is_representative = 1, auth_state = 'live', updated_at = ?
+      SET status = 'ready', auth_state = 'live', updated_at = ?
       WHERE fid = ?
     `);
 
