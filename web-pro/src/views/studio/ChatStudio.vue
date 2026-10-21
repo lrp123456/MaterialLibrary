@@ -1,5 +1,5 @@
 <template>
-  <div class="flex-1 flex h-[calc(100vh-56px)] overflow-hidden bg-studio-950 font-sans text-slate-100 text-sm">
+  <div class="chat-root flex-1 flex h-[calc(100vh-56px)] overflow-hidden bg-studio-950 font-sans text-slate-100 text-sm">
     <!-- ========================================================================= -->
     <!-- 1. 左侧抽屉栏：豆包/千问双模式（会话历史 / 我的创作库） -->
     <!-- ========================================================================= -->
@@ -81,9 +81,9 @@
     <!-- ========================================================================= -->
     <!-- 2. 中央核心工作区：空状态【大号参考图主工作台】 VS 消息流 -->
     <!-- ========================================================================= -->
-    <main class="flex-1 flex flex-col justify-between overflow-hidden bg-studio-950 relative p-4 space-y-3">
+    <main class="chat-main flex-1 flex flex-col justify-between overflow-hidden bg-studio-950 relative p-4 space-y-3">
       <!-- 2.1 中间工作区：空状态居中灵感与参考看板 VS 真实消息流 -->
-      <div ref="messageScroller" class="flex-1 overflow-y-auto px-2 space-y-4 scrollbar-thin">
+      <div ref="messageScroller" class="chat-scroll flex-1 overflow-y-auto px-2 space-y-4 scrollbar-thin">
         <!-- 空状态展示 (根据当前底部选中的主模式，展示不同形态的大号参考图工作台！) -->
         <div v-if="messages.length === 0" class="h-full flex flex-col items-center justify-center text-center max-w-4xl mx-auto py-4 space-y-5 select-none">
           <!-- A. 纯对话模式 (默认) -->
@@ -624,24 +624,55 @@
                 </div>
               </div>
 
-              <!-- 纯文本与生成说明 -->
-              <p
-                v-if="msg.isError"
-                class="leading-relaxed whitespace-pre-wrap text-rose-100 font-bold bg-rose-950/30 p-2.5 rounded-lg border border-rose-900/50"
-              >{{ msg.content }}</p>
-              <p v-else class="leading-relaxed whitespace-pre-wrap text-slate-200">{{ msg.content }}</p>
-              <div v-if="msg.isError" class="flex items-center gap-2">
-                <button type="button" class="px-3 py-1 rounded-lg bg-studio-accent text-white text-xs font-bold cursor-pointer" @click="openRetry(msg)">重试</button>
-                <button type="button" class="px-3 py-1 rounded-lg border border-studio-700 text-xs font-bold cursor-pointer" @click="editFromError(msg)">编辑</button>
+              <!-- 思考过程：与回答正文分离，默认折叠，可展开查看 -->
+              <div v-if="msg.thinking" class="rounded-xl border border-studio-750 bg-studio-950/70 overflow-hidden">
+                <button
+                  type="button"
+                  class="w-full flex items-center justify-between px-3 py-2 text-[11px] font-bold text-studio-cyan hover:bg-studio-900/60 cursor-pointer"
+                  @click="expandedThinking[i] = !expandedThinking[i]"
+                >
+                  <span class="flex items-center gap-1.5">
+                    <span>🧠 思考过程</span>
+                    <span class="text-slate-500 font-normal font-mono">{{ msg.thinking.length }} 字</span>
+                  </span>
+                  <span class="text-slate-400 font-normal">{{ expandedThinking[i] ? '收起' : '展开' }}</span>
+                </button>
+                <pre v-if="expandedThinking[i]" class="px-3 pb-3 whitespace-pre-wrap break-words text-[11px] leading-relaxed text-slate-400 max-h-72 overflow-y-auto scrollbar-thin">{{ msg.thinking }}</pre>
               </div>
+
+              <!-- 错误卡片：图标 + 标题 + 正文 + 处置建议 + 操作 -->
+              <div v-if="msg.isError" class="gen-error">
+                <div class="gen-error-head">
+                  <span class="gen-error-icon">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M12 2L1 21h22L12 2zm1 14h-2v2h2v-2zm0-7h-2v5h2v-5z"/></svg>
+                  </span>
+                  <span class="gen-error-title">生成未成功</span>
+                </div>
+                <p class="gen-error-body">{{ friendlyErrorText(msg.content) }}</p>
+                <p v-if="errorHint(msg.content)" class="gen-error-hint">
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+                  {{ errorHint(msg.content) }}
+                </p>
+                <div class="gen-error-actions">
+                  <button type="button" class="gen-error-retry" @click="openRetry(msg)">
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+                    重试
+                  </button>
+                  <button type="button" class="gen-error-edit" @click="editFromError(msg)">
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                    编辑后再发
+                  </button>
+                </div>
+              </div>
+              <p v-else class="leading-relaxed whitespace-pre-wrap text-slate-200">{{ msg.content }}</p>
             </div>
           </div>
         </div>
 
         <div v-if="generating" class="flex justify-start">
-          <div class="rounded-xl bg-studio-900 border border-studio-750 px-4 py-3 text-slate-300 text-xs flex items-center space-x-2.5">
-            <StudioIcon name="refresh" :size="16" class="animate-spin text-studio-accent" />
-            <span>视觉/多模态引擎正在推理计算中，预计 3 秒输出高保真产物...</span>
+          <div class="rounded-xl bg-studio-900 border border-studio-750 px-4 py-3 text-slate-300 text-xs flex items-center gap-2.5 max-w-xl">
+            <StudioIcon name="refresh" :size="16" class="animate-spin text-studio-accent shrink-0" />
+            <span class="leading-relaxed">{{ generatingHint }}</span>
           </div>
         </div>
       </div>
@@ -657,16 +688,28 @@
             <div class="flex items-center space-x-2">
               <span class="text-slate-400 font-bold">对话模型:</span>
               <select v-model="chatModelKey" class="bg-studio-950 text-white font-bold text-xs border border-studio-700 rounded-lg px-2.5 py-1 outline-none">
-                <option v-for="m in studioModels.chat" :key="m.id" :value="m.id">
-                  {{ m.name }}{{ m.badge ? ' · ' + m.badge : '' }}
-                </option>
+                <optgroup v-for="group in chatModelGroups" :key="group.label" :label="group.label">
+                  <option v-for="m in group.models" :key="m.id" :value="m.id">
+                    {{ m.name }}{{ m.badge ? ' · ' + m.badge : '' }}
+                  </option>
+                </optgroup>
               </select>
             </div>
 
             <div class="flex items-center space-x-3">
-              <label class="flex items-center space-x-1.5 text-studio-cyan font-bold cursor-pointer">
-                <input type="checkbox" v-model="deepThinkingEnabled" class="rounded accent-studio-cyan" />
-                <span>🧠 深度思考模式 (R1)</span>
+              <label class="flex items-center space-x-1.5 text-studio-cyan font-bold">
+                <span>🧠 思考强度</span>
+                <select
+                  v-if="chatReasoningCaps && chatReasoningCaps.supported"
+                  v-model="thinkingStrength"
+                  class="bg-studio-950 text-white font-bold text-xs border border-studio-700 rounded-lg px-2 py-1 outline-none"
+                  :title="chatReasoningCaps.note || ''"
+                >
+                  <option v-for="lv in chatReasoningCaps.levels" :key="lv" :value="lv">{{ thinkingLevelLabel(lv) }}</option>
+                </select>
+                <span v-else class="text-slate-400 font-normal" :title="chatReasoningCaps?.note || '模型未声明思考档位'">
+                  {{ chatReasoningCaps?.mode === 'always' ? '内置思考·不可关' : (chatReasoningCaps?.mode === 'none' ? '无档位' : '未声明') }}
+                </span>
               </label>
               <span class="text-slate-500">|</span>
               <span class="text-slate-300" :title="contextNoteTitle">{{ contextNote }}</span>
@@ -678,19 +721,25 @@
             <div class="flex w-full flex-wrap items-center gap-x-3 gap-y-2">
               <span class="text-slate-400 font-bold">{{ activeModality === 'video' ? '视频模型' : (activeModality === 'music' ? '配乐' : '生图模型') }}:</span>
               <select v-if="activeModality === 'image'" v-model="imageModelKey" class="bg-studio-950 text-white font-bold text-xs border border-studio-700 rounded-lg px-2.5 py-1 outline-none">
-                <option v-for="m in studioModels.image" :key="m.id" :value="m.id">
-                  {{ m.name }}{{ m.badge ? ' · ' + m.badge : '' }}
-                </option>
+                <optgroup v-for="group in imageModelGroups" :key="group.label" :label="group.label">
+                  <option v-for="m in group.models" :key="m.id" :value="m.id">
+                    {{ m.name }}{{ m.badge ? ' · ' + m.badge : '' }}
+                  </option>
+                </optgroup>
               </select>
               <select v-else-if="activeModality === 'video'" v-model="videoModelKey" class="bg-studio-950 text-white font-bold text-xs border border-studio-700 rounded-lg px-2.5 py-1 outline-none">
-                <option v-for="m in studioModels.video" :key="m.id" :value="m.id">
-                  {{ m.name }}{{ m.badge ? ' · ' + m.badge : '' }}
-                </option>
+                <optgroup v-for="group in videoModelGroups" :key="group.label" :label="group.label">
+                  <option v-for="m in group.models" :key="m.id" :value="m.id">
+                    {{ m.name }}{{ m.badge ? ' · ' + m.badge : '' }}
+                  </option>
+                </optgroup>
               </select>
               <select v-else v-model="musicType" class="bg-studio-950 text-white font-bold text-xs border border-studio-700 rounded-lg px-2.5 py-1 outline-none">
-                <option v-for="m in studioModels.music" :key="m.id" :value="m.id">
-                  {{ m.name }}{{ m.badge ? ' · ' + m.badge : '' }}
-                </option>
+                <optgroup v-for="group in musicModelGroups" :key="group.label" :label="group.label">
+                  <option v-for="m in group.models" :key="m.id" :value="m.id">
+                    {{ m.name }}{{ m.badge ? ' · ' + m.badge : '' }}
+                  </option>
+                </optgroup>
               </select>
               <DynamicModelParamBar
                 v-if="currentSchema"
@@ -917,296 +966,17 @@
       </section>
     </main>
 
-    <!-- ========================================================================= -->
-    <!-- 3. 模态弹窗：私有素材库 DAM 全量多选选择器 / 本地上传【宽屏沉浸式工作台】 -->
-    <!-- ========================================================================= -->
-    <div v-if="showAssetSelector" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-150">
-      <div class="w-full max-w-[1280px] h-[90vh] rounded-2xl bg-studio-900 border border-studio-750 shadow-2xl flex flex-col overflow-hidden">
-        <!-- 弹窗顶栏 -->
-        <div class="flex items-center justify-between px-6 py-4 border-b border-studio-750 shrink-0 bg-studio-950/40">
-          <div class="flex items-center space-x-3">
-            <span class="text-xl">🖼️</span>
-            <div>
-              <div class="text-sm font-bold text-white flex items-center gap-2">
-                <span>私有素材库 DAM 资产选择器</span>
-                <span class="text-xs font-mono font-bold text-studio-cyan bg-studio-850 px-2 py-0.5 rounded border border-studio-750">
-                  {{ selectorTotal > 0 ? `共 ${selectorTotal} 件资产可用` : '连接私有素材库' }}
-                </span>
-              </div>
-              <div class="text-[11px] text-slate-400">支持分类筛选、关键词搜索与多选批量挂载至 @图1 @图2 混排提示词</div>
-            </div>
-          </div>
-          <button @click="showAssetSelector = false" class="w-8 h-8 rounded-lg bg-studio-850 hover:bg-studio-800 text-slate-400 hover:text-white flex items-center justify-center transition-all cursor-pointer">
-            ✕
-          </button>
-        </div>
-
-        <!-- 选项卡与控制栏 -->
-        <div class="px-6 py-3 border-b border-studio-750 flex flex-wrap items-center justify-between gap-3 shrink-0 bg-studio-950/20">
-          <!-- 选项卡：素材库 vs 本地上传 -->
-          <div class="flex items-center space-x-2">
-            <button
-              @click="selectorTab = 'library'"
-              :class="['px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5', selectorTab === 'library' ? 'bg-studio-accent text-white shadow-md' : 'bg-studio-850 text-slate-400 hover:text-white hover:bg-studio-800 border border-studio-750']"
-            >
-              <span>🏛️ DAM 素材库</span>
-              <span class="text-[10px] font-mono opacity-80">({{ selectorTotal }})</span>
-            </button>
-            <button
-              @click="selectorTab = 'upload'"
-              :class="['px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5', selectorTab === 'upload' ? 'bg-studio-accent text-white shadow-md' : 'bg-studio-850 text-slate-400 hover:text-white hover:bg-studio-800 border border-studio-750']"
-            >
-              <span>☁️ 本地高清上传</span>
-            </button>
-          </div>
-
-          <!-- 搜索与多选工具 (仅在素材库选项卡展示) -->
-          <div v-if="selectorTab === 'library'" class="flex items-center space-x-2.5">
-            <div class="relative w-56">
-              <input
-                v-model="selectorKeyword"
-                @keyup.enter="loadDamAssets(1)"
-                type="text"
-                placeholder="搜索名称 / 标签 / 空间..."
-                class="w-full pl-8 pr-3 py-1.5 bg-studio-950 border border-studio-750 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-studio-accent"
-              />
-              <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs">🔍</span>
-            </div>
-            <button
-              @click="loadDamAssets(1)"
-              class="px-3 py-1.5 rounded-lg bg-studio-850 hover:bg-studio-800 border border-studio-750 text-slate-200 text-xs font-bold cursor-pointer"
-            >
-              检索
-            </button>
-            <div class="h-4 w-px bg-studio-750"></div>
-            <button
-              @click="selectAllCurrentPage"
-              class="px-2.5 py-1.5 rounded-lg bg-studio-850 hover:bg-studio-800 border border-studio-750 text-slate-300 text-xs cursor-pointer"
-              title="选择当前页显示的资产 (最多10件)"
-            >
-              全选本页
-            </button>
-            <button
-              @click="clearModalSelection"
-              class="px-2.5 py-1.5 rounded-lg bg-studio-850 hover:bg-studio-800 border border-studio-750 text-slate-400 hover:text-rose-400 text-xs cursor-pointer"
-            >
-              清空
-            </button>
-          </div>
-        </div>
-
-        <div v-if="selectorTab === 'library'" class="flex-1 flex min-h-0">
-        <aside class="picker-pane w-72 shrink-0 overflow-y-auto border-r border-studio-800 p-3 space-y-2">
-          <div class="lib-plates" style="padding:0">
-            <button v-for="plate in sourcePlates" :key="plate.key" type="button" class="lib-plate" :class="{ 'is-on': selectorShelf === plate.key }" @click="selectorShelf = plate.key; loadDamAssets(1)">
-              <span class="lib-mark"></span>{{ plate.label }}
-            </button>
-          </div>
-          <button
-            v-for="tab in selectorMains"
-            :key="tab.key"
-            type="button"
-            class="sidebar-row"
-            :class="{ 'is-on': selectorMain === tab.key }"
-            @click="setSelectorMain(tab.key)"
-          >
-            {{ tab.label }}
-          </button>
-          <button
-            v-for="sub in selectorSubs"
-            :key="sub.key"
-            type="button"
-            class="sidebar-row is-sub"
-            :class="{ 'is-on': selectorSub === sub.key }"
-            @click="setSelectorSub(sub.key)"
-          >
-            {{ sub.label }}
-          </button>
-          <button type="button" class="filter-switch" :class="{ 'is-on': selectorOnlyFav }" @click="toggleSelectorFav">
-            <span>只看收藏</span>
-            <span class="filter-switch-knob"></span>
-          </button>
-          <div v-if="selectorMain === 'image'" class="space-y-1">
-            <section class="lib-group">
-              <button type="button" class="lib-group-head" @click="pickerOpen.ratio = !pickerOpen.ratio"><span>画幅</span><span class="lib-meta">{{ pickerOpen.ratio ? '收起' : '展开' }}</span></button>
-              <div v-if="pickerOpen.ratio" class="lib-chips">
-                <button v-for="item in selectorOrientations" :key="item.key" type="button" class="lib-chip" :class="{ 'is-on': selectorOrientation === item.key }" @click="toggleSelectorOrientation(item.key)">{{ item.label }}</button>
-              </div>
-            </section>
-            <section v-if="selectorSub === 'interior_exterior'" class="lib-group">
-              <button type="button" class="lib-group-head" @click="pickerOpen.space = !pickerOpen.space"><span>空间</span><span class="lib-meta">{{ pickerOpen.space ? '收起' : '展开' }}</span></button>
-              <div v-if="pickerOpen.space" class="lib-chips">
-                <button v-for="item in selectorSpaces" :key="item.dir" type="button" class="lib-chip" :class="{ 'is-on': selectorSpace === item.dir }" @click="toggleSelectorSpace(item.dir)">{{ item.label }}</button>
-              </div>
-            </section>
-            <section v-if="selectorSub === 'interior_exterior'" class="lib-group">
-              <button type="button" class="lib-group-head" @click="pickerOpen.style = !pickerOpen.style"><span>风格</span><span class="lib-meta">{{ pickerOpen.style ? '收起' : '展开' }}</span></button>
-              <div v-if="pickerOpen.style" class="lib-chips">
-                <button v-for="item in selectorStyles" :key="'st'+item.dir" type="button" class="lib-chip" :class="{ 'is-on': selectorStyle === item.dir }" @click="toggleSelectorStyle(item.dir)">{{ item.label }}</button>
-              </div>
-            </section>
-            <section v-if="selectorSub === 'interior_exterior'" class="lib-group">
-              <button type="button" class="lib-group-head" @click="pickerOpen.material = !pickerOpen.material"><span>材质</span><span class="lib-meta">{{ pickerOpen.material ? '收起' : '展开' }}</span></button>
-              <div v-if="pickerOpen.material" class="lib-chips">
-                <button v-for="item in selectorMaterials" :key="'mt'+item.dir" type="button" class="lib-chip" :class="{ 'is-on': selectorMaterial === item.dir }" @click="toggleSelectorMaterial(item.dir)">{{ item.label }}</button>
-              </div>
-            </section>
-            <section class="lib-group">
-              <button type="button" class="lib-group-head" @click="pickerOpen.color = !pickerOpen.color"><span>主色</span><span class="lib-meta">{{ pickerOpen.color ? '收起' : '展开' }}</span></button>
-              <div v-if="pickerOpen.color" class="lib-chips">
-                <button v-for="item in selectorColors" :key="item.dir || item.label" type="button" class="lib-chip" :class="{ 'is-on': selectorColor === (item.dir || item.label) }" @click="toggleSelectorColor(item.dir || item.label)">{{ item.label }}</button>
-              </div>
-            </section>
-          </div>
-        </aside>
-        <div class="flex-1 overflow-y-auto p-6 scrollbar-thin">
-          <div v-if="libraryLoading" class="h-64 flex flex-col items-center justify-center space-y-3 text-slate-400 text-xs">
-            <div class="w-8 h-8 rounded-full border-2 border-studio-accent border-t-transparent animate-spin"></div>
-            <span>正在全量读取私有 DAM 素材库资产...</span>
-          </div>
-          <div v-else-if="libraryItems.length === 0 && sessionUploads.length === 0 && sessionGenerated.length === 0" class="h-64 flex flex-col items-center justify-center space-y-2 text-slate-500 text-xs">
-            <span class="text-3xl">🏜️</span>
-            <span>该筛选条件下暂无素材资产，请尝试其他关键词或分类</span>
-          </div>
-          <div v-else>
-          <div v-if="sessionUploads.length" class="mb-4">
-            <div class="text-xs font-bold mb-2">上传素材</div>
-            <div class="flex gap-2 overflow-x-auto">
-              <div v-for="item in sessionUploads" :key="'up-' + (item.fid || item.url)" class="w-16 shrink-0">
-                <button type="button" class="block" @click="toggleSelectAsset(item)">
-                  <img :src="item.url" class="w-16 h-16 object-cover rounded-lg" :alt="item.name" />
-                </button>
-                <button type="button" class="mt-1 w-full text-[11px] font-bold" @click="openMediaPreview(item)">查看</button>
-              </div>
-            </div>
-          </div>
-          <div v-if="sessionGenerated.length" class="mb-4">
-            <div class="text-xs font-bold mb-2">生成素材</div>
-            <div class="flex gap-2 overflow-x-auto">
-              <div v-for="item in sessionGenerated" :key="'gen-' + (item.fid || item.url)" class="w-16 shrink-0">
-                <button type="button" class="block" @click="toggleSelectAsset(item)">
-                  <img :src="item.url" class="w-16 h-16 object-cover rounded-lg" :alt="item.name" />
-                </button>
-                <button type="button" class="mt-1 w-full text-[11px] font-bold" @click="openMediaPreview(item)">查看</button>
-              </div>
-            </div>
-          </div>
-          <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5">
-            <div
-              v-for="item in libraryItems"
-              :key="item.fid || item.id"
-              @click="toggleSelectAsset(item)"
-              :class="[
-                'group relative rounded-xl overflow-hidden border bg-studio-950 aspect-square cursor-pointer transition-all shadow-sm select-none',
-                selectedModalFids.includes(item.fid)
-                  ? 'border-2 border-studio-cyan ring-2 ring-studio-cyan/30 shadow-lg shadow-studio-cyan/20 scale-[0.98]'
-                  : 'border-studio-750 hover:border-slate-500 hover:shadow-md'
-              ]"
-            >
-              <img :src="item.url" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200" loading="lazy" />
-
-              <!-- 多选勾选标记 (左上角) -->
-              <div class="absolute top-2 left-2 z-10 pointer-events-none">
-                <div
-                  :class="[
-                    'w-6 h-6 rounded-lg flex items-center justify-center transition-all shadow-md',
-                    selectedModalFids.includes(item.fid)
-                      ? 'bg-studio-cyan text-slate-950 font-black'
-                      : 'bg-black/60 backdrop-blur border border-white/20 text-transparent opacity-70 group-hover:opacity-100'
-                  ]"
-                >
-                  <span class="text-xs">✓</span>
-                </div>
-              </div>
-
-              <!-- 右上角：大图预览放大镜按钮 -->
-              <div class="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button
-                  @click.stop="openMediaPreview(item, item.kind === 'video' ? 'video' : 'image')"
-                  class="w-6 h-6 rounded-lg bg-black/70 hover:bg-studio-accent text-white flex items-center justify-center transition-all shadow-md cursor-pointer"
-                  title="查看高清大图/视频"
-                >
-                  <span class="text-[11px]">🔍</span>
-                </button>
-              </div>
-
-              <!-- 底部标题与类型徽标 -->
-              <div class="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-transparent flex flex-col justify-end p-2 pointer-events-none">
-                <span class="text-[11px] font-bold text-white truncate w-full">{{ item.name }}</span>
-                <div class="flex items-center justify-between text-[10px] text-slate-400 mt-0.5">
-                  <span class="font-mono text-studio-cyan">{{ item.kind === 'video' ? '🎬 视频' : '🖼️ 图片' }}</span>
-                  <span v-if="selectedModalFids.includes(item.fid)" class="text-studio-cyan font-bold font-mono">已选中</span>
-                </div>
-              </div>
-            </div>
-          </div>
-          </div>
-        </div>
-        </div>
-
-        <!-- 本地上传区域 -->
-        <div v-else-if="selectorTab === 'upload'" class="flex-1 flex items-center justify-center p-8">
-          <div
-            @click="triggerLocalFileInput"
-            class="w-full max-w-lg border-2 border-dashed border-studio-700 hover:border-studio-accent rounded-2xl p-12 text-center cursor-pointer transition-all bg-studio-950/60 hover:bg-studio-950 flex flex-col items-center justify-center space-y-3"
-          >
-            <div class="w-16 h-16 rounded-2xl bg-studio-850 flex items-center justify-center text-studio-accent">
-              <StudioIcon name="image" :size="36" />
-            </div>
-            <span class="text-sm font-bold text-slate-200">点击选择本地高清图片或视频</span>
-            <span class="text-xs text-slate-400">支持 PNG, JPG, WEBP, MP4 格式，上传后立即挂载为图文混排引用</span>
-            <span class="px-4 py-1.5 rounded-lg bg-studio-accent text-white text-xs font-bold shadow-md hover:brightness-110">
-              浏览本地文件
-            </span>
-          </div>
-          <input ref="localFileInput" type="file" :accept="fileAccept" class="hidden" @change="onLocalFileSelected" />
-        </div>
-
-        <!-- 弹窗底栏：分页与确认挂载操作 -->
-        <div class="px-6 py-3.5 border-t border-studio-750 shrink-0 bg-studio-950/60 flex items-center justify-between">
-          <!-- 左侧：分页控制 -->
-          <div v-if="selectorTab === 'library'" class="flex items-center space-x-2 text-xs text-slate-400 font-mono">
-            <span>第 {{ selectorPage }} / {{ Math.max(1, Math.ceil(selectorTotal / selectorPageSize)) }} 页</span>
-            <button
-              @click="loadDamAssets(selectorPage - 1)"
-              :disabled="selectorPage <= 1"
-              class="px-2.5 py-1 rounded bg-studio-850 hover:bg-studio-800 disabled:opacity-30 border border-studio-750 text-slate-200 cursor-pointer"
-            >
-              上一页
-            </button>
-            <button
-              @click="loadDamAssets(selectorPage + 1)"
-              :disabled="selectorPage * selectorPageSize >= selectorTotal"
-              class="px-2.5 py-1 rounded bg-studio-850 hover:bg-studio-800 disabled:opacity-30 border border-studio-750 text-slate-200 cursor-pointer"
-            >
-              下一页
-            </button>
-          </div>
-          <div v-else></div>
-
-          <!-- 右侧：挂载与取消 -->
-          <div class="flex items-center space-x-3">
-            <span class="text-xs font-bold text-slate-300">
-              已选 <span class="text-studio-cyan font-mono text-sm font-extrabold">{{ selectedModalFids.length }}</span> / 10 件
-            </span>
-            <button
-              @click="showAssetSelector = false"
-              class="px-4 py-2 rounded-xl text-slate-400 hover:text-white hover:bg-studio-850 text-xs font-bold cursor-pointer transition-all"
-            >
-              取消
-            </button>
-            <button
-              @click="confirmMountSelected"
-              :disabled="selectedModalFids.length === 0"
-              class="px-5 py-2 rounded-xl bg-gradient-to-r from-studio-accent to-studio-cyan hover:brightness-110 text-white text-xs font-extrabold shadow-lg shadow-studio-accent/25 transition-all disabled:opacity-40 cursor-pointer flex items-center space-x-1.5"
-            >
-              <span>确认挂载 (@引用已选 {{ selectedModalFids.length }} 件)</span>
-              <span>➔</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    <!-- 3. 共享素材选择器（AI 对话 / 快捷编辑同一组件） -->
+    <AssetPickerModal
+      :visible="showAssetSelector"
+      context="chat"
+      :max-select="10"
+      :recent="assetPickerRecent"
+      upload-enabled
+      @close="showAssetSelector = false"
+      @confirm="onAssetPickerConfirm"
+      @upload="onAssetPickerUpload"
+    />
 
     <!-- ========================================================================= -->
     <!-- 4. 高清媒体预览灯箱 (Media Lightbox Modal: 大图缩放与视频播放) -->
@@ -1858,11 +1628,11 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import StudioIcon from '../../components/StudioIcon.vue';
 import DynamicModelParamBar from '../../components/DynamicModelParamBar.vue';
+import AssetPickerModal from '../../components/AssetPickerModal.vue';
 import { STUDIO_SKILLS_REGISTRY, evaluateClientModelRules, normalizeClientLayerStack } from '../../utils/model-protocol';
 import { contextBudgetTokens, trimChatMessages } from '../../../../src/chat-context.mjs';
 import {
   getAssetImageUrl,
-  fetchAssets,
   authFetch,
   generateAiImage,
   generateAiVideo,
@@ -1888,33 +1658,35 @@ const sidebarTab = ref('history'); // 'history' | 'library'
 const currentSessionId = ref('default_session');
 const tplSearch = ref('');
 const generating = ref(false);
+// 等待文案按模型/模式给出真实预期，本地 Qwen 是分钟级，不再显示误导性的「3 秒」
+const generatingHint = computed(() => {
+  if (activeModality.value === 'video') return '视频云端渲染通常需要 1~3 分钟，完成后会自动出现在对话中，可继续输入其他需求…';
+  if (activeModality.value === 'music') return '配乐合成中，通常需要 30~60 秒…';
+  if (activeModality.value === 'image' && imageModelKey.value === 'qwenimage_local') {
+    const size = schemaParams.value.size === '2K' ? '2K' : '1K';
+    const base = size === '2K'
+      ? '本机 Qwen-Image 2K 生成约需 4~7 分钟（模型加载与逐像素扩散），1K 约 1.5~3 分钟'
+      : '本机 Qwen-Image 正在加载模型并逐像素扩散，1K 约 1.5~3 分钟，期间不占用云端额度';
+    return `${base}，完成后自动显示…`;
+  }
+  return '云端生图引擎推理中，通常 10~30 秒…';
+});
 const optimizing = ref(false);
 const optimizeUndo = ref(null);
 const showHashMenu = ref(false);
 const showAssetSelector = ref(false);
-const selectorTab = ref('library');
-const localFileInput = ref(null);
 const richEditorRef = ref(null);
 const messageScroller = ref(null);
 const sessionRefPool = ref([]);
-const selectedModalItems = ref({});
-const selectorShelf = ref('original');
-const selectorColor = ref('');
-const selectorColors = ref([]);
-const sourcePlates = [
-  { key: 'original', label: '原素材' },
-  { key: 'retouched', label: '精修素材' },
-  { key: 'finished', label: '成品素材' }
-];
-const pickerOpen = ref({ ratio: true, space: true, style: false, material: false, color: false });
-const libraryLoading = ref(false);
 
 // 核心底栏 4 模态：'chat' (纯对话) | 'image' (图片生成) | 'video' (视频生成) | 'music' (音乐生成)
 const activeModality = ref('chat'); // 默认纯对话！
 
 // 纯对话专属状态
 const chatModelKey = ref('volc_doubao_seed_2_1_pro');
-const deepThinkingEnabled = ref(true);
+// 思考强度：取值由当前模型在官方目录声明的 caps.reasoning 决定
+const thinkingStrength = ref('');
+const expandedThinking = ref({});
 
 // 图像模式专属参数
 const imageModelKey = ref('seedream5flash');
@@ -1942,6 +1714,50 @@ const studioModels = ref({
   video: [],
   music: []
 });
+
+// ---- 模型按「提供商 · 模型族」两级分组（原生 optgroup，无需自绘下拉） ----
+function groupModelsByProvider(models) {
+  const groups = [];
+  const index = new Map();
+  for (const m of models || []) {
+    const provider = m.providerGroup || m.providerName || '其他';
+    const family = m.familyName || '';
+    const label = family ? `${provider} · ${family}` : provider;
+    if (!index.has(label)) {
+      index.set(label, { label, models: [] });
+      groups.push(index.get(label));
+    }
+    index.get(label).models.push(m);
+  }
+  return groups;
+}
+const chatModelGroups = computed(() => groupModelsByProvider(studioModels.value.chat));
+const imageModelGroups = computed(() => groupModelsByProvider(studioModels.value.image));
+const videoModelGroups = computed(() => groupModelsByProvider(studioModels.value.video));
+const musicModelGroups = computed(() => groupModelsByProvider(studioModels.value.music));
+
+const currentChatModel = computed(() => (studioModels.value.chat || []).find((m) => m.id === chatModelKey.value) || null);
+const chatReasoningCaps = computed(() => currentChatModel.value?.reasoning || null);
+const THINKING_LABELS = { off: '关闭', on: '开启', none: '关闭', minimal: '最低', low: '低', medium: '中', high: '高', xhigh: '超高', max: '最高' };
+function thinkingLevelLabel(level) {
+  return THINKING_LABELS[level] || level;
+}
+watch(chatReasoningCaps, (caps) => {
+  thinkingStrength.value = caps && caps.supported ? (caps.default || caps.levels?.[0] || '') : '';
+}, { immediate: true });
+// 兜底拆分：部分上游（如 Gemma）把 <thought> 混在正文里，服务端未拆分时客户端再拆一次
+function splitClientThinking(content, reasoning) {
+  let think = typeof reasoning === 'string' ? reasoning : '';
+  let text = typeof content === 'string' ? content : '';
+  const take = (inner) => {
+    const t = (inner || '').trim();
+    if (t) think = think ? `${think}\n${t}` : t;
+  };
+  text = text.replace(/<(thought|thinking)>([\s\S]*?)<\/\1>/gi, (_, __, inner) => { take(inner); return ''; });
+  const open = text.match(/<(thought|thinking)>([\s\S]*)$/i);
+  if (open) { take(open[2]); text = text.replace(/<(thought|thinking)>[\s\S]*$/i, ''); }
+  return { content: text.trim(), thinking: think.trim() };
+}
 const activeGenMode = ref('');
 const schemaParams = ref({});
 const showAdvanced = ref(false);
@@ -1975,7 +1791,7 @@ function toggleStudioSkill(skill) {
   } else {
     activeSkillIds.value.push(skill.id);
     if (skill.autoParams && typeof skill.autoParams === 'object') {
-      schemaParams.value = { ...schemaParams.value, ...skill.autoParams };
+      schemaParams.value = clampParamsToSchema(currentSchema.value, { ...schemaParams.value, ...skill.autoParams });
       applyModeLocks();
     }
   }
@@ -1998,8 +1814,19 @@ const currentSchema = computed(() => {
   if (studioSchemas.value[key]) return studioSchemas.value[key];
   return null;
 });
-const sessionUploads = computed(() => sessionRefPool.value.filter((item) => item.origin !== 'generated'));
-const sessionGenerated = computed(() => sessionRefPool.value.filter((item) => item.origin === 'generated'));
+// 共享素材选择器的「最近素材」：本会话最近上传与生成的素材，置顶并标记来源
+const assetPickerRecent = computed(() => {
+  const list = [];
+  for (let i = sessionRefPool.value.length - 1; i >= 0 && list.length < 12; i -= 1) {
+    const item = sessionRefPool.value[i];
+    if (!item?.url) continue;
+    list.push({
+      ...item,
+      mark: item.origin === 'generated' ? '本次生成' : '对话使用',
+    });
+  }
+  return list;
+});
 const commonFields = computed(() => {
   const schema = currentSchema.value;
   if (!schema) return [];
@@ -2034,6 +1861,13 @@ function valueStillFits(schema, key, value) {
   const field = fieldByKey(schema, key);
   if (!field) return false;
   if (field.type === 'enum') return (field.options || []).map(String).includes(String(value));
+  if (['number', 'range', 'duration'].includes(field.type)) {
+    if (value === '' || value == null) return false;
+    const n = Number(value);
+    if (!Number.isFinite(n)) return false;
+    if (field.min != null && n < Number(field.min)) return false;
+    if (field.max != null && n > Number(field.max)) return false;
+  }
   return true;
 }
 function lockedKeySet() {
@@ -2323,9 +2157,6 @@ const messages = ref([]);
 // 真实参考托盘 (初始为空，杜绝写死假数据！)
 const referenceTray = ref([]);
 
-// 真实私有素材库 DAM 资产池
-const libraryItems = ref([]);
-
 // 媒体大图/视频预览弹窗
 const previewModal = ref({
   visible: false,
@@ -2334,55 +2165,6 @@ const previewModal = ref({
   title: '',
   scale: 1.0
 });
-
-// 私有素材库选择器状态 (多选、全量分页与多维筛选)
-const selectorMain = ref('image');
-const selectorSub = ref('interior_exterior');
-const selectorOnlyFav = ref(false);
-const selectorOrientation = ref('');
-const selectorSpace = ref('');
-const selectorStyle = ref('');
-const selectorMaterial = ref('');
-const selectorSpaces = ref([]);
-const selectorStyles = ref([]);
-const selectorMaterials = ref([]);
-const selectorKeyword = ref('');
-const selectorPage = ref(1);
-const selectorPageSize = 60;
-const selectorTotal = ref(0);
-const selectedModalFids = ref([]);
-
-const selectorMains = [
-  { key: 'image', label: '图片' },
-  { key: 'video', label: '视频' },
-  { key: 'audio', label: '音频' }
-];
-const selectorSubMap = {
-  image: [
-    { key: 'all', label: '全部图片' },
-    { key: 'interior_exterior', label: '室内外设计' },
-    { key: 'portrait', label: '空间人像' },
-    { key: 'clothing', label: '服装服饰' },
-    { key: 'furniture', label: '单品家具' }
-  ],
-  video: [
-    { key: 'all', label: '全部视频' },
-    { key: 'walkthrough', label: '空间漫游' },
-    { key: 'ad', label: '商业短片' }
-  ],
-  audio: [
-    { key: 'all', label: '全部音频' },
-    { key: 'bgm', label: '氛围背景乐' },
-    { key: 'sfx', label: '环境音效' }
-  ]
-};
-const selectorSubs = computed(() => selectorSubMap[selectorMain.value] || []);
-const selectorOrientations = [
-  { key: 'portrait', label: '9:16 竖图' },
-  { key: '3:4', label: '3:4 竖图' },
-  { key: 'landscape', label: '16:9 横图' },
-  { key: 'square', label: '1:1 方图' }
-];
 
 // 灵感胶囊预设
 const chatQuickStarters = [
@@ -2474,7 +2256,6 @@ onMounted(async () => {
   resetSchemaForModel();
   window.addEventListener('keydown', handleGlobalKeydown);
   await loadTemplates();
-  await loadDamAssets();
   await loadSessions();
 });
 
@@ -2502,100 +2283,6 @@ function handleGlobalKeydown(e) {
   }
 }
 
-// 加载真实素材库 DAM 资产 (支持全量检索、品类过滤与分页)
-async function loadDamAssets(page = 1) {
-  libraryLoading.value = true;
-  selectorPage.value = page;
-  try {
-    const params = {
-      page,
-      limit: selectorPageSize,
-      pageSize: selectorPageSize
-    };
-    if (selectorMain.value === 'video') {
-      params.media_type = 'video';
-      if (selectorSub.value === 'walkthrough') params.category = 'video';
-      if (selectorSub.value === 'ad') params.category = 'finished';
-    } else if (selectorMain.value === 'audio') {
-      params.media_type = 'music';
-      params.category = 'music';
-    } else {
-      params.media_type = 'image';
-      if (selectorSub.value !== 'all') params.category = selectorSub.value;
-    }
-    if (selectorShelf.value) params.shelf = selectorShelf.value;
-    if (selectorOnlyFav.value) params.only_favorite = 1;
-    if (selectorOrientation.value) params.orientation = selectorOrientation.value;
-    if (selectorColor.value) params.color = selectorColor.value;
-    if (selectorSpace.value) params.space = selectorSpace.value;
-    if (selectorStyle.value) params.style = selectorStyle.value;
-    if (selectorMaterial.value) params.material = selectorMaterial.value;
-    if (selectorKeyword.value.trim()) {
-      params.keyword = selectorKeyword.value.trim();
-    }
-    const data = await fetchAssets(params);
-    const items = data.items || [];
-    selectorTotal.value = data.total || items.length;
-    const opts = data.filterOptions || {};
-    if (Array.isArray(opts.space)) selectorSpaces.value = opts.space;
-    if (Array.isArray(opts.style_atom)) selectorStyles.value = opts.style_atom;
-    if (Array.isArray(opts.material_kind)) selectorMaterials.value = opts.material_kind.slice(0, 8);
-    if (Array.isArray(opts.colors)) selectorColors.value = opts.colors.slice(0, 12);
-    libraryItems.value = items.map(it => {
-      const imgUrl = getAssetImageUrl(it.fid, it.mediaToken);
-      return {
-        id: it.fid,
-        fid: it.fid,
-        mediaToken: it.mediaToken,
-        name: it.file_name || it.fileName || it.name || '素材资产',
-        url: imgUrl,
-        category: it.category,
-        kind: it.kind || it.media_type || 'image'
-      };
-    });
-  } catch (e) {
-    console.warn('加载素材库资产失败:', e);
-  } finally {
-    libraryLoading.value = false;
-  }
-}
-
-function setSelectorMain(key) {
-  selectorMain.value = key;
-  selectorSub.value = key === 'image' ? 'interior_exterior' : 'all';
-  selectorSpace.value = '';
-  selectorStyle.value = '';
-  selectorMaterial.value = '';
-  loadDamAssets(1);
-}
-function setSelectorSub(key) {
-  selectorSub.value = key;
-  loadDamAssets(1);
-}
-function toggleSelectorFav() {
-  selectorOnlyFav.value = !selectorOnlyFav.value;
-  loadDamAssets(1);
-}
-function toggleSelectorOrientation(key) {
-  selectorOrientation.value = selectorOrientation.value === key ? '' : key;
-  loadDamAssets(1);
-}
-function toggleSelectorSpace(dir) {
-  selectorSpace.value = selectorSpace.value === dir ? '' : dir;
-  loadDamAssets(1);
-}
-function toggleSelectorStyle(dir) {
-  selectorStyle.value = selectorStyle.value === dir ? '' : dir;
-  loadDamAssets(1);
-}
-function toggleSelectorMaterial(dir) {
-  selectorMaterial.value = selectorMaterial.value === dir ? '' : dir;
-  loadDamAssets(1);
-}
-function toggleSelectorColor(dir) {
-  selectorColor.value = selectorColor.value === dir ? '' : dir;
-  loadDamAssets(1);
-}
 function fileNameFromUrl(url) {
   try {
     const base = decodeURIComponent(String(url || '').split('?')[0].split('/').pop() || '');
@@ -3101,15 +2788,6 @@ function latestChatAnalysis() {
   return '';
 }
 
-function priorTranscript() {
-  const model = (studioModels.value.chat || []).find((item) => item.id === chatModelKey.value);
-  const trimmed = trimChatMessages(messages.value, contextBudgetTokens(model?.contextTokens));
-  return trimmed.messages
-    .map((message) => `${message.role === 'user' ? '用户' : '助手'}：${stripScaffold(message.content)}`)
-    .join('\n')
-    .slice(-6000);
-}
-
 function priorMedia() {
   const found = [];
   for (let i = messages.value.length - 1; i >= 0; i--) {
@@ -3253,7 +2931,12 @@ async function selectSession(s) {
         return {
           id: m.id,
           role: m.role,
-          content: m.prompt || (m.result ? m.result.content : ''),
+          content: mod === 'chat'
+            ? splitClientThinking(m.prompt || (m.result ? m.result.content : ''), m.result?.thinking || '').content
+            : (m.prompt || (m.result ? m.result.content : '')),
+          thinking: mod === 'chat'
+            ? splitClientThinking(m.prompt || (m.result ? m.result.content : ''), m.result?.thinking || '').thinking
+            : '',
           modality: mod,
           imageUrl: m.result?.imageUrl,
           videoUrl: m.result?.videoUrl,
@@ -3405,11 +3088,11 @@ function applyTemplate(tpl) {
   if (params.schemaMode) setGenMode(params.schemaMode);
   if (params.schemaParams && typeof params.schemaParams === 'object') {
     const schema = currentSchema.value;
-    const next = { ...schemaParams.value };
+    const incoming = {};
     for (const [key, value] of Object.entries(params.schemaParams)) {
-      if (valueStillFits(schema, key, value) || fieldByKey(schema, key)) next[key] = value;
+      if (fieldByKey(schema, key)) incoming[key] = value;
     }
-    schemaParams.value = next;
+    schemaParams.value = clampParamsToSchema(schema, { ...schemaParams.value, ...incoming });
     applyModeLocks();
   }
   if (params.ratio) selectedRatio.value = params.ratio;
@@ -3458,71 +3141,39 @@ function selectHashTemplate(tpl) {
 
 function openAssetSelectorModal() {
   showAssetSelector.value = true;
-  selectedModalFids.value = [];
-  loadDamAssets(1);
 }
 
-function selectFromLibrary(item) {
-  const idx = referenceTray.value.length + 1;
-  const asset = { name: item.name, url: item.url, weight: 85, tag: `@图${idx}`, fid: item.fid, kind: item.kind };
-  referenceTray.value.push(asset);
-  insertChipToEditor(asset);
-  showAssetSelector.value = false;
-}
-
-// 模态选择器多选与勾选
-function toggleSelectAsset(item) {
-  const fid = item.fid || item.url;
-  if (!fid) return;
-  const idx = selectedModalFids.value.indexOf(fid);
-  if (idx >= 0) {
-    selectedModalFids.value.splice(idx, 1);
-    delete selectedModalItems.value[fid];
-  } else {
-    if (selectedModalFids.value.length >= 10) {
-      alert('最多同时选择 10 件参考素材');
-      return;
-    }
-    selectedModalFids.value.push(fid);
-    selectedModalItems.value[fid] = item;
-  }
-}
-
-function selectAllCurrentPage() {
-  const currentFids = libraryItems.value.map(it => it.fid);
-  for (const fid of currentFids) {
-    if (!selectedModalFids.value.includes(fid)) {
-      if (selectedModalFids.value.length >= 10) break;
-      selectedModalFids.value.push(fid);
-    }
-  }
-}
-
-function clearModalSelection() {
-  selectedModalFids.value = [];
-  selectedModalItems.value = {};
-}
-
-function confirmMountSelected() {
-  if (selectedModalFids.value.length === 0) return;
-  for (const fid of selectedModalFids.value) {
-    const item = selectedModalItems.value[fid] || libraryItems.value.find(it => it.fid === fid);
-    if (!item) continue;
+// 共享素材选择器确认：把选中的「原图 / 衍生图」版本挂载为 @引用
+function onAssetPickerConfirm(versions) {
+  for (const version of versions || []) {
+    if (!version?.url) continue;
     const idx = referenceTray.value.length + 1;
     const asset = {
-      name: item.name,
-      url: item.url,
+      name: version.derivativeKind ? `${version.name || '素材资产'}（${version.label || '衍生图'}）` : (version.name || '素材资产'),
+      url: version.url,
       weight: 85,
       tag: `@图${idx}`,
-      fid: item.fid,
-      kind: item.kind
+      fid: version.fid,
+      kind: version.kind || 'image',
+      derivativeId: version.derivativeId || '',
+      derivativeKind: version.derivativeKind || ''
     };
     referenceTray.value.push(asset);
     rememberSessionRefs([asset]);
     insertChipToEditor(asset);
   }
-  selectedModalFids.value = [];
-  selectedModalItems.value = {};
+  showAssetSelector.value = false;
+}
+
+function onAssetPickerUpload(file) {
+  if (!file) return;
+  const name = file.name.replace(/\.[^.]+$/, '');
+  const url = URL.createObjectURL(file);
+  localFileByUrl.set(url, file);
+  const idx = referenceTray.value.length + 1;
+  const asset = { name, url, weight: 85, tag: `@图${idx}`, kind: file.type.startsWith('video/') ? 'video' : (file.type.startsWith('audio/') ? 'audio' : 'image') };
+  referenceTray.value.push(asset);
+  insertChipToEditor(asset);
   showAssetSelector.value = false;
 }
 
@@ -3557,23 +3208,6 @@ function closeMediaPreview() {
 
 function zoomPreview(delta) {
   previewModal.value.scale = Math.max(0.5, Math.min(4.0, previewModal.value.scale + delta));
-}
-
-function triggerLocalFileInput() {
-  localFileInput.value?.click();
-}
-
-function onLocalFileSelected(e) {
-  const f = e.target.files?.[0];
-  if (!f) return;
-  const name = f.name.replace(/\.[^.]+$/, '');
-  const url = URL.createObjectURL(f);
-  localFileByUrl.set(url, f);
-  const idx = referenceTray.value.length + 1;
-  const asset = { name, url, weight: 85, tag: `@图${idx}`, kind: f.type.startsWith('video/') ? 'video' : (f.type.startsWith('audio/') ? 'audio' : 'image') };
-  referenceTray.value.push(asset);
-  insertChipToEditor(asset);
-  showAssetSelector.value = false;
 }
 
 function dropMentionNumber(removed) {
@@ -3635,8 +3269,7 @@ async function optimizePrompt() {
         prompt: rawText,
         modelId: activeModality.value === 'image' ? imageModelKey.value : (activeModality.value === 'video' ? videoModelKey.value : musicType.value),
         mode: activeGenMode.value || (activeModality.value === 'video' ? 'text_to_video' : 'text_to_image'),
-        imageUrls,
-        priorContext: priorTranscript()
+        imageUrls
       })
     });
     const json = await res.json();
@@ -3780,18 +3413,28 @@ async function sendMessage() {
       }
       const images = await portableImageUrls(visionRefs, 2);
 
+      const reasoningCaps = chatReasoningCaps.value;
+      const reasoningParam = reasoningCaps && reasoningCaps.supported
+        ? (reasoningCaps.mode === 'levels'
+          ? { reasoning_effort: thinkingStrength.value }
+          : { thinkingStrength: thinkingStrength.value })
+        : {};
       const res = await generateAiChat({
         model: chatModelKey.value,
         messages: historyContext,
         prompt: rawContent,
-        images
+        images,
+        ...reasoningParam
       });
 
-      const replyText = res.choices?.[0]?.message?.content || res.reply || res.text || res.data?.reply || '已完成空间需求分析。';
+      const rawReply = res.choices?.[0]?.message?.content || res.reply || res.text || res.data?.reply || '已完成空间需求分析。';
+      const split = splitClientThinking(rawReply, res.reasoning || res.choices?.[0]?.message?.reasoning_content || '');
+      const replyText = split.content;
       const asstMsg = {
         role: 'assistant',
         modality: 'chat',
         content: replyText,
+        thinking: split.thinking,
         model: getModelDisplayName(chatModelKey.value)
       };
       messages.value.push(asstMsg);
@@ -3807,11 +3450,14 @@ async function sendMessage() {
     } else if (currentMod === 'image') {
       const imageUrls = await portableImageUrls(currentTray, currentTray.length || 1);
       const promptForModel = promptWithPriorAnalysis(rawContent, usedPriorMedia ? currentTray.length : 0);
+      // 尺寸/画幅以契约参数条为准（Qwen 本地默认 1K：2K 生成慢 2~3 倍，不再用写死的 2K 兜底）
+      const submitImageSize = retryParams.size || retryParams.resolution || schemaParams.value.size || selectedResolution.value;
+      const submitImageRatio = retryParams.ratio || schemaParams.value.ratio || selectedRatio.value;
       const res = await generateAiImage({
         prompt: promptForModel,
         model: imageModelKey.value,
-        size: retryParams.size || retryParams.resolution || selectedResolution.value,
-        ratio: retryParams.ratio || selectedRatio.value,
+        size: submitImageSize,
+        ratio: submitImageRatio,
         imageUrls,
         genMode: retryMode,
         extras: retryParams,
@@ -3824,19 +3470,20 @@ async function sendMessage() {
       }
 
       const layerStack = normalizeClientLayerStack(res, retryParams);
+      const imageElapsedSec = Math.round((res.elapsedMs || 0) / 1000);
       const asstMsg = {
         role: 'assistant',
         modality: 'image',
         content: layerStack && layerStack.layers.length > 1
           ? `已完成 Seedream 5.0 多图层拆分生成（共 ${layerStack.layers.length} 个独立图层），可直接在上方切换查看或单层二次引用。`
-          : `已为您完成空间视效生成。家具材质光泽与参考项深度统一，光影自然，画质达到 ${retryParams.size || selectedResolution.value}。`,
+          : `已为您完成空间视效生成。家具材质光泽与参考项深度统一，光影自然，画质达到 ${submitImageSize}。`,
         userPrompt: rawContent,
         refs: currentTray,
         imageUrl: genUrl,
         layerStack,
-        duration: res.duration ? `${res.duration}s` : '2.8s',
-        resolution: retryParams.size || selectedResolution.value,
-        ratio: retryParams.ratio || selectedRatio.value,
+        duration: imageElapsedSec > 0 ? `${imageElapsedSec}s` : (res.duration ? `${res.duration}s` : ''),
+        resolution: submitImageSize,
+        ratio: submitImageRatio,
         model: getModelDisplayName(imageModelKey.value),
         modelKey: imageModelKey.value,
         genMode: 'image'
@@ -3849,8 +3496,8 @@ async function sendMessage() {
           prompt: rawContent,
           model: imageModelKey.value,
           mode: 'image',
-          ratio: selectedRatio.value,
-          resolution: selectedResolution.value,
+          ratio: submitImageRatio,
+          resolution: submitImageSize,
           sessionId: currentSessionId.value
         });
         asstMsg.assetFid = filed.fid;
@@ -3871,12 +3518,18 @@ async function sendMessage() {
     } else if (currentMod === 'video') {
       const imageUrls = await portableImageUrls(currentTray, currentTray.length || 1);
       const promptForModel = promptWithPriorAnalysis(rawContent, usedPriorMedia ? currentTray.length : 0);
+      // 时长/画幅一律以契约参数条为准（已经过夹取），杜绝旧 videoDuration=60 这类游离默认值
+      const submitDuration = retryParams.duration != null && retryParams.duration !== ''
+        ? retryParams.duration
+        : schemaParams.value.duration != null ? schemaParams.value.duration : videoDuration.value;
+      const submitRatio = retryParams.ratio || schemaParams.value.ratio || selectedRatio.value;
+      const submitSize = retryParams.resolution || retryParams.size || schemaParams.value.size || videoResolution.value;
       const res = await generateAiVideo({
         prompt: promptForModel,
         model: videoModelKey.value,
-        duration: retryParams.duration != null ? retryParams.duration : videoDuration.value,
-        resolution: retryParams.resolution || retryParams.size || videoResolution.value,
-        ratio: retryParams.ratio,
+        duration: submitDuration,
+        resolution: submitSize,
+        ratio: submitRatio,
         camera: videoCameraMove.value,
         imageUrls,
         genMode: retryMode,
@@ -3893,11 +3546,29 @@ async function sendMessage() {
         modality: 'video',
         content: `影视级空间动态渲染已就绪。运镜平滑连续，空间光影与环境音效自然契合。`,
         videoUrl: genVideoUrl,
-        duration: `${videoDuration.value === '-1' ? '8' : videoDuration.value}s`,
-        resolution: videoResolution.value,
+        duration: `${submitDuration === '-1' ? '8' : submitDuration}s`,
+        resolution: submitSize,
+        ratio: submitRatio,
         model: getModelDisplayName(videoModelKey.value),
         camera: videoCameraMove.value
       };
+      try {
+        const filed = await registerGeneratedAsset({
+          previewUrl: genVideoUrl,
+          parentFid: currentTray.find((item) => item.fid)?.fid || '',
+          refFids: currentTray.map((item) => item.fid).filter(Boolean).slice(1),
+          prompt: rawContent,
+          model: videoModelKey.value,
+          mode: 'video',
+          ratio: submitRatio,
+          resolution: submitSize,
+          sessionId: currentSessionId.value
+        });
+        asstMsg.assetFid = filed.fid;
+      } catch (fileErr) {
+        // 入库失败不阻断消息展示：视频仍可播放、可下载
+        console.warn('写入精修素材失败', fileErr);
+      }
       messages.value.push(asstMsg);
 
       await saveChatMessage({
@@ -3959,6 +3630,13 @@ async function sendMessage() {
       retryParams
     };
     messages.value.push(errMsg);
+    // 失败后把提示词与参考图恢复到输入区，用户可直接改参数重发，也避免「图槽 0/N」与实际附件不一致
+    try {
+      restorePromptContent(rawContent, currentTray);
+      syncTrayFromEditor();
+    } catch (restoreErr) {
+      console.warn('恢复失败输入失败:', restoreErr);
+    }
     try {
       await saveChatMessage({
         sessionId: currentSessionId.value,
@@ -4009,9 +3687,58 @@ function fillComposerFromError(msg) {
   suppressSchemaReset = false;
   resetSchemaForModel();
   if (msg.retryMode) setGenMode(msg.retryMode);
-  if (msg.retryParams) schemaParams.value = { ...schemaParams.value, ...msg.retryParams };
+  if (msg.retryParams) schemaParams.value = clampParamsToSchema(currentSchema.value, { ...schemaParams.value, ...msg.retryParams });
   restorePromptContent(prompt, refs);
   syncTrayFromEditor();
+}
+// 把历史/重试/技能注入的参数夹取到当前契约：枚举非法回落默认、数值越界夹取到 [min,max]
+function clampParamsToSchema(schema, params) {
+  if (!schema) return params;
+  const fields = [...(schema.common || []), ...(schema.advanced || [])];
+  const out = { ...params };
+  for (const field of fields) {
+    if (!(field.key in out) || out[field.key] === '' || out[field.key] == null) continue;
+    if (field.type === 'enum') {
+      const opts = (field.options || []).map(String);
+      if (!opts.includes(String(out[field.key]))) out[field.key] = field.default != null ? field.default : opts[0];
+    } else if (['number', 'range', 'duration'].includes(field.type)) {
+      const step = Number(field.step) > 0 ? Number(field.step) : 1;
+      let n = Number(out[field.key]);
+      if (!Number.isFinite(n)) { n = field.default != null ? Number(field.default) : Number(field.min ?? 0); }
+      if (n === -1 && Array.isArray(field.extraStops) && field.extraStops.includes(-1)) continue;
+      n = Math.min(Number(field.max), Math.max(Number(field.min), n));
+      n = Math.round(n / step) * step;
+      if (Number.isInteger(step)) n = Math.round(n);
+      out[field.key] = n;
+    }
+  }
+  return out;
+}
+// 把后端技术性错误信息转成用户可读的一句话 + 可操作建议
+function friendlyErrorText(raw) {
+  const text = String(raw || '').replace(/^生成遇到问题[:：]\s*/, '').trim();
+  if (!text) return '请检查服务端模型配置或网络连接后重试。';
+  // 去掉内部模型前缀 [Agnes Video ...] / [Agnes Video keyframe]
+  return text.replace(/^\[[^\]]+\]\s*/, '');
+}
+function errorHint(raw) {
+  const text = String(raw || '');
+  if (/BFF_PUBLIC_BASE|公网/.test(text)) {
+    return '需要在「设置 → 运行时配置」里把 BFF_PUBLIC_BASE 填成可公网 HTTPS 访问的地址；或先切换到文生视频。';
+  }
+  if (/首帧|尾帧|keyframe/.test(text)) {
+    return '首尾帧模式至少上传 1 张图片：第 1 张为首帧，第 2 张为尾帧。也可以切换到「文生视频」。';
+  }
+  if (/时长/.test(text)) {
+    return '在上方参数条把「时长」调整到模型允许的范围即可。';
+  }
+  if (/画幅|aspect|ratio/i.test(text)) {
+    return '在上方参数条把「画幅」切换为下拉中支持的比例。';
+  }
+  if (/data URL|blob|无法读取/.test(text)) {
+    return '图片在浏览器里已失效，请删除附件后重新选择或上传。';
+  }
+  return '';
 }
 function openRetry(msg) {
   retryDialog.value = { visible: true, msg };
@@ -4134,7 +3861,33 @@ function sendVideoToClip(msg) {
 }
 
 function captureFrameFromVideo(msg) {
-  alert('已从当前视频时间点截取关键帧，已就绪可作为生图参考图使用！');
+  const idx = messages.value.indexOf(msg);
+  const videoEl = idx >= 0 ? videoPlayers[idx] : null;
+  if (!videoEl || !videoEl.videoWidth) {
+    alert('视频尚未加载完成，请先播放或等待加载后再截帧');
+    return;
+  }
+  const cap = refCap();
+  if (cap != null && referenceTray.value.length >= cap) {
+    alert(`当前模式最多挂载 ${cap} 张参考图`);
+    return;
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = videoEl.videoWidth;
+  canvas.height = videoEl.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+  const asset = {
+    name: `截帧_${Date.now()}.jpg`,
+    url: dataUrl,
+    weight: 85,
+    tag: `@图${referenceTray.value.length + 1}`,
+    kind: 'image',
+    origin: 'video_frame'
+  };
+  referenceTray.value.push(asset);
+  insertChipToEditor(asset);
 }
 
 const videoPlayers = {};
@@ -4199,5 +3952,90 @@ function registerVideoEl(idx, el) {
   font-size: 11px;
   line-height: 16px;
   cursor: pointer;
+}
+
+/* ===== 错误卡片（生成失败提示，token 驱动，适配暗黑/明朗/护眼） ===== */
+.gen-error {
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: var(--theme-danger-bg);
+  border: 1px solid var(--theme-danger-border);
+}
+.gen-error-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 6px;
+}
+.gen-error-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: rgb(var(--studio-rose-rgb) / 0.18);
+  color: var(--theme-danger-text);
+}
+.gen-error-title {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--theme-danger-text);
+}
+.gen-error-body {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.55;
+  color: var(--theme-text-primary);
+  white-space: pre-wrap;
+}
+.gen-error-hint {
+  margin: 7px 0 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--theme-text-secondary);
+}
+.gen-error-hint svg {
+  margin-top: 2px;
+  flex-shrink: 0;
+  color: var(--theme-warning-text);
+}
+.gen-error-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 9px;
+}
+.gen-error-retry,
+.gen-error-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 13px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: filter .15s, background-color .15s;
+}
+.gen-error-retry {
+  background: var(--theme-accent-primary);
+  color: var(--theme-accent-text);
+  border: 1px solid transparent;
+}
+.gen-error-retry:hover { filter: brightness(1.08); }
+.gen-error-edit {
+  background: transparent;
+  color: var(--theme-text-secondary);
+  border: 1px solid var(--theme-border);
+}
+.gen-error-edit:hover {
+  background: var(--theme-bg-hover);
+  color: var(--theme-text-primary);
 }
 </style>
