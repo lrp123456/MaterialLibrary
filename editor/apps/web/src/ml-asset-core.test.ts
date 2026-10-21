@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DERIVATIVE_LABELS, derivativeLabel, isGeometryKind, stripVersionKey, versionKey, versionsOf } from "../../../../shared/ml-asset-core/index";
+import { DERIVATIVE_LABELS, derivativeLabel, isGeometryKind, isSelected, stripVersionKey, toggleSelection, versionKey, versionsOf } from "../../../../shared/ml-asset-core/index";
 
 describe("derivativeLabel", () => {
 	test("已知类型返回中文标签", () => {
@@ -96,5 +96,44 @@ describe("versionsOf", () => {
 		const payload = stripVersionKey(origin);
 		expect("key" in payload).toBe(false);
 		expect(payload.fid).toBe("abc");
+	});
+});
+
+describe("toggleSelection", () => {
+	const base = { mediaToken: "", derivativeKind: "origin", label: "原图", url: "/u", kind: "image", name: "n" };
+	const a = { ...base, key: "a", fid: "a", derivativeId: "" };
+	const b = { ...base, key: "b::d1", fid: "b", derivativeId: "d1" };
+	const c = { ...base, key: "c", fid: "c", derivativeId: "" };
+
+	test("单选模式下选中即替换", () => {
+		expect(toggleSelection([a], b, 1).selected.map((v) => v.key)).toEqual(["b::d1"]);
+	});
+
+	test("同一版本再点一次取消选中", () => {
+		expect(toggleSelection([a, b], b, 10).selected.map((v) => v.key)).toEqual(["a"]);
+	});
+
+	test("多选模式下累加", () => {
+		expect(toggleSelection([a], b, 10).selected.map((v) => v.key)).toEqual(["a", "b::d1"]);
+	});
+
+	test("超出上限时保持原状并给出提示", () => {
+		const res = toggleSelection([a, b], c, 2);
+		expect(res.selected.map((v) => v.key)).toEqual(["a", "b::d1"]);
+		expect(res.notice).toBe("最多同时选择 2 件参考素材");
+	});
+
+	test("同一 fid 的两个版本可同时选中（key 不同）", () => {
+		const aOrigin = { ...base, key: "a", fid: "a", derivativeId: "" };
+		const aDeriv = { ...base, key: "a::d1", fid: "a", derivativeId: "d1" };
+		expect(toggleSelection([aOrigin], aDeriv, 10).selected.map((v) => v.key)).toEqual(["a", "a::d1"]);
+	});
+});
+
+describe("isSelected", () => {
+	test("按版本 key 判断，不按 fid", () => {
+		const v = { mediaToken: "", derivativeKind: "origin", label: "原图", url: "/u", kind: "image", name: "n", key: "a", fid: "a", derivativeId: "" };
+		expect(isSelected([v], "a")).toBe(true);
+		expect(isSelected([v], "a::d1")).toBe(false);
 	});
 });
