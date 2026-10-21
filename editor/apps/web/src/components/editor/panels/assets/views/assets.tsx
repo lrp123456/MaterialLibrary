@@ -15,14 +15,9 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import {
 	cloudRowSelectionId,
-	hasPendingCloudElement,
-	insertPendingCloudElement,
+	downloadCloudAssetToLocal,
 	mergeMediaRows,
 	useCloudMediaList,
-	pendingMediaIdForFid,
-	registerPendingMediaAsset,
-	releasePendingMediaAsset,
-	resolvePendingCloudElement,
 	type MergedMediaRow,
 } from "@/components/editor/panels/assets/views/media-merged";
 import {
@@ -103,6 +98,8 @@ export function MediaView({ filter = "all" }: { filter?: MediaTypeFilter }) {
 	const [isProcessing, setIsProcessing] = useState(false);
 	const [progress, setProgress] = useState(0);
 	const [isPickerOpen, setIsPickerOpen] = useState(false);
+	/** 本次素材（本工程素材池）/ 云素材（素材库只读目录）分开看 */
+	const [mediaSource, setMediaSource] = useState<"local" | "cloud">("local");
 
 	const processFiles = async ({ files }: { files: File[] }) => {
 		if (!files || files.length === 0) return;
@@ -180,26 +177,45 @@ export function MediaView({ filter = "all" }: { filter?: MediaTypeFilter }) {
 		}
 	};
 
-	const mergedRows = useMemo(
+	/**
+	 * 两组数据分开算，不再混排：
+	 * - 本次素材 = 本工程素材池（可以直接上轨）
+	 * - 云素材   = 素材库只读目录（必须先「导入到本次」才能上轨）
+	 */
+	const localRows = useMemo(
 		() =>
 			mergeMediaRows({
 				localAssets: mediaFiles,
+				cloudItems: [],
+				filter,
+				sortBy: mediaSortBy,
+				sortOrder: mediaSortOrder,
+			}),
+		[mediaFiles, filter, mediaSortBy, mediaSortOrder],
+	);
+
+	const cloudRows = useMemo(
+		() =>
+			mergeMediaRows({
+				localAssets: [],
 				cloudItems: cloud.items,
 				filter,
 				sortBy: mediaSortBy,
 				sortOrder: mediaSortOrder,
 			}),
-		[mediaFiles, cloud.items, filter, mediaSortBy, mediaSortOrder],
+		[cloud.items, filter, mediaSortBy, mediaSortOrder],
 	);
+
+	const visibleRows = mediaSource === "local" ? localRows : cloudRows;
 
 	// 选中/框选的有序 id：本地用 mediaId，云端用 cloud:<fid>
 	const orderedMediaIds = useMemo(() => {
-		return mergedRows.map((row) =>
+		return visibleRows.map((row) =>
 			row.origin === "local"
 				? row.asset.id
 				: cloudRowSelectionId({ fid: row.item.fid }),
 		);
-	}, [mergedRows]);
+	}, [visibleRows]);
 
 	return (
 		<>
@@ -211,7 +227,7 @@ export function MediaView({ filter = "all" }: { filter?: MediaTypeFilter }) {
 			/>
 
 			<PanelView
-				title={t("assets.media.unified", "素材（本地 + 云端）")}
+				title={t("assets.media.unified", "素材")}
 				actions={
 					<MediaActions
 						mediaViewMode={mediaViewMode}
@@ -223,16 +239,23 @@ export function MediaView({ filter = "all" }: { filter?: MediaTypeFilter }) {
 						onImport={() => setIsPickerOpen(true)}
 					/>
 				}
-				className={cn(isDragOver && "bg-accent/30")}
+				className={cn(isDragOver && mediaSource === "local" && "bg-accent/30")}
 				contentClassName="h-full"
 				{...dragProps}
 			>
+				<MediaSourceSwitch
+					source={mediaSource}
+					onChange={setMediaSource}
+					localCount={localRows.length}
+					cloudCount={cloudRows.length}
+				/>
 				<CloudStatus
 					isLoading={cloud.isLoading}
 					error={cloud.error}
 					onRetry={() => void cloud.reload()}
 				/>
-				{isDragOver || (mergedRows.length === 0 && !cloud.isLoading) ? (
+				{mediaSource === "local" &&
+				(isDragOver || (localRows.length === 0 && !cloud.isLoading)) ? (
 					<MediaDragOverlay
 						isVisible={true}
 						isProcessing={isProcessing}
@@ -247,15 +270,82 @@ export function MediaView({ filter = "all" }: { filter?: MediaTypeFilter }) {
 						onRevealComplete={clearHighlight}
 					>
 						<MediaScopeRegistrar />
-						<MediaItemList
-							rows={mergedRows}
-							mode={mediaViewMode}
-							onRemove={handleRemove}
-						/>
+						{visibleRows.length === 0 ? (
+							<CloudEmptyHint
+								source={mediaSource}
+								isLoading={cloud.isLoading}
+							/>
+						) : (
+							<MediaItemList
+								rows={visibleRows}
+								mode={mediaViewMode}
+								onRemove={handleRemove}
+							/>
+						)}
 					</SelectableSurface>
 				)}
 			</PanelView>
 		</>
+	);
+}
+
+/**
+ * 素材来源切换：本次素材 / 云素材。
+ *
+ * 为什么要分开：两者可用性完全不同——本次素材可直接上轨，云素材是只读仓库，
+ * 必须先导入。混在一个列表里，用户分不清"拖不动"和"没下载"。
+ */
+function MediaSourceSwitch({
+	source,
+	onChange,
+	localCount,
+	cloudCount,
+}: {
+	source: "local" | "cloud";
+	onChange: (next: "local" | "cloud") => void;
+	localCount: number;
+	cloudCount: number;
+}) {
+	const items = [
+		{ key: "local" as const, label: "本次素材", count: localCount },
+		{ key: "cloud" as const, label: "云素材", count: cloudCount },
+	];
+	return (
+		<div className="mb-2 flex items-center gap-1 rounded-md bg-accent/40 p-0.5">
+			{items.map((item) => (
+				<button
+					key={item.key}
+					type="button"
+					onClick={() => onChange(item.key)}
+					className={cn(
+						"flex-1 cursor-pointer rounded px-2 py-1 text-[11px] font-semibold transition-colors",
+						source === item.key
+							? "bg-background text-foreground shadow-sm"
+							: "text-muted-foreground hover:text-foreground",
+					)}
+				>
+					{item.label}
+					<span className="ml-1 font-mono opacity-60">{item.count}</span>
+				</button>
+			))}
+		</div>
+	);
+}
+
+function CloudEmptyHint({
+	source,
+	isLoading,
+}: {
+	source: "local" | "cloud";
+	isLoading: boolean;
+}) {
+	if (isLoading) return null;
+	return (
+		<div className="text-muted-foreground flex h-24 items-center justify-center px-3 text-center text-[11px] leading-relaxed">
+			{source === "local"
+				? "本次还没有素材，把文件拖进来或点右上角导入。"
+				: "素材库里还没有素材。云素材需要先「导入到本次」才能上轨。"}
+		</div>
 	);
 }
 
@@ -485,7 +575,13 @@ function LocalMediaRow({
 	);
 }
 
-/** 云端行：不在本地素材池里，拖到时间线时才下载。 */
+/**
+ * 云素材行：只读。
+ *
+ * 规则：云端素材**不允许直接上轨**，必须先「导入到本次」变成本地素材。
+ * 这样也避开了旧的「占位元素 + 后台下载替换」机制——那套在下载失败时会静默删掉元素，
+ * 且 pending id 是确定性的，同一素材拖两次会互相干扰。
+ */
 function CloudMediaRow({
 	item,
 	isGrid,
@@ -493,101 +589,85 @@ function CloudMediaRow({
 	item: MaterialAssetItem;
 	isGrid: boolean;
 }) {
+	const editor = useEditor();
+	const activeProject = useEditor((e) => e.project.getActiveOrNull());
+	const [isImporting, setIsImporting] = useState(false);
+
+	const handleImport = (event: React.MouseEvent) => {
+		event.stopPropagation();
+		if (isImporting) return;
+		if (!activeProject) {
+			toast.error("请先打开或创建一个工程");
+			return;
+		}
+		setIsImporting(true);
+		void showMediaUploadToast({
+			filesCount: 1,
+			promise: async () => {
+				const created = await downloadCloudAssetToLocal({
+					editor,
+					projectId: activeProject.metadata.id,
+					item,
+				});
+				return { uploadedCount: 1, assetNames: [created.name] };
+			},
+		})
+			.catch((error) => {
+				console.error("云素材导入失败:", error);
+				toast.error(`「${item.file_name}」导入失败`);
+			})
+			.finally(() => setIsImporting(false));
+	};
+
 	return (
 		<SelectableItem
 			className={cn(!isGrid && "w-full")}
 			id={cloudRowSelectionId({ fid: item.fid })}
 		>
-			<CloudMediaDraggable item={item} isGrid={isGrid} />
+			<div className={cn("relative", !isGrid && "w-full")}>
+				<DraggableItem
+					name={item.file_name}
+					preview={
+						<CloudPreview item={item} variant={isGrid ? "grid" : "compact"} />
+					}
+					dragData={{
+						id: cloudRowSelectionId({ fid: item.fid }),
+						type: "media",
+						mediaType: item.kind,
+						name: item.file_name,
+						targetElementTypes: [...MASKABLE_ELEMENT_TYPES],
+					}}
+					// 关键：不可拖拽，只能导入
+					isDraggable={false}
+					variant={isGrid ? "card" : "compact"}
+					isRounded={isGrid ? false : undefined}
+					trailing={
+						isGrid ? undefined : (
+							<MediaRowMeta duration={item.duration} origin="cloud" />
+						)
+					}
+				/>
+				{isImporting ? (
+					<div className="bg-background/75 text-foreground pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-sm text-[10px] font-bold">
+						导入中…
+					</div>
+				) : (
+					<button
+						type="button"
+						onClick={handleImport}
+						title="下载到本次素材，之后才能拖到时间线"
+						className={cn(
+							"absolute z-10 cursor-pointer rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-bold text-white transition-colors hover:bg-black/85",
+							isGrid
+								? "bottom-1 left-1 right-1 text-center"
+								: "right-1 top-1/2 -translate-y-1/2",
+						)}
+					>
+						导入到本次
+					</button>
+				)}
+			</div>
 		</SelectableItem>
-	);
-}
-
-/**
- * 云端项的拖拽外壳。
- *
- * 时序（拖拽路径）：
- * 1. dragstart：把云端项临时挂成一条 ephemeral 媒体（id = pendingMediaIdForFid），
- *    drop 控制器才有媒体可查，能正常算出落点、轨道和时长；
- * 2. dragend：摘掉临时媒体 → 若时间线上出现了引用该 pendingMediaId 的占位元素，
- *    就并发下载，成功替换 mediaId，失败删除占位并 toast；
- * 3. 加号按钮走 insertPendingCloudElement，落点用播放头，收尾逻辑完全相同。
- */
-function CloudMediaDraggable({
-	item,
-	isGrid,
-}: {
-	item: MaterialAssetItem;
-	isGrid: boolean;
-}) {
-	const editor = useEditor();
-	const [isPending, setIsPending] = useState(false);
-	const mediaId = pendingMediaIdForFid({ fid: item.fid });
-
-	const handleDragStart = () => {
-		try {
-			registerPendingMediaAsset({ editor, item, mediaId });
-		} catch (error) {
-			// 临时媒体只在内存里，注册失败只是拖拽不落占位，不该打断用户操作
-			console.error("注册云端占位媒体失败:", error);
-		}
-	};
-
-	const handleDragEnd = () => {
-		releasePendingMediaAsset({ editor, mediaId });
-		// 落点不在时间线（面板内、预览区等）就不会有占位元素，不必下载
-		if (!hasPendingCloudElement({ editor, mediaId })) return;
-
-		setIsPending(true);
-		void resolvePendingCloudElement({ editor, mediaId, item })
-			.catch((error) => {
-				console.error("云端素材下载收尾失败:", error);
-				toast.error(`「${item.file_name}」下载失败`);
-			})
-			.finally(() => setIsPending(false));
-	};
-
-	const handleAddToTimeline = ({ currentTime }: { currentTime: MediaTime }) => {
-		setIsPending(true);
-		void insertPendingCloudElement({ editor, item, startTime: currentTime })
-			.catch((error) => {
-				console.error("云端素材插入失败:", error);
-				toast.error(`「${item.file_name}」插入失败`);
-			})
-			.finally(() => setIsPending(false));
-	};
-
-	return (
-		<div className={cn("relative", !isGrid && "w-full")}>
-			<DraggableItem
-				name={item.file_name}
-				preview={
-					<CloudPreview item={item} variant={isGrid ? "grid" : "compact"} />
-				}
-				dragData={{
-					id: mediaId,
-					type: "media",
-					mediaType: item.kind,
-					name: item.file_name,
-					targetElementTypes: [...MASKABLE_ELEMENT_TYPES],
-				}}
-				onDragStart={handleDragStart}
-				onDragEnd={handleDragEnd}
-				onAddToTimeline={handleAddToTimeline}
-				variant={isGrid ? "card" : "compact"}
-				isRounded={isGrid ? false : undefined}
-				trailing={
-					isGrid ? undefined : (
-						<MediaRowMeta duration={item.duration} origin="cloud" />
-					)
-				}
-			/>
-			{isPending ? (
-				<div className="bg-background/75 text-foreground pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-sm text-[10px] font-bold">
-					下载中…
-				</div>
-			) : null}
-		</div>
 	);
 }
 
