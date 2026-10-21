@@ -40,6 +40,7 @@
     ".next/types/**/*.ts",
     "src/types/**/*.d.ts",
     "../../use-frame-cache.ts",
+    "../../../shared/**/*.ts",
     "src/stores/timeline-store.ts",
     ".next/dev/types/**/*.ts",
     ".next*/types/**/*.ts",
