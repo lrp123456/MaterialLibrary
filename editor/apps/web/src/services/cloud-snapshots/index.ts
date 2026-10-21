@@ -58,7 +58,7 @@ function writeMap(key: string, value: Record<string, string>) {
 }
 
 /** 深拷贝并把所有 mediaId 按映射换成新的本地 id。 */
-function remapMediaIds<T>({
+export function remapMediaIds<T>({
 	value,
 	map,
 }: {
@@ -108,7 +108,8 @@ export function getMediaFidRef(mediaId: string): MediaFidRef | null {
 	return parsed.fid ? parsed : null;
 }
 
-async function uploadFileToLibrary(file: File): Promise<string> {
+/** 上传一个本地文件进素材库，返回 fid（云端快照与 .mlsclip 导出共用）。 */
+export async function uploadFileToLibrary(file: File): Promise<string> {
 	const form = new FormData();
 	form.append("file", file, file.name);
 	form.append("shelf", "clip-material");
@@ -326,21 +327,25 @@ export async function pullSnapshot({
 
 	// 需要下载的版本：以 mediaFidMap 的值为准（它才带 derivativeId），
 	// snapshot.assets 只按 fid 去重，仅用于兜底老快照/清单缺失的情况。
+	const missing: string[] = [];
 	const plannedVersions = new Map<string, { fid: string; derivativeId: string }>();
 	for (const ref of Object.values(remoteMediaFidMap)) {
 		const parsed = parseMediaFidRef(ref);
-		if (!parsed.fid) continue;
+		if (!parsed.fid) {
+			missing.push(String(ref));
+			continue;
+		}
 		plannedVersions.set(formatMediaFidRef(parsed.fid, parsed.derivativeId), parsed);
 	}
 	const assets = (snapshot.assets || []) as Array<{ fid: string; role: string }>;
+	const plannedFids = new Set([...plannedVersions.values()].map((v) => v.fid));
 	for (const a of assets) {
 		if (a.role !== "media" && a.role !== "audio") continue;
-		const key = formatMediaFidRef(a.fid, "");
-		if (!plannedVersions.has(key)) plannedVersions.set(key, { fid: a.fid, derivativeId: "" });
+		if (!a.fid || plannedFids.has(a.fid)) continue;
+		plannedVersions.set(a.fid, { fid: a.fid, derivativeId: "" });
 	}
 
 	const versionEntries = [...plannedVersions.entries()];
-	const missing: string[] = [];
 	const fidToLocalId: Record<string, string> = {};
 	let imported = 0;
 
@@ -356,14 +361,23 @@ export async function pullSnapshot({
 			});
 			if (!fileRes.ok) throw new Error(`HTTP ${fileRes.status}`);
 			const blob = await fileRes.blob();
+			const mime = blob.type || "";
+			const kind = mime.startsWith("video")
+				? "video"
+				: mime.startsWith("audio")
+					? "audio"
+					: mime.startsWith("image")
+						? "image"
+						: "";
+			if (!kind) throw new Error(`Unsupported content type: ${mime || "unknown"}`);
 			const suffix = derivativeId ? `_${String(derivativeId).slice(0, 8)}` : "";
-			const name = (blob.type || "").startsWith("video")
-				? `${fid}${suffix}.mp4`
-				: (blob.type || "").startsWith("audio")
-					? `${fid}${suffix}.m4a`
-					: `${fid}${suffix}.png`;
-			const file = new File([blob], name, { type: blob.type || "application/octet-stream" });
+			const name = kind === "video" ? `${fid}${suffix}.mp4` : kind === "audio" ? `${fid}${suffix}.m4a` : `${fid}${suffix}.png`;
+			const file = new File([blob], name, { type: mime });
 			const processed = await processMediaAssets({ files: [file] });
+			if (processed.length === 0) {
+				missing.push(ref);
+				continue;
+			}
 			for (const p of processed) {
 				// processMediaAssets 返回的资产没有 id（正常路径由 editor.media.addMediaAsset 生成），
 				// 这里直接落库，需要自己补一个。
@@ -387,7 +401,8 @@ export async function pullSnapshot({
 	const mediaFidMap = remoteMediaFidMap;
 	const idRemap: Record<string, string> = {};
 	for (const [oldId, ref] of Object.entries(mediaFidMap)) {
-		const localMediaId = fidToLocalId[ref] || fidToLocalId[formatMediaFidRef(parseMediaFidRef(ref).fid, "")];
+		const parsed = parseMediaFidRef(ref);
+		const localMediaId = fidToLocalId[formatMediaFidRef(parsed.fid, parsed.derivativeId)];
 		if (localMediaId) idRemap[oldId] = localMediaId;
 	}
 
