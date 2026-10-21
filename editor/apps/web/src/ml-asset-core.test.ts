@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DERIVATIVE_LABELS, derivativeLabel, isGeometryKind } from "../../../../shared/ml-asset-core/index";
+import { DERIVATIVE_LABELS, derivativeLabel, isGeometryKind, stripVersionKey, versionKey, versionsOf } from "../../../../shared/ml-asset-core/index";
 
 describe("derivativeLabel", () => {
 	test("已知类型返回中文标签", () => {
@@ -35,5 +35,66 @@ describe("DERIVATIVE_LABELS", () => {
 		for (const kind of ["origin", "restage_3_4", "retouched", "manual_edit"]) {
 			expect(typeof DERIVATIVE_LABELS[kind]).toBe("string");
 		}
+	});
+});
+
+describe("versionKey", () => {
+	test("原图用裸 fid，衍生版用双冒号拼接", () => {
+		expect(versionKey("abc")).toBe("abc");
+		expect(versionKey("abc", "")).toBe("abc");
+		expect(versionKey("abc", "d1")).toBe("abc::d1");
+	});
+});
+
+describe("versionsOf", () => {
+	const urls = {
+		originUrl: (it: { fid: string }) => `/origin/${it.fid}`,
+		derivativeUrl: (it: { fid: string }, id: string) => `/deriv/${it.fid}/${id}`,
+	};
+	const item = { fid: "abc", name: "客厅", kind: "image", mediaToken: "mt" };
+
+	test("无衍生数据时只有原图一项", () => {
+		const list = versionsOf(item, undefined, urls);
+		expect(list).toHaveLength(1);
+		expect(list[0]).toMatchObject({ key: "abc", derivativeId: "", label: "原图", url: "/origin/abc" });
+	});
+
+	test("跳过 kind=origin 的衍生项，避免出现两个原图", () => {
+		const list = versionsOf(item, [{ id: "o1", kind: "origin" }], urls);
+		expect(list).toHaveLength(1);
+	});
+
+	test("其余衍生项按详情顺序展开，改画幅的带 geometry 标记", () => {
+		const list = versionsOf(
+			item,
+			[
+				{ id: "o1", kind: "origin" },
+				{ id: "d1", kind: "restage_9_16" },
+				{ id: "d2", kind: "clean" },
+			],
+			urls,
+		);
+		expect(list.map((v) => v.key)).toEqual(["abc", "abc::d1", "abc::d2"]);
+		expect(list[1]).toMatchObject({
+			derivativeId: "d1",
+			derivativeKind: "restage_9_16",
+			geometry: true,
+			label: "9:16 画幅重构",
+			url: "/deriv/abc/d1",
+			kind: "image",
+			mediaToken: "mt",
+		});
+		expect(list[2].geometry).toBe(false);
+	});
+
+	test("缺少 fid 时返回空数组", () => {
+		expect(versionsOf({ fid: "" }, [{ id: "d1", kind: "clean" }], urls)).toEqual([]);
+	});
+
+	test("stripVersionKey 去掉 key 保留其余字段", () => {
+		const [origin] = versionsOf(item, undefined, urls);
+		const payload = stripVersionKey(origin);
+		expect("key" in payload).toBe(false);
+		expect(payload.fid).toBe("abc");
 	});
 });
