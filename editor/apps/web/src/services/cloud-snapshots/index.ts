@@ -18,6 +18,7 @@ import type { SerializedProject } from "@/services/storage/types";
 import {
 	formatMediaFidRef,
 	parseMediaFidRef,
+	snapshotDownloadPath,
 	type MediaFidRef,
 } from "./fid-ref";
 
@@ -194,7 +195,9 @@ export async function backupProject({
 		done += 1;
 		const known = fidMap[item.id];
 		if (known) {
-			fids.push(known);
+			const parsed = parseMediaFidRef(known);
+			// 快照 assets 清单只按裸 fid 记录，版本引用只放 mediaFidMap
+			if (parsed.fid) fids.push(parsed.fid);
 			mediaFidMap[item.id] = known;
 			continue;
 		}
@@ -321,29 +324,44 @@ export async function pullSnapshot({
 
 	onProgress?.("写入工程", 15);
 
+	// 需要下载的版本：以 mediaFidMap 的值为准（它才带 derivativeId），
+	// snapshot.assets 只按 fid 去重，仅用于兜底老快照/清单缺失的情况。
+	const plannedVersions = new Map<string, { fid: string; derivativeId: string }>();
+	for (const ref of Object.values(remoteMediaFidMap)) {
+		const parsed = parseMediaFidRef(ref);
+		if (!parsed.fid) continue;
+		plannedVersions.set(formatMediaFidRef(parsed.fid, parsed.derivativeId), parsed);
+	}
 	const assets = (snapshot.assets || []) as Array<{ fid: string; role: string }>;
-	const mediaAssets = assets.filter((a) => a.role === "media" || a.role === "audio");
+	for (const a of assets) {
+		if (a.role !== "media" && a.role !== "audio") continue;
+		const key = formatMediaFidRef(a.fid, "");
+		if (!plannedVersions.has(key)) plannedVersions.set(key, { fid: a.fid, derivativeId: "" });
+	}
+
+	const versionEntries = [...plannedVersions.entries()];
 	const missing: string[] = [];
 	const fidToLocalId: Record<string, string> = {};
 	let imported = 0;
 
-	for (let i = 0; i < mediaAssets.length; i += 1) {
-		const { fid } = mediaAssets[i];
+	for (let i = 0; i < versionEntries.length; i += 1) {
+		const [ref, { fid, derivativeId }] = versionEntries[i];
 		onProgress?.(
-			`下载素材 ${i + 1}/${mediaAssets.length}`,
-			15 + Math.round(((i + 1) / Math.max(1, mediaAssets.length)) * 75),
+			`下载素材 ${i + 1}/${versionEntries.length}`,
+			15 + Math.round(((i + 1) / Math.max(1, versionEntries.length)) * 75),
 		);
 		try {
-			const fileRes = await fetch(`/api/viewer/assets/${encodeURIComponent(fid)}/file`, {
+			const fileRes = await fetch(snapshotDownloadPath(fid, derivativeId), {
 				headers: headers(),
 			});
 			if (!fileRes.ok) throw new Error(`HTTP ${fileRes.status}`);
 			const blob = await fileRes.blob();
+			const suffix = derivativeId ? `_${String(derivativeId).slice(0, 8)}` : "";
 			const name = (blob.type || "").startsWith("video")
-				? `${fid}.mp4`
+				? `${fid}${suffix}.mp4`
 				: (blob.type || "").startsWith("audio")
-					? `${fid}.m4a`
-					: `${fid}.png`;
+					? `${fid}${suffix}.m4a`
+					: `${fid}${suffix}.png`;
 			const file = new File([blob], name, { type: blob.type || "application/octet-stream" });
 			const processed = await processMediaAssets({ files: [file] });
 			for (const p of processed) {
@@ -354,12 +372,13 @@ export async function pullSnapshot({
 					projectId: localId,
 					mediaAsset,
 				});
-				registerMediaFid(mediaAsset.id, fid);
-				fidToLocalId[fid] = mediaAsset.id;
+				registerMediaFid(mediaAsset.id, fid, derivativeId);
+				// 同一 fid 的两个版本必须是两条本地媒体，因此以版本引用为键
+				fidToLocalId[ref] = mediaAsset.id;
 				imported += 1;
 			}
 		} catch {
-			missing.push(fid);
+			missing.push(ref);
 		}
 	}
 
@@ -367,8 +386,8 @@ export async function pullSnapshot({
 	// 按备份时记录的映射换成新导入的本地 id，否则画面会整片空白。
 	const mediaFidMap = remoteMediaFidMap;
 	const idRemap: Record<string, string> = {};
-	for (const [oldId, fid] of Object.entries(mediaFidMap)) {
-		const localMediaId = fidToLocalId[fid];
+	for (const [oldId, ref] of Object.entries(mediaFidMap)) {
+		const localMediaId = fidToLocalId[ref] || fidToLocalId[formatMediaFidRef(parseMediaFidRef(ref).fid, "")];
 		if (localMediaId) idRemap[oldId] = localMediaId;
 	}
 

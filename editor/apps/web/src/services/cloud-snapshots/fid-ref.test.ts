@@ -14,6 +14,14 @@ describe("parseMediaFidRef", () => {
 		expect(parseMediaFidRef(null)).toEqual({ fid: "", derivativeId: "" });
 		expect(parseMediaFidRef(undefined)).toEqual({ fid: "", derivativeId: "" });
 	});
+
+	test("空衍生 id 视为原图", () => {
+		expect(parseMediaFidRef("abc::")).toEqual({ fid: "abc", derivativeId: "" });
+	});
+
+	test("衍生 id 含分隔符时只切第一个", () => {
+		expect(parseMediaFidRef("a::b::c")).toEqual({ fid: "a", derivativeId: "b::c" });
+	});
 });
 
 describe("formatMediaFidRef", () => {
@@ -36,5 +44,11 @@ describe("snapshotDownloadPath", () => {
 
 	test("fid 中的特殊字符被编码", () => {
 		expect(snapshotDownloadPath("a b")).toBe("/api/viewer/assets/a%20b/file");
+	});
+
+	test("derivative 参数中的空格被编码", () => {
+		expect(snapshotDownloadPath("abc", "d 1")).toBe(
+			"/api/viewer/assets/abc/file?derivative=d%201",
+		);
 	});
 });
