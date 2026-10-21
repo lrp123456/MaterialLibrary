@@ -3887,7 +3887,18 @@ function triggerPrecisionEdit(msg) {
 }
 
 function sendVideoToClip(msg) {
-  emit('sendToClip', msg);
+  // 剪辑桥接只认 {fid, file_name, mime, duration}；直接把消息对象丢过去会因缺 fid 被静默丢弃
+  if (msg.assetFid) {
+    emit('sendToClip', {
+      fid: msg.assetFid,
+      file_name: `AI视频_${Date.now()}.mp4`,
+      mime: 'video/mp4',
+      duration: parseFloat(String(msg.duration || '')) || 0,
+      derivativeId: ''
+    });
+    return;
+  }
+  alert('该视频尚未完成入库，请稍后重试或先下载 MP4 手动导入');
 }
 
 function captureFrameFromVideo(msg) {
