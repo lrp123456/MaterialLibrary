@@ -12,6 +12,10 @@ describe("derivativeLabel", () => {
 		expect(derivativeLabel("")).toBe("衍生版本");
 		expect(derivativeLabel(undefined)).toBe("衍生版本");
 	});
+
+	test("原型链上的键不会被当成标签", () => {
+		expect(derivativeLabel("constructor")).toBe("constructor");
+	});
 });
 
 describe("isGeometryKind", () => {

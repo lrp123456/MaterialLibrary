@@ -28,7 +28,7 @@ export const GEOMETRY_KINDS = new Set<string>([
 
 export function derivativeLabel(kind?: string): string {
 	const key = String(kind || "");
-	return DERIVATIVE_LABELS[key] || key || "衍生版本";
+	return Object.hasOwn(DERIVATIVE_LABELS, key) ? DERIVATIVE_LABELS[key] : key || "衍生版本";
 }
 
 export function isGeometryKind(kind?: string): boolean {
