@@ -3603,20 +3603,35 @@ async function sendMessage() {
         audioUrl: genAudioUrl,
         model: getModelDisplayName(musicType.value)
       };
-      try {
-        const filed = await registerGeneratedAsset({
-          previewUrl: genAudioUrl,
-          parentFid: currentTray.find((item) => item.fid)?.fid || '',
-          refFids: currentTray.map((item) => item.fid).filter(Boolean).slice(1),
-          prompt: rawContent,
-          model: musicType.value,
-          mode: 'music',
-          sessionId: currentSessionId.value
-        });
-        // 多产物时只登记第一条：当前播放器也只播第一条，其余暂不入库
-        asstMsg.assetFid = filed.fid;
-      } catch (fileErr) {
-        console.warn('写入精修素材失败', fileErr);
+      if (genAudioUrl.includes('/api/cache/temp/')) {
+        try {
+          const filed = await registerGeneratedAsset({
+            previewUrl: genAudioUrl,
+            parentFid: currentTray.find((item) => item.fid)?.fid || '',
+            refFids: currentTray.map((item) => item.fid).filter(Boolean).slice(1),
+            prompt: rawContent,
+            model: musicType.value,
+            mode: 'music',
+            sessionId: currentSessionId.value
+          });
+          // 多产物时只登记第一条：当前播放器也只播第一条，其余暂不入库
+          asstMsg.assetFid = filed.fid;
+        } catch (fileErr) {
+          console.warn('写入精修素材失败', fileErr);
+        }
+      } else {
+        // 后端已持久化（如 doubao_bgm_v5）：直接复用已入库 fid，无需重复登记
+        const firstFile = res.files?.[0] || {};
+        const assetFid = firstFile.fid || genAudioUrl.match(/\/api\/assets\/([^/?#]+)\//)?.[1] || '';
+        if (assetFid) {
+          asstMsg.assetFid = assetFid;
+          try {
+            // 后端入库默认落在 original，这里移入精修货架
+            await moveAssetShelf(assetFid, 'retouched');
+          } catch (shelfErr) {
+            console.warn('移入精修货架失败', shelfErr);
+          }
+        }
       }
       messages.value.push(asstMsg);
 
