@@ -25,6 +25,36 @@ export interface MlsAssetPayload {
 
 const PENDING_STORAGE_KEY = "mls_pending_import_asset";
 
+/** 判定素材 mime：响应头优先，其次载荷声明，再按 kind/扩展名兜底。 */
+function resolveMediaMime(blobType: string, payload: MlsAssetPayload): string {
+	const fromBlob = String(blobType || "").split(";")[0].trim().toLowerCase();
+	if (/^(image|video|audio)\//.test(fromBlob)) return fromBlob;
+
+	const declared = String(payload.mime || "").split(";")[0].trim().toLowerCase();
+	if (/^(image|video|audio)\//.test(declared)) return declared;
+
+	const kind = String(payload.kind || "").toLowerCase();
+	if (kind === "image") return "image/jpeg";
+	if (kind === "audio") return "audio/mpeg";
+	if (kind === "video") return "video/mp4";
+
+	const ext = (String(payload.file_name || "").toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] || "");
+	const byExt: Record<string, string> = {
+		jpg: "image/jpeg",
+		jpeg: "image/jpeg",
+		png: "image/png",
+		webp: "image/webp",
+		gif: "image/gif",
+		mp4: "video/mp4",
+		webm: "video/webm",
+		mov: "video/quicktime",
+		mp3: "audio/mpeg",
+		wav: "audio/wav",
+		m4a: "audio/mp4",
+	};
+	return byExt[ext] || "";
+}
+
 /**
  * Material Studio Pro 通信桥梁：
  * 负责接收父窗口派发的 MLS_IMPORT_ASSET 消息，并完成素材下载、OPFS 写入、FID 绑定与自动上轨。
@@ -36,15 +66,15 @@ export function MlsBridge() {
 	const isHandlingRef = useRef(false);
 
 	const handleImportPayload = async (payload: MlsAssetPayload, projectId: string) => {
+		if (!payload?.fid) {
+			toast.error("素材信息不完整，无法导入");
+			return;
+		}
 		if (isHandlingRef.current) return;
 		isHandlingRef.current = true;
 		const derivativeId = String(
 			payload.derivativeId || payload.activeDerivativeId || "",
 		);
-		const mime = payload.mime
-			|| (payload.kind === "image" ? "image/jpeg"
-				: payload.kind === "audio" ? "audio/mpeg"
-					: "video/mp4");
 		const toastId = toast.loading(`正在从素材库加载「${payload.file_name}」...`);
 
 		try {
@@ -62,6 +92,8 @@ export function MlsBridge() {
 				throw new Error(`下载素材失败 (HTTP ${res.status})`);
 			}
 			const blob = await res.blob();
+			const mime = resolveMediaMime(blob.type, payload);
+			if (!mime) throw new Error("无法识别素材类型");
 			const file = new File([blob], payload.file_name, {
 				type: mime,
 			});
