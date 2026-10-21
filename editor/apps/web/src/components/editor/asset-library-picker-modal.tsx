@@ -142,6 +142,15 @@ function buildDownloadPath(fid: string, derivativeId?: string): string {
 	return derivativeId ? `${base}?derivative=${encodeURIComponent(derivativeId)}` : base;
 }
 
+/** 同名素材的原图与衍生版要能在媒体池里区分开。 */
+function buildVersionFileName(version: AssetVersion): string {
+	const name = version.name || version.fid;
+	if (!version.derivativeId) return name;
+	const dot = name.lastIndexOf(".");
+	const suffix = `_${version.derivativeKind || version.derivativeId.slice(0, 8)}`;
+	return dot > 0 ? `${name.slice(0, dot)}${suffix}${name.slice(dot)}` : `${name}${suffix}`;
+}
+
 export function AssetLibraryPickerModal({
 	isOpen,
 	onOpenChange,
@@ -165,6 +174,9 @@ export function AssetLibraryPickerModal({
 	const [expandedFid, setExpandedFid] = useState<string>("");
 	const [derivativeCache, setDerivativeCache] = useState<Record<string, DerivativeLike[]>>({});
 	const [derivativeLoading, setDerivativeLoading] = useState<Record<string, boolean>>({});
+	const [derivativeError, setDerivativeError] = useState<Record<string, string>>({});
+	// 在途 fid：避免重复点击时并发拉同一份衍生详情
+	const derivativeInFlight = useRef<Set<string>>(new Set());
 	const [selectionNotice, setSelectionNotice] = useState<string>("");
 	// 弹窗是一次性批量导入，实际不限制数量；传大值即等价于不限制
 	const MAX_SELECT = 100;
@@ -280,7 +292,10 @@ export function AssetLibraryPickerModal({
 	const itemHasSelection = (fid: string) => selectedVersions.some((v) => v.fid === fid);
 
 	const versionCountBadge = (item: MaterialAssetItem) => {
-		const count = derivativeCache[item.fid]?.filter((d) => d.kind !== "origin").length || 0;
+		if (derivativeError[item.fid]) return "读取失败";
+		const cached = derivativeCache[item.fid];
+		if (!cached) return "1 版";
+		const count = cached.filter((d) => d.kind !== "origin").length;
 		return count > 0 ? `${count + 1} 版` : "1 版";
 	};
 
@@ -296,19 +311,37 @@ export function AssetLibraryPickerModal({
 
 	const ensureDerivatives = useCallback(async (item: MaterialAssetItem) => {
 		if (!item.fid || item.kind !== "image") return;
+		if (derivativeInFlight.current.has(item.fid)) return;
 		if (Object.prototype.hasOwnProperty.call(derivativeCache, item.fid)) return;
+		derivativeInFlight.current.add(item.fid);
+		setDerivativeError((prev) => {
+			const next = { ...prev };
+			delete next[item.fid];
+			return next;
+		});
 		setDerivativeLoading((prev) => ({ ...prev, [item.fid]: true }));
 		try {
 			const res = await fetch(`/api/viewer/assets/${encodeURIComponent(item.fid)}`, {
 				headers: authHeaders(),
 			});
-			const json = res.ok ? await res.json() : null;
+			if (!res.ok) {
+				setDerivativeError((prev) => ({ ...prev, [item.fid]: "读取衍生版本失败" }));
+				return;
+			}
+			const json = await res.json();
 			const detail = json?.data || json;
 			const list = Array.isArray(detail?.derivatives) ? detail.derivatives : [];
+			// 只有成功拿到详情才写缓存，失败不能被永久缓存成 []
 			setDerivativeCache((prev) => ({ ...prev, [item.fid]: list }));
+			setDerivativeError((prev) => {
+				const next = { ...prev };
+				delete next[item.fid];
+				return next;
+			});
 		} catch {
-			setDerivativeCache((prev) => ({ ...prev, [item.fid]: [] }));
+			setDerivativeError((prev) => ({ ...prev, [item.fid]: "读取衍生版本失败" }));
 		} finally {
+			derivativeInFlight.current.delete(item.fid);
 			setDerivativeLoading((prev) => ({ ...prev, [item.fid]: false }));
 		}
 	}, [derivativeCache]);
@@ -351,6 +384,7 @@ export function AssetLibraryPickerModal({
 	};
 
 	const handleConfirm = async (autoInsertTimeline = false) => {
+		if (isSubmitting) return;
 		if (!activeProject) {
 			toast.error("请先进入一个工程");
 			return;
@@ -364,22 +398,27 @@ export function AssetLibraryPickerModal({
 
 		try {
 			const filesToProcess: { file: File; version: AssetVersion }[] = [];
+			const failedNames: string[] = [];
 
+			// 完全不依赖 items：切换筛选/翻页/搜索后，选中项仍可按版本自身信息下载
 			for (const version of chosen) {
-				const item = items.find((it) => it.fid === version.fid);
-				if (!item) continue;
-				const resp = await fetch(buildDownloadPath(item.fid, version.derivativeId), {
+				const resp = await fetch(buildDownloadPath(version.fid, version.derivativeId), {
 					headers: authHeaders(),
 				});
-				if (!resp.ok) continue;
+				if (!resp.ok) {
+					failedNames.push(version.name || version.fid);
+					continue;
+				}
 				const blob = await resp.blob();
-				const mime = version.derivativeId ? "image/jpeg" : item.mime || "video/mp4";
-				const file = new File([blob], item.file_name, { type: mime });
+				// 用响应真实 mime，避免 PNG/WebP 衍生版被硬编码成 jpeg
+				const mime = blob.type || (version.derivativeId ? "image/jpeg" : "video/mp4");
+				const file = new File([blob], buildVersionFileName(version), { type: mime });
 				filesToProcess.push({ file, version });
 			}
 
 			if (filesToProcess.length === 0) {
-				throw new Error("所选素材下载异常，请检查网络连接与鉴权");
+				toast.error("导入素材失败：没有素材成功入库", { id: toastId });
+				return;
 			}
 
 			// 原生解码落入 OPFS
@@ -387,9 +426,15 @@ export function AssetLibraryPickerModal({
 				files: filesToProcess.map((f) => f.file),
 			});
 
-			for (let i = 0; i < processedAssets.length; i++) {
-				const asset = processedAssets[i];
-				const picked = filesToProcess[i]?.version;
+			// processMediaAssets 会跳过失败项，返回数组是输入的子序列，必须按 file 身份回查版本
+			const versionByFile = new Map(
+				filesToProcess.map(({ file, version }) => [file, version] as const),
+			);
+			let createdCount = 0;
+
+			for (const asset of processedAssets) {
+				const picked = versionByFile.get(asset.file);
+				if (!picked) continue;
 
 				// processMediaAssets 返回的资产没有 id，后续必须使用入库返回值，
 				// 否则上轨元素的 mediaId 为 undefined，会直接把整页打成白屏。
@@ -397,9 +442,13 @@ export function AssetLibraryPickerModal({
 					projectId: activeProject.metadata.id,
 					asset,
 				});
-				if (!created) continue;
+				if (!created) {
+					failedNames.push(picked.name || picked.fid);
+					continue;
+				}
+				createdCount += 1;
 
-				if (picked?.fid) {
+				if (picked.fid) {
 					// 先绑定裸 fid，保证备份不丢素材；版本号在 Task 7 接上
 					registerMediaFid(created.id, picked.fid);
 				}
@@ -425,10 +474,22 @@ export function AssetLibraryPickerModal({
 				}
 			}
 
+			if (createdCount === 0) {
+				toast.error("导入素材失败：没有素材成功入库", { id: toastId });
+				return;
+			}
+
 			const msg = autoInsertTimeline || directInsertTimeline
-				? `已成功载入 ${processedAssets.length} 个版本并自动上轨`
-				: `已导入 ${processedAssets.length} 个版本到工程媒体池`;
-			toast.success(msg, { id: toastId });
+				? `已成功载入 ${createdCount} 个版本并自动上轨`
+				: `已导入 ${createdCount} 个版本到工程媒体池`;
+
+			if (failedNames.length > 0) {
+				const shown = failedNames.slice(0, 3).join("、");
+				const names = failedNames.length > 3 ? `${shown} 等` : shown;
+				toast.warning(`${msg}，${failedNames.length} 个版本失败（${names}）`, { id: toastId });
+			} else {
+				toast.success(msg, { id: toastId });
+			}
 			onOpenChange(false);
 		} catch (err) {
 			toast.error(`导入素材失败: ${err instanceof Error ? err.message : "未知错误"}`, { id: toastId });
@@ -669,6 +730,18 @@ export function AssetLibraryPickerModal({
 						{derivativeLoading[expandedItem.fid] ? (
 							<div className="h-16 flex items-center justify-center text-xs text-muted-foreground">
 								读取衍生版本…
+							</div>
+						) : derivativeError[expandedItem.fid] ? (
+							<div className="h-16 flex items-center justify-center gap-3 text-xs text-destructive">
+								<span className="font-semibold">{derivativeError[expandedItem.fid]}</span>
+								<Button
+									size="sm"
+									variant="ghost"
+									className="h-7 px-2 text-xs cursor-pointer"
+									onClick={() => void ensureDerivatives(expandedItem)}
+								>
+									重试
+								</Button>
 							</div>
 						) : (
 							<div className="flex flex-wrap gap-2">
