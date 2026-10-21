@@ -3603,6 +3603,21 @@ async function sendMessage() {
         audioUrl: genAudioUrl,
         model: getModelDisplayName(musicType.value)
       };
+      try {
+        const filed = await registerGeneratedAsset({
+          previewUrl: genAudioUrl,
+          parentFid: currentTray.find((item) => item.fid)?.fid || '',
+          refFids: currentTray.map((item) => item.fid).filter(Boolean).slice(1),
+          prompt: rawContent,
+          model: musicType.value,
+          mode: 'music',
+          sessionId: currentSessionId.value
+        });
+        // 多产物时只登记第一条：当前播放器也只播第一条，其余暂不入库
+        asstMsg.assetFid = filed.fid;
+      } catch (fileErr) {
+        console.warn('写入精修素材失败', fileErr);
+      }
       messages.value.push(asstMsg);
 
       await saveChatMessage({
