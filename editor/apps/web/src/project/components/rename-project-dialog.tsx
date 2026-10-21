@@ -35,37 +35,37 @@ export function RenameProjectDialog({
 		<Dialog open={isOpen} onOpenChange={handleOpenChange}>
 			<DialogContent>
 				<DialogHeader>
-					<DialogTitle>Rename project</DialogTitle>
-				</DialogHeader>
+					<DialogTitle>重命名工程</DialogTitle>
+			</DialogHeader>
 
-				<DialogBody className="gap-3">
-					<Label>New name</Label>
-					<Input
-						value={name}
-						onChange={(e) => setName(e.target.value)}
-						onKeyDown={(e) => {
-							if (e.key === "Enter") {
-								e.preventDefault();
-								onConfirm(name);
-							}
-						}}
-						placeholder="Enter a new name"
-					/>
-				</DialogBody>
-
-				<DialogFooter>
-					<Button
-						variant="outline"
-						onClick={(e) => {
+			<DialogBody className="gap-3">
+				<Label>新名称</Label>
+				<Input
+					value={name}
+					onChange={(e) => setName(e.target.value)}
+					onKeyDown={(e) => {
+						if (e.key === "Enter") {
 							e.preventDefault();
-							e.stopPropagation();
-							onOpenChange(false);
-						}}
-					>
-						Cancel
-					</Button>
-					<Button onClick={() => onConfirm(name)}>Rename</Button>
-				</DialogFooter>
+							onConfirm(name);
+						}
+					}}
+					placeholder="请输入新的工程名称"
+				/>
+			</DialogBody>
+
+			<DialogFooter>
+				<Button
+					variant="outline"
+					onClick={(e) => {
+						e.preventDefault();
+						e.stopPropagation();
+						onOpenChange(false);
+					}}
+				>
+					取消
+				</Button>
+				<Button onClick={() => onConfirm(name)}>保存</Button>
+			</DialogFooter>
 			</DialogContent>
 		</Dialog>
 	);

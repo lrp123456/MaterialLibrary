@@ -63,7 +63,7 @@ export function ChangelogNotification() {
 					size="icon"
 					className="-mr-1 -mt-1 shrink-0"
 					onClick={() => setRelease(null)}
-					aria-label="Dismiss"
+					aria-label="关闭"
 				>
 					<HugeiconsIcon icon={Cancel01Icon} className="size-4" />
 				</Button>

@@ -1,12 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-	Tooltip,
-	TooltipContent,
-	TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/utils/ui";
 import {
 	TAB_KEYS,
@@ -46,41 +40,34 @@ export function TabBar() {
 	}, [checkScrollPosition]);
 
 	return (
-		<div className="relative flex">
+		<div className="relative flex w-20 shrink-0 bg-muted/20 border-r border-border/40 select-none">
 			<div
 				ref={scrollRef}
-				className="scrollbar-hidden relative flex size-full p-1 flex-col items-center justify-start gap-0.5 overflow-y-auto"
+				className="scrollbar-none relative flex size-full p-2 flex-col items-center justify-start gap-2 overflow-y-auto"
 			>
 				{TAB_KEYS.map((tabKey) => {
 					const tab = tabs[tabKey];
+					const isActive = activeTab === tabKey;
 					return (
-						<Tooltip key={tabKey} delayDuration={10}>
-							<TooltipTrigger asChild>
-								<Button
-									variant={activeTab === tabKey ? "secondary" : "ghost"}
-									size="icon"
-									aria-label={tab.label}
-									className={cn(
-										"shrink-0",
-										"h-8 w-8",
-										activeTab !== tabKey && "text-muted-foreground",
-									)}
-									onClick={() => setActiveTab(tabKey)}
-								>
-									<tab.icon />
-								</Button>
-							</TooltipTrigger>
-							<TooltipContent
-								side="right"
-								align="center"
-								variant="sidebar"
-								sideOffset={8}
-							>
-								<div className="text-foreground text-sm leading-none font-medium">
-									{tab.label}
-								</div>
-							</TooltipContent>
-						</Tooltip>
+						<button
+							key={tabKey}
+							type="button"
+							aria-label={tab.label}
+							onClick={() => setActiveTab(tabKey)}
+							className={cn(
+								"w-full h-16 rounded-xl flex flex-col items-center justify-center gap-1.5 transition-all cursor-pointer shrink-0",
+								isActive
+									? "bg-primary text-primary-foreground font-extrabold shadow-sm"
+									: "text-muted-foreground hover:bg-muted/70 hover:text-foreground font-semibold"
+							)}
+						>
+							<div className="size-6 flex items-center justify-center">
+								<tab.icon className="size-6 shrink-0" />
+							</div>
+							<span className="text-xs leading-none tracking-tight">
+								{tab.label}
+							</span>
+						</button>
 					);
 				})}
 			</div>
@@ -101,7 +88,7 @@ function FadeOverlay({
 	return (
 		<div
 			className={cn(
-				"pointer-events-none absolute right-0 left-0 h-6",
+				"pointer-events-none absolute right-0 left-0 h-4 z-10",
 				direction === "top" && show
 					? "from-background top-0 bg-linear-to-b to-transparent"
 					: "from-background bottom-0 bg-linear-to-t to-transparent",

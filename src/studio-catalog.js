@@ -70,6 +70,55 @@ const R_NONE = {
   note: '该域不使用选区',
 };
 
+/* ---------- 文本模型思考能力（客户端据此渲染档位选择器） ---------- *
+ * mode:
+ *   'levels' 多档位，经 LiteLLM reasoning_effort 透传
+ *   'toggle' 只有开/关，经 LiteLLM thinking 透传
+ *   'always' 模型自带思考，参数无法关闭（如 Gemma 4）
+ *   'none'   上游未提供思考控制
+ * supported=false 时不显示档位选择器，只显示说明。
+ */
+const REASONING = {
+  gemini: {
+    supported: true,
+    mode: 'levels',
+    levels: ['none', 'low', 'medium', 'high'],
+    default: 'none',
+    // Gemini 经 LiteLLM 必须发 reasoning:{effort} 才会在 message.reasoning_content 返回可读思考；
+    // 发 reasoning_effort 只能拿到加密 thought_signature。豆包则用扁平的 reasoning_effort。
+    wire: 'reasoning-object',
+    note: '经 LiteLLM 透传 reasoning.effort；Gemini Flash-Lite 默认思考很轻，reasoning_content 自动拆到思考块',
+  },
+  gemmaAlways: {
+    supported: false,
+    mode: 'always',
+    levels: [],
+    default: null,
+    note: 'Gemma 4 内置思考，无法通过参数关闭；正文中的 <thought> 会自动拆到思考块',
+  },
+  doubaoLevels: {
+    supported: true,
+    mode: 'levels',
+    levels: ['minimal', 'low', 'medium', 'high'],
+    default: 'medium',
+    note: '豆包 Seed 2.1 经 LiteLLM 透传 reasoning_effort；minimal=关闭思考直接回答，low/medium/high 调节思维链长度，medium 为官方默认；reasoning_content 自动拆到思考块',
+  },
+  agnesNone: {
+    supported: false,
+    mode: 'none',
+    levels: [],
+    default: null,
+    note: 'Agnes 上游未提供思考档位控制',
+  },
+  litellmNone: {
+    supported: false,
+    mode: 'none',
+    levels: [],
+    default: null,
+    note: '网关池模型不开放思考档位',
+  },
+};
+
 const OFFICIAL_STUDIO = {
   chat: {
     defaultModel: 'agnes3_0flash',
@@ -77,54 +126,52 @@ const OFFICIAL_STUDIO = {
       M({
         id: 'gemini_flash_lite_latest', name: 'Gemini Flash-Lite', model_code: 'gemini-flash-lite-latest',
         provider: 'gemini', providerName: 'Google', badge: '多模态免费', capabilities: 'chat,vision,tag',
-        disabled: true,
-        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: true },
+        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: true, reasoning: REASONING.gemini },
       }),
       M({
         id: 'agnes3_0flash', name: 'Agnes 3.0 Flash', model_code: 'agnes-3.0-flash',
         provider: 'agnes', providerName: 'Agnes AI', badge: '高可用免费', capabilities: 'chat,vision,tag',
-        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: true },
+        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: true, reasoning: REASONING.agnesNone },
       }),
       M({
         id: 'gemma_4_26b', name: 'Gemma 4 26B', model_code: 'gemma-4-26b-a4b-it',
         provider: 'gemini', providerName: 'Google', badge: '开源视觉', capabilities: 'chat,vision',
-        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, contextTokens: 262144, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: true },
+        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, contextTokens: 262144, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: true, reasoning: REASONING.gemmaAlways },
       }),
       M({
         id: 'gemma_4_31b', name: 'Gemma 4 31B', model_code: 'gemma-4-31b-it',
         provider: 'gemini', providerName: 'Google', badge: '开源视觉 · 低优先', capabilities: 'chat,vision',
-        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: true },
+        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: true, reasoning: REASONING.gemmaAlways },
       }),
       M({
         id: 'workflow_vision', name: '工作流视觉（免费池）', model_code: 'workflow_vision',
         provider: 'litellm', providerName: 'LiteLLM', badge: '无人值守', capabilities: 'chat,vision,tag',
-        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: true },
+        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: true, reasoning: REASONING.litellmNone },
       }),
       M({
         id: 'workflow_vision_low', name: '工作流视觉（低优先）', model_code: 'workflow_vision_low',
         provider: 'litellm', providerName: 'LiteLLM', badge: '队列满时', capabilities: 'chat,vision,tag',
-        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: true },
+        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: true, reasoning: REASONING.litellmNone },
       }),
       M({
         id: 'gemini_flash_latest', name: 'Gemini Flash', model_code: 'gemini-flash-latest',
         provider: 'gemini', providerName: 'Google', badge: '多模态备用', capabilities: 'chat,vision,tag',
-        disabled: true,
-        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: false },
+        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: false, reasoning: REASONING.gemini },
       }),
       M({
         id: 'doubao_seed_2_1_lite', dbId: 'volc_doubao_seed_2_1_lite', name: 'Doubao-Seed-2.1-lite', model_code: 'doubao-seed-2-1-lite-260915',
         provider: 'volcengine', providerName: '火山方舟', badge: '2.1 Lite(付费)', capabilities: 'vision,tag,chat',
-        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, contextTokens: 1048576, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: false },
+        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, contextTokens: 1048576, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: false, reasoning: REASONING.doubaoLevels },
       }),
       M({
         id: 'doubao_seed_2_1_turbo', dbId: 'volc_doubao_seed_2_1_turbo', name: 'Doubao-Seed-2.1-turbo', model_code: 'doubao-seed-2-1-turbo-260628',
         provider: 'volcengine', providerName: '火山方舟', badge: '2.1 Turbo(付费)', capabilities: 'vision,tag,chat',
-        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: false },
+        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: false, reasoning: REASONING.doubaoLevels },
       }),
       M({
         id: 'doubao_seed_2_1_pro', dbId: 'volc_doubao_seed_2_1_pro', name: 'Doubao-Seed-2.1-pro', model_code: 'doubao-seed-2-1-pro-260628',
         provider: 'volcengine', providerName: '火山方舟', badge: '2.1 Pro(付费)', capabilities: 'vision,tag,chat',
-        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: false },
+        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: false, reasoning: REASONING.doubaoLevels },
       }),
     ],
   },
@@ -482,6 +529,52 @@ function matchOfficial(official, rows) {
   return null;
 }
 
+/* ------------------------------------------------------------------ *
+ * 提供商 / 模型族分类（客户端下拉分组与治理台共用）
+ * 分类方案共 3 层：
+ *   1. 提供商组：Google / 字节跳动 / Agnes / 本机 / LiteLLM
+ *   2. 模型族：gemini、gemma、nano；seedream、seedance、seed；agnes；qwen；local
+ *   3. 模态域：chat / image / video / music（由 OFFICIAL_STUDIO 的 domain 决定）
+ * 新增模型只要 id / model_code 命中下面的规则即可自动归类，无需逐条登记。
+ * ------------------------------------------------------------------ */
+const FAMILY_RULES = [
+  { family: 'gemini', name: 'Gemini', re: /gemini/i },
+  { family: 'gemma', name: 'Gemma', re: /gemma/i },
+  { family: 'nano', name: 'Nano', re: /nano/i },
+  { family: 'seedream', name: 'Seedream', re: /seedream/i },
+  { family: 'seedance', name: 'Seedance', re: /seedance/i },
+  { family: 'seed', name: 'Seed', re: /(^|[-_/])seed([-_/]|$)|doubao-seed/i },
+  { family: 'agnes', name: 'Agnes', re: /agnes/i },
+  { family: 'qwen', name: 'Qwen', re: /qwen/i },
+  { family: 'local', name: '本机', re: /(local|acestep|index-tts)/i },
+];
+
+/** 从模型 id / model_code 推导模型族（提供商内部再细分） */
+function familyOf(idOrCode, providerId) {
+  const text = `${idOrCode || ''}`;
+  for (const rule of FAMILY_RULES) {
+    if (rule.re.test(text)) return { family: rule.family, familyName: rule.name };
+  }
+  const p = String(providerId || '');
+  if (p === 'gemini') return { family: 'gemini', familyName: 'Gemini' };
+  if (p === 'volcengine') return { family: 'seed', familyName: 'Seed' };
+  if (p === 'agnes') return { family: 'agnes', familyName: 'Agnes' };
+  if (p === 'local') return { family: 'local', familyName: '本机' };
+  if (p === 'litellm') return { family: 'litellm', familyName: '网关池' };
+  return { family: p || 'other', familyName: p || '其他' };
+}
+
+/** 提供商组：客户端只按这一层显示分组标题 */
+function providerGroupOf(providerId) {
+  const p = String(providerId || '');
+  if (p === 'gemini') return 'Google';
+  if (p === 'volcengine') return '字节跳动';
+  if (p === 'agnes') return 'Agnes';
+  if (p === 'local') return '本机';
+  if (p === 'litellm') return 'LiteLLM';
+  return p || '其他';
+}
+
 function providerDisplayName(providerId, code) {
   const p = String(providerId || '');
   const c = String(code || '').toLowerCase();
@@ -545,6 +638,8 @@ module.exports = {
   OFFICIAL_STUDIO,
   matchOfficial,
   providerDisplayName,
+  providerGroupOf,
+  familyOf,
   officialNameFor,
   resolveModelCode,
   officialIdOf,

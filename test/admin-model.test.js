@@ -386,9 +386,11 @@ async function testStep4() {
   assert.ok(catalog.models && catalog.models.length > 0, '目录中必须包含模型');
   assert.ok(catalog.studio.image && catalog.studio.video && catalog.studio.music, '工坊各领域分组必须齐备');
 
-  // 1. 停用的模型（例如 Gemini）绝对不出现在目录中
-  const geminiModels = catalog.models.filter(m => /gemini/i.test(m.id) || /gemini/i.test(m.name));
-  assert.strictEqual(geminiModels.length, 0, '停用模型（Gemini 等）严禁出现在公开目录中');
+  // 1. Gemini 对话模型已启用，应出现在公开目录（生图/视频等 gemini 适配器仍停用，不在此列）
+  const geminiChat = catalog.studio.chat.models.filter(
+    m => m.id === 'gemini_flash_latest' || m.id === 'gemini_flash_lite_latest'
+  );
+  assert.strictEqual(geminiChat.length, 2, '两个 Gemini 对话模型必须出现在公开目录中');
 
   // 2. 人像模型不给尺寸/比例生图控件
   const portraitModels = catalog.models.filter(m => /portrait/i.test(m.id) || /portrait/i.test(m.kind));

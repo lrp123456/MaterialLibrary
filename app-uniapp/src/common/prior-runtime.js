@@ -906,13 +906,42 @@ async function downloadAndSaveToAlbum({ url, fileName = "", isVideo = false, isA
   if (!url.startsWith("http://") && !url.startsWith("https://")) {
     return saveLocalFile(url);
   }
+  // 改造下载 URL，在 URL 路径末尾带上标准 saveName
+  let downloadUrl = url;
+  try {
+    if (url.startsWith("http://") || url.startsWith("https://")) {
+      const u = new URL(url);
+      if (u.pathname.endsWith("/image") || u.pathname.endsWith("/file")) {
+        u.pathname = `${u.pathname}/${encodeURIComponent(saveName)}`;
+        u.searchParams.set("download", "1");
+        downloadUrl = u.toString();
+      }
+    }
+  } catch (_) {}
+
   return new Promise((resolve, reject) => {
     uni.downloadFile({
-      url,
+      url: downloadUrl,
       success: async (res) => {
         if (res.statusCode === 200 && res.tempFilePath) {
           try {
-            const r = await saveLocalFile(res.tempFilePath);
+            let targetPath = res.tempFilePath;
+            if (typeof plus !== "undefined" && plus.io && plus.io.resolveLocalFileSystemURL) {
+              try {
+                targetPath = await new Promise((resMove) => {
+                  plus.io.resolveLocalFileSystemURL(res.tempFilePath, (entry) => {
+                    plus.io.requestFileSystem(plus.io.PRIVATE_DOC, (fsSys) => {
+                      fsSys.root.getDirectory("exports", { create: true }, (dir) => {
+                        entry.moveTo(dir, saveName, (newEntry) => {
+                          resMove(newEntry.toLocalURL ? newEntry.toLocalURL() : newEntry.fullPath);
+                        }, () => resMove(res.tempFilePath));
+                      }, () => resMove(res.tempFilePath));
+                    }, () => resMove(res.tempFilePath));
+                  }, () => resMove(res.tempFilePath));
+                });
+              } catch (_) {}
+            }
+            const r = await saveLocalFile(targetPath);
             resolve(r);
           } catch (e) {
             reject(e);

@@ -79,12 +79,13 @@ export class ProjectManager {
 		await this.storageMigrationPromise;
 	}
 
-	async createNewProject({ name }: { name: string }): Promise<string> {
-		const mainScene = buildDefaultScene({ name: "Main scene", isMain: true });
+	async createNewProject({ name, group }: { name: string; group?: string }): Promise<string> {
+		const mainScene = buildDefaultScene({ name: "主场景", isMain: true });
 		const newProject: TProject = {
 			metadata: {
 				id: generateUUID(),
 				name,
+				group: group || "",
 				duration: getProjectDurationFromScenes({ scenes: [mainScene] }),
 				createdAt: new Date(),
 				updatedAt: new Date(),
@@ -204,6 +205,14 @@ export class ProjectManager {
 			await storageService.saveProject({ project: updatedProject });
 			this.active = updatedProject;
 			this.updateMetadata(updatedProject);
+			// 通知后台自动同步（仅对已绑定云端快照的工程生效）
+			if (typeof window !== "undefined") {
+				window.dispatchEvent(
+					new CustomEvent("mls_project_saved", {
+						detail: { projectId: updatedProject.metadata.id },
+					}),
+				);
+			}
 		} catch (error) {
 			console.error("Failed to save project:", error);
 		}
@@ -325,8 +334,8 @@ export class ProjectManager {
 		try {
 			const result = await storageService.loadProject({ id });
 			if (!result) {
-				toast.error("Project not found", {
-					description: "Please try again",
+				toast.error("工程不存在", {
+					description: "请重试",
 				});
 				return;
 			}
@@ -354,6 +363,47 @@ export class ProjectManager {
 				description:
 					error instanceof Error ? error.message : "Please try again",
 			});
+		}
+	}
+
+	/** 批量把工程移动到某个分组（空字符串表示取消分组）。 */
+	async setProjectsGroup({
+		ids,
+		group,
+	}: {
+		ids: string[];
+		group: string;
+	}): Promise<void> {
+		const nextGroup = String(group || "").trim();
+		for (const id of ids) {
+			try {
+				const result = await storageService.loadProject({ id });
+				if (!result) continue;
+				const updatedProject: TProject = {
+					...result.project,
+					metadata: {
+						...result.project.metadata,
+						group: nextGroup,
+						updatedAt: new Date(),
+					},
+				};
+				await storageService.saveProject({ project: updatedProject });
+				if (this.active?.metadata.id === id) {
+					this.active = updatedProject;
+					this.notify();
+				}
+				this.updateMetadata(updatedProject);
+				// 分组变更也要同步到云端快照
+				if (typeof window !== "undefined") {
+					window.dispatchEvent(
+						new CustomEvent("mls_project_saved", {
+							detail: { projectId: id },
+						}),
+					);
+				}
+			} catch (error) {
+				console.error("Failed to move project group:", error);
+			}
 		}
 	}
 
@@ -547,13 +597,21 @@ export class ProjectManager {
 	getFilteredAndSortedProjects({
 		searchQuery,
 		sortOption,
+		groupFilter = "",
 	}: {
 		searchQuery: string;
 		sortOption: TProjectSortOption;
+		groupFilter?: string;
 	}): TProjectMetadata[] {
-		const filteredProjects = this.savedProjects.filter((project) =>
-			project.name.toLowerCase().includes(searchQuery.toLowerCase()),
-		);
+		const filteredProjects = this.savedProjects.filter((project) => {
+			if (!project.name.toLowerCase().includes(searchQuery.toLowerCase())) {
+				return false;
+			}
+			if (!groupFilter) return true;
+			const group = project.group || "";
+			if (groupFilter === "__ungrouped__") return group === "";
+			return group === groupFilter;
+		});
 
 		const [key, order] = sortOption.split("-") as [
 			TProjectSortKey,

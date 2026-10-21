@@ -85,6 +85,28 @@ function hamming(a, b) {
   return d;
 }
 
+/**
+ * 64-bit pHash 的 4 段 16-bit 子段抽屉变体。
+ * 鸽巢原理：总距离 <= K 时，4 段中必有一段距离 <= floor(K/4)。
+ * maxFlips=1 覆盖 K<=7，maxFlips=2 覆盖 K<=8...11。
+ */
+function hex16Variants(seg, maxFlips = 1) {
+  const s = String(seg || '');
+  if (s.length !== 4) return [s];
+  const base = parseInt(s, 16);
+  const toHex = (v) => (v & 0xffff).toString(16).padStart(4, '0');
+  const out = [s];
+  for (let b1 = 0; b1 < 16; b1++) {
+    out.push(toHex(base ^ (1 << b1)));
+    if (maxFlips >= 2) {
+      for (let b2 = b1 + 1; b2 < 16; b2++) {
+        out.push(toHex(base ^ (1 << b1) ^ (1 << b2)));
+      }
+    }
+  }
+  return out;
+}
+
 async function laplacianVariance(buffer) {
   const { data, info } = await sharp(buffer).rotate().greyscale()
     .resize(256, 256, { fit: 'fill' }).raw().toBuffer({ resolveWithObject: true });
@@ -100,4 +122,4 @@ async function laplacianVariance(buffer) {
   return vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length;
 }
 
-module.exports = { inspect, hamming, computePHash };
+module.exports = { inspect, hamming, hammingDistanceHex: hamming, computePHash, hex16Variants };

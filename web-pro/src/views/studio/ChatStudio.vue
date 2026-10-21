@@ -664,7 +664,7 @@
                   </button>
                 </div>
               </div>
-              <p v-else class="leading-relaxed whitespace-pre-wrap text-slate-200">{{ msg.content }}</p>
+              <div v-else class="chat-md text-slate-200" v-html="renderMarkdown(msg.content)"></div>
             </div>
           </div>
         </div>
@@ -1626,6 +1626,8 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 import StudioIcon from '../../components/StudioIcon.vue';
 import DynamicModelParamBar from '../../components/DynamicModelParamBar.vue';
 import AssetPickerModal from '../../components/AssetPickerModal.vue';
@@ -1757,6 +1759,32 @@ function splitClientThinking(content, reasoning) {
   const open = text.match(/<(thought|thinking)>([\s\S]*)$/i);
   if (open) { take(open[2]); text = text.replace(/<(thought|thinking)>[\s\S]*$/i, ''); }
   return { content: text.trim(), thinking: think.trim() };
+}
+
+// 助手正文按 Markdown 渲染：marked 解析 + DOMPurify 净化后再 v-html，杜绝 XSS。
+// 链接强制 noopener/新标签；纯文本命中换行/列表/标题等标记时也走同一条路径。
+marked.setOptions({ gfm: true, breaks: true });
+// 所有外链安全地在新标签打开（DOMPurify 净化后再补属性）
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  if (node && node.tagName === 'A') {
+    node.setAttribute('target', '_blank');
+    node.setAttribute('rel', 'noopener noreferrer');
+  }
+});
+const mdHtmlCache = new Map();
+function renderMarkdown(src) {
+  const text = typeof src === 'string' ? src : '';
+  if (!text) return '';
+  const hit = mdHtmlCache.get(text);
+  if (hit !== undefined) return hit;
+  const rawHtml = marked.parse(text, { async: false });
+  const html = DOMPurify.sanitize(rawHtml, {
+    ALLOWED_TAGS: ['h1','h2','h3','h4','h5','h6','p','br','hr','strong','b','em','i','del','code','pre','blockquote','ul','ol','li','a','img','table','thead','tbody','tr','th','td','span','div'],
+    ALLOWED_ATTR: ['href','src','alt','title','class','target','rel'],
+  });
+  mdHtmlCache.set(text, html);
+  if (mdHtmlCache.size > 200) mdHtmlCache.delete(mdHtmlCache.keys().next().value);
+  return html;
 }
 const activeGenMode = ref('');
 const schemaParams = ref({});
@@ -4079,4 +4107,70 @@ function registerVideoEl(idx, el) {
   background: var(--theme-bg-hover);
   color: var(--theme-text-primary);
 }
+
+/* ---- 助手正文 Markdown 排版（v-html 注入：宿主 .chat-md 带 scoped 属性，
+        其内部标签不带，故命中内部标签需 :deep；直接子元素用普通 scoped 选择器即可） ---- */
+.chat-md { font-size: 12.5px; line-height: 1.7; word-break: break-word; }
+.chat-md > * + * { margin-top: 0.6em; }
+.chat-md :deep(h1),
+.chat-md :deep(h2),
+.chat-md :deep(h3),
+.chat-md :deep(h4) { font-weight: 700; color: #f1f5f9; line-height: 1.4; }
+.chat-md :deep(h1) { font-size: 1.35em; }
+.chat-md :deep(h2) { font-size: 1.22em; }
+.chat-md :deep(h3) { font-size: 1.1em; }
+.chat-md :deep(h4) { font-size: 1em; }
+.chat-md :deep(ul),
+.chat-md :deep(ol) { padding-left: 1.4em; }
+.chat-md :deep(ul) { list-style: disc; }
+.chat-md :deep(ol) { list-style: decimal; }
+.chat-md :deep(li) { margin: 0.2em 0; }
+.chat-md :deep(li > ul),
+.chat-md :deep(li > ol) { margin-top: 0.2em; }
+.chat-md :deep(strong) { color: #f8fafc; font-weight: 700; }
+.chat-md :deep(em) { font-style: italic; }
+.chat-md :deep(a) { color: #22d3ee; text-decoration: underline; text-underline-offset: 2px; }
+.chat-md :deep(blockquote) {
+  border-left: 3px solid rgba(34, 211, 238, 0.5);
+  padding: 0.2em 0 0.2em 0.9em;
+  color: #94a3b8;
+}
+.chat-md :deep(code) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.88em;
+  background: rgba(148, 163, 184, 0.15);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 5px;
+  padding: 0.1em 0.4em;
+}
+.chat-md :deep(pre) {
+  background: #0b1220;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 10px;
+  padding: 0.8em 1em;
+  overflow-x: auto;
+}
+.chat-md :deep(pre code) {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: 0.85em;
+  color: #e2e8f0;
+}
+.chat-md :deep(hr) { border: none; border-top: 1px solid rgba(148, 163, 184, 0.25); }
+.chat-md :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92em;
+  display: block;
+  overflow-x: auto;
+}
+.chat-md :deep(th),
+.chat-md :deep(td) {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  padding: 0.4em 0.7em;
+  text-align: left;
+}
+.chat-md :deep(th) { background: rgba(148, 163, 184, 0.12); font-weight: 700; }
+.chat-md :deep(img) { max-width: 100%; border-radius: 8px; }
 </style>

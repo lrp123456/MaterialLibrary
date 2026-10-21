@@ -5,21 +5,57 @@
 const { DOMINANT_COLORS } = require('./tags-seed');
 const { MODEL_CATALOG } = require('./studio-catalog');
 
-// 12色主色标准板
-const COLOR_OPTIONS = [
-  { value: '#FFFFFF', label: '纯白', hex: '#FFFFFF', isLight: true },
-  { value: '#111827', label: '暗黑', hex: '#111827', isLight: false },
-  { value: '#6B7280', label: '中灰', hex: '#6B7280', isLight: false },
-  { value: '#EF4444', label: '烈红', hex: '#EF4444', isLight: false },
-  { value: '#F97316', label: '亮橙', hex: '#F97316', isLight: false },
-  { value: '#EAB308', label: '暖黄', hex: '#EAB308', isLight: true },
-  { value: '#10B981', label: '翠绿', hex: '#10B981', isLight: false },
-  { value: '#06B6D4', label: '青蓝', hex: '#06B6D4', isLight: false },
-  { value: '#3B82F6', label: '科技蓝', hex: '#3B82F6', isLight: false },
-  { value: '#8B5CF6', label: '典雅紫', hex: '#8B5CF6', isLight: false },
-  { value: '#EC4899', label: '柔粉', hex: '#EC4899', isLight: false },
-  { value: '#78350F', label: '胡桃棕', hex: '#78350F', isLight: false },
-];
+// 12 色主色兜底标准板：与 src/tags-seed.js (DOMINANT_COLORS) 完全一致，
+// value 必须是中文标签（与 assets.dominant_color 及打标词表同源），HEX 仅作展示。
+function isLightHex(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || ''));
+  if (!m) return false;
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return (0.299 * r + 0.587 * g + 0.114 * b) > 168;
+}
+
+const COLOR_FALLBACK = DOMINANT_COLORS.map((c) => ({
+  value: c.name,
+  label: c.name,
+  hex: c.hex,
+  isLight: isLightHex(c.hex),
+}));
+
+/**
+ * 从 tag_dict 动态读取某个维度的标签选项。
+ * value 默认取中文 label（与打标词表、assets.dominant_color 同源），dir 一并保留。
+ */
+function readTagOptions(db, dimension, { includeAll = false, valueKey = 'label' } = {}) {
+  let rows = [];
+  if (db) {
+    try {
+      rows = db.prepare(
+        "SELECT dir, label FROM tag_dict WHERE dimension=? AND deprecated=0 ORDER BY id"
+      ).all(dimension);
+    } catch (_) {
+      rows = [];
+    }
+  }
+  const options = rows
+    .filter((r) => r && r.label)
+    .map((r) => ({ value: valueKey === 'dir' ? r.dir : r.label, label: r.label, dir: r.dir }));
+  if (includeAll) options.unshift({ value: '', label: '全部' });
+  return options;
+}
+
+// 主色选项：优先 tag_dict(dominant_color)，表为空时回退到 DOMINANT_COLORS 标准板
+function readColorOptions(db) {
+  const labels = readTagOptions(db, 'dominant_color');
+  if (!labels.length) return COLOR_FALLBACK;
+  const hexMap = new Map(DOMINANT_COLORS.map((c) => [c.name, c.hex]));
+  return labels.map((o) => {
+    const hex = hexMap.get(o.label) || '#9E9E9E';
+    return { value: o.label, label: o.label, hex, isLight: isLightHex(hex) };
+  });
+}
 
 /**
  * 获取完整的三层素材库菜单与过滤体系
@@ -28,6 +64,27 @@ const COLOR_OPTIONS = [
  * Level 3: 关联过滤维度 (Facets) -> 区分 primary (快捷) 与 advanced (高级)
  */
 function getMenuTree(db) {
+  // 动态词表：全部来自 tag_dict，表为空时由下方静态兜底
+  const colorOptions = readColorOptions(db);
+  const dyn = {
+    space: readTagOptions(db, 'space', { valueKey: 'dir' }),
+    spaceLabel: readTagOptions(db, 'space'),
+    style: readTagOptions(db, 'style_atom'),
+    material: readTagOptions(db, 'material_kind'),
+    furnitureCat: readTagOptions(db, 'furniture_category', { valueKey: 'dir' }),
+    furnitureCatLabel: readTagOptions(db, 'furniture_category'),
+    season: readTagOptions(db, 'season'),
+    clothingCat: readTagOptions(db, 'clothing_category', { valueKey: 'dir' }),
+    clothingStyle: readTagOptions(db, 'clothing_style'),
+    gender: readTagOptions(db, 'gender'),
+    shotType: readTagOptions(db, 'shot_type'),
+    mood: readTagOptions(db, 'mood'),
+  };
+  const pick = (list, fallback) => (Array.isArray(list) && list.length ? list : fallback);
+  const childrenFrom = (list, fallback) =>
+    Array.isArray(list) && list.length
+      ? list.map((o) => ({ key: o.dir, label: o.label }))
+      : fallback;
   return [
     {
       key: 'all',
@@ -41,7 +98,7 @@ function getMenuTree(db) {
           type: 'color_palette',
           multi: true,
           placement: 'primary',
-          options: COLOR_OPTIONS,
+          options: colorOptions,
         },
         {
           key: 'orientation',
@@ -64,7 +121,7 @@ function getMenuTree(db) {
       key: 'interior',
       label: '室内空间',
       icon: 'sofa',
-      children: [
+      children: childrenFrom(dyn.space, [
         { key: 'living_room', label: '客厅' },
         { key: 'bedroom', label: '主卧' },
         { key: 'study', label: '书房' },
@@ -73,7 +130,7 @@ function getMenuTree(db) {
         { key: 'dining_room', label: '餐厅' },
         { key: 'foyer', label: '门厅玄关' },
         { key: 'balcony', label: '阳台休闲' },
-      ],
+      ]),
       facets: [
         {
           key: 'space',
@@ -81,7 +138,7 @@ function getMenuTree(db) {
           type: 'tag_group',
           multi: false,
           placement: 'primary',
-          options: [
+          options: pick(dyn.spaceLabel, [
             { value: '客厅', label: '客厅' },
             { value: '主卧', label: '主卧' },
             { value: '书房', label: '书房' },
@@ -89,7 +146,7 @@ function getMenuTree(db) {
             { value: '厨房', label: '厨房' },
             { value: '餐厅', label: '餐厅' },
             { value: '门厅玄关', label: '玄关' },
-          ],
+          ]),
         },
         {
           key: 'style_atom',
@@ -97,13 +154,13 @@ function getMenuTree(db) {
           type: 'tag_group',
           multi: true,
           placement: 'primary',
-          options: [
+          options: pick(dyn.style, [
             { value: '现代极简', label: '现代极简' },
             { value: '侘寂风', label: '侘寂风' },
             { value: '法式中古', label: '法式中古' },
             { value: '轻奢新中式', label: '轻奢中式' },
             { value: '工业美式', label: '工业风' },
-          ],
+          ]),
         },
         {
           key: 'dominant_color',
@@ -111,7 +168,7 @@ function getMenuTree(db) {
           type: 'color_palette',
           multi: true,
           placement: 'primary',
-          options: COLOR_OPTIONS,
+          options: colorOptions,
         },
         {
           key: 'material_kind',
@@ -119,13 +176,13 @@ function getMenuTree(db) {
           type: 'tag_group',
           multi: true,
           placement: 'advanced',
-          options: [
+          options: pick(dyn.material, [
             { value: '微水泥', label: '微水泥' },
             { value: '大理石岩板', label: '岩板大理石' },
             { value: '胡桃原木', label: '胡桃原木' },
             { value: '亚麻棉麻', label: '亚麻布艺' },
             { value: '黄铜金属', label: '黄铜金属' },
-          ],
+          ]),
         },
         {
           key: 'orientation',
@@ -143,7 +200,7 @@ function getMenuTree(db) {
       ],
     },
     {
-      key: 'architecture',
+      key: 'exterior',
       label: '建筑形态',
       icon: 'building',
       children: [
@@ -159,11 +216,11 @@ function getMenuTree(db) {
           type: 'tag_group',
           multi: true,
           placement: 'primary',
-          options: [
+          options: pick(dyn.style, [
             { value: '清水混凝土', label: '清水混凝土' },
             { value: '现代主义悬挑', label: '几何悬挑' },
             { value: '参数化立面', label: '参数化' },
-          ],
+          ]),
         },
         {
           key: 'dominant_color',
@@ -171,7 +228,7 @@ function getMenuTree(db) {
           type: 'color_palette',
           multi: true,
           placement: 'primary',
-          options: COLOR_OPTIONS,
+          options: colorOptions,
         },
         {
           key: 'orientation',
@@ -191,13 +248,13 @@ function getMenuTree(db) {
       key: 'furniture',
       label: '家具单品',
       icon: 'sofa',
-      children: [
+      children: childrenFrom(dyn.furnitureCat, [
         { key: 'sofa', label: '沙发椅凳' },
         { key: 'table', label: '桌几茶几' },
         { key: 'cabinet', label: '储物柜架' },
         { key: 'bed', label: '床榻床头' },
         { key: 'lighting', label: '灯具照明' },
-      ],
+      ]),
       facets: [
         {
           key: 'furniture_category',
@@ -205,12 +262,12 @@ function getMenuTree(db) {
           type: 'tag_group',
           multi: false,
           placement: 'primary',
-          options: [
+          options: pick(dyn.furnitureCatLabel, [
             { value: '沙发椅凳', label: '沙发椅凳' },
             { value: '桌几茶几', label: '桌几茶几' },
             { value: '储物柜架', label: '储物柜架' },
             { value: '灯具照明', label: '灯具照明' },
-          ],
+          ]),
         },
         {
           key: 'dominant_color',
@@ -218,7 +275,7 @@ function getMenuTree(db) {
           type: 'color_palette',
           multi: true,
           placement: 'primary',
-          options: COLOR_OPTIONS,
+          options: colorOptions,
         },
         {
           key: 'material_kind',
@@ -226,12 +283,12 @@ function getMenuTree(db) {
           type: 'tag_group',
           multi: true,
           placement: 'advanced',
-          options: [
+          options: pick(dyn.material, [
             { value: '真皮头层皮', label: '皮质' },
             { value: '实木木纹', label: '实木' },
             { value: '岩板石材', label: '岩板' },
             { value: '不锈钢金属', label: '金属' },
-          ],
+          ]),
         },
       ],
     },
@@ -239,12 +296,12 @@ function getMenuTree(db) {
       key: 'clothing',
       label: '服装服饰',
       icon: 'shirt',
-      children: [
+      children: childrenFrom(dyn.clothingCat, [
         { key: 'tops', label: '上衣外套' },
         { key: 'bottoms', label: '裤装裙装' },
         { key: 'suit', label: '西服套装' },
         { key: 'shoes', label: '鞋履配饰' },
-      ],
+      ]),
       facets: [
         {
           key: 'season',
@@ -252,12 +309,12 @@ function getMenuTree(db) {
           type: 'tag_group',
           multi: false,
           placement: 'primary',
-          options: [
+          options: pick(dyn.season, [
             { value: '春季', label: '春季' },
             { value: '夏季', label: '夏季' },
             { value: '秋季', label: '秋季' },
             { value: '冬季', label: '冬季' },
-          ],
+          ]),
         },
         {
           key: 'clothing_style',
@@ -265,11 +322,11 @@ function getMenuTree(db) {
           type: 'tag_group',
           multi: true,
           placement: 'primary',
-          options: [
+          options: pick(dyn.clothingStyle, [
             { value: '极简通勤', label: '极简通勤' },
             { value: '轻奢优雅', label: '轻奢优雅' },
             { value: '街头潮流', label: '街头潮流' },
-          ],
+          ]),
         },
         {
           key: 'dominant_color',
@@ -277,7 +334,7 @@ function getMenuTree(db) {
           type: 'color_palette',
           multi: true,
           placement: 'primary',
-          options: COLOR_OPTIONS,
+          options: colorOptions,
         },
       ],
     },
@@ -297,10 +354,10 @@ function getMenuTree(db) {
           type: 'tag_group',
           multi: false,
           placement: 'primary',
-          options: [
+          options: pick(dyn.gender, [
             { value: '女性', label: '女性' },
             { value: '男性', label: '男性' },
-          ],
+          ]),
         },
         {
           key: 'shot_type',
@@ -308,11 +365,11 @@ function getMenuTree(db) {
           type: 'tag_group',
           multi: false,
           placement: 'primary',
-          options: [
+          options: pick(dyn.shotType, [
             { value: '全身照', label: '全身' },
             { value: '半身特写', label: '半身' },
             { value: '面部微距', label: '面部特写' },
-          ],
+          ]),
         },
       ],
     },
@@ -353,11 +410,11 @@ function getMenuTree(db) {
           type: 'tag_group',
           multi: false,
           placement: 'primary',
-          options: [
+          options: pick(dyn.mood, [
             { value: '舒缓放松', label: '舒缓' },
             { value: '高端奢华', label: '轻奢' },
             { value: '科技未来', label: '科技' },
-          ],
+          ]),
         },
       ],
     },
@@ -371,43 +428,86 @@ function getMenuTree(db) {
   ];
 }
 
+// 静态兜底模型目录（model_contracts 为空时使用）
+const DEFAULT_STUDIO_MODELS = [
+  {
+    id: 'doubao-seed-2-0',
+    name: 'Seedream 5.0 Flash',
+    desc: '火山方舟毫秒级超快响应，支持原生交互编辑与精准重绘',
+    provider: 'volcengine',
+    isDefault: true,
+    type: 'image',
+    caps: ['coords_bbox', 'inpaint', 'relight', 'super_resolution'],
+  },
+  {
+    id: 'doubao-seed-2-0-pro',
+    name: 'Seedream 5.0 Pro',
+    desc: '4K超高画质电影级渲染，精细光影与微距材质呈现',
+    provider: 'volcengine',
+    isDefault: false,
+    type: 'image',
+    caps: ['coords_bbox', 'inpaint', 'texture', 'swap', 'expand'],
+  },
+  {
+    id: 'doubao-seedance-2-0-lite',
+    name: 'Seedance 2.0 空间视频',
+    desc: '首创空间拓扑一致性视频生成引擎，支持多机位漫游',
+    provider: 'volcengine',
+    isDefault: false,
+    type: 'video',
+    caps: ['camera_walkthrough', 'motion_control'],
+  },
+];
+
+/**
+ * 从 model_contracts 动态读取已启用的生图/生视频模型；
+ * 表为空时回退静态目录，保证客户端下拉永不空。
+ */
+function readStudioModels(db) {
+  let rows = [];
+  if (db) {
+    try {
+      rows = db.prepare(`
+        SELECT id, name, vendor_model_id, capability_id
+        FROM model_contracts
+        WHERE enabled=1
+          AND capability_id IN ('ark_image','agnes_image','qwenimage_local','ark_video','agnes_video')
+        ORDER BY CASE capability_id
+          WHEN 'ark_image' THEN 0 WHEN 'agnes_image' THEN 1 WHEN 'qwenimage_local' THEN 2
+          WHEN 'ark_video' THEN 3 ELSE 4 END, id
+      `).all();
+    } catch (_) {
+      rows = [];
+    }
+  }
+  if (!rows.length) return DEFAULT_STUDIO_MODELS;
+
+  const models = rows.map((r) => {
+    const isVideo = /video/i.test(r.capability_id || '');
+    return {
+      id: r.vendor_model_id || r.id,
+      name: r.name || r.id,
+      desc: isVideo ? '服务端契约注册的空间视频生成引擎' : '服务端契约注册的图像生成引擎',
+      provider: /agnes/i.test(r.capability_id || '') ? 'agnes' : (/qwen/i.test(r.capability_id || '') ? 'local' : 'volcengine'),
+      isDefault: false,
+      type: isVideo ? 'video' : 'image',
+      caps: isVideo ? ['motion_control', 'camera_walkthrough'] : ['coords_bbox', 'inpaint'],
+    };
+  });
+  const firstImage = models.find((m) => m.type === 'image');
+  (firstImage || models[0]).isDefault = true;
+  return models;
+}
+
 /**
  * 获取创作工坊驱动元数据 (Studio Schema)
  * 模型列表、输入框快捷/高级项配置、固定高优按钮与本地缓存策略
  */
-function getStudioSchema() {
+function getStudioSchema(db) {
   return {
     version: '2026.10.11',
-    // 1. 模型列表 (支持 Web 与 App 下拉切换)
-    models: [
-      {
-        id: 'doubao-seed-2-0',
-        name: 'Seedream 5.0 Flash',
-        desc: '火山方舟毫秒级超快响应，支持原生交互编辑与精准重绘',
-        provider: 'volcengine',
-        isDefault: true,
-        type: 'image',
-        caps: ['coords_bbox', 'inpaint', 'relight', 'super_resolution'],
-      },
-      {
-        id: 'doubao-seed-2-0-pro',
-        name: 'Seedream 5.0 Pro',
-        desc: '4K超高画质电影级渲染，精细光影与微距材质呈现',
-        provider: 'volcengine',
-        isDefault: false,
-        type: 'image',
-        caps: ['coords_bbox', 'inpaint', 'texture', 'swap', 'expand'],
-      },
-      {
-        id: 'doubao-seedance-2-0-lite',
-        name: 'Seedance 2.0 空间视频',
-        desc: '首创空间拓扑一致性视频生成引擎，支持多机位漫游',
-        provider: 'volcengine',
-        isDefault: false,
-        type: 'video',
-        caps: ['camera_walkthrough', 'motion_control'],
-      },
-    ],
+    // 1. 模型列表 (支持 Web 与 App 下拉切换，动态来自 model_contracts)
+    models: readStudioModels(db),
 
     // 2. 输入控制项 (服务端动态控制快捷项与高级抽屉项)
     inputControls: {

@@ -140,14 +140,12 @@ const OFFICIAL_PROMPT_TEMPLATES = {
     name: '室内与建筑空间多维打标',
     category: 'tag',
     template: `你是室内设计空间素材标注器。只输出 JSON，不要 markdown。
-规则：空间 1 个；文化风格 style_main 为数组（0-3 个，可多选）；wood_style 木系单选或 null；硬装≤2、软装≤2。不要输出色系、地域、调性、构图、机位、光线、AI生成、装修实拍。
-dir 只能从枚举中选；空间拿不准给 other；风格实在拿不准才给 eclectic_other。
+规则：空间 1 个；风格 style_main 为数组（1-3 个，多标签共存检索，严禁为空）；硬装≤2、软装≤2。不要输出色系、地域、调性、构图、机位、光线、AI生成、装修实拍。
+dir 只能从枚举中选；空间拿不准给 other；若画面融合多种风格（如现代极简与原木风并存），必须输出所有对应的风格标签（最多3个）；严禁输出混搭；只有完全不属于任何已知风格时才输出 other。
 {
   "space": "场景空间，严格单选 [{{@dict.space}}]。门外未进户为 porch(门外门廊)，进门过渡区为 foyer(门内门厅)。",
-  "style_main": "文化/流派风格。输出字符串数组，0-3 个 dir，从枚举中选 [{{@dict.style_atom}}]。\\n判定要点：法式=护墙板/线脚/人字拼/对称；意式=大理石皮革低矮雕塑感；托斯卡纳=赤陶木梁锻铁陶罐乡土；地中海=白墙蓝白花砖拱廊；奶油风=无法式符号的浅暖软融；中古风=1945-75柚木细锥腿有机弧线；现代极简=冷感几何留白；工业=裸砖水泥管道；现代美式=当代舒适；美式乡村=农舍壁炉格纹旧木；南洋=藤编柚木绿植百叶；宋式美学=雅素文人；古典中式=明清红木繁雕对称；新中式=传统符号+现代转译；侘寂=斑驳枯寂；混搭=多风格强冲突。\\n【禁止】欧式轻奢、原木日式、日式、北欧、英式、民宿风。只有实在拿不准时才用 eclectic_other(混搭)。",
+  "style_main": "风格流派与木系风格。输出字符串数组，1-3 个 dir，从枚举中选 [{{@dict.style_atom}}]。\\n判定要点：法式=护墙板/线脚/人字拼/对称；意式=大理石皮革低矮雕塑感；托斯卡纳=赤陶木梁锻铁陶罐乡土；地中海=白墙蓝白花砖拱廊；奶油风=无法式符号的浅暖软融；中古风=1945-75柚木细锥腿有机弧线；现代极简=冷感几何留白；工业=裸砖水泥管道；现代美式=当代舒适；美式乡村=农舍壁炉格纹旧木；南洋=藤编柚木绿植百叶；宋式美学=雅素文人；古典中式=明清红木繁雕对称；新中式=传统符号+现代转译；侘寂=斑驳枯寂；自然原木风=浅色松/白橡/原色自然表面；深色原木风=胡桃/深橡/烟熏深木表面；自然复古原木风=浅色做旧/磨损/锯痕；深色复古原木风=深色做旧/历史斑驳感；other=不在以上体系内。\\n【禁止】混搭、欧式轻奢、原木日式、日式、北欧、英式、民宿风。画面有多风格时输出具体各风格，不可输出混搭；无法归类才给 other，数组不得为空。",
   "style_confidence": "0到1之间的小数，表示风格判定置信度",
-  "wood_style": "木系风格（深浅×做旧），严格单选 dir 或 null [{{@dict.wood_style}}]。\\n浅=松/白橡/原色，深=胡桃/深橡/烟熏；做旧=裂痕/虫眼/大面积包浆/明显磨损/粗糙锯痕。光滑均匀色面不算做旧。非木质主体必须 null。只看木面表面，不看布局文化。",
-  "wood_confidence": "0到1之间的小数",
   "materials_hard": "硬装主材：地面/墙面/木作/五金/玻璃隔断等大面积主材，最多2个。【禁止】普通大白墙/顶面标 paint；普通透明门窗玻璃标 glass_clear，只有特色玻璃隔断/家具才标。只能选 [{{@dict.material_hard}}]",
   "materials_soft": "软装主材：织物/皮革/藤编，最多2个。只能选 [{{@dict.material_soft}}]",
   "has_watermark": false,
@@ -169,8 +167,7 @@ dir 只能从枚举中选，拿不准给 null 或 0。
   "dominant_color": "该家具单品的唯一主体视觉颜色，严格单选 [{{@dict.dominant_color}}]",
   "furniture_craft": "表面工艺与质感，最多3个 [{{@dict.furniture_craft}}]",
   "furniture_form": "造型结构特征，单选 [{{@dict.furniture_form}}]",
-  "style_main": "设计流派/风格，可多选数组 [{{@dict.style_atom}}]。禁止：欧式轻奢、原木日式、日式、北欧、英式。",
-  "wood_style": "木系（深浅×做旧）单选或 null [{{@dict.wood_style}}]。非木 null。",
+  "style_main": "设计流派/风格（含木系），可多选数组（1-3个，含四种木色）[{{@dict.style_atom}}]。严禁混搭、欧式轻奢、原木日式、日式、北欧、英式。拿不准给 other。",
   "classic_design": "若为经典名品款名选一项，非名款给 other_classic 或 null [{{@dict.classic_design}}]",
   "recommended_spaces": "推荐适用的室内空间，最多2个 [{{@dict.space}}]",
   "ai_generated": false,
@@ -392,7 +389,7 @@ const RAW_OPERATOR_CATALOG = [
     category: 'vlm',
     categoryLabel: '视觉理解与打标 (VLM)',
     icon: 'home',
-    description: '针对室内/建筑空间，动态注入 space/style_atom/wood_style/material 词典枚举输出多维标签',
+    description: '针对室内/建筑空间，动态注入 space/style_atom(含木系)/material 词典枚举输出多维多标签',
     needsModel: true,
     modelDomain: 'vision',
     defaultModelId: 'workflow_vision',
@@ -401,7 +398,7 @@ const RAW_OPERATOR_CATALOG = [
     supportsSnippets: false,
     defaultSnippets: [],
     defaultParams: { temperature: 0.1, categoryScope: 'interior', skipCluster: true },
-    outputs: ['tags', 'space', 'style_main', 'wood_style', 'materials_hard', 'materials_soft'],
+    outputs: ['tags', 'space', 'style_main', 'materials_hard', 'materials_soft'],
   },
   {
     type: 'tag_furniture',

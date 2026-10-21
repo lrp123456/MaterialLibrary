@@ -23,6 +23,55 @@ const { regionClause, regionNoteOf, routeFor, reconcilePrompt, stripCoordSyntax 
 const { describeRegion, needsVlm } = require('./region-vlm');
 
 const OPS = new Set(['replace', 'insert', 'add', 'space', 'remove', 'expand', 'style_transfer', 'clarity', 'install', 'gap']);
+const OP_ALIAS = {
+  install: 'insert',
+  gap: 'space',
+  watermark: 'remove',
+  upscale: 'clarity',
+};
+
+/**
+ * 精修结果统一落盘为 derivatives（自动计算 sha256/md5/phash 并登记 export_registry）
+ */
+async function persistEditDerivative(services, assetFid, kind, buffer, params = {}) {
+  if (!assetFid || !services || !services.db || !buffer || !buffer.length) return null;
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const tmpFile = path.join(os.tmpdir(), `edit_${kind}_${assetFid}_${Date.now()}.jpg`);
+  try {
+    fs.writeFileSync(tmpFile, buffer);
+    const { createDerivative } = require('../derivatives');
+    const meta = await sharp(buffer).metadata().catch(() => ({}));
+    return await createDerivative(services, {
+      assetFid,
+      kind,
+      srcPath: tmpFile,
+      fileName: `${kind}_${Date.now()}.jpg`,
+      width: meta.width || null,
+      height: meta.height || null,
+      mime: 'image/jpeg',
+      params,
+    });
+  } catch (e) {
+    console.warn('[edit-run] 写入衍生图失败:', e.message);
+    return null;
+  } finally {
+    try { fs.unlinkSync(tmpFile); } catch (_) {}
+  }
+}
+
+/** 自定义风格的 AI 锚定描述 + 用户特别要求，合成一段可直插模板的约束文本。 */
+function buildStyleExtraPrompt(stylePrompt, extraPrompt) {
+  const blocks = [];
+  const anchor = String(stylePrompt || '').trim();
+  if (anchor) {
+    blocks.push(`【风格锚定描述（必须逐条在画面中落实，但不要改变空间几何结构）】${anchor}`);
+  }
+  const extra = String(extraPrompt || '').trim();
+  if (extra) blocks.push(`【用户特别要求】${extra}。`);
+  return blocks.join('\n');
+}
 
 function apiBoxFromBounds(minX, minY, maxX, maxY, sw, sh) {
   return {
@@ -276,8 +325,7 @@ async function handleSpace(services, { sceneImageBuffer, selection, prompt, side
  */
 async function handleEditRun(services, opts) {
   let op = String(opts.op || 'replace').toLowerCase();
-  if (op === 'install') op = 'insert';
-  if (op === 'gap') op = 'space';
+  op = OP_ALIAS[op] || op;
   if (!OPS.has(op)) throw new Error('不支持的操作: ' + op);
   const sceneImageBuffer = opts.sceneImageBuffer;
   if (!sceneImageBuffer) throw new Error('缺少场景图');
@@ -304,6 +352,10 @@ async function handleEditRun(services, opts) {
       const expandPrompt = `【画幅外扩】以图1为基准向四周延展画幅，补全被裁掉的墙面、地面、天花与相邻空间，透视与光影必须与原图无缝延续。${extra ? '补充要求：' + extra : ''}`;
       const generated = await runAdapter(services, [sceneImageBuffer], expandPrompt, pickedImageModel);
       const m2 = await sharp(generated).metadata();
+      await persistEditDerivative(services, opts.assetFid, 'ai_expand', generated, {
+        op: 'expand',
+        model: pickedImageModel,
+      });
       return {
         buffer: generated,
         apiBox: { x1: 0, y1: 0, x2: 999, y2: 999 },
@@ -334,6 +386,10 @@ async function handleEditRun(services, opts) {
       });
     }
     const m2 = await sharp(buffer).metadata();
+    await persistEditDerivative(services, opts.assetFid, 'ai_expand', buffer, {
+      op: 'expand',
+      method,
+    });
     return {
       buffer,
       apiBox: { x1: 0, y1: 0, x2: 999, y2: 999 },
@@ -346,8 +402,10 @@ async function handleEditRun(services, opts) {
   if (op === 'style_transfer') {
     const targetStyle = opts.targetStyle || opts.productName || '意式';
     const sourceStyle = opts.sourceStyle || '';
+    const stylePrompt = stripCoordSyntax(opts.stylePrompt || '');
     const extraPrompt = stripCoordSyntax(opts.extraPrompt || opts.prompt || '');
     const fromDesc = sourceStyle ? `（原风格：${sourceStyle}）` : '';
+    const promptExtra = buildStyleExtraPrompt(stylePrompt, extraPrompt);
     
     let finalPrompt = '';
     if (services && services.db) {
@@ -361,7 +419,7 @@ async function handleEditRun(services, opts) {
           vars: {
             source_style: fromDesc,
             target_style: targetStyle,
-            extra_prompt: extraPrompt ? `【用户特别要求】${extraPrompt}。` : '',
+            extra_prompt: promptExtra ? `${promptExtra}\n` : '',
           },
         });
         if (compiled && compiled.prompt) finalPrompt = compiled.prompt;
@@ -375,7 +433,7 @@ async function handleEditRun(services, opts) {
 1. 墙面与天花：将现有饰面全面替换为符合${targetStyle}风格的标准材质、护墙板或艺术漆，调整吊顶与现代灯光照明系统；
 2. 地面铺装：将原地面替换为匹配${targetStyle}的通铺大理石、微水泥或高级地板；
 3. 软装与家具：将沙发、茶几、单椅、地毯、窗帘、灯具与软装摆件彻底重塑为地道的${targetStyle}设计经典款；
-${extraPrompt ? `【用户特别要求】${extraPrompt}。\n` : ''}
+${promptExtra ? `${promptExtra}\n` : ''}
 【出图标准】整体光影渲染真实自然，材质质感极度细腻逼真，空间透视严丝合缝，无任何多余畸变杂物，商业室内设计大师级实景大片摄影。`;
     }
 
@@ -402,6 +460,7 @@ ${extraPrompt ? `【用户特别要求】${extraPrompt}。\n` : ''}
             targetStyle,
             sourceStyle: sourceStyle || null,
             strengthLevel: opts.strengthLevel || 'standard',
+            stylePrompt: stylePrompt || null,
             extraPrompt: extraPrompt || null,
           }
         });
@@ -440,16 +499,46 @@ ${extraPrompt ? `【用户特别要求】${extraPrompt}。\n` : ''}
     }
 
     const generated = await runAdapter(services, [sceneImageBuffer], finalPrompt, opts.model);
+    let finalBuffer = generated;
+    // targetClarity: 2K / 4K / 8K —— 按目标长边做 Lanczos 重采样，真正落实档位
+    const clarMap = { '2K': 2048, '4K': 3840, '8K': 7680 };
+    const targetLong = clarMap[String(opts.targetClarity || '').toUpperCase()] || 0;
+    if (targetLong) {
+      try {
+        const gm = await sharp(finalBuffer).metadata();
+        const long = Math.max(gm.width || 0, gm.height || 0);
+        if (long && long < targetLong) {
+          const resizeOpt = gm.width >= gm.height ? { width: targetLong } : { height: targetLong };
+          finalBuffer = await sharp(finalBuffer)
+            .resize({ ...resizeOpt, fit: 'inside', withoutEnlargement: false, kernel: 'lanczos3' })
+            .jpeg({ quality: 92 })
+            .toBuffer();
+        }
+      } catch (e) {
+        console.warn('[edit-run] clarity resize failed:', e.message);
+      }
+    }
+    await persistEditDerivative(services, opts.assetFid, 'ai_clarity', finalBuffer, {
+      targetClarity: opts.targetClarity || null,
+      model: opts.model || null,
+    });
     return {
-      buffer: generated,
+      buffer: finalBuffer,
       apiBox: { x1: 0, y1: 0, x2: 999, y2: 999 },
       untouchedDiff: { unchangedRatio: 1, note: '超分增强全图保真' },
       prompt: finalPrompt,
     };
   }
 
-  const selection = normalizeSelection(opts.region, sw, sh);
-  if (!selection) throw new Error('未指定有效选区');
+  let selection = normalizeSelection(opts.region, sw, sh);
+  if (!selection) {
+    // 全局去水印：未给选区时按整图处理，交由提示词完成全图水印清除
+    if (op === 'remove' && opts.removeWatermark) {
+      selection = { left: 0, top: 0, right: sw, bottom: sh, unit: 'px' };
+    } else {
+      throw new Error('未指定有效选区');
+    }
+  }
 
   // ★ 出口路由：一次性决定「这个模型到底能吃什么选区」，并把结果转成提示词子句。
   //   coords_bbox → `图1 <bbox>…</bbox>`；coords_point → `<point>`；
@@ -587,6 +676,13 @@ ${extraPrompt ? `【用户特别要求】${extraPrompt}。\n` : ''}
     ? { unchangedRatio: null, note: 'space 不贴回' }
     : await untouchedDiff(sceneImageBuffer, result.buffer, selection);
 
+  await persistEditDerivative(services, opts.assetFid, 'ai_' + op, result.buffer, {
+    op,
+    model: opts.model || null,
+    prompt: result.prompt || null,
+    installMode: op === 'insert' ? (opts.installMode || null) : undefined,
+  });
+
   return {
     buffer: result.buffer,
     apiBox: result.apiBox,
@@ -614,4 +710,5 @@ module.exports = {
   untouchedDiff,
   normalizeSelection,
   apiBoxFromBounds,
+  buildStyleExtraPrompt,
 };

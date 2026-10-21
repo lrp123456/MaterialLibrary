@@ -1,16 +1,15 @@
 import type { FrameRate } from "opencut-wasm";
 import { EXPORT_MIME_TYPES } from "./mime-types";
 
+export const EXPORT_FORMAT_VALUES = ["mp4", "webm"] as const;
+export type ExportFormat = (typeof EXPORT_FORMAT_VALUES)[number];
+
 export const EXPORT_QUALITY_VALUES = [
 	"low",
 	"medium",
 	"high",
 	"very_high",
 ] as const;
-
-export const EXPORT_FORMAT_VALUES = ["mp4", "webm"] as const;
-
-export type ExportFormat = (typeof EXPORT_FORMAT_VALUES)[number];
 export type ExportQuality = (typeof EXPORT_QUALITY_VALUES)[number];
 
 export interface ExportOptions {
@@ -69,11 +68,13 @@ export function downloadBuffer({
 	URL.revokeObjectURL(url);
 }
 
-export type DeliverMode = "upload" | "download";
+export type DeliverMode = "upload" | "download" | "both";
 
 export interface DeliveredAsset {
 	ok: boolean;
 	mode: DeliverMode;
+	downloaded?: boolean;
+	uploaded?: boolean;
 	fid?: string;
 	url?: string;
 	error?: string;
@@ -89,10 +90,10 @@ function authHeaders(): Record<string, string> {
 }
 
 /**
- * 成片出口。
- * - upload（默认）：直接进素材库成品架，用户可在「成品」里看到；
- * - download：退回浏览器下载，用于离线或临时导出。
- * 上传失败不静默 —— 回退到下载并带回错误，避免用户以为已经入库。
+ * 成品双出口交付（同时导出到本地并同步至素材库成品库）。
+ * - 默认模式同时触发：
+ *   1. 浏览器端下载到本地磁盘（downloadBuffer）
+ *   2. POST /api/upload（shelf='finished'）自动归档入库
  */
 export async function deliverBuffer({
 	buffer,
@@ -107,32 +108,58 @@ export async function deliverBuffer({
 	mode?: DeliverMode;
 	shelf?: string;
 }): Promise<DeliveredAsset> {
-	if (mode === "download") {
-		downloadBuffer({ buffer, filename, mimeType });
-		return { ok: true, mode };
-	}
+	// 无论如何，首先触发本地下载到用户计算机
 	try {
+		downloadBuffer({ buffer, filename, mimeType });
+	} catch (dlErr) {
+		console.warn("本地下载触发异常:", dlErr);
+	}
+
+	// 如果仅需本地下载，直接返回
+	if (mode === "download") {
+		return { ok: true, mode: "download", downloaded: true };
+	}
+
+	// 同步上传至素材库成品库
+	try {
+		// 分类按实际产物推断：纯音频导出以前会被记成视频，进库后归类错乱
+		const category = mimeType.startsWith("audio/")
+			? "audio"
+			: mimeType.startsWith("image/")
+				? "image"
+				: "video";
+
 		const form = new FormData();
 		form.append("file", new Blob([buffer], { type: mimeType }), filename);
 		form.append("shelf", shelf);
+		form.append("category", category);
+
 		const res = await fetch("/api/upload", {
 			method: "POST",
 			headers: authHeaders(),
 			body: form,
 		});
-		if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
+
+		if (!res.ok) {
+			const errText = await res.text();
+			throw new Error(errText || `HTTP ${res.status}`);
+		}
+
 		const data = await res.json();
 		return {
 			ok: true,
-			mode,
+			mode: "both",
+			downloaded: true,
+			uploaded: true,
 			fid: data.fid,
 			url: data.fid ? `/api/viewer/assets/${encodeURIComponent(data.fid)}/file` : undefined,
 		};
 	} catch (e) {
-		downloadBuffer({ buffer, filename, mimeType });
 		return {
 			ok: false,
-			mode,
+			mode: "both",
+			downloaded: true,
+			uploaded: false,
 			error: e instanceof Error ? e.message : String(e),
 		};
 	}

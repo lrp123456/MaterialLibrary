@@ -142,6 +142,10 @@ function findFingerprintHit(db, { md5, sha256, phash, excludeFid = '' } = {}, op
 
   if (!phash) return null;
 
+  // 决策 1：入库网关严格只拦绝对重复（dist === 0）；1 <= dist <= 8 连拍图交由工作台人工筛选
+  const maxSameDist = opts.exactOnly ? 0 : sameThreshold;
+  const maxNearDist = opts.exactOnly ? 0 : nearThreshold;
+
   const since = Date.now() - PHASH_WINDOW_MS;
 
   // 3) 感知哈希：近三天入库的原图
@@ -157,17 +161,17 @@ function findFingerprintHit(db, { md5, sha256, phash, excludeFid = '' } = {}, op
       .all(since, excludeFid, excludeFid);
     for (const r of rows) {
       const dist = hamming(phash, r.phash);
-      if (dist > nearThreshold) continue;
+      if (dist > maxNearDist) continue;
       const cand = {
         hit: true,
-        reason: dist <= sameThreshold ? `phash:${dist}` : `phash_near:${dist}`,
+        reason: dist <= maxSameDist ? `phash:${dist}` : `phash_near:${dist}`,
         fid: r.fid,
         derivativeId: null,
         dist,
         kind: 'origin',
       };
       if (!best || cand.dist < best.dist) best = cand;
-      if (dist <= sameThreshold) return best;
+      if (dist <= maxSameDist) return best;
     }
   } catch (_) {}
 
@@ -185,7 +189,7 @@ function findFingerprintHit(db, { md5, sha256, phash, excludeFid = '' } = {}, op
       .all(...PHASH_WINDOW_DERIV_KINDS, since, excludeFid, excludeFid);
     for (const r of rows) {
       const dist = hamming(phash, r.phash);
-      if (dist > nearThreshold) continue;
+      if (dist > maxNearDist) continue;
       const cand = {
         hit: true,
         reason: dist <= sameThreshold ? `deriv_phash:${dist}` : `deriv_phash_near:${dist}`,
@@ -195,7 +199,7 @@ function findFingerprintHit(db, { md5, sha256, phash, excludeFid = '' } = {}, op
         kind: r.kind || 'derivative',
       };
       if (!best || cand.dist < best.dist) best = cand;
-      if (dist <= sameThreshold) return best;
+      if (dist <= maxSameDist) return best;
     }
   } catch (_) {}
 
@@ -206,7 +210,7 @@ function findFingerprintHit(db, { md5, sha256, phash, excludeFid = '' } = {}, op
     ).all(since);
     for (const r of rows) {
       const dist = hamming(phash, r.phash);
-      if (dist > nearThreshold) continue;
+      if (dist > maxNearDist) continue;
       const cand = {
         hit: true,
         reason: dist <= sameThreshold ? `export_phash:${dist}` : `export_phash_near:${dist}`,
@@ -216,7 +220,7 @@ function findFingerprintHit(db, { md5, sha256, phash, excludeFid = '' } = {}, op
         kind: r.kind || 'export',
       };
       if (!best || cand.dist < best.dist) best = cand;
-      if (dist <= sameThreshold) return best;
+      if (dist <= maxSameDist) return best;
     }
   } catch (_) {}
 

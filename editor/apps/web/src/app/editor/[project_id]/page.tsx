@@ -35,6 +35,8 @@ import {
 	getBookmarkPreviewOverlaySource,
 } from "@/timeline/bookmarks/index";
 
+import { MlsBridge } from "@/components/mls-bridge";
+
 export default function Editor() {
 	const params = useParams();
 	const projectId = params.project_id as string;
@@ -59,6 +61,7 @@ export default function Editor() {
 	return (
 		<MobileGate>
 			<EditorProvider projectId={projectId}>
+				<MlsBridge />
 				<div className="bg-background flex h-screen w-screen flex-col overflow-hidden">
 					<DegradedRendererBanner />
 					<EditorHeader />
@@ -81,13 +84,13 @@ function DegradedRendererBanner() {
 
 	return (
 		<div className="bg-accent border-b h-9 flex items-center justify-center gap-2 text-xs text-muted-foreground">
-			<span>For the best experience, open OpenCut in Chrome.</span>
+			<span>为了获得最佳体验，请使用 Chrome 浏览器打开剪辑工作台。</span>
 			<Button
 				variant="text"
 				size="icon"
 				className="p-0 w-auto [&_svg]:size-3.5"
 				onClick={() => setDismissed(true)}
-				aria-label="Dismiss"
+				aria-label="关闭提示"
 			>
 				<HugeiconsIcon icon={Cancel01Icon} />
 			</Button>

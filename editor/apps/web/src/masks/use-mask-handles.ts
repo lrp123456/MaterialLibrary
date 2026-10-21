@@ -17,6 +17,7 @@ import type { Mask, MaskHandleId, MaskInteractionResult } from "@/masks/types";
 import type { MaskableElement } from "@/timeline";
 import { isMaskableElement } from "@/timeline/element-utils";
 import { registerCanceller } from "@/editor/cancel-interaction";
+import { DEFAULT_CANVAS_SIZE } from "@/canvas/sizes";
 
 interface DragState {
 	trackId: string;
@@ -111,7 +112,7 @@ export function useMaskHandles({
 	const currentTime = useEditor((e) => e.playback.getCurrentTime());
 	const mediaAssets = useEditor((e) => e.media.getAssets());
 	const canvasSize = useEditor(
-		(e) => e.project.getActive().settings.canvasSize,
+		(e) => e.project.getActiveOrNull()?.settings.canvasSize ?? DEFAULT_CANVAS_SIZE,
 	);
 	const selectedElements = useEditor((e) => e.selection.getSelectedElements());
 	const selectedMaskPointSelection = useEditor((e) =>

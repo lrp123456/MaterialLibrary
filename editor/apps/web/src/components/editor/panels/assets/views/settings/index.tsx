@@ -31,6 +31,8 @@ import { dimensionToAspectRatio } from "@/utils/geometry";
 import { formatNumberForDisplay } from "@/utils/math";
 import { OcSquarePlusIcon } from "@/components/icons";
 import type { TCanvasSize } from "@/project/types";
+import { DEFAULT_CANVAS_SIZE } from "@/canvas/sizes";
+import { DEFAULT_FPS } from "@/fps/defaults";
 
 type SettingsView = "project-info" | "background";
 
@@ -99,12 +101,12 @@ function useCanvasDimensionDraft({
 export function SettingsView() {
 	const [view, setView] = useState<SettingsView>("project-info");
 	const editor = useEditor();
-	const activeProject = useEditor((e) => e.project.getActive());
+	const activeProject = useEditor((e) => e.project.getActiveOrNull());
 	const { canvasPresets } = useEditorStore();
-	const currentCanvasSize = activeProject.settings.canvasSize;
-	const canvasSizeMode = activeProject.settings.canvasSizeMode ?? "preset";
+	const currentCanvasSize = activeProject?.settings.canvasSize ?? DEFAULT_CANVAS_SIZE;
+	const canvasSizeMode = activeProject?.settings.canvasSizeMode ?? "preset";
 	const lastCustomCanvasSize =
-		activeProject.settings.lastCustomCanvasSize ?? null;
+		activeProject?.settings.lastCustomCanvasSize ?? null;
 
 	const presetItems = canvasPresets.map((preset, index) => {
 		const ratio = dimensionToAspectRatio(preset);
@@ -222,8 +224,8 @@ export function SettingsView() {
 					}}
 				>
 					<TabsList>
-						<TabsTrigger value="project-info">Project info</TabsTrigger>
-						<TabsTrigger value="background">Background</TabsTrigger>
+						<TabsTrigger value="project-info">工程信息</TabsTrigger>
+						<TabsTrigger value="background">画布背景</TabsTrigger>
 					</TabsList>
 				</Tabs>
 			}
@@ -232,24 +234,24 @@ export function SettingsView() {
 				<div className="flex flex-col">
 					<Section showTopBorder={false}>
 						<SectionHeader>
-							<SectionTitle className="flex-1">Name</SectionTitle>
+							<SectionTitle className="flex-1">工程名称</SectionTitle>
 							<span className="text-sm truncate">
-								{activeProject.metadata.name}
+								{activeProject?.metadata.name ?? ""}
 							</span>
 						</SectionHeader>
 					</Section>
 					<Section showTopBorder={false}>
 						<SectionHeader className="justify-between">
-							<SectionTitle className="flex-1">Frame rate</SectionTitle>
+							<SectionTitle className="flex-1">帧率</SectionTitle>
 					<Select
-							value={String(Math.round(frameRateToFloat(activeProject.settings.fps)))}
+							value={String(Math.round(frameRateToFloat(activeProject?.settings.fps ?? DEFAULT_FPS)))}
 							onValueChange={(value) => {
 								const fps = floatToFrameRate(parseFloat(value));
 								editor.project.updateSettings({ settings: { fps } });
 							}}
 							>
 								<SelectTrigger className="bg-transparent border-none p-1 h-auto">
-									<SelectValue placeholder="Select a frame rate" />
+									<SelectValue placeholder="选择帧率" />
 								</SelectTrigger>
 								<SelectContent>
 									{FPS_PRESETS.map((preset) => (
@@ -267,7 +269,7 @@ export function SettingsView() {
 						sectionKey="settings:aspect-ratio"
 					>
 						<SectionHeader>
-							<SectionTitle className="flex-1">Aspect ratio</SectionTitle>
+							<SectionTitle className="flex-1">画面比例</SectionTitle>
 						</SectionHeader>
 						<SectionContent className="px-2 flex flex-col gap-1 pb-2">
 							{presetItems.map((preset) => (
@@ -286,7 +288,7 @@ export function SettingsView() {
 							<div className="pb-2">
 								<AspectRatioItem
 									key="custom"
-									label="Custom"
+									label="自定义"
 									previewIcon={<OcSquarePlusIcon />}
 									isSelected={isCustomSelected}
 									onClick={selectCustomCanvasSize}
@@ -295,7 +297,7 @@ export function SettingsView() {
 											<NumberField
 												value={widthDraft.displayValue}
 												className="w-full"
-												aria-label="Canvas width"
+												aria-label="画布宽度"
 												onFocus={widthDraft.onFocus}
 												onChange={widthDraft.onChange}
 												onBlur={widthDraft.onBlur}
@@ -303,7 +305,7 @@ export function SettingsView() {
 											<NumberField
 												value={heightDraft.displayValue}
 												className="w-full"
-												aria-label="Canvas height"
+												aria-label="画布高度"
 												onFocus={heightDraft.onFocus}
 												onChange={heightDraft.onChange}
 												onBlur={heightDraft.onBlur}

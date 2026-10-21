@@ -48,7 +48,7 @@ function seekToBookmarkTime({
 	editor: EditorCore;
 	time: MediaTime;
 }) {
-	const activeProject = editor.project.getActive();
+	const activeProject = editor.project.getActiveOrNull();
 	const duration = editor.timeline.getTotalDuration();
 	const rate = activeProject?.settings.fps ?? DEFAULT_FPS;
 	const snappedTime = snapSeekMediaTime({ time, duration, fps: rate });
@@ -92,7 +92,7 @@ export function TimelineBookmarksRow({
 					height: TIMELINE_BOOKMARK_ROW_HEIGHT_PX,
 					width: `${dynamicTimelineWidth}px`,
 				}}
-				aria-label="Timeline ruler"
+				aria-label="时间轴刻度"
 				type="button"
 				onWheel={handleWheel}
 				onClick={(event) => {
@@ -349,16 +349,16 @@ function BookmarkPopoverContent({
 	return (
 		<>
 			<div className="flex flex-col gap-2">
-				<Label className="text-xs">Note</Label>
+				<Label className="text-xs">备注</Label>
 				<Input
-					placeholder="Add a note..."
+					placeholder="填写备注..."
 					value={bookmark.note ?? ""}
 					onChange={(event) => handleUpdate({ note: event.target.value })}
 					className="h-8 text-sm"
 				/>
 			</div>
 			<div className="flex flex-col gap-2">
-				<Label className="text-xs">Color</Label>
+				<Label className="text-xs">颜色</Label>
 				<div className="relative">
 					<ColorPicker
 						value={uppercase({ string: draftColorHex })}
@@ -378,7 +378,7 @@ function BookmarkPopoverContent({
 								type="button"
 								variant="text"
 								size="text"
-								aria-label="Reset to default color"
+								aria-label="恢复默认颜色"
 								className="absolute top-1/2 right-1 -translate-y-1/2 mr-1"
 								onClick={() =>
 									editor.scenes.updateBookmark({
@@ -396,7 +396,7 @@ function BookmarkPopoverContent({
 				</div>
 			</div>
 			<div className="flex flex-col gap-2">
-				<Label className="text-xs">Duration</Label>
+				<Label className="text-xs">时长</Label>
 				<div className="flex items-center gap-1.5">
 					<Input
 						type="number"

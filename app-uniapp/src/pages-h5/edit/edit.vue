@@ -80,7 +80,7 @@ export default {
       img: null,
       OPS: [
         { key: 'replace', label: '替换' },
-        { key: 'install', label: '安装' },
+        { key: 'insert', label: '安装' },
         { key: 'add', label: '增加' },
         { key: 'space', label: '留白' },
         { key: 'remove', label: '去除' },

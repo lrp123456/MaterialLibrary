@@ -23,7 +23,23 @@ function getAssetTags(db, fid) {
   `).all(fid);
 }
 
+function isVideoExtractStill(asset) {
+  if (!asset) return false;
+  const src = String(asset.source || asset.source_type || '');
+  const fn = String(asset.file_name || asset.fileName || '');
+  const parent = String(asset.parent_fid || '');
+  return (
+    src.includes('video_frame') ||
+    src.includes('video_extract') ||
+    src.includes('frame_extract') ||
+    /^(frame_|extract_|still_|video_frame_)/i.test(fn) ||
+    parent.startsWith('vid_') ||
+    parent.startsWith('local_vid_')
+  );
+}
+
 module.exports = {
   isGenericExportPrefix,
-  getAssetTags
+  getAssetTags,
+  isVideoExtractStill,
 };

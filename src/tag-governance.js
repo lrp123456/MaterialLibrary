@@ -8,7 +8,6 @@ const DIM_META = {
   space: { label: '空间', group: 'space', multi: false, primary: true },
   style_atom: { label: '风格', group: 'space', multi: true, primary: true, max: 4 },
   style_region: { label: '风格大区', group: 'space', multi: false, primary: false, readonly: true },
-  wood_style: { label: '木系风格', group: 'space', multi: false, primary: true },
   material_kind: { label: '材质', group: 'space', multi: true, primary: true, max: 4 },
   dominant_color: { label: '主色', group: 'space', multi: false, primary: true, readonly: true },
   orientation: { label: '画幅', group: 'space', multi: false, primary: true, readonly: true },
@@ -46,8 +45,7 @@ const DIM_META = {
 
 const CRITERIA_DRAFTS = {
   space: (label) => `画面主体是完整「${label}」场景，能看到该空间典型功能区与家具组合；局部特写或含糊角落不要标。`,
-  style_atom: (label) => `整体材质、色彩、线条与软装气质符合「${label}」（文化/流派叶子）；可与木系风格并存；混搭严重或信息不足时不要强标。禁用：欧式轻奢、原木日式、民宿风。`,
-  wood_style: (label) => `木质主体的深浅与做旧符合「${label}」。浅=松/白橡/原色，深=胡桃/深橡/烟熏；做旧=裂痕/虫眼/大面积包浆/明显磨损/粗糙锯痕。光滑均匀色面不算做旧；非木质留空。`,
+  style_atom: (label) => `整体材质、色彩、线条与软装气质符合「${label}」（含文化流派与木系风格）；支持多风格多选共存（1-3个）；严禁标注混搭；完全不吻合且不在体系内才标 other。`,
   material_kind: (label) => `画面中「${label}」是大面积可见主材或明确点缀材质，不能是文字提及或极小面积。`,
   color_style: (label) => `整体色感与「${label}」一致；以第一眼主色倾向为准。`,
   dominant_color: (label) => `人眼第一视角最具视觉统治力的颜色为「${label}」；点缀色不要覆盖主色判断。`,
@@ -410,7 +408,7 @@ function setDeprecated(db, { id, dimension, dir, deprecated }, actor) {
 
 function fallbackDirsFor(dim) {
   if (dim === 'space') return ['other', 'detail_closeup'];
-  if (dim === 'style_atom') return ['eclectic_other'];
+  if (dim === 'style_atom') return ['other'];
   return [];
 }
 

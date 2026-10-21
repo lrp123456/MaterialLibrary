@@ -56,6 +56,16 @@ async function runScan(services, { manual = false } = {}) {
     const thumbLocal = path.join(thumbsDir, `${file.fid}.jpg`);
     if (file.big_thumbnail) {
       cacheThumbnail(file.big_thumbnail, thumbLocal);
+      try {
+        if (fs.existsSync(thumbLocal)) {
+          const { registerVisibleImageHashes } = require('./export-tag');
+          const th = registerVisibleImageHashes(db, { filePath: thumbLocal, sourceFid: file.fid, variant: 'thumb', exportedBy: 'sync' });
+          if (th) {
+            db.prepare('UPDATE assets SET thumb_sha256 = COALESCE(thumb_sha256, ?), thumb_md5 = COALESCE(thumb_md5, ?) WHERE fid = ?')
+              .run(th.sha256, th.md5, file.fid);
+          }
+        }
+      } catch (_) {}
     }
 
     if (existing) {

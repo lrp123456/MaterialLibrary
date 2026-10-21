@@ -35,6 +35,7 @@ import {
 import { useEditor } from "@/editor/use-editor";
 import { DEFAULT_EXPORT_OPTIONS } from "@/export/defaults";
 import { t } from "@/i18n";
+import { toast } from "sonner";
 
 function isExportFormat(value: string): value is ExportFormat {
 	return EXPORT_FORMAT_VALUES.some((formatValue) => formatValue === value);
@@ -99,7 +100,7 @@ function ExportPopover({
 	onOpenChange: (open: boolean) => void;
 }) {
 	const editor = useEditor();
-	const activeProject = useEditor((e) => e.project.getActive());
+	const activeProject = useEditor((e) => e.project.getActiveOrNull());
 	const exportState = useEditor((e) => e.project.getExportState());
 	const { isExporting, progress, result: exportResult } = exportState;
 	const [format, setFormat] = useState<ExportFormat>(
@@ -162,7 +163,7 @@ function ExportPopover({
 		<PopoverContent className="bg-background mr-4 flex w-80 flex-col p-0">
 			{exportResult && !exportResult.success ? (
 				<ExportError
-					error={exportResult.error || "Unknown error occurred"}
+					error={exportResult.error || "发生未知错误"}
 					onRetry={handleExport}
 				/>
 			) : (

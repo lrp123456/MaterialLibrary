@@ -3,7 +3,6 @@
 import { ArrowRightIcon } from "lucide-react";
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { SOCIAL_LINKS } from "@/site/social";
 import { useLocalStorage } from "@/services/storage/use-local-storage";
 import { Button } from "../ui/button";
 import { Dialog, DialogBody, DialogContent, DialogTitle } from "../ui/dialog";
@@ -28,13 +27,13 @@ export function Onboarding() {
 	const getStepTitle = () => {
 		switch (step) {
 			case 0:
-				return "Welcome to OpenCut Beta! 🎉";
+				return "欢迎使用剪辑工作台！🎉";
 			case 1:
-				return "⚠️ This is a super early beta!";
+				return "⚠️ 这是早期测试版本";
 			case 2:
-				return "🦋 Have fun testing!";
+				return "🦋 开始创作吧！";
 			default:
-				return "OpenCut Onboarding";
+				return "剪辑工作台引导";
 		}
 	};
 
@@ -44,10 +43,10 @@ export function Onboarding() {
 				return (
 					<div className="space-y-5">
 						<div className="space-y-3">
-							<Title title="Welcome to OpenCut Beta! 🎉" />
-							<Description description="You're among the first to try OpenCut - the fully open source CapCut alternative." />
+							<Title title="欢迎使用剪辑工作台！🎉" />
+							<Description description="这里可以直接使用素材库里的视频与图片，剪辑完成后还能一键归档到成品库。" />
 						</div>
-						<NextButton onClick={handleNext}>Next</NextButton>
+						<NextButton onClick={handleNext}>下一步</NextButton>
 					</div>
 				);
 			case 1:
@@ -55,11 +54,10 @@ export function Onboarding() {
 					<div className="space-y-5">
 						<div className="space-y-3">
 							<Title title={getStepTitle()} />
-							<Description description="There's still a ton of things to do to make this editor amazing." />
-							<Description description="A lot of features are still missing. We're working hard to build them out!" />
-							<Description description="If you're curious, check out our roadmap [here](https://opencut.app/roadmap)" />
+							<Description description="部分高级功能仍在完善中，遇到问题请先备份到云端，避免本地数据丢失。" />
+							<Description description="建议优先在桌面端使用，编辑体验更完整。" />
 						</div>
-						<NextButton onClick={handleNext}>Next</NextButton>
+						<NextButton onClick={handleNext}>下一步</NextButton>
 					</div>
 				);
 			case 2:
@@ -67,11 +65,9 @@ export function Onboarding() {
 					<div className="space-y-5">
 						<div className="space-y-3">
 							<Title title={getStepTitle()} />
-							<Description
-								description={`Join our [Discord](${SOCIAL_LINKS.discord}), chat with cool people and share feedback to help make OpenCut the best editor ever.`}
-							/>
+							<Description description="把素材拖入时间轴即可开始剪辑，退出页面时工程会自动保存。" />
 						</div>
-						<NextButton onClick={handleClose}>Finish</NextButton>
+						<NextButton onClick={handleClose}>开始使用</NextButton>
 					</div>
 				);
 			default:

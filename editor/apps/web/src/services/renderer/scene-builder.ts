@@ -1,4 +1,4 @@
-import type { SceneTracks, TimelineTrack } from "@/timeline";
+import type { SceneTracks, TimelineElement, TimelineTrack } from "@/timeline";
 import type { MediaAsset } from "@/media/types";
 import { RootNode } from "./nodes/root-node";
 import { VideoNode } from "./nodes/video-node";
@@ -9,9 +9,12 @@ import { GraphicNode } from "./nodes/graphic-node";
 import { ColorNode } from "./nodes/color-node";
 import { BlurBackgroundNode } from "./nodes/blur-background-node";
 import { EffectLayerNode } from "./nodes/effect-layer-node";
+import { TransitionNode } from "./nodes/transition-node";
 import type { AnyBaseNode } from "./nodes/base-node";
 import type { TBackground, TCanvasSize } from "@/project/types";
 import { DEFAULT_BACKGROUND_BLUR_INTENSITY } from "@/background/blur";
+import { resolveTransitionRender } from "@/services/clip-packs";
+import { TRANSITION_CUT_EPSILON } from "@/timeline/transition";
 import {
 	buildTransformFromParams,
 	readBlendModeFromParams,
@@ -30,6 +33,64 @@ function getVisibleSortedElements({ track }: { track: TimelineTrack }) {
 		});
 }
 
+/**
+ * 把一条轨道上"有 transitionOut 的片段 + 紧邻的下一个片段"配成转场节点。
+ *
+ * 只做配对与几何换算，不判断窗口是否激活（那是 resolve 的活儿）。
+ * 应用转场后的几何：B.start = A.start + A.duration - d，据此反推 B，容差 1 帧。
+ */
+function buildTransitionNodes({
+	elements,
+	nodeByElementId,
+}: {
+	elements: TimelineElement[];
+	nodeByElementId: Map<string, AnyBaseNode>;
+}): Map<AnyBaseNode, TransitionNode> {
+	const transitionByFromNode = new Map<AnyBaseNode, TransitionNode>();
+
+	for (const element of elements) {
+		if (element.type !== "video") continue;
+		const transition = element.transitionOut;
+		if (!transition || transition.duration <= 0) continue;
+
+		const fromNode = nodeByElementId.get(element.id);
+		if (!fromNode) continue;
+
+		const expectedNextStart =
+			element.startTime + element.duration - transition.duration;
+		const next = elements.find(
+			(item) =>
+				item.id !== element.id &&
+				Math.abs(item.startTime - expectedNextStart) <= TRANSITION_CUT_EPSILON,
+		);
+		if (!next) continue;
+
+		const toNode = nodeByElementId.get(next.id);
+		if (!toNode) continue;
+
+		const render = resolveTransitionRender({
+			type: transition.type,
+			params: transition.params,
+		});
+
+		transitionByFromNode.set(
+			fromNode,
+			new TransitionNode({
+				fromNode,
+				toNode,
+				// 渲染窗口 [C - d, C]，C = A 的结尾（A 不动，B 前移 d）
+				startTime: element.startTime + element.duration - transition.duration,
+				duration: transition.duration,
+				mode: render.mode,
+				scalars: render.scalars,
+				direction: render.direction,
+			}),
+		);
+	}
+
+	return transitionByFromNode;
+}
+
 function buildTrackNodes({
 	tracks,
 	mediaMap,
@@ -45,10 +106,16 @@ function buildTrackNodes({
 
 	for (const track of tracks) {
 		const elements = getVisibleSortedElements({ track });
+		// 本轨的节点先落到 trackNodes，最后按"A 的位置插入转场节点"的顺序并入 nodes，
+		// 保证转场项的 z 序与原片段一致。
+		const trackNodes: AnyBaseNode[] = [];
+		const nodeByElementId = new Map<string, AnyBaseNode>();
 
 		for (const element of elements) {
+			const before = trackNodes.length;
+
 			if (element.type === "effect") {
-				nodes.push(
+				trackNodes.push(
 					new EffectLayerNode({
 						effectType: element.effectType,
 						effectParams: element.params,
@@ -56,17 +123,14 @@ function buildTrackNodes({
 						duration: element.duration,
 					}),
 				);
-				continue;
-			}
-
-			if (element.type === "video" || element.type === "image") {
+			} else if (element.type === "video" || element.type === "image") {
 				const mediaAsset = mediaMap.get(element.mediaId);
 				if (!mediaAsset?.file || !mediaAsset?.url) {
 					continue;
 				}
 
 				if (element.type === "video" && mediaAsset.type === "video") {
-					nodes.push(
+					trackNodes.push(
 						new VideoNode({
 							mediaId: mediaAsset.id,
 							url: mediaAsset.url,
@@ -86,7 +150,7 @@ function buildTrackNodes({
 					);
 				}
 				if (element.type === "image" && mediaAsset.type === "image") {
-					nodes.push(
+					trackNodes.push(
 						new ImageNode({
 							url: mediaAsset.url,
 							duration: element.duration,
@@ -105,10 +169,8 @@ function buildTrackNodes({
 						}),
 					);
 				}
-			}
-
-			if (element.type === "text") {
-				nodes.push(
+			} else if (element.type === "text") {
+				trackNodes.push(
 					new TextNode({
 						...element,
 						transform: buildTransformFromParams({ params: element.params }),
@@ -120,10 +182,8 @@ function buildTrackNodes({
 						effects: element.effects ?? [],
 					}),
 				);
-			}
-
-			if (element.type === "sticker") {
-				nodes.push(
+			} else if (element.type === "sticker") {
+				trackNodes.push(
 					new StickerNode({
 						stickerId: element.stickerId,
 						intrinsicWidth: element.intrinsicWidth,
@@ -139,10 +199,8 @@ function buildTrackNodes({
 						effects: element.effects ?? [],
 					}),
 				);
-			}
-
-			if (element.type === "graphic") {
-				nodes.push(
+			} else if (element.type === "graphic") {
+				trackNodes.push(
 					new GraphicNode({
 						definitionId: element.definitionId,
 						params: element.params,
@@ -159,6 +217,26 @@ function buildTrackNodes({
 					}),
 				);
 			}
+
+			// 一个元素可能产出多个节点（目前只有单节点），取第一个作为转场参与者
+			if (trackNodes.length > before && !nodeByElementId.has(element.id)) {
+				nodeByElementId.set(element.id, trackNodes[before]);
+			}
+		}
+
+		const transitionByFromNode = buildTransitionNodes({
+			elements,
+			nodeByElementId,
+		});
+
+		for (const node of trackNodes) {
+			const transition = transitionByFromNode.get(node);
+			if (transition) {
+				// 转场节点排在 A 之前：帧描述阶段它先出 transition item，
+				// A / B 的普通 layer 在该帧被抑制，避免重复绘制。
+				nodes.push(transition);
+			}
+			nodes.push(node);
 		}
 	}
 

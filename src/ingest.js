@@ -228,7 +228,7 @@ async function ingestBuffer(services, {
     const fpHit = fpApi.findFingerprintHit(
       db,
       { md5: ingestFp.md5, sha256: ingestFp.sha256, phash: ingestFp.phash },
-      {}
+      { exactOnly: true }
     );
     if (fpHit && fpHit.hit) {
       return {

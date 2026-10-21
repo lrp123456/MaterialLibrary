@@ -15,6 +15,12 @@ const SHARPEN_SHADER_ID: &str = "sharpen";
 const SHARPEN_SHADER_SOURCE: &str = include_str!("shaders/sharpen.wgsl");
 const SKIN_SMOOTH_SHADER_ID: &str = "skin-smooth";
 const SKIN_SMOOTH_SHADER_SOURCE: &str = include_str!("shaders/skin_smooth.wgsl");
+const GRADE_SHADER_ID: &str = "grade";
+const GRADE_SHADER_SOURCE: &str = include_str!("shaders/grade.wgsl");
+const WARP_SHADER_ID: &str = "warp";
+const WARP_SHADER_SOURCE: &str = include_str!("shaders/warp.wgsl");
+const CHANNEL_SHADER_ID: &str = "channel";
+const CHANNEL_SHADER_SOURCE: &str = include_str!("shaders/channel.wgsl");
 
 /// 内置 shader 清单。给资源包加载器与文档提供单一事实来源。
 pub fn builtin_shader_ids() -> Vec<&'static str> {
@@ -23,6 +29,9 @@ pub fn builtin_shader_ids() -> Vec<&'static str> {
         GLOW_SHADER_ID,
         SHARPEN_SHADER_ID,
         SKIN_SMOOTH_SHADER_ID,
+        GRADE_SHADER_ID,
+        WARP_SHADER_ID,
+        CHANNEL_SHADER_ID,
     ]
 }
 
@@ -107,7 +116,7 @@ impl EffectPipeline {
 
         // 所有特效共用同一套 pipeline layout，只有 fragment shader 不同。
         // 新增 shader 只需在这个清单里加一行，不用复制整段管线代码。
-        let shader_defs: [(&str, &str, &str); 4] = [
+        let shader_defs: [(&str, &str, &str); 7] = [
             (
                 GAUSSIAN_BLUR_SHADER_ID,
                 "effects-gaussian-blur-shader",
@@ -123,6 +132,13 @@ impl EffectPipeline {
                 SKIN_SMOOTH_SHADER_ID,
                 "effects-skin-smooth-shader",
                 SKIN_SMOOTH_SHADER_SOURCE,
+            ),
+            (GRADE_SHADER_ID, "effects-grade-shader", GRADE_SHADER_SOURCE),
+            (WARP_SHADER_ID, "effects-warp-shader", WARP_SHADER_SOURCE),
+            (
+                CHANNEL_SHADER_ID,
+                "effects-channel-shader",
+                CHANNEL_SHADER_SOURCE,
             ),
         ];
 

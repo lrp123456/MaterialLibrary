@@ -292,6 +292,26 @@ html.senior-mode textarea {
   font-size: inherit;
 }
 
+/* 适老化大比例等比缩放下的自适应换行与抗截断规则 */
+html.senior-mode {
+  overflow-x: hidden;
+}
+html.senior-mode nav,
+html.senior-mode .toolbar,
+html.senior-mode .filter-bar,
+html.senior-mode .tags-row {
+  flex-wrap: wrap;
+}
+html.senior-mode button,
+html.senior-mode .btn {
+  white-space: nowrap;
+}
+html.senior-mode .modal-container,
+html.senior-mode .dialog-box {
+  max-height: 92vh !important;
+  overflow-y: auto !important;
+}
+
 /* ==============================================================================
    核心全局映射规则：全站组件自动继承唯一真相源，杜绝任何孤立硬编码颜色
    ============================================================================== */

@@ -5,6 +5,7 @@ import { useEditor } from "@/editor/use-editor";
 import { useCommittedRef } from "@/hooks/use-committed-ref";
 import { useShiftKey } from "@/hooks/use-shift-key";
 import { registerCanceller } from "@/editor/cancel-interaction";
+import { DEFAULT_CANVAS_SIZE } from "@/canvas/sizes";
 import {
 	TransformHandleController,
 	type TransformHandleDeps,
@@ -25,7 +26,7 @@ export function useTransformHandles({
 	const currentTime = useEditor((e) => e.playback.getCurrentTime());
 	const mediaAssets = useEditor((e) => e.media.getAssets());
 	const canvasSize = useEditor(
-		(e) => e.project.getActive().settings.canvasSize,
+		(e) => e.project.getActiveOrNull()?.settings.canvasSize ?? DEFAULT_CANVAS_SIZE,
 	);
 	const deps: TransformHandleDeps = {
 		viewport,

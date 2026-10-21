@@ -1,5 +1,5 @@
 <template>
-  <div class="flex-1 flex flex-col h-[calc(100vh-56px)] overflow-hidden bg-studio-950 font-sans">
+  <div class="view-root mediahub-view flex-1 flex flex-col h-[calc(100vh-56px)] overflow-hidden bg-studio-950 font-sans">
     <!-- 二级导航栏：多轨视频剪辑 vs 常用媒体工具 (高度 48px) -->
     <div class="h-12 bg-studio-900 border-b border-studio-700 px-5 flex items-center justify-between shrink-0 select-none">
       <div class="flex items-center space-x-2">
@@ -59,7 +59,7 @@
     </div>
 
     <!-- 子工作台内容展示 -->
-    <OpenCutView v-if="activeSub === 'opencut'" />
+    <OpenCutView v-if="activeSub === 'opencut'" :initialPayload="clipPayload" />
     <ClipStudio v-else-if="activeSub === 'clip'" />
     <MediaToolsView v-else-if="activeSub === 'tools'" />
   </div>
@@ -73,7 +73,8 @@ import ClipStudio from './studio/ClipStudio.vue';
 import MediaToolsView from './studio/MediaToolsView.vue';
 
 const props = defineProps({
-  initialSub: { type: String, default: 'opencut' }
+  initialSub: { type: String, default: 'opencut' },
+  clipPayload: { type: Object, default: null }
 });
 
 const activeSub = ref(props.initialSub);

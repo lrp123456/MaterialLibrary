@@ -158,7 +158,7 @@ function CustomColorPreview({
 						isSelected && "border-primary border-2",
 					)}
 					type="button"
-					aria-label="Pick a custom background color"
+					aria-label="选择自定义背景色"
 				>
 					<span
 						className="absolute inset-0"
@@ -180,14 +180,14 @@ function CustomColorPreview({
 }
 
 const COLOR_SECTIONS = [
-	{ id: "colors", title: "Colors", backgrounds: colors, useBackgroundColor: true, showCustomPicker: true },
-	{ id: "pattern-craft", title: "Pattern craft", backgrounds: patternCraftGradients, showCustomPicker: false },
-	{ id: "syntax-ui", title: "Syntax UI", backgrounds: syntaxUIGradients, showCustomPicker: false },
+	{ id: "colors", title: "纯色", backgrounds: colors, useBackgroundColor: true, showCustomPicker: true },
+	{ id: "pattern-craft", title: "图案渐变", backgrounds: patternCraftGradients, showCustomPicker: false },
+	{ id: "syntax-ui", title: "界面配色", backgrounds: syntaxUIGradients, showCustomPicker: false },
 ] as const;
 
 export function BackgroundContent() {
 	const editor = useEditor();
-	const activeProject = useEditor((e) => e.project.getActive());
+	const activeProject = useEditor((e) => e.project.getActiveOrNull());
 
 	const handleBlurSelect = useCallback(
 		async (blurIntensity: number) => {
@@ -218,16 +218,16 @@ export function BackgroundContent() {
 		[editor.project],
 	);
 
-	const isBlurBackground = activeProject.settings.background.type === "blur";
-	const isColorBackground = activeProject.settings.background.type === "color";
+	const background = activeProject?.settings.background;
+	const isBlurBackground = background?.type === "blur";
+	const isColorBackground = background?.type === "color";
 
 	const currentBlurIntensity = isBlurBackground
-		? (activeProject.settings.background as { blurIntensity: number })
-				.blurIntensity
+		? (background as { blurIntensity: number }).blurIntensity
 		: DEFAULT_BACKGROUND_BLUR_INTENSITY;
 
 	const currentBackgroundColor = isColorBackground
-		? (activeProject.settings.background as { color: string }).color
+		? (background as { color: string }).color
 		: DEFAULT_BACKGROUND_COLOR;
 
 	const hasPresetColorMatch = colors.some(
@@ -263,7 +263,7 @@ export function BackgroundContent() {
 				showTopBorder={false}
 			>
 				<SectionHeader>
-					<SectionTitle>Blur</SectionTitle>
+					<SectionTitle>模糊</SectionTitle>
 				</SectionHeader>
 				<SectionContent>
 					<div className="flex flex-wrap gap-2">{blurPreviews}</div>

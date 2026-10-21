@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import type { ReactNode } from "react";
 import type {
 	EffectElement,
@@ -82,7 +83,7 @@ function buildTransformTab({
 }): PropertiesTabDef {
 	return {
 		id: "transform",
-		label: "Transform",
+		get label() { return t("inspector.tabs.transform", "基础变换"); },
 		icon: <HugeiconsIcon icon={ArrowExpandIcon} size={16} />,
 		content: ({ trackId }) => (
 			<ElementParamsTab
@@ -102,7 +103,7 @@ function buildBlendingTab({
 }): PropertiesTabDef {
 	return {
 		id: "blending",
-		label: "Blending",
+		get label() { return t("inspector.tabs.blending", "混合模式"); },
 		icon: <HugeiconsIcon icon={RainDropIcon} size={16} />,
 		content: ({ trackId }) => (
 			<ElementParamsTab
@@ -122,7 +123,7 @@ function buildAudioTab({
 }): PropertiesTabDef {
 	return {
 		id: "audio",
-		label: "Audio",
+		get label() { return t("inspector.tabs.audio", "音频参数"); },
 		icon: <HugeiconsIcon icon={MusicNote03Icon} size={16} />,
 		content: ({ trackId }) => (
 			<ElementParamsTab
@@ -142,7 +143,7 @@ function buildSpeedTab({
 }): PropertiesTabDef {
 	return {
 		id: "speed",
-		label: "Speed",
+		get label() { return t("inspector.tabs.speed", "变速控制"); },
 		icon: <HugeiconsIcon icon={DashboardSpeed02Icon} size={16} />,
 		content: ({ trackId }) => <SpeedTab element={element} trackId={trackId} />,
 	};
@@ -155,7 +156,7 @@ function buildMasksTab({
 }): PropertiesTabDef {
 	return {
 		id: "masks",
-		label: "Masks",
+		get label() { return t("inspector.tabs.masks", "形状遮罩"); },
 		icon: <OcShapesIcon size={16} />,
 		content: ({ trackId }) => <MasksTab element={element} trackId={trackId} />,
 	};
@@ -168,7 +169,7 @@ function buildClipEffectsTab({
 }): PropertiesTabDef {
 	return {
 		id: "effects",
-		label: "Effects",
+		get label() { return t("inspector.tabs.effects", "特效滤镜"); },
 		icon: <HugeiconsIcon icon={MagicWand05Icon} size={16} />,
 		content: ({ trackId }) => (
 			<ClipEffectsTab element={element} trackId={trackId} />
@@ -179,7 +180,7 @@ function buildClipEffectsTab({
 function buildTextTab({ element }: { element: TextElement }): PropertiesTabDef {
 	return {
 		id: "text",
-		label: "Text",
+		get label() { return t("inspector.tabs.text", "文字排版"); },
 		icon: <HugeiconsIcon icon={TextFontIcon} size={16} />,
 		content: ({ trackId }) => (
 			<ElementParamsTab
@@ -199,7 +200,7 @@ function buildGraphicTab({
 }): PropertiesTabDef {
 	return {
 		id: "graphic",
-		label: "Graphic",
+		get label() { return t("inspector.tabs.graphic", "图形外观"); },
 		icon: <OcShapesIcon size={16} />,
 		content: ({ trackId }) => <GraphicTab element={element} trackId={trackId} />,
 	};
@@ -212,7 +213,7 @@ function buildStandaloneEffectTab({
 }): PropertiesTabDef {
 	return {
 		id: "effects",
-		label: "Effects",
+		label: "特效",
 		icon: <HugeiconsIcon icon={MagicWand05Icon} size={16} />,
 		content: ({ trackId }) => (
 			<StandaloneEffectTab element={element} trackId={trackId} />

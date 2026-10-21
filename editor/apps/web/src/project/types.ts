@@ -20,6 +20,8 @@ export interface TCanvasSize {
 export interface TProjectMetadata {
 	id: string;
 	name: string;
+	/** 分组名：作品集/风格/负责人等自由归类；空表示未分组，随工程一起备份到云端。 */
+	group?: string;
 	thumbnail?: string;
 	duration: MediaTime;
 	createdAt: Date;

@@ -181,8 +181,33 @@ async function testStage2UnifiedTranslatorAndConverters() {
   });
   assert.strictEqual(agnesVidReq.seconds, '5', 'Agnes Video seconds 必须强转为字符串 "5"');
   assert.strictEqual(agnesVidReq.size, '720P', 'Agnes Video size 必须规范化为大写 "720P"');
-  assert.strictEqual(agnesVidReq.first_frame_image, 'https://example.com/f1.jpg');
-  assert.strictEqual(agnesVidReq.last_frame_image, 'https://example.com/f2.jpg');
+  assert.strictEqual(agnesVidReq.first_frame, 'https://example.com/f1.jpg');
+  assert.strictEqual(agnesVidReq.last_frame, 'https://example.com/f2.jpg');
+  // Agnes 云端拒绝 *_image 别名字段（HTTP 400 invalid_request），视频 payload 不得携带
+  assert.ok(!('first_frame_image' in agnesVidReq), 'Agnes Video 不允许发送 first_frame_image');
+  assert.ok(!('last_frame_image' in agnesVidReq), 'Agnes Video 不允许发送 last_frame_image');
+
+  // 5b. 时长越界必须显式报错，禁止静默回退（防止前端 60s、实际 5s 的错位）
+  assert.throws(
+    () => convertAgnesVideoRequest({
+      contract: DEFAULT_MODEL_CONTRACTS.find(m => m.id === 'agnes_video_2_5_flash'),
+      prompt: '空间漫游',
+      mode: 'text_to_video',
+      values: { seconds: 60, aspect_ratio: '16:9' },
+    }),
+    /4–12/,
+    'Agnes Video seconds=60 必须抛出 4–12 范围错误，而不是静默夹取'
+  );
+  assert.throws(
+    () => convertAgnesVideoRequest({
+      contract: DEFAULT_MODEL_CONTRACTS.find(m => m.id === 'agnes_video_2_5_flash'),
+      prompt: '空间漫游',
+      mode: 'text_to_video',
+      values: { seconds: 5, aspect_ratio: '33:9' },
+    }),
+    /画幅/,
+    'Agnes Video 非法画幅必须显式报错'
+  );
 
   // 6. Ark Files API 7天过期时间与视频抽帧预处理构造
   const fileMeta = buildArkFileUploadMeta({ purpose: 'user_data', ttlDays: 7, videoFps: 2 });

@@ -724,6 +724,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import StudioIcon from '../../components/StudioIcon.vue';
+import { authFetch, registerGeneratedAsset } from '../../api';
 
 const toolTabs = [
   { key: 'frames', label: '视频元素寻帧', icon: '🎬' },
@@ -936,12 +937,35 @@ function removeCapturedFrame(idx) {
   capturedFrames.value.splice(idx, 1);
 }
 
-function batchSaveToLibrary() {
+async function batchSaveToLibrary() {
+  if (!capturedFrames.value.length) {
+    alert('请先截取至少一帧静帧');
+    return;
+  }
   savingLibrary.value = true;
-  setTimeout(() => {
+  let ok = 0;
+  let failed = 0;
+  try {
+    for (const f of capturedFrames.value) {
+      try {
+        await registerGeneratedAsset({
+          imageBase64: f.dataUrl,
+          prompt: `视频抽帧 ${f.timeStr}`,
+          model: 'video-frame',
+          mode: 'video_frame',
+          frame: f.frame
+        });
+        ok++;
+      } catch (e) {
+        failed++;
+      }
+    }
+    alert(failed
+      ? `归档完成：成功 ${ok} 帧，失败 ${failed} 帧`
+      : `成功将 ${ok} 帧静帧画面归档至素材库！`);
+  } finally {
     savingLibrary.value = false;
-    alert(`成功将 ${capturedFrames.value.length} 帧静帧画面自动打标并批量归档至素材库！`);
-  }, 900);
+  }
 }
 
 // =============================================================================
@@ -949,6 +973,7 @@ function batchSaveToLibrary() {
 // =============================================================================
 const convertSourceFileName = ref('全景客厅空间漫游.mp4');
 const convertFileInputRef = ref(null);
+const convertFileObj = ref(null);
 const convertTargetFormat = ref('mp4');
 const convertResolution = ref('source');
 const convertExtractAudioOnly = ref(false);
@@ -964,8 +989,38 @@ function triggerConvertFilePicker() {
 function onConvertFileSelected(e) {
   const f = e.target.files?.[0];
   if (f) {
+    convertFileObj.value = f;
     convertSourceFileName.value = f.name;
   }
+}
+
+/**
+ * 把本地视频真实上传到服务端并返回素材 fid（transcode/compress 均按 fid 解析源文件）
+ */
+async function uploadLocalVideo(file) {
+  const fd = new FormData();
+  fd.append('file', file, file.name);
+  fd.append('filename', file.name);
+  fd.append('source', 'studio_media_tools');
+  const res = await authFetch('/api/sync/upload', { method: 'POST', body: fd });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || !json.success || !json.data) {
+    throw new Error(json.error || '视频上传失败');
+  }
+  return json.data;
+}
+
+async function callConvertVideo(body) {
+  const res = await authFetch('/api/tools/convert-video', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || !json.success || !json.data) {
+    throw new Error(json.error || '转码失败');
+  }
+  return json.data;
 }
 
 async function runVideoConversion() {
@@ -974,11 +1029,15 @@ async function runVideoConversion() {
   convertStageText.value = '正在解析视频容器与音视频轨道...';
   convertResult.value = null;
 
+  let timer = null;
   try {
+    if (!convertFileObj.value) {
+      throw new Error('请先选择本地视频文件');
+    }
     const isAudioOnly = convertExtractAudioOnly.value || ['mp3', 'wav'].includes(convertTargetFormat.value);
     const targetFmt = isAudioOnly ? (convertTargetFormat.value === 'wav' ? 'wav' : 'mp3') : convertTargetFormat.value;
 
-    const timer = setInterval(() => {
+    timer = setInterval(() => {
       if (convertProgress.value < 85) {
         convertProgress.value += 15;
         if (convertProgress.value > 40) convertStageText.value = '正在调用原生 FFmpeg 进行深度转码与封装...';
@@ -986,40 +1045,46 @@ async function runVideoConversion() {
       }
     }, 400);
 
-    const res = await fetch('/api/tools/convert-video', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        targetFormat: targetFmt,
-        extractAudio: isAudioOnly,
-        crf: 23,
-      })
-    });
-    clearInterval(timer);
-    convertProgress.value = 100;
+    convertStageText.value = '正在上传源视频到服务端...';
+    const uploaded = await uploadLocalVideo(convertFileObj.value);
 
-    const json = await res.json();
-    if (json.success && json.data) {
-      convertResult.value = json.data;
-    } else {
-      throw new Error(json.error || '转码失败');
-    }
+    convertStageText.value = '正在调用原生 FFmpeg 进行深度转码与封装...';
+    convertResult.value = await callConvertVideo({
+      fid: uploaded.fid,
+      targetFormat: targetFmt,
+      extractAudio: isAudioOnly,
+      crf: 23,
+    });
+    convertProgress.value = 100;
+    convertStageText.value = '转码完成';
   } catch (err) {
-    console.warn('转码回退处理:', err.message);
-    convertResult.value = {
-      outputFile: `transcode_output_${Date.now()}.${convertTargetFormat.value}`,
-      downloadUrl: '/sample-video.mp4',
-      size: 4200000,
-      format: convertTargetFormat.value,
-      type: ['mp3', 'wav'].includes(convertTargetFormat.value) ? 'audio' : 'video'
-    };
+    convertProgress.value = 0;
+    convertStageText.value = '';
+    alert('转码失败: ' + err.message);
   } finally {
+    if (timer) clearInterval(timer);
     converting.value = false;
   }
 }
 
-function saveConvertResultToLibrary() {
-  alert('已将转码产物自动打标归档至素材库！');
+async function saveConvertResultToLibrary() {
+  if (!convertResult.value?.downloadUrl) {
+    alert('请先完成一次转码');
+    return;
+  }
+  try {
+    const out = await registerGeneratedAsset({
+      previewUrl: convertResult.value.downloadUrl,
+      prompt: '视频格式转码产物',
+      model: 'ffmpeg',
+      mode: 'convert',
+      format: convertResult.value.format || ''
+    });
+    if (out?.fid) alert('转码产物已归档至素材库: ' + out.fid);
+    else alert('转码产物已归档至素材库');
+  } catch (e) {
+    alert('归档失败: ' + e.message);
+  }
 }
 
 // =============================================================================
@@ -1027,6 +1092,7 @@ function saveConvertResultToLibrary() {
 // =============================================================================
 const compressSourceFileName = ref('全景客厅空间漫游.mp4');
 const compressFileInputRef = ref(null);
+const compressFileObj = ref(null);
 const compressPreset = ref('web');
 const compressCrf = ref(25);
 const compressing = ref(false);
@@ -1041,6 +1107,7 @@ function triggerCompressFilePicker() {
 function onCompressFileSelected(e) {
   const f = e.target.files?.[0];
   if (f) {
+    compressFileObj.value = f;
     compressSourceFileName.value = f.name;
   }
 }
@@ -1077,8 +1144,12 @@ async function runVideoCompression() {
   compressStageText.value = '正在分析画面动态帧率与运动矢量...';
   compressResult.value = null;
 
+  let timer = null;
   try {
-    const timer = setInterval(() => {
+    if (!compressFileObj.value) {
+      throw new Error('请先选择本地视频文件');
+    }
+    timer = setInterval(() => {
       if (compressProgress.value < 85) {
         compressProgress.value += 15;
         if (compressProgress.value > 40) compressStageText.value = `正在使用 CRF=${compressCrf.value} 进行两趟量化压缩...`;
@@ -1086,40 +1157,45 @@ async function runVideoCompression() {
       }
     }, 450);
 
-    const res = await fetch('/api/tools/convert-video', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        targetFormat: 'mp4',
-        crf: compressCrf.value,
-        extractAudio: false,
-      })
-    });
-    clearInterval(timer);
-    compressProgress.value = 100;
+    compressStageText.value = '正在上传源视频到服务端...';
+    const uploaded = await uploadLocalVideo(compressFileObj.value);
 
-    const json = await res.json();
-    if (json.success && json.data) {
-      compressResult.value = json.data;
-    } else {
-      throw new Error(json.error || '压缩失败');
-    }
+    compressStageText.value = `正在使用 CRF=${compressCrf.value} 进行两趟量化压缩...`;
+    compressResult.value = await callConvertVideo({
+      fid: uploaded.fid,
+      targetFormat: 'mp4',
+      crf: compressCrf.value,
+      extractAudio: false,
+    });
+    compressProgress.value = 100;
+    compressStageText.value = '压缩完成';
   } catch (err) {
-    console.warn('压缩回退处理:', err.message);
-    compressResult.value = {
-      outputFile: `compressed_crf${compressCrf.value}_${Date.now()}.mp4`,
-      downloadUrl: '/sample-video.mp4',
-      size: Math.round(Number(estimatedCompressedSize.value) * 1024 * 1024),
-      format: 'mp4',
-      type: 'video'
-    };
+    compressProgress.value = 0;
+    compressStageText.value = '';
+    alert('压缩失败: ' + err.message);
   } finally {
+    if (timer) clearInterval(timer);
     compressing.value = false;
   }
 }
 
-function saveCompressResultToLibrary() {
-  alert('已将压缩视频自动打标并存入素材库！');
+async function saveCompressResultToLibrary() {
+  if (!compressResult.value?.downloadUrl) {
+    alert('请先完成一次压缩');
+    return;
+  }
+  try {
+    const out = await registerGeneratedAsset({
+      previewUrl: compressResult.value.downloadUrl,
+      prompt: `视频压缩产物 CRF=${compressCrf.value}`,
+      model: 'ffmpeg',
+      mode: 'compress'
+    });
+    if (out?.fid) alert('压缩产物已归档至素材库: ' + out.fid);
+    else alert('压缩产物已归档至素材库');
+  } catch (e) {
+    alert('归档失败: ' + e.message);
+  }
 }
 
 function formatFileSize(bytes) {

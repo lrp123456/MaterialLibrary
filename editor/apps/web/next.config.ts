@@ -66,4 +66,14 @@ const nextConfig: NextConfig = {
 	},
 };
 
-export default withContentCollections(withBotId(nextConfig));
+/**
+ * content-collections 在构建开始时会调 esbuild 编译自身配置。
+ * 本机安全策略会拦截未签名 exe 读文件（winapi error #5），导致构建直接失败；
+ * 该插件只服务博客/更新日志页，且产物已生成在 .content-collections/generated，
+ * 因此提供开关：SKIP_CONTENT_COLLECTIONS=1 时跳过插件，改用已有产物。
+ */
+const skipContentCollections = process.env.SKIP_CONTENT_COLLECTIONS === "1";
+
+export default skipContentCollections
+	? withBotId(nextConfig)
+	: withContentCollections(withBotId(nextConfig));

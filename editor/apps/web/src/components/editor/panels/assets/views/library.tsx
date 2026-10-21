@@ -5,10 +5,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PanelView } from "./base-panel";
 import { useEditor } from "@/editor/use-editor";
-import { processMediaAssets } from "@/media/processing";
-import { registerMediaFid } from "@/services/cloud-snapshots";
 import { showMediaUploadToast } from "@/media/upload-toast";
 import { AssetLibraryPickerModal, type MaterialAssetItem } from "@/components/editor/asset-library-picker-modal";
+import {
+	downloadCloudAssetToLocal,
+	fetchCloudAssets,
+} from "@/components/editor/panels/assets/views/media-merged";
 import { toast } from "sonner";
 import {
 	Search01Icon,
@@ -32,32 +34,6 @@ const SHELF_PLATES = [
 	{ key: "finished", label: "成品" },
 	{ key: "render", label: "精修/AI" },
 ] as const;
-
-function getAuthToken(): string {
-	try {
-		if (typeof window === "undefined") return "";
-		const params = new URLSearchParams(window.location.search);
-		const urlToken = params.get("token") || params.get("ml_token");
-		if (urlToken) {
-			localStorage.setItem("ml_token", urlToken);
-			return urlToken;
-		}
-		const t = localStorage.getItem("ml_token") || localStorage.getItem("token");
-		if (t) return t;
-		const match = document.cookie.match(/(?:^|;\s*)ml_token=([^;]+)/);
-		if (match) return match[1];
-	} catch {
-		/* ignore */
-	}
-	return "";
-}
-
-function authHeaders(): Record<string, string> {
-	const h: Record<string, string> = {};
-	const token = getAuthToken();
-	if (token) h.Authorization = `Bearer ${token}`;
-	return h;
-}
 
 function formatBytes(bytes: number): string {
 	if (bytes === 0) return "0 B";
@@ -98,69 +74,27 @@ export function LibraryView() {
 		setLoading(true);
 		setFetchError("");
 		try {
-			const q = new URLSearchParams();
-			q.set("pageSize", "80");
-			q.set("page", "1");
+			const q: Record<string, string> = { pageSize: "80", page: "1" };
 
 			if (searchQuery.trim()) {
-				q.set("keyword", searchQuery.trim());
+				q.keyword = searchQuery.trim();
 			}
 
 			// 板块映射
 			if (activeShelf === "interior_exterior") {
-				q.set("category", "interior_exterior");
+				q.category = "interior_exterior";
 			} else if (activeShelf === "walkthrough") {
-				q.set("media_type", "video");
+				q.media_type = "video";
 			} else if (activeShelf === "finished") {
-				q.set("shelf", "finished");
+				q.shelf = "finished";
 			} else if (activeShelf === "render") {
-				q.set("shelf", "retouched");
+				q.shelf = "retouched";
 			}
 
-			const res = await fetch(`/api/viewer/assets?${q.toString()}`, {
-				headers: authHeaders(),
-			});
-
-			if (res.ok) {
-				const json = await res.json();
-				const rawList = (json?.data?.items || json?.items || []) as any[];
-				const token = getAuthToken();
-
-				const processed: MaterialAssetItem[] = rawList.map((it) => {
-					let thumb = it.thumb_url;
-					if (!thumb) {
-						if (it.kind === "video") {
-							thumb = `/api/viewer/assets/${encodeURIComponent(it.fid)}/poster${token ? `?token=${encodeURIComponent(token)}` : ""}`;
-						} else {
-							thumb = `/api/viewer/assets/${encodeURIComponent(it.fid)}/image${token ? `?token=${encodeURIComponent(token)}` : ""}`;
-						}
-					} else if (token && !thumb.includes("token=")) {
-						thumb += (thumb.includes("?") ? "&" : "?") + `token=${encodeURIComponent(token)}`;
-					}
-
-					return {
-						fid: it.fid,
-						file_name: it.file_name || it.fileName || "未命名素材",
-						kind: it.kind || (it.category === "music" ? "audio" : "image"),
-						mime: it.mime || (it.kind === "video" ? "video/mp4" : it.kind === "audio" ? "audio/mpeg" : "image/jpeg"),
-						size: it.size || 0,
-						duration: it.duration_s || it.duration || 0,
-						width: it.width,
-						height: it.height,
-						thumb_url: thumb,
-					};
-				});
-
-				setItems(processed);
-			} else if (res.status === 401) {
-				setFetchError("未登录或会话已过期，请在主系统刷新");
-				setItems([]);
-			} else {
-				setFetchError(`拉取失败 (HTTP ${res.status})`);
-				setItems([]);
-			}
-		} catch (e: any) {
-			setFetchError(`连接异常: ${e?.message || "未就绪"}`);
+			const processed = await fetchCloudAssets({ query: q });
+			setItems(processed);
+		} catch (error) {
+			setFetchError(error instanceof Error ? error.message : "拉取失败");
 			setItems([]);
 		} finally {
 			setLoading(false);
@@ -189,29 +123,18 @@ export function LibraryView() {
 
 		setImportingFid(item.fid);
 		try {
-			const downloadUrl = `/api/viewer/assets/${item.fid}/file`;
-			const resp = await fetch(downloadUrl, { headers: authHeaders() });
-			if (!resp.ok) {
-				throw new Error(`下载失败 (HTTP ${resp.status})`);
-			}
-			const blob = await resp.blob();
-			const file = new File([blob], item.file_name, { type: item.mime || "video/mp4" });
-
 			await showMediaUploadToast({
 				filesCount: 1,
 				promise: async () => {
-					const processedAssets = await processMediaAssets({ files: [file] });
-					for (const asset of processedAssets) {
-						const created = await editor.media.addMediaAsset({
-							projectId: activeProject.metadata.id,
-							asset,
-						});
-						// 只有入库成功后才有 id，FID 映射必须绑定真实 mediaId。
-						if (created) registerMediaFid(created.id, item.fid, "");
-					}
+					// 下载 + 解码 + 入库 + fid 映射都在 media-merged 里，与统一列表共用一份实现
+					const created = await downloadCloudAssetToLocal({
+						editor,
+						projectId: activeProject.metadata.id,
+						item,
+					});
 					return {
-						uploadedCount: processedAssets.length,
-						assetNames: [item.file_name],
+						uploadedCount: 1,
+						assetNames: [created.name],
 					};
 				},
 			});
@@ -397,7 +320,7 @@ export function LibraryView() {
 				</button>
 			</div>
 
-			{/* 微缩版大弹窗组件 */}
+			{/* 微缩版大弹窗组件：未传本地上传回调，弹窗内会隐藏该入口，避免点了没反应 */}
 			<AssetLibraryPickerModal
 				isOpen={isModalOpen}
 				onOpenChange={setIsModalOpen}

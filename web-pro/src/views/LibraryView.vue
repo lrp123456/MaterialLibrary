@@ -1,5 +1,5 @@
 <template>
-  <div class="library-shell flex-1 flex h-full min-w-0 bg-studio-950 text-slate-100 overflow-hidden font-sans select-none relative" :class="{ 'is-collapsed': sidebarCollapsed }" :style="{ '--lib-sidebar-w': sidebarWidth + 'px' }">
+  <div class="view-root library-shell flex-1 flex h-full min-w-0 bg-studio-950 text-slate-100 overflow-hidden font-sans select-none relative" :class="{ 'is-collapsed': sidebarCollapsed }" :style="{ '--lib-sidebar-w': sidebarWidth + 'px' }">
     <button type="button" class="sidebar-open-btn" @click="openLibrarySidebar">菜单</button>
     <aside class="library-sidebar" :class="{ 'is-open': sidebarOpen, 'is-collapsed': sidebarCollapsed }">
       <div class="sidebar-pin">
@@ -133,6 +133,10 @@
         <button type="button" :class="{ 'is-on': showSidebarTimeline }" @click="showSidebarTimeline = !showSidebarTimeline"><span class="lib-mark"></span>时间轴<span v-if="showSidebarTimeline" class="lib-now">当前</span></button>
         <button type="button" :class="{ 'is-on': layoutMode === 'masonry' }" @click="layoutMode = 'masonry'"><span class="lib-mark"></span>瀑布流<span v-if="layoutMode === 'masonry'" class="lib-now">当前</span></button>
         <button type="button" :class="{ 'is-on': layoutMode === 'grid' }" @click="layoutMode = 'grid'"><span class="lib-mark"></span>网格<span v-if="layoutMode === 'grid'" class="lib-now">当前</span></button>
+        <button type="button" class="theme-btn-workbench bg-studio-accent/20 border border-studio-accent/40 text-studio-cyan font-bold hover:brightness-125" @click="openSimilarityWorkbench">
+          <StudioIcon name="scan" :size="14" />
+          <span>🔍 相似工作台</span>
+        </button>
         <button v-if="sourcePlate === 'finished'" type="button" @click="finishedFileInput?.click()">上传成品</button>
         <input ref="finishedFileInput" type="file" accept="image/*,video/*,audio/*" class="hidden" @change="uploadFinished" />
         <button type="button" @click="reloadAssets(true)">刷新</button>
@@ -284,6 +288,63 @@
         <div v-if="loading && assetsList.length === 0" class="flex flex-col items-center justify-center py-24 space-y-4">
           <div class="w-12 h-12 rounded-full border-4 border-studio-accent border-t-transparent animate-spin"></div>
           <span class="text-sm text-slate-400 font-medium">正在连接素材服务并加载资产…</span>
+        </div>
+
+        <!-- 三级回退全挂 / 请求失败：显式错误面板（不再伪装成“未找到匹配素材”） -->
+        <div
+          v-else-if="loadError"
+          class="flex flex-col items-center justify-center py-28 space-y-5 text-center"
+        >
+          <div class="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/30 flex items-center justify-center text-3xl">
+            {{ isAllDown() ? '📡' : '⚠️' }}
+          </div>
+          <div class="space-y-1.5">
+            <h3 class="text-base font-bold text-red-300">
+              {{ isAllDown() ? '无法连接素材服务器' : '素材加载失败' }}
+            </h3>
+            <p class="text-xs text-slate-400 max-w-md leading-relaxed">
+              {{ loadError }}
+            </p>
+            <p class="text-[11px] text-slate-500 font-mono pt-1">
+              回退链：{{ fallbackChainText }}
+            </p>
+            <p class="text-[11px] text-slate-500 font-mono">
+              当前生效：{{ activeServer }}
+            </p>
+          </div>
+
+          <!-- 公网/备用服务器手动指定（对标 App 设置页） -->
+          <div class="flex items-center gap-2 pt-1">
+            <input
+              v-model="manualServerInput"
+              type="text"
+              placeholder="公网地址，如 https://material.example.com"
+              class="w-72 bg-studio-900 border border-studio-700 rounded-lg px-3 py-2 text-xs text-slate-200 font-mono outline-none focus:border-studio-accent"
+            />
+            <button
+              @click="saveManualServer"
+              class="px-4 py-2 rounded-lg bg-studio-800 hover:bg-studio-700 border border-studio-700 text-white text-xs font-bold cursor-pointer whitespace-nowrap"
+            >
+              保存并重探
+            </button>
+          </div>
+
+          <div class="flex items-center gap-3 pt-1">
+            <button
+              @click="reconnectAndReload"
+              :disabled="reconnecting"
+              class="px-5 py-2.5 bg-studio-accent text-white text-xs font-bold rounded-lg hover:brightness-110 transition-all cursor-pointer disabled:opacity-50"
+            >
+              {{ reconnecting ? '正在重新探测…' : '重新探测并连接' }}
+            </button>
+            <button
+              @click="clearManualAndReload"
+              v-if="getManualServer()"
+              class="px-4 py-2.5 bg-studio-850 text-slate-300 text-xs font-bold rounded-lg border border-studio-700 hover:bg-studio-800 cursor-pointer"
+            >
+              清除手动地址
+            </button>
+          </div>
         </div>
 
         <!-- 空数据提示 -->
@@ -1052,6 +1113,12 @@
       @close="lineageGraphOpen = false"
       @open-detail="onGraphOpenDetail"
     />
+
+    <SimilarityWorkbenchModal
+      ref="workbenchModalRef"
+      v-model:visible="similarityWorkbenchOpen"
+      @resolved="reloadAssets(true)"
+    />
   </div>
 </template>
 
@@ -1059,6 +1126,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import StudioIcon from '../components/StudioIcon.vue';
 import LineageGraph from '../components/LineageGraph.vue';
+import SimilarityWorkbenchModal from '../components/SimilarityWorkbenchModal.vue';
 import {
   ensureToken,
   fetchAssets,
@@ -1077,7 +1145,15 @@ import {
   authFetch,
   moveAssetShelf,
   classifyAsset,
-  retagAsset
+  retagAsset,
+  ensureServerBase,
+  serverLabel,
+  isAllDown,
+  listCandidates,
+  listCandidateUrls,
+  setManualServer,
+  getManualServer,
+  onServerStatusChange
 } from '../api.js';
 
 const emit = defineEmits(['sendToChat', 'sendToEdit', 'sendToClip']);
@@ -1196,6 +1272,15 @@ function setSourcePlate(key) {
 const finishedFileInput = ref(null);
 const detailPane = ref('tags');
 const lineageGraphOpen = ref(false);
+const similarityWorkbenchOpen = ref(false);
+const workbenchModalRef = ref(null);
+
+function openSimilarityWorkbench() {
+  similarityWorkbenchOpen.value = true;
+  nextTick(() => {
+    workbenchModalRef.value?.loadWorkbench();
+  });
+}
 const detailTagEditing = ref(false);
 const classifyCategory = ref('interior');
 const classifySpace = ref('');
@@ -1299,6 +1384,12 @@ function toggleOnlyFavorite() {
 const showFilterBar = ref(true); // 筛选栏展开状态
 const loading = ref(false);
 const loadingMore = ref(false);
+const loadError = ref(''); // 非空表示三级回退全挂后的真实断线状态（区别于“筛选无结果”）
+const reconnecting = ref(false);
+const activeServer = ref(serverLabel());
+const fallbackChainText = listCandidates().join(' → ');
+const manualServerInput = ref(getManualServer());
+let stopServerWatch = null;
 const currentPage = ref(1);
 const pageSize = 60;
 const totalAssetsCount = ref(0);
@@ -1949,6 +2040,7 @@ async function reloadAssets(reset = true) {
   }
 
   loading.value = true;
+  loadError.value = '';
   try {
     await ensureToken();
 
@@ -2008,10 +2100,56 @@ async function reloadAssets(reset = true) {
       hasMore.value = assetsList.value.length < totalAssetsCount.value && items.length > 0;
     }
   } catch (err) {
+    // 未登录 / 会话过期：全局登录弹窗已弹出（ensureToken/authFetch 会广播事件），
+    // 这里不展示错误面板，避免把“需要登录”误报成断线或空结果。
+    if (err?.name === 'AuthRequiredError') {
+      return;
+    }
     console.error('加载素材失败:', err);
+    // 三级回退（同源网关→本机→局域网/公网）全部不可达：
+    // 显式展示断线面板，不再把失败伪装成“未找到匹配的素材资产”。
+    const networkDown = err?.name === 'MLServerUnreachable'
+      || err instanceof TypeError
+      || (typeof err?.message === 'string' && /Failed to fetch|NetworkError|网络|无法连接|502|503|504/.test(err.message));
+    if (networkDown || isAllDown()) {
+      loadError.value = isAllDown()
+        ? '无法连接素材服务器：同源网关、本机、局域网/公网候选均不可达'
+        : (err?.message || '与素材服务的网络连接已断开');
+    } else {
+      // 服务在线但请求失败（权限、后端 5xx 等）：单独提示，不冒充“无匹配结果”
+      loadError.value = err?.message || '素材服务请求失败';
+    }
   } finally {
     loading.value = false;
   }
+}
+
+// 强制重新探活整个候选链并重载
+async function reconnectAndReload() {
+  if (reconnecting.value) return;
+  reconnecting.value = true;
+  try {
+    await ensureServerBase({ force: true });
+  } catch { /* 全挂时 loadError 会继续保留 */ }
+  reconnecting.value = false;
+  activeServer.value = serverLabel();
+  reloadAssets(true);
+}
+
+// 保存公网/备用地址（App 设置页同款三级回退的人工入口）
+async function saveManualServer() {
+  const u = (manualServerInput.value || '').trim();
+  await setManualServer(u);
+  manualServerInput.value = getManualServer();
+  activeServer.value = serverLabel();
+  reloadAssets(true);
+}
+
+async function clearManualAndReload() {
+  await setManualServer('');
+  manualServerInput.value = '';
+  activeServer.value = serverLabel();
+  reloadAssets(true);
 }
 
 // 触底自动分页加载更多
@@ -2257,7 +2395,7 @@ function getModalDownloadUrl() {
   if (!activeModalAsset.value) return '';
   const fid = activeModalAsset.value.fid;
   if (activeDerivativeId.value) {
-    return getDerivativeDownloadUrl(fid, activeDerivativeId.value);
+    return getDerivativeDownloadUrl(fid, activeDerivativeId.value, activeDerivativeObj.value?.kind || 'derivative');
   }
   return getAssetDownloadUrl(fid);
 }
@@ -2528,9 +2666,50 @@ function formatDateTimeShort(ts) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function handleImageError(e) {
-  e.target.onerror = null;
-  e.target.src = 'data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200" viewBox="0 0 300 200"><rect width="100%" height="100%" fill="%23162032"/><text x="50%" y="50%" font-size="13" fill="%2364748B" text-anchor="middle" dominant-baseline="middle">🖼️ 缩略图生成中</text></svg>';
+const PLACEHOLDER_IMG = 'data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200" viewBox="0 0 300 200"><rect width="100%" height="100%" fill="%23162032"/><text x="50%" y="50%" font-size="13" fill="%2364748B" text-anchor="middle" dominant-baseline="middle">🖼️ 缩略图生成中</text></svg>';
+
+// <img>/@error 统一处理：当前 base 的媒体链路失败时，先按三级回退换服务器重试，
+// 所有候选都不可达或资源确实 404 时才落到占位图。
+async function handleImageError(e) {
+  const el = e?.target || e?.currentTarget;
+  if (!el) return;
+  const curSrc = el.getAttribute('src') || '';
+  if (curSrc.startsWith('data:')) return;
+
+  // 只对我们自己的 API 媒体地址做跨 base 重试；外链/editor-api 直接占位
+  const isApiMedia = /\/api\/viewer\/assets\//.test(curSrc);
+  if (!isApiMedia) {
+    el.onerror = null;
+    el.src = PLACEHOLDER_IMG;
+    return;
+  }
+
+  // 记录已在该元素上试过的 base，避免同一坏地址/同源反复触发
+  if (!el.__mlImgTried) el.__mlImgTried = new Set();
+  const curOrigin = (() => { try { return new URL(curSrc, window.location.href).origin; } catch { return ''; } })();
+  el.__mlImgTried.add(curOrigin);
+
+  // 重新探活，并从候选链里找一个还没试过的 base
+  const { allDown } = await ensureServerBase({ force: true });
+  activeServer.value = serverLabel();
+  if (allDown) {
+    el.onerror = null;
+    el.src = PLACEHOLDER_IMG;
+    return;
+  }
+  const candidates = listCandidateUrls();
+  const next = candidates.find((c) => !el.__mlImgTried.has(new URL(c, window.location.href).origin));
+  if (!next) {
+    el.onerror = null;
+    el.src = PLACEHOLDER_IMG;
+    return;
+  }
+  let nextSrc = curSrc;
+  try {
+    const u = new URL(curSrc, window.location.href);
+    nextSrc = `${next.replace(/\/$/, '')}${u.pathname}${u.search}`;
+  } catch { /* ignore */ }
+  el.src = nextSrc;
 }
 
 function handleKeyDown(e) {
@@ -2554,11 +2733,15 @@ onMounted(() => {
   loadTimelineDays();
   setTimeout(setupIntersectionObserver, 300);
   window.addEventListener('keydown', handleKeyDown);
+  stopServerWatch = onServerStatusChange((detail) => {
+    activeServer.value = detail.label || serverLabel();
+  });
 });
 
 onUnmounted(() => {
   if (observerInstance) observerInstance.disconnect();
   window.removeEventListener('keydown', handleKeyDown);
+  if (stopServerWatch) stopServerWatch();
 });
 </script>
 

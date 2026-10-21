@@ -19,9 +19,9 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { TextIcon } from "@hugeicons/core-free-icons";
 
 const FONT_TABS = [
-	{ key: "all", label: "All fonts" },
-	{ key: "my-fonts", label: "My fonts" },
-	{ key: "favorites", label: "Favorites" },
+	{ key: "all", label: "全部字体" },
+	{ key: "my-fonts", label: "我的字体" },
+	{ key: "favorites", label: "收藏" },
 ] as const;
 
 type FontTab = (typeof FONT_TABS)[number]["key"];
@@ -98,7 +98,7 @@ export function FontPicker({
 						<HugeiconsIcon icon={TextIcon} />
 					</span>
 					<span className="truncate" style={{ fontFamily: defaultValue }}>
-						{defaultValue ?? "Select a font"}
+						{defaultValue ?? "选择字体"}
 					</span>
 				</div>
 				<ChevronDown className="size-3 shrink-0 opacity-50" />

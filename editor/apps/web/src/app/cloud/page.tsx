@@ -24,6 +24,18 @@ export default function CloudProjectsPage() {
 	const [items, setItems] = useState<SnapshotSummary[] | null>(null);
 	const [error, setError] = useState("");
 	const [busyId, setBusyId] = useState<string | null>(null);
+	const [groupFilter, setGroupFilter] = useState("");
+
+	const groups = Array.from(
+		new Set((items || []).map((item) => item.group || "").filter(Boolean)),
+	).sort((a, b) => a.localeCompare(b, "zh-CN"));
+
+	const visibleItems = (items || []).filter((item) => {
+		if (!groupFilter) return true;
+		const group = item.group || "";
+		if (groupFilter === "__ungrouped__") return group === "";
+		return group === groupFilter;
+	});
 
 	const load = async () => {
 		setError("");
@@ -105,13 +117,55 @@ export default function CloudProjectsPage() {
 				</div>
 			)}
 
-			{items && items.length > 0 && (
+			{items && items.length > 0 && groups.length > 0 && (
+				<div className="mb-4 flex flex-wrap gap-2">
+					<Button
+						size="sm"
+						variant={groupFilter === "" ? "default" : "outline"}
+						onClick={() => setGroupFilter("")}
+					>
+						全部分组
+					</Button>
+					<Button
+						size="sm"
+						variant={groupFilter === "__ungrouped__" ? "default" : "outline"}
+						onClick={() => setGroupFilter("__ungrouped__")}
+					>
+						未分组
+					</Button>
+					{groups.map((group) => (
+						<Button
+							key={group}
+							size="sm"
+							variant={groupFilter === group ? "default" : "outline"}
+							onClick={() => setGroupFilter(group)}
+						>
+							{group}
+						</Button>
+					))}
+				</div>
+			)}
+
+			{items && items.length > 0 && visibleItems.length === 0 && (
+				<div className="text-muted-foreground rounded-lg border border-dashed px-6 py-16 text-center text-sm">
+					该分组下还没有云端工程。
+				</div>
+			)}
+
+			{visibleItems.length > 0 && (
 				<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-					{items.map((snap) => (
+					{visibleItems.map((snap) => (
 						<Card key={snap.id} className="overflow-hidden">
 							<CardContent className="flex h-full flex-col gap-3 p-4">
 								<div className="min-w-0">
-									<div className="truncate text-sm font-medium">{snap.name}</div>
+									<div className="flex items-center gap-2">
+										<div className="truncate text-sm font-medium">{snap.name}</div>
+										{snap.group && (
+											<span className="bg-accent/60 text-muted-foreground ml-auto shrink-0 rounded-sm px-1.5 py-0.5 text-[11px]">
+												{snap.group}
+											</span>
+										)}
+									</div>
 									<div className="text-muted-foreground mt-1 text-xs">
 										rev {snap.rev} · {snap.assetsCount} 个素材 ·{" "}
 										{(snap.sizeBytes / 1024).toFixed(0)} KB

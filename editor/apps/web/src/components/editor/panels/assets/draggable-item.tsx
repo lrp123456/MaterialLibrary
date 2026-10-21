@@ -20,6 +20,8 @@ export interface DraggableItemProps {
 	preview: ReactNode;
 	dragData: TimelineDragData;
 	onDragStart?: ({ e }: { e: React.DragEvent }) => void;
+	/** 拖拽结束（含松手后落点已处理完），用于清理拖拽期间的临时状态 */
+	onDragEnd?: ({ e }: { e: React.DragEvent }) => void;
 	onAddToTimeline?: ({ currentTime }: { currentTime: MediaTime }) => void;
 	aspectRatio?: number;
 	className?: string;
@@ -28,6 +30,8 @@ export interface DraggableItemProps {
 	shouldShowLabel?: boolean;
 	isRounded?: boolean;
 	variant?: "card" | "compact";
+	/** compact 变体在名称右侧追加的元信息（时长、来源角标等） */
+	trailing?: ReactNode;
 	isDraggable?: boolean;
 }
 
@@ -36,6 +40,7 @@ export function DraggableItem({
 	preview,
 	dragData,
 	onDragStart,
+	onDragEnd,
 	onAddToTimeline,
 	aspectRatio = 16 / 9,
 	className = "",
@@ -44,6 +49,7 @@ export function DraggableItem({
 	shouldShowLabel = true,
 	isRounded = true,
 	variant = "card",
+	trailing,
 	isDraggable = true,
 }: DraggableItemProps) {
 	const [isDragging, setIsDragging] = useState(false);
@@ -87,9 +93,10 @@ export function DraggableItem({
 		onDragStart?.({ e: event });
 	};
 
-	const handleDragEnd = () => {
+	const handleDragEnd = (event: React.DragEvent) => {
 		setIsDragging(false);
 		editor.timeline.dragSource.end();
+		onDragEnd?.({ e: event });
 	};
 
 	return (
@@ -161,6 +168,7 @@ export function DraggableItem({
 						<span className="w-full flex-1 truncate text-sm text-left">
 							{name}
 						</span>
+						{trailing}
 					</button>
 				</div>
 			)}
@@ -187,7 +195,7 @@ export function DraggableItem({
 								{shouldShowPlusOnDrag && (
 									<PlusButton
 										onClick={handleAddToTimeline}
-										tooltipText="Add to timeline or drag to position"
+										tooltipText="添加到时间轴，或拖到指定位置"
 									/>
 								)}
 							</AspectRatio>

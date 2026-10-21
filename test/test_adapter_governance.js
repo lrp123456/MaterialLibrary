@@ -25,8 +25,8 @@ async function runTests() {
     assert.strictEqual(OFFICIAL_STUDIO.chat.defaultModel, 'agnes3_0flash', 'chat.defaultModel 应为 agnes3_0flash');
     const lite = OFFICIAL_STUDIO.chat.models.find(m => m.id === 'gemini_flash_lite_latest');
     const flash = OFFICIAL_STUDIO.chat.models.find(m => m.id === 'gemini_flash_latest');
-    assert.strictEqual(lite?.disabled, true, 'gemini_flash_lite_latest 应有 disabled: true');
-    assert.strictEqual(flash?.disabled, true, 'gemini_flash_latest 应有 disabled: true');
+    assert.ok(lite && !lite.disabled, 'gemini_flash_lite_latest 应已启用（无 disabled 标记）');
+    assert.ok(flash && !flash.disabled, 'gemini_flash_latest 应已启用（无 disabled 标记）');
 
     const gemma = OFFICIAL_STUDIO.chat.models.find(m => m.id === 'gemma_4_26b');
     assert.ok(gemma, 'gemma_4_26b 必须保留');
@@ -201,19 +201,29 @@ async function runTests() {
     const db = new Database(':memory:');
     ensureGenGovernanceSchema(db);
 
-    // 模拟 gen_job_bindings 指向已停用的 gemini_flash_lite_latest
-    db.prepare(`
-      INSERT INTO gen_job_bindings (job_id, model_id, params_json, allow_models_json, fields_json, actor, updated_at)
-      VALUES ('gate', 'gemini_flash_lite_latest', '{}', '[]', '[]', 'test', 0)
-    `).run();
+    // 当前目录已无内置停用模型，临时给 gemini_flash_lite_latest 打停用标记来覆盖降级路径，测后恢复
+    const target = OFFICIAL_STUDIO.chat.models.find(m => m.id === 'gemini_flash_lite_latest');
+    const hadDisabled = Object.prototype.hasOwnProperty.call(target, 'disabled');
+    const prevDisabled = target.disabled;
+    target.disabled = true;
+    try {
+      // 模拟 gen_job_bindings 指向已停用的 gemini_flash_lite_latest
+      db.prepare(`
+        INSERT INTO gen_job_bindings (job_id, model_id, params_json, allow_models_json, fields_json, actor, updated_at)
+        VALUES ('gate', 'gemini_flash_lite_latest', '{}', '[]', '[]', 'test', 0)
+      `).run();
 
-    const binding = getJobBinding(db, 'gate');
-    assert.notStrictEqual(binding.model_id, 'gemini_flash_lite_latest', '读取作业绑定时不能返回已停用的模型');
-    assert.ok(binding.model_id === 'workflow_vision' || binding.model_id === 'agnes3_0flash', `应平滑降级为启用模型，实际: ${binding.model_id}`);
+      const binding = getJobBinding(db, 'gate');
+      assert.notStrictEqual(binding.model_id, 'gemini_flash_lite_latest', '读取作业绑定时不能返回已停用的模型');
+      assert.ok(binding.model_id === 'workflow_vision' || binding.model_id === 'agnes3_0flash', `应平滑降级为启用模型，实际: ${binding.model_id}`);
 
-    // 检查 DB 中的原始绑定行未被删除或覆写（以后启用即可恢复）
-    const rawRow = db.prepare("SELECT model_id FROM gen_job_bindings WHERE job_id='gate'").get();
-    assert.strictEqual(rawRow.model_id, 'gemini_flash_lite_latest', 'DB 记录必须完整保留，不作破坏性删除');
+      // 检查 DB 中的原始绑定行未被删除或覆写（以后启用即可恢复）
+      const rawRow = db.prepare("SELECT model_id FROM gen_job_bindings WHERE job_id='gate'").get();
+      assert.strictEqual(rawRow.model_id, 'gemini_flash_lite_latest', 'DB 记录必须完整保留，不作破坏性删除');
+    } finally {
+      if (hadDisabled) target.disabled = prevDisabled;
+      else delete target.disabled;
+    }
     console.log('✔ 作业绑定透明降级且原样保留 DB 记录校验通过');
   }
 

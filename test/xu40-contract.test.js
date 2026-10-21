@@ -97,7 +97,8 @@ function testMounts() {
   const text = list.find((m) => m.id === 'workflow_vision');
   assert.strictEqual(text.kind, 'chat');
   assert.ok(GATEWAY_GROUP_NAMES.has('workflow_vision'));
-  assert.strictEqual(list.find((m) => m.id === 'gemini-flash-latest').enabled, false);
+  assert.strictEqual(list.find((m) => m.id === 'gemini-flash-latest').enabled, true);
+  assert.strictEqual(list.find((m) => m.id === 'gemini-flash-lite-latest').enabled, true);
   assert.ok(list.some((m) => m.id === 'agnes-3.0-flash'));
 
   db.prepare(`INSERT INTO llm_models (id, provider_id, name, model_code, capabilities, enabled, created_at, updated_at)

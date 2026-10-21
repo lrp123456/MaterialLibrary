@@ -169,7 +169,7 @@ const DEFAULT_MODELS = [
     capabilities: 'chat,vision,tag',
     params_json: JSON.stringify({ temperature: 0.2, max_tokens: 2048 }),
     is_default: 0,
-    enabled: 0
+    enabled: 1
   },
   {
     id: 'litellm_gemini_flash_latest',
@@ -179,7 +179,7 @@ const DEFAULT_MODELS = [
     capabilities: 'chat,vision,tag',
     params_json: JSON.stringify({ temperature: 0.2, max_tokens: 2048 }),
     is_default: 0,
-    enabled: 0
+    enabled: 1
   },
   {
     id: 'litellm_workflow_vision',
@@ -1384,14 +1384,19 @@ function resolveLiteLlmChatConfig(db, config, requestedModel) {
     } catch (_) {}
   }
 
-  // 2. 现有对话和识图模型先挂在本地网关上，请求仍进 :4000
+  // 2. 现有对话和识图模型优先读取第四代 llm_endpoints 权威配置
+  let endpointRow = null;
+  try {
+    endpointRow = db.prepare("SELECT id, base_url, enabled FROM llm_endpoints WHERE id='litellm'").get();
+  } catch (_) {}
+
   let row = null;
   try {
     row = db.prepare("SELECT id, base_url, api_key, secrets_json, enabled FROM llm_providers WHERE id='litellm'").get();
   } catch (_) {}
 
   // 去掉「LiteLLM 未启用就拒绝一切文本和视觉」的 litellm_disabled 报错
-  const baseUrl = row?.base_url || config?.litellmBaseUrl || process.env.LITELLM_BASE_URL || 'http://127.0.0.1:4000';
+  const baseUrl = endpointRow?.base_url || row?.base_url || config?.litellmBaseUrl || process.env.LITELLM_BASE_URL || 'http://127.0.0.1:4000';
   const keys = keysForProviderRow(row);
   const extra = process.env.LITELLM_API_KEY || config?.litellmApiKey || '';
   if (extra && !keys.includes(extra)) keys.push(extra);

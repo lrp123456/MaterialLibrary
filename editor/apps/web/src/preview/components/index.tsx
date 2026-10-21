@@ -8,6 +8,8 @@ import { useContainerSize } from "@/hooks/use-container-size";
 import { useFullscreen } from "@/hooks/use-fullscreen";
 import { CanvasRenderer } from "@/services/renderer/canvas-renderer";
 import { TICKS_PER_SECOND } from "@/wasm";
+import { DEFAULT_FPS } from "@/fps/defaults";
+import { DEFAULT_CANVAS_SIZE } from "@/canvas/sizes";
 import type { RootNode } from "@/services/renderer/nodes/root-node";
 import { buildScene } from "@/services/renderer/scene-builder";
 import { PreviewOverlayLayer } from "./overlay-layer";
@@ -25,9 +27,9 @@ import {
 } from "./preview-viewport";
 
 function usePreviewSize() {
-	const canvasSize = useEditor(
-		(e) => e.project.getActive()?.settings.canvasSize,
-	);
+	const canvasSize =
+		useEditor((e) => e.project.getActiveOrNull()?.settings.canvasSize) ??
+		DEFAULT_CANVAS_SIZE;
 
 	return {
 		width: canvasSize?.width,
@@ -98,7 +100,7 @@ function RenderTreeController() {
 		(e) => e.timeline.getPreviewTracks() ?? e.scenes.getActiveScene().tracks,
 	);
 	const mediaAssets = useEditor((e) => e.media.getAssets());
-	const activeProject = useEditor((e) => e.project.getActive());
+	const activeProject = useEditor((e) => e.project.getActiveOrNull());
 
 	const { width, height } = usePreviewSize();
 
@@ -145,7 +147,7 @@ function PreviewCanvas({
 	const { width: nativeWidth, height: nativeHeight } = usePreviewSize();
 	const viewportSize = useContainerSize({ containerRef: viewportRef });
 	const editor = useEditor();
-	const activeProject = useEditor((e) => e.project.getActive());
+	const activeProject = useEditor((e) => e.project.getActiveOrNull());
 	const renderTree = useEditor((e) => e.renderer.getRenderTree());
 	const viewport = usePreviewViewportState({
 		canvasHeight: nativeHeight,
@@ -160,9 +162,9 @@ function PreviewCanvas({
 		return new CanvasRenderer({
 			width: nativeWidth,
 			height: nativeHeight,
-			fps: activeProject.settings.fps,
+			fps: activeProject?.settings.fps ?? DEFAULT_FPS,
 		});
-	}, [nativeWidth, nativeHeight, activeProject.settings.fps]);
+	}, [nativeWidth, nativeHeight, activeProject?.settings.fps]);
 
 	// Mount the compositor's output canvas directly into the preview. wgpu
 	// renders straight into this element, so there is no intermediate copy —
@@ -317,9 +319,9 @@ function PreviewCanvas({
 									width: viewport.sceneWidth,
 									height: viewport.sceneHeight,
 									background:
-										activeProject.settings.background.type === "blur"
+										activeProject?.settings.background.type === "blur"
 											? "transparent"
-											: activeProject?.settings.background.color,
+											: (activeProject?.settings.background.color ?? "#000"),
 								}}
 							/>
 								<PreviewOverlayLayer

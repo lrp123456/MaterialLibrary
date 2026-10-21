@@ -64,6 +64,11 @@ function ensureSnapshotTables(db) {
     );
     CREATE INDEX IF NOT EXISTS idx_csa_fid ON clip_snapshot_assets(fid);
   `);
+  // 分组：与本地工程 metadata.group 一一对应，拉取/备份时随工程一起流动
+  const cols = db.prepare('PRAGMA table_info(clip_snapshots)').all().map((c) => c.name);
+  if (!cols.includes('group_name')) {
+    db.exec("ALTER TABLE clip_snapshots ADD COLUMN group_name TEXT DEFAULT ''");
+  }
 }
 
 function normalizeAssets(raw) {
@@ -93,6 +98,7 @@ function rowToSummary(row, assetsCount) {
   return {
     id: row.id,
     name: row.name,
+    group: row.group_name || '',
     rev: Number(row.rev) || 1,
     schemaVersion: Number(row.schema_version) || 1,
     thumbnailFid: row.thumbnail_fid || null,
@@ -139,29 +145,30 @@ function replaceAssets(db, snapshotId, assets) {
   for (const a of assets) ins.run(snapshotId, a.fid, a.role, now);
 }
 
-function createSnapshot(db, { name, data, assets, ownerId = 0, thumbnailFid = null }) {
+function createSnapshot(db, { name, data, assets, ownerId = 0, thumbnailFid = null, group = '' }) {
   const id = makeSnapId();
   const payload = JSON.stringify(data);
   const now = Date.now();
   db.prepare(`
-    INSERT INTO clip_snapshots (id, name, owner_id, data_json, schema_version, thumbnail_fid, size_bytes, rev, created_at, updated_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?)
-  `).run(id, name, ownerId, payload, 1, thumbnailFid, Buffer.byteLength(payload), 1, now, now);
+    INSERT INTO clip_snapshots (id, name, group_name, owner_id, data_json, schema_version, thumbnail_fid, size_bytes, rev, created_at, updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)
+  `).run(id, name, String(group || '').slice(0, 120), ownerId, payload, 1, thumbnailFid, Buffer.byteLength(payload), 1, now, now);
   replaceAssets(db, id, assets);
   return getSnapshot(db, id);
 }
 
-function updateSnapshot(db, id, { name, data, assets, rev, thumbnailFid = null }) {
+function updateSnapshot(db, id, { name, data, assets, rev, thumbnailFid = null, group = '' }) {
   const cur = db.prepare('SELECT rev FROM clip_snapshots WHERE id=?').get(id);
   if (!cur) throw Object.assign(new Error('快照不存在'), { status: 404 });
   const payload = JSON.stringify(data);
+  const groupName = String(group || '').slice(0, 120);
   const expected = Number(rev);
   if (Number.isFinite(expected) && expected >= 0) {
     const r = db.prepare(`
       UPDATE clip_snapshots
-      SET name=?, data_json=?, size_bytes=?, thumbnail_fid=?, rev=rev+1, updated_at=?
+      SET name=?, group_name=?, data_json=?, size_bytes=?, thumbnail_fid=?, rev=rev+1, updated_at=?
       WHERE id=? AND rev=?
-    `).run(name, payload, Buffer.byteLength(payload), thumbnailFid, Date.now(), id, expected);
+    `).run(name, groupName, payload, Buffer.byteLength(payload), thumbnailFid, Date.now(), id, expected);
     if (!r.changes) {
       throw Object.assign(new Error('云端快照已被其它机器更新，请先拉取最新版本'), {
         status: 409,
@@ -172,9 +179,9 @@ function updateSnapshot(db, id, { name, data, assets, rev, thumbnailFid = null }
   } else {
     db.prepare(`
       UPDATE clip_snapshots
-      SET name=?, data_json=?, size_bytes=?, thumbnail_fid=?, rev=rev+1, updated_at=?
+      SET name=?, group_name=?, data_json=?, size_bytes=?, thumbnail_fid=?, rev=rev+1, updated_at=?
       WHERE id=?
-    `).run(name, payload, Buffer.byteLength(payload), thumbnailFid, Date.now(), id);
+    `).run(name, groupName, payload, Buffer.byteLength(payload), thumbnailFid, Date.now(), id);
   }
   replaceAssets(db, id, assets);
   return getSnapshot(db, id);
@@ -219,6 +226,7 @@ async function handleSnapshots(services, req, res, url) {
     }
     const snap = createSnapshot(db, {
       name: String(body.name || '未命名工程').slice(0, 120),
+      group: String(body.group || '').slice(0, 120),
       data: body.data,
       assets,
       thumbnailFid: body.thumbnailFid || null,
@@ -248,6 +256,7 @@ async function handleSnapshots(services, req, res, url) {
       }
       const snap = updateSnapshot(db, id, {
         name: String(body.name || '未命名工程').slice(0, 120),
+        group: String(body.group || '').slice(0, 120),
         data: body.data,
         assets,
         rev: body.rev,

@@ -242,6 +242,8 @@ function emitOpen() {
 
 function onNodeClick(node) {
   if (!node || node.ring === 0 || node.sameAsset) return;
+  // 已删除（回收站中或已彻底清除）的节点不可再居中，避免触发「关系没有读出来」
+  if (node.missing) return;
   recenter(node);
 }
 
@@ -293,9 +295,14 @@ async function loadCenter(fid, seed) {
     packs[fid] = named;
     centerFid.value = fid;
     centerName.value = (named.self && named.self.file_name) || name || centerName.value || fid;
-  } catch {
+  } catch (err) {
     if (gen !== loadGen) return;
-    errorText.value = '这张的关系没有读出来。';
+    // 中心素材已被删除（软删在回收站 / 已彻底清除）：给出可操作提示，而非通用读取失败
+    if (err && /HTTP\s*404|404/.test(String(err.message || ''))) {
+      errorText.value = '这张素材已删除（可能在回收站中），恢复后可查看血缘。';
+    } else {
+      errorText.value = '这张的关系没有读出来。';
+    }
   } finally {
     if (gen === loadGen) loading.value = false;
   }

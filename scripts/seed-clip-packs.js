@@ -195,7 +195,34 @@ writePack(
   },
 );
 
-// ---------- 4. 文字模板（数据就绪，渲染待接入） ----------
+// ---------- 8. 能力插件：镜头切分（operation） ----------
+// 声明式插件只登记「用哪个 runner、吃哪些输入、吐什么产物、有哪些参数」，
+// 执行体固定在 <dataDir>/clip-ai-runners/scene-split.js；
+// 包目录里只有 manifest.json，没有任何可执行文件，因此不存在"加载即执行"。
+writePack('com.mls.plugin.scene-split', {
+  schemaVersion: 1,
+  id: 'com.mls.plugin.scene-split',
+  type: 'operation',
+  name: { zh: '镜头切分', en: 'Scene Split' },
+  description: {
+    zh: '按画面突变切分镜头，产出切点时间表（秒）。执行体由服务端 runner 提供。',
+  },
+  version: '1.0.0',
+  engine: { minEditor: '0.1.0' },
+  tags: ['AI', '镜头检测', '切点'],
+  operation: {
+    input: ['video'],
+    output: 'cuts',
+    runner: 'scene-split',
+    params: [
+      { key: 'threshold', type: 'number', label: { zh: '切分阈值' }, default: 27, min: 1, max: 100, step: 1 },
+      { key: 'minSceneLen', type: 'number', label: { zh: '最短镜头（秒）' }, default: 1, min: 0, max: 30, step: 0.1 },
+    ],
+  },
+  license: { type: 'internal', source: '自研', commercialUse: true },
+});
+
+// ---------- 9. 文字模板（数据就绪，渲染待接入） ----------
 writePack('com.mls.text.gallery-title', {
   schemaVersion: 1,
   id: 'com.mls.text.gallery-title',
@@ -223,6 +250,195 @@ writePack('com.mls.text.gallery-title', {
   },
   license: { type: 'internal', source: '自研', commercialUse: true },
 });
+
+// ---------- 7. 转场包（12 个 mode，走 compositor 的 transition 通道） ----------
+// mode 常量与 editor/rust/crates/compositor/src/shaders/transition.wgsl 一一对应；
+// uniforms.mode 由包内写死，u_scalar0..3 / u_direction 由元素 params 在运行时代入。
+const TRANSITIONS = [
+  {
+    id: 'dissolve',
+    name: '叠化',
+    en: 'Dissolve',
+    mode: 0,
+    duration: 0.8,
+    desc: '最通用的交叉溶解，软硬由柔和度控制。',
+    tags: ['基础', '叠化', '通用'],
+    params: [
+      { key: 'softness', label: '柔和度', default: 0.6, min: 0, max: 1, step: 0.01 },
+    ],
+    uniforms: { u_scalar0: '$softness' },
+  },
+  {
+    id: 'dip-black',
+    name: '黑场过渡',
+    en: 'Dip to Black',
+    mode: 1,
+    duration: 0.9,
+    desc: '先压到全黑再拉起，适合段落之间留呼吸。',
+    tags: ['黑场', '段落'],
+    params: [],
+    uniforms: {},
+  },
+  {
+    id: 'dip-white',
+    name: '白场过渡',
+    en: 'Dip to White',
+    mode: 2,
+    duration: 0.9,
+    desc: '闪白过场，适合明亮空间与快节奏剪辑。',
+    tags: ['白场', '闪白'],
+    params: [],
+    uniforms: {},
+  },
+  {
+    id: 'push-left',
+    name: '左推',
+    en: 'Push Left',
+    mode: 3,
+    duration: 0.7,
+    desc: '画面整体向左推出，右侧带入下一段。',
+    tags: ['推移', '方向感'],
+    params: [],
+    uniforms: { u_direction: '[1,0]' },
+  },
+  {
+    id: 'push-up',
+    name: '上推',
+    en: 'Push Up',
+    mode: 4,
+    duration: 0.7,
+    desc: '画面向上推出，适合竖向空间关系。',
+    tags: ['推移', '竖向'],
+    params: [],
+    uniforms: {},
+  },
+  {
+    id: 'zoom-in',
+    name: '缩放推近',
+    en: 'Zoom Push',
+    mode: 5,
+    duration: 0.75,
+    desc: '前一段推近淡出，后一段从略小拉回原尺寸。',
+    tags: ['缩放', '推近'],
+    params: [
+      { key: 'amount', label: '推近幅度', default: 0.65, min: 0, max: 1, step: 0.01 },
+    ],
+    uniforms: { u_scalar1: '$amount' },
+  },
+  {
+    id: 'rotate',
+    name: '旋转',
+    en: 'Rotate',
+    mode: 6,
+    duration: 0.8,
+    desc: '两段反向旋转交接，适合节奏感的转场点。',
+    tags: ['旋转', '动感'],
+    params: [
+      { key: 'amount', label: '旋转角度', default: 0.7, min: 0, max: 1, step: 0.01 },
+    ],
+    uniforms: { u_scalar1: '$amount' },
+  },
+  {
+    id: 'blur',
+    name: '模糊过渡',
+    en: 'Blur Dissolve',
+    mode: 7,
+    duration: 0.9,
+    desc: '中点最糊、两端清晰，用模糊掩盖剪辑点。',
+    tags: ['模糊', '柔化'],
+    params: [
+      { key: 'softness', label: '模糊强度', default: 0.45, min: 0, max: 1, step: 0.01 },
+    ],
+    uniforms: { u_scalar0: '$softness' },
+  },
+  {
+    id: 'wipe-linear',
+    name: '线性擦除',
+    en: 'Linear Wipe',
+    mode: 8,
+    duration: 0.8,
+    desc: '沿方向线性推开，羽化控制边缘软硬。',
+    tags: ['擦除', '方向'],
+    params: [
+      { key: 'softness', label: '羽化', default: 0.12, min: 0, max: 0.5, step: 0.01 },
+    ],
+    uniforms: { u_scalar0: '$softness', u_direction: '[1,0]' },
+  },
+  {
+    id: 'blinds',
+    name: '百叶窗',
+    en: 'Blinds',
+    mode: 9,
+    duration: 0.85,
+    desc: '横向条带依次翻面，条数与羽化可调。',
+    tags: ['条带', '结构感'],
+    params: [
+      { key: 'amount', label: '条带密度', default: 0.5, min: 0, max: 1, step: 0.01 },
+      { key: 'softness', label: '边缘羽化', default: 0.05, min: 0, max: 0.5, step: 0.01 },
+    ],
+    uniforms: { u_scalar0: '$softness', u_scalar1: '$amount' },
+  },
+  {
+    id: 'glitch',
+    name: '置换故障',
+    en: 'Glitch Shift',
+    mode: 10,
+    duration: 0.5,
+    desc: '按行随机位移 + 通道分离，故障风格专用。',
+    tags: ['故障', '赛博'],
+    params: [
+      { key: 'amount', label: '强度', default: 0.7, min: 0, max: 1, step: 0.01 },
+    ],
+    uniforms: { u_scalar1: '$amount' },
+  },
+  {
+    id: 'page-turn',
+    name: '翻页',
+    en: 'Page Turn',
+    mode: 11,
+    duration: 1.0,
+    desc: '沿方向翻页，折痕处带镜像与高光。',
+    tags: ['翻页', '立体'],
+    params: [
+      { key: 'softness', label: '折页宽度', default: 0.4, min: 0, max: 1, step: 0.01 },
+    ],
+    uniforms: { u_scalar0: '$softness', u_direction: '[1,0]' },
+  },
+];
+
+for (const t of TRANSITIONS) {
+  writePack(`com.mls.transition.${t.id}`, {
+    schemaVersion: 1,
+    id: `com.mls.transition.${t.id}`,
+    type: 'transition',
+    name: { zh: t.name, en: t.en },
+    description: { zh: t.desc },
+    version: '1.0.0',
+    engine: { minEditor: '0.1.0' },
+    tags: t.tags,
+    params: t.params.map((p) => ({
+      key: p.key,
+      type: 'number',
+      label: { zh: p.label },
+      default: p.default,
+      min: p.min,
+      max: p.max,
+      step: p.step,
+      keyframable: false,
+    })),
+    render: {
+      passes: [
+        {
+          shader: 'transition',
+          // mode 写死；标量走 $param，由加载器在帧构建时代入
+          uniforms: { mode: String(t.mode), ...t.uniforms },
+        },
+      ],
+    },
+    transition: { defaultDuration: t.duration, mode: t.mode },
+    license: { type: 'internal', source: '自研', commercialUse: true },
+  });
+}
 
 const dirs = fs.readdirSync(ROOT, { withFileTypes: true }).filter((d) => d.isDirectory());
 console.log(`已生成 ${dirs.length} 个资源包：`);

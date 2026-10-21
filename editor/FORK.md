@@ -90,7 +90,7 @@ uniform 只有 4 个标量槽 + 1 个方向向量。资源包里用：
 
 未知 uniform 名会直接报错（防止拼错后静默失效）。
 
-**当前内置 shader**：`gaussian-blur`、`glow`、`sharpen`、`skin-smooth`。
+**当前内置 shader**：`gaussian-blur`、`glow`、`sharpen`、`skin-smooth`、`grade`、`warp`、`channel`。
 
 **离线校验 WGSL**（比等到浏览器白屏快）：
 `cargo run --release -- <shaders 目录>`，工具在

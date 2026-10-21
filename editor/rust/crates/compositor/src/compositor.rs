@@ -18,6 +18,7 @@ use crate::{
 const LAYER_SHADER_SOURCE: &str = include_str!("shaders/layer.wgsl");
 const BLEND_SHADER_SOURCE: &str = include_str!("shaders/blend.wgsl");
 const MASK_SHADER_SOURCE: &str = include_str!("shaders/mask.wgsl");
+const TRANSITION_SHADER_SOURCE: &str = include_str!("shaders/transition.wgsl");
 
 pub struct RenderFrameOptions<'a, 'surface> {
     pub frame: &'a FrameDescriptor,
@@ -35,6 +36,8 @@ pub struct Compositor {
     blend_pipeline: wgpu::RenderPipeline,
     mask_uniform_bind_group_layout: wgpu::BindGroupLayout,
     mask_pipeline: wgpu::RenderPipeline,
+    transition_bind_group_layout: wgpu::BindGroupLayout,
+    transition_pipeline: wgpu::RenderPipeline,
 }
 
 #[derive(Debug, Error)]
@@ -74,6 +77,19 @@ struct MaskUniformBuffer {
     _padding: [f32; 3],
 }
 
+/// 与 transition.wgsl 的 TransitionUniforms 逐字段对应。
+/// 布局：resolution@0(8) progress@8(4) mode@12(4) scalars@16(16) direction@32(8) pad@40(8) = 48 字节。
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct TransitionUniformBuffer {
+    resolution: [f32; 2],
+    progress: f32,
+    mode: u32,
+    scalars: [f32; 4],
+    direction: [f32; 2],
+    _padding: [f32; 2],
+}
+
 impl Compositor {
     pub fn new(context: &GpuContext) -> Self {
         let device = context.device();
@@ -92,6 +108,10 @@ impl Compositor {
         let mask_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("compositor-mask-shader"),
             source: wgpu::ShaderSource::Wgsl(MASK_SHADER_SOURCE.into()),
+        });
+        let transition_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("compositor-transition-shader"),
+            source: wgpu::ShaderSource::Wgsl(TRANSITION_SHADER_SOURCE.into()),
         });
 
         let layer_uniform_bind_group_layout =
@@ -136,6 +156,50 @@ impl Compositor {
                     count: None,
                 }],
             });
+        // 转场是双输入：两张纹理 + 一个采样器 + 一份 uniform 同属一个 bind group，
+        // 因为 transition.wgsl 的 group(0) 里同时挂了这四项。
+        let transition_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("compositor-transition-layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
 
         let layer_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -165,6 +229,12 @@ impl Compositor {
             ],
             immediate_size: 0,
         });
+        let transition_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("compositor-transition-pipeline-layout"),
+                bind_group_layouts: &[Some(&transition_bind_group_layout)],
+                immediate_size: 0,
+            });
 
         let layer_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("compositor-layer-pipeline"),
@@ -266,6 +336,40 @@ impl Compositor {
             cache: None,
         });
 
+        let transition_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("compositor-transition-pipeline"),
+            layout: Some(&transition_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &fullscreen_shader,
+                entry_point: Some("vertex_main"),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<[f32; 2]>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[wgpu::VertexAttribute {
+                        format: wgpu::VertexFormat::Float32x2,
+                        offset: 0,
+                        shader_location: 0,
+                    }],
+                }],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &transition_shader,
+                entry_point: Some("fragment_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: context.texture_format(),
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
         Self {
             textures: TextureStore::default(),
             texture_pool: TexturePool::default(),
@@ -277,6 +381,8 @@ impl Compositor {
             blend_pipeline,
             mask_uniform_bind_group_layout,
             mask_pipeline,
+            transition_bind_group_layout,
+            transition_pipeline,
         }
     }
 
@@ -334,6 +440,46 @@ impl Compositor {
                         effect_pass_groups,
                     )?;
                 }
+                FrameItemDescriptor::Transition {
+                    from,
+                    to,
+                    progress,
+                    mode,
+                    scalars,
+                    direction,
+                } => {
+                    // from / to 各自走完整的图层管线（含 effects / mask），
+                    // 得到的中间纹理只在这一帧内被 transition pass 读取，
+                    // 下次 recycle_frame 时自动回到纹理池。
+                    let from_texture = self.render_layer(context, &mut encoder, frame, from)?;
+                    let to_texture = self.render_layer(context, &mut encoder, frame, to)?;
+                    let mixed = self.apply_transition(
+                        context,
+                        &mut encoder,
+                        &from_texture,
+                        &to_texture,
+                        TransitionUniformBuffer {
+                            resolution: [frame.width as f32, frame.height as f32],
+                            progress: progress.clamp(0.0, 1.0),
+                            mode: *mode,
+                            scalars: *scalars,
+                            direction: *direction,
+                            _padding: [0.0; 2],
+                        },
+                        frame.width,
+                        frame.height,
+                    );
+                    // 转场结果按 from 的 blend_mode 贴回场景，保持轨道层级语义不变
+                    scene = self.blend_texture(
+                        context,
+                        &mut encoder,
+                        &scene,
+                        &mixed,
+                        from.blend_mode,
+                        frame.width,
+                        frame.height,
+                    )?;
+                }
             }
         }
 
@@ -388,6 +534,46 @@ impl Compositor {
                         frame.width,
                         frame.height,
                         effect_pass_groups,
+                    )?;
+                }
+                FrameItemDescriptor::Transition {
+                    from,
+                    to,
+                    progress,
+                    mode,
+                    scalars,
+                    direction,
+                } => {
+                    // from / to 各自走完整的图层管线（含 effects / mask），
+                    // 得到的中间纹理只在这一帧内被 transition pass 读取，
+                    // 下次 recycle_frame 时自动回到纹理池。
+                    let from_texture = self.render_layer(context, &mut encoder, frame, from)?;
+                    let to_texture = self.render_layer(context, &mut encoder, frame, to)?;
+                    let mixed = self.apply_transition(
+                        context,
+                        &mut encoder,
+                        &from_texture,
+                        &to_texture,
+                        TransitionUniformBuffer {
+                            resolution: [frame.width as f32, frame.height as f32],
+                            progress: progress.clamp(0.0, 1.0),
+                            mode: *mode,
+                            scalars: *scalars,
+                            direction: *direction,
+                            _padding: [0.0; 2],
+                        },
+                        frame.width,
+                        frame.height,
+                    );
+                    // 转场结果按 from 的 blend_mode 贴回场景，保持轨道层级语义不变
+                    scene = self.blend_texture(
+                        context,
+                        &mut encoder,
+                        &scene,
+                        &mixed,
+                        from.blend_mode,
+                        frame.width,
+                        frame.height,
                     )?;
                 }
             }
@@ -835,6 +1021,82 @@ impl Compositor {
             render_pass.draw(0..6, 0..1);
         }
         Ok(target)
+    }
+
+    /// 双输入转场：把 from / to 两张等大纹理按 progress + mode 混合成一张新纹理。
+    /// 纹理流转与 blend_texture 完全一致（acquire → 一次全屏 pass → 返回目标纹理）。
+    fn apply_transition(
+        &mut self,
+        context: &GpuContext,
+        encoder: &mut wgpu::CommandEncoder,
+        from: &wgpu::Texture,
+        to: &wgpu::Texture,
+        uniforms: TransitionUniformBuffer,
+        width: u32,
+        height: u32,
+    ) -> wgpu::Texture {
+        let target = self
+            .texture_pool
+            .acquire(context, width, height, "compositor-transition-texture");
+        let from_view = from.create_view(&wgpu::TextureViewDescriptor::default());
+        let to_view = to.create_view(&wgpu::TextureViewDescriptor::default());
+        let target_view = target.create_view(&wgpu::TextureViewDescriptor::default());
+        let uniform_buffer =
+            context
+                .device()
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("compositor-transition-uniform-buffer"),
+                    contents: bytemuck::bytes_of(&uniforms),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+        let bind_group = context
+            .device()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("compositor-transition-bind-group"),
+                layout: &self.transition_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&from_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&to_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Sampler(context.linear_sampler()),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: uniform_buffer.as_entire_binding(),
+                    },
+                ],
+            });
+
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("compositor-transition-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &target_view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                multiview_mask: None,
+            });
+            render_pass.set_pipeline(&self.transition_pipeline);
+            render_pass.set_vertex_buffer(0, context.fullscreen_quad().slice(..));
+            render_pass.set_bind_group(0, &bind_group, &[]);
+            render_pass.draw(0..6, 0..1);
+        }
+        target
     }
 
     fn blit_texture(

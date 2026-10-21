@@ -19,8 +19,8 @@ const {
 // 动态词典维度元数据（供前端渲染可点击的 {{@dict.xxx}} 蓝色词典芯片）
 const DICT_MACRO_SPECS = [
   { macro: '{{@dict.space}}', dim: 'space', label: '空间类型枚举 (17类)', scope: 'interior' },
-  { macro: '{{@dict.style_atom}}', dim: 'style_atom', label: '文化/流派风格与判据 (16类)', scope: 'all' },
-  { macro: '{{@dict.wood_style}}', dim: 'wood_style', label: '木系质感与做旧判据', scope: 'interior' },
+  { macro: '{{@dict.style_atom}}', dim: 'style_atom', label: '文化/流派与木系风格判据 (含四种木色与其他风格)', scope: 'all' },
+  { macro: '{{@dict.wood_style}}', dim: 'wood_style', label: '木系风格(已合并入style_atom)', scope: 'interior' },
   { macro: '{{@dict.material_hard}}', dim: 'material_hard', label: '硬装主材枚举', scope: 'interior' },
   { macro: '{{@dict.material_soft}}', dim: 'material_soft', label: '软装主材枚举', scope: 'interior' },
   { macro: '{{@dict.furniture_category}}', dim: 'furniture_category', label: '家具大类枚举', scope: 'furniture' },

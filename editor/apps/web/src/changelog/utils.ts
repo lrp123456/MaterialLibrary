@@ -10,12 +10,12 @@ type ChangeSectionConfig = {
 };
 
 const knownSectionConfigs: Record<string, ChangeSectionConfig> = {
-	new: { title: "Features", order: 0 },
-	improved: { title: "Improvements", order: 1 },
-	fixed: { title: "Fixes", order: 2 },
-	breaking: { title: "Breaking Changes", order: 3 },
+	new: { title: "新功能", order: 0 },
+	improved: { title: "优化", order: 1 },
+	fixed: { title: "修复", order: 2 },
+	breaking: { title: "不兼容变更", order: 3 },
 	technical: {
-		title: "Technical details",
+		title: "技术细节",
 		order: 4,
 		collapsible: true,
 	},

@@ -214,6 +214,9 @@ function normalizeArkSeedreamPayload(body, v, inp, ctx) {
     if (!u) return;
     const s = String(u).trim();
     if (!s || s === 'undefined' || s === 'null') return;
+    // 厂商只吃 data URL 或公网 https；本地相对路径/内网地址会在上游 400，这里直接丢弃
+    const usable = s.startsWith('data:') || /^https?:\/\/(?!127\.0\.0\.1|localhost)/i.test(s);
+    if (!usable) return;
     if (!images.includes(s)) images.push(s);
   };
   if (Array.isArray(inp.arkImages) && inp.arkImages.length) {
@@ -280,8 +283,10 @@ function noteVendorOutcome(input, ok, errText) {
   if (!id) return;
   try {
     const { globalCircuitBreaker } = require('../converters');
-    if (ok) globalCircuitBreaker.recordSuccess(id);
-    else globalCircuitBreaker.recordFailure(id, errText || '');
+    if (ok) return globalCircuitBreaker.recordSuccess(id);
+    // 上游排队/限流/临时不可用属于瞬时状态，计入熔断会让用户重试几秒后就被整体拦下
+    if (/队列已满|queue is full|rate.?limit|HTTP 429|HTTP 503|no available deployment/i.test(String(errText || ''))) return;
+    globalCircuitBreaker.recordFailure(id, errText || '');
   } catch (_) {}
 }
 
@@ -394,7 +399,8 @@ async function executeAdapter(services, adapter, input) {
 
   async function resolveImageToDataUrl(raw) {
     if (!raw) return null;
-    const s = String(raw).trim();
+    // 客户端偶发把查询串里的 & 额外转义成字面量 \u0026，导致 token 解析失败取不到图
+    const s = String(raw).trim().replace(/\\u0026/gi, '&');
     if (!s) return null;
     if (s.startsWith('data:image/')) return s;
 
@@ -465,6 +471,15 @@ async function executeAdapter(services, adapter, input) {
         }
       } catch (e) {}
     }
+
+    // 4.5 素材库本地缓存兜底：local_cache 衍生图存在 derivatives.storage_ref，
+    //     上面按 storage_path 的查询覆盖不到，复用帧中继的本地解析（含 originals/thumbs/derivatives）
+    try {
+      const local = require('../frame-relay').readLocalRef(services, s);
+      if (local?.buf?.length) {
+        return `data:${local.mime || 'image/jpeg'};base64,${local.buf.toString('base64')}`;
+      }
+    } catch (e) {}
 
     // 5. 各种 HTTP/HTTPS URL（自动将本地/穿透端口转换为 127.0.0.1 回环拉取，避免 NAT 限制与外网解析）
     if (/^https?:\/\//i.test(s) || s.startsWith('/')) {
@@ -539,6 +554,49 @@ async function executeAdapter(services, adapter, input) {
     if (maskDataUrl) extraImageDataUrls.push(maskDataUrl);
   }
 
+  // 参考图统一转 data URL：火山方舟等厂商只接受 data URL 或公网 https，相对路径/内网地址会直接 400
+  // 直接回写 input：下游 canonicalize 会读 imageUrls / arkImages / image / images 等原始字段
+  const resolveList = async (list) => {
+    const out = [];
+    for (const cand of list) out.push((await resolveImageToDataUrl(cand)) || cand);
+    return out;
+  };
+  const resolvedImageUrls = Array.isArray(input.imageUrls)
+    ? await resolveList(input.imageUrls)
+    : [];
+  if (resolvedImageUrls.length) input.imageUrls = resolvedImageUrls;
+  if (Array.isArray(input.arkImages) && input.arkImages.length) {
+    input.arkImages = await resolveList(input.arkImages);
+  }
+  if (Array.isArray(input.images) && input.images.length) {
+    input.images = await resolveList(input.images);
+  }
+  if (typeof input.image === 'string' && input.image) {
+    input.image = (await resolveImageToDataUrl(input.image)) || input.image;
+  }
+  // 部分调用方把参考图放在 refs 里
+  if (input.refs && Array.isArray(input.refs.images) && input.refs.images.length) {
+    input.refs.images = await resolveList(input.refs.images);
+  }
+  if (typeof input.firstFrame === 'string' && input.firstFrame.startsWith('/')) {
+    input.firstFrame = (await resolveImageToDataUrl(input.firstFrame)) || input.firstFrame;
+  }
+  if (typeof input.lastFrame === 'string' && input.lastFrame.startsWith('/')) {
+    input.lastFrame = (await resolveImageToDataUrl(input.lastFrame)) || input.lastFrame;
+  }
+
+  // extras（客户端 params / 契约 assembled.body）展开后位于 vars 末尾，可能带着原始 image 字段
+  // 覆盖掉上面解析好的值，这里一并解析，避免相对路径又漏给厂商。
+  if (input.extras && typeof input.extras === 'object') {
+    const ex = input.extras;
+    if (typeof ex.image === 'string' && ex.image) {
+      ex.image = (await resolveImageToDataUrl(ex.image)) || ex.image;
+    }
+    for (const key of ['images', 'imageUrls', 'image_urls', 'arkImages']) {
+      if (Array.isArray(ex[key]) && ex[key].length) ex[key] = await resolveList(ex[key]);
+    }
+  }
+
   const vars = {
     prompt: input.prompt || '',
     negativePrompt: input.negativePrompt || '',
@@ -550,7 +608,7 @@ async function executeAdapter(services, adapter, input) {
     seed: input.seed || Math.floor(Math.random() * 1000000),
     image_b64: imageB64,
     image_data_url: imageDataUrl,
-    image_urls: input.imageUrls || [],
+    image_urls: resolvedImageUrls,
     extra_image_data_urls: extraImageDataUrls,
     first_frame: input.firstFrame || '',
     last_frame: input.lastFrame || '',
@@ -597,7 +655,7 @@ async function executeAdapter(services, adapter, input) {
   /**
    * 按照 Agnes Image 2.5 Flash 官方规范与检查清单约束 Payload
    */
-  function normalizeAgnesImagePayload(body, v, inp) {
+  async function normalizeAgnesImagePayload(body, v, inp) {
     const isAgnes = (body.model || v.model || '').includes('agnes-image') ||
                     (adapter.id || '').includes('agnes') ||
                     baseUrl.includes('agnes-ai.com') || baseUrl.includes('agnes-ai.cn');
@@ -625,13 +683,45 @@ async function executeAdapter(services, adapter, input) {
       },
       modelContract,
     });
-    return converted.body || converted.payload;
+    const out = converted.body || converted.payload;
+    // Agnes 只接受公网可拉取的 URL：把 data:/本地地址经帧中继换成公网地址，
+    // 换不出去的本地路径直接剔除，绝不能让 '/api/...' 这类地址发到上游（会 400 invalid url）
+    const frameRelay = require('../frame-relay');
+    const toPublic = async (u) => {
+      if (typeof u !== 'string' || !u) return null;
+      // Agnes 官方接受 Data URI Base64（见 pe-agnes-image 技能说明），无需换成公网地址
+      if (/^data:/i.test(u)) return u;
+      if (/^https?:\/\/(?!127\.0\.0\.1|localhost)/i.test(u)) return u;
+      try {
+        return (await frameRelay.materializeFrameUrls(services, [u]))[0] || null;
+      } catch (_) {
+        return null;
+      }
+    };
+    const cleanImageField = async (holder) => {
+      if (!holder || !holder.image) return;
+      const list = Array.isArray(holder.image) ? holder.image : [holder.image];
+      const kept = [];
+      for (const u of list) {
+        const pub = await toPublic(u);
+        if (pub && !kept.includes(pub)) kept.push(pub);
+      }
+      if (kept.length) holder.image = kept.length === 1 ? kept[0] : kept;
+      else delete holder.image;
+    };
+    if (out && typeof out === 'object') {
+      await cleanImageField(out);
+      await cleanImageField(out.extra_body);
+    }
+    return out;
   }
 
   /**
    * 按照 Agnes Video 2.5 Flash 官方规范约束异步生成 Payload
+   * 云端要求首帧/尾帧/参考图必须是公网可拉取 URL：把 data:/相对路径/本地路径
+   * 统一通过帧中继落盘并签发公网 URL（见 src/frame-relay.js）。
    */
-  function normalizeAgnesVideoPayload(body, v, inp) {
+  async function normalizeAgnesVideoPayload(body, v, inp) {
     const isAgnesVideo = (body.model || v.model || '').includes('agnes-video') ||
                          (adapter.id || '').includes('agnes_video') ||
                          baseUrl.includes('agnes-ai.com') || baseUrl.includes('agnes-ai.cn');
@@ -645,6 +735,57 @@ async function executeAdapter(services, adapter, input) {
     if (!prompt || !String(prompt).trim()) {
       throw new Error('[Agnes Video] prompt 为必填参数且不能为空');
     }
+    const frameRelay = require('../frame-relay');
+    const clientMode = inp.genMode || v.gen_mode || body.mode || body.client_mode || '';
+
+    // 1. 收集所有可能的图片引用（保留顺序、去重），先做帧中继
+    const rawImages = [];
+    const pushRaw = (u) => {
+      if (!u || typeof u !== 'string') return;
+      const s = u.trim();
+      // 跳过空值与未填充的模板占位符（如 '{{image_data_url}}'）
+      if (!s || s.includes('{{') || s === 'undefined' || s === 'null') return;
+      if (!rawImages.includes(s)) rawImages.push(s);
+    };
+    pushRaw(inp.firstFrame); pushRaw(v.first_frame);
+    pushRaw(inp.lastFrame); pushRaw(v.last_frame);
+    (inp.imageUrls || []).forEach(pushRaw);
+    (Array.isArray(v.image_urls) ? v.image_urls : []).forEach(pushRaw);
+    [body.first_frame, body.last_frame, body.first_frame_image, body.last_frame_image]
+      .forEach((u) => { if (typeof u === 'string') pushRaw(u); });
+    (Array.isArray(body.images) ? body.images : []).forEach(pushRaw);
+
+    const publicUrls = await frameRelay.materializeFrameUrls(services, rawImages);
+
+    // 2. 按模式回填：首尾帧模式前两张即首帧/尾帧；其余作为参考图
+    const needsKeyframe = ['first_last_frame', 'keyframe'].includes(String(clientMode));
+    let firstFrame = '';
+    let lastFrame = '';
+    let refImages = [];
+    // 只把调用方实际提供的首/尾帧纳入收集顺序，避免缺失的一方被另一张图错位填充
+    const rawFirst = [];
+    const rawLast = [];
+    [inp.firstFrame, v.first_frame].forEach((u) => {
+      if (u && typeof u === 'string' && u.trim() && !u.includes('{{') && !rawFirst.includes(u)) rawFirst.push(u);
+    });
+    [inp.lastFrame, v.last_frame].forEach((u) => {
+      if (u && typeof u === 'string' && u.trim() && !u.includes('{{') && !rawLast.includes(u)) rawLast.push(u);
+    });
+    if (needsKeyframe) {
+      if (rawFirst.length) firstFrame = (await frameRelay.materializeFrameUrls(services, rawFirst))[0] || '';
+      if (rawLast.length) lastFrame = (await frameRelay.materializeFrameUrls(services, rawLast))[0] || '';
+      // 未显式区分时，参考图前两张按顺序充当首/尾帧
+      if (!firstFrame && !lastFrame && publicUrls.length) {
+        firstFrame = publicUrls[0] || '';
+        lastFrame = publicUrls[1] || '';
+      }
+      refImages = publicUrls.slice(firstFrame && lastFrame ? 2 : 1);
+    } else {
+      refImages = publicUrls;
+      if (rawFirst.length) firstFrame = (await frameRelay.materializeFrameUrls(services, rawFirst))[0] || '';
+      if (rawLast.length) lastFrame = (await frameRelay.materializeFrameUrls(services, rawLast))[0] || '';
+    }
+
     const { convertAgnesVideoRequest } = require('../converters');
     let modelContract = null;
     try {
@@ -658,9 +799,16 @@ async function executeAdapter(services, adapter, input) {
         ...(body || {}),
         prompt: String(prompt).trim(),
         model: body.model || v.model || 'agnes-video-2.5-flash',
-        mode: inp.genMode || v.gen_mode || body.mode || body.client_mode,
+        mode: clientMode,
         ratio: body.aspect_ratio || body.ratio || v.ratio || inp.ratio || '16:9',
         seconds: body.seconds || v.duration || inp.durationSec || '5',
+        refs: {
+          first_frame: firstFrame || null,
+          last_frame: lastFrame || null,
+          images: refImages,
+          videos: [],
+          audios: Array.isArray(body.audios) ? body.audios : [],
+        },
       },
       modelContract,
     });
@@ -760,7 +908,7 @@ async function executeAdapter(services, adapter, input) {
       if (bodyObj.image_data_url === '') delete bodyObj.image_data_url;
     }
     bodyObj = normalizeArkSeedreamPayload(bodyObj, vars, input, { adapter, baseUrl, cfg, apiKey });
-    bodyObj = normalizeAgnesImagePayload(bodyObj, vars, input);
+    bodyObj = await normalizeAgnesImagePayload(bodyObj, vars, input);
     bodyObj = normalizeModelScopePayload(bodyObj, vars, input);
 
     let res;
@@ -884,7 +1032,7 @@ async function executeAdapter(services, adapter, input) {
   if (adapter.protocol === 'async_http_job') {
     const submitUrl = resolveUrl(baseUrl, cfg.submitPath);
     let submitBody = fillTemplate(cfg.submitBodyTemplate || { prompt: '{{prompt}}', model: '{{model}}' }, vars);
-    submitBody = normalizeAgnesVideoPayload(submitBody, vars, input);
+    submitBody = await normalizeAgnesVideoPayload(submitBody, vars, input);
     submitBody = normalizeVolcengineVideoPayload(submitBody, vars, input);
     submitBody = normalizeModelScopePayload(submitBody, vars, input);
 
@@ -918,6 +1066,24 @@ async function executeAdapter(services, adapter, input) {
 
     if (!submitRes || !submitRes.ok) {
       noteVendorOutcome(input, false, lastErrText);
+      // 云端拉不到参考图时，把运维语言翻译成可操作提示（常见根因：公网基址用了非标准端口）
+      if (/素材 URL 无法下载|无法下载或不是支持的媒体格式/.test(lastErrText)) {
+        let hint = '';
+        try {
+          const relay = require('../frame-relay');
+          const base = relay.resolvePublicBase(services);
+          if (base) {
+            const u = new URL(base);
+            const nonStd = (u.protocol === 'http:' && u.port && u.port !== '80')
+              || (u.protocol === 'https:' && u.port && u.port !== '443');
+            if (nonStd) {
+              hint = `——视频云端无法拉取参考图：公网地址 ${base} 使用了非标准端口 ${u.port}，多数厂商仅放行 80/443。请为该域名挂标准端口的反向代理后更新 BFF_PUBLIC_BASE，或改用文生视频。`;
+            }
+          }
+        } catch (_) { /* ignore */ }
+        if (!hint) hint = '——请确认首帧/尾帧图片可在公网直接打开（无需登录、无防盗链、为 JPG/PNG/WebP），或改用文生视频。';
+        throw new Error(`异步任务提交失败 HTTP ${submitRes?.status || 500}: ${lastErrText.slice(0, 240)}${hint}`);
+      }
       throw new Error(`异步任务提交失败 HTTP ${submitRes?.status || 500}: ${lastErrText.slice(0, 300)}`);
     }
 

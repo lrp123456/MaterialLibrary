@@ -114,6 +114,17 @@ interface BaseTimelineElement {
 	params: ParamValues;
 }
 
+/**
+ * 片段尾部的转场。`duration` 是转场总时长 d：
+ * A 尾部与 B 头部各让出 d/2，渲染窗口为 [C - d/2, C + d/2]。
+ */
+export interface VideoTransition {
+	/** 资源包 id，如 com.mls.transition.dissolve */
+	type: string;
+	duration: MediaTime;
+	params: ParamValues;
+}
+
 export interface VideoElement extends BaseTimelineElement {
 	type: "video";
 	mediaId: string;
@@ -122,6 +133,10 @@ export interface VideoElement extends BaseTimelineElement {
 	retime?: RetimeConfig;
 	effects?: Effect[];
 	masks?: Mask[];
+	/** 绑定在本片段尾部的转场 */
+	transitionOut?: VideoTransition;
+	/** 素材余量不足、转场靠冻结补帧时置 true（时间线角标黄点） */
+	transitionDegraded?: boolean;
 }
 
 export interface ImageElement extends BaseTimelineElement {

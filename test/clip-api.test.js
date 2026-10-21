@@ -31,6 +31,49 @@ require.cache[aiTasksPath] = {
 const { handleClipApi } = require(path.join(ROOT, 'src/clip-api.js'));
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clip-api-test-'));
+
+// ---- 造一个最小 WAV（16bit 单声道），给 TTS 产物做时长解析 ----
+function makeWav(sampleRate, seconds) {
+  const channels = 1;
+  const bits = 16;
+  const dataSize = Math.round(sampleRate * seconds) * channels * (bits / 8);
+  const buf = Buffer.alloc(44 + dataSize);
+  buf.write('RIFF', 0);
+  buf.writeUInt32LE(36 + dataSize, 4);
+  buf.write('WAVE', 8);
+  buf.write('fmt ', 12);
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20);
+  buf.writeUInt16LE(channels, 22);
+  buf.writeUInt32LE(sampleRate, 24);
+  buf.writeUInt32LE((sampleRate * channels * bits) / 8, 28);
+  buf.writeUInt16LE((channels * bits) / 8, 32);
+  buf.writeUInt16LE(bits, 34);
+  buf.write('data', 36);
+  buf.writeUInt32LE(dataSize, 40);
+  return buf;
+}
+
+// ---- 桩掉 IndexTTS 客户端：不真跑 GPU，只验证通道与任务流转 ----
+const ttsCalls = [];
+const indexttsPath = require.resolve(path.join(ROOT, 'src/gen/indextts-local.js'));
+require.cache[indexttsPath] = {
+  id: indexttsPath, filename: indexttsPath, loaded: true,
+  exports: {
+    runVoiceJob: async (services, adapter, input) => {
+      ttsCalls.push({ adapter, input });
+      const dir = path.join(dataDir, 'cache', 'temp');
+      fs.mkdirSync(dir, { recursive: true });
+      const out = path.join(dir, 'tts_mock_0.wav');
+      fs.writeFileSync(out, makeWav(8000, 1));
+      return {
+        ok: true, success: true, taskId: 'mock',
+        files: [{ localPath: out, previewUrl: `/api/cache/temp/${path.basename(out)}`, mime: 'audio/wav' }],
+      };
+    },
+  },
+};
+
 const db = new DatabaseSync(':memory:');
 db.exec(`
   CREATE TABLE assets (
@@ -205,6 +248,57 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   r = await call('GET', '/editor-api/ai/jobs?fid=fid_a');
   check('按素材查任务', r.status === 200 && r.json.items.length >= 2, `${r.status} count=${r.json?.items?.length}`);
+
+  // ============ AI 三通道：TTS / 镜头检测 / 人声分离 + 音色库 ============
+  r = await call('GET', '/editor-api/ai/voices');
+  check('音色库不存在时返回空数组', r.status === 200 && Array.isArray(r.json?.items) && r.json.items.length === 0,
+    `${r.status} ${r.text.slice(0, 120)}`);
+
+  r = await call('POST', '/editor-api/ai/tts', JSON.stringify({ text: '你好，世界' }));
+  check('TTS 缺参考音频 400', r.status === 400 && /参考音频/.test(r.json?.error || ''),
+    `${r.status} ${r.text.slice(0, 160)}`);
+
+  r = await call('POST', '/editor-api/ai/scene-split', JSON.stringify({ fid: 'fid_a' }));
+  const splitJobId = r.json?.job?.id;
+  check('镜头检测投递为 pending', r.status === 200 && r.json?.job?.status === 'pending',
+    `${r.status} ${r.text.slice(0, 160)}`);
+  await sleep(2600);
+  r = await call('GET', `/editor-api/ai/jobs/${splitJobId}`);
+  check('缺 runner 时明确失败（scene-split）',
+    r.json?.job?.status === 'failed' && /引擎未配置：缺少 .*scene-split\.js/.test(r.json.job.error),
+    `${r.json?.job?.status} ${r.json?.job?.error?.slice(0, 100)}`);
+
+  // 补上 IndexTTS 适配器：TTS 是内置引擎，就绪与否只看 gen_adapters
+  db.exec(`
+    CREATE TABLE gen_adapters (
+      id TEXT PRIMARY KEY, label TEXT, kind TEXT, builtin INTEGER, protocol TEXT,
+      base_url TEXT, secrets_json TEXT, config_json TEXT, enabled INTEGER,
+      created_at INTEGER, updated_at INTEGER
+    );
+  `);
+  db.prepare('INSERT INTO gen_adapters VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(
+    'indextts_local', 'IndexTTS 2.5', 'music', 1, 'indextts_local',
+    'http://127.0.0.1:9000', '{}', '{}', 1, Date.now(), Date.now(),
+  );
+
+  r = await call('POST', '/editor-api/ai/tts', JSON.stringify({
+    text: '你好，世界', refFid: 'fid_a', lang: 'zh', durationFactor: 1.1,
+  }));
+  const ttsJobId = r.json?.jobId;
+  check('TTS 提交返回 jobId', r.status === 200 && r.json.ok === true && !!ttsJobId && r.json.job.type === 'tts',
+    `${r.status} ${r.text.slice(0, 160)}`);
+  await sleep(2600);
+  r = await call('GET', `/editor-api/ai/jobs/${ttsJobId}`);
+  const ttsResult = r.json?.job?.result || {};
+  check('TTS 任务完成并返回产物',
+    r.json?.job?.status === 'done' && ttsResult.ok === true
+      && /^\/api\/cache\/temp\//.test(ttsResult.url || '') && !!ttsResult.localPath,
+    `${r.json?.job?.status} ${JSON.stringify(ttsResult).slice(0, 160)}`);
+  check('TTS 产物时长可解析', ttsResult.durationMs === 1000, String(ttsResult.durationMs));
+  const ttsInput = ttsCalls[0]?.input || {};
+  check('TTS 入参归一（lang / durationFactor）',
+    ttsInput.extras?.lang === 'ZH' && ttsInput.extras?.duration_factor === 1.1,
+    JSON.stringify(ttsInput.extras || {}));
 
   // ============ 删除 ============
   r = await call('DELETE', `/editor-api/snapshots/${snapId}`);

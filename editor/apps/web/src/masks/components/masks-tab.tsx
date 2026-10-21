@@ -12,6 +12,7 @@ import { useEditor } from "@/editor/use-editor";
 import { useElementPreview } from "@/timeline/hooks/use-element-preview";
 import { useMenuPreview } from "@/editor/use-menu-preview";
 import { getVisibleElementsWithBounds } from "@/preview/element-bounds";
+import { DEFAULT_CANVAS_SIZE } from "@/canvas/sizes";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
 	ArrowExpandIcon,
@@ -141,7 +142,7 @@ export function MasksTab({ element, trackId }: MasksTabProps) {
 	const currentTime = useEditor((e) => e.playback.getCurrentTime());
 	const mediaAssets = useEditor((e) => e.media.getAssets());
 	const canvasSize = useEditor(
-		(e) => e.project.getActive().settings.canvasSize,
+		(e) => e.project.getActiveOrNull()?.settings.canvasSize ?? DEFAULT_CANVAS_SIZE,
 	);
 	const masks = element.masks ?? [];
 	const renderMasks = renderElement.masks ?? masks;
@@ -254,7 +255,7 @@ export function MasksTab({ element, trackId }: MasksTabProps) {
 	return (
 		<div className="flex flex-col h-full">
 			<div className="border-b px-3.5 h-11 shrink-0 flex items-center justify-between gap-2">
-				<SectionTitle>Masks</SectionTitle>
+				<SectionTitle>遮罩</SectionTitle>
 				<DropdownMenu
 					open={hasMask ? false : isDropdownOpen}
 					onOpenChange={handleDropdownOpenChange}
@@ -267,7 +268,7 @@ export function MasksTab({ element, trackId }: MasksTabProps) {
 										variant="ghost"
 										size="icon"
 										disabled
-										aria-label="Add mask"
+										aria-label="添加遮罩"
 									>
 										<HugeiconsIcon icon={PlusSignIcon} className="size-3.5!" />
 									</Button>
@@ -280,7 +281,7 @@ export function MasksTab({ element, trackId }: MasksTabProps) {
 						</Tooltip>
 					) : (
 						<DropdownMenuTrigger asChild>
-							<Button variant="ghost" size="icon" aria-label="Add mask">
+							<Button variant="ghost" size="icon" aria-label="添加遮罩">
 								<HugeiconsIcon icon={PlusSignIcon} className="size-3.5!" />
 							</Button>
 						</DropdownMenuTrigger>
@@ -432,7 +433,7 @@ function MaskParamsFields({
 			{definition.features.hasPosition &&
 				"centerX" in mask.params &&
 				"centerY" in mask.params && (
-					<SectionField label="Position">
+					<SectionField label="位置">
 						<div className="flex items-center gap-2">
 							<MaskNumberField
 								className="flex-1"
@@ -469,7 +470,7 @@ function MaskParamsFields({
 			{definition.features.sizeMode === "width-height" &&
 				"width" in mask.params &&
 				"height" in mask.params && (
-					<SectionField label="Size">
+					<SectionField label="尺寸">
 						<div className="flex items-center gap-2">
 							<MaskNumberField
 								className="flex-1"
@@ -505,7 +506,7 @@ function MaskParamsFields({
 
 			{definition.features.sizeMode === "height-only" &&
 				"height" in mask.params && (
-					<SectionField label="Height">
+					<SectionField label="高度">
 						<MaskNumberField
 							icon="H"
 							param={getNumberParamDefinition({
@@ -524,7 +525,7 @@ function MaskParamsFields({
 
 			{definition.features.sizeMode === "width-only" &&
 				"width" in mask.params && (
-					<SectionField label="Width">
+					<SectionField label="宽度">
 						<MaskNumberField
 							icon="W"
 							param={getNumberParamDefinition({
@@ -542,7 +543,7 @@ function MaskParamsFields({
 				)}
 
 			{definition.features.sizeMode === "uniform" && "scale" in mask.params && (
-				<SectionField label="Scale">
+				<SectionField label="缩放">
 					<MaskNumberField
 						icon={
 							isTextMask(mask) ? <HugeiconsIcon icon={ArrowExpandIcon} /> : "S"
@@ -562,7 +563,7 @@ function MaskParamsFields({
 			)}
 
 			{definition.features.hasRotation && "rotation" in mask.params && (
-				<SectionField label="Rotation">
+				<SectionField label="旋转">
 					<MaskNumberField
 						icon={<HugeiconsIcon icon={RotateClockwiseIcon} />}
 						param={getNumberParamDefinition({
@@ -579,7 +580,7 @@ function MaskParamsFields({
 				</SectionField>
 			)}
 
-			<SectionField label="Feather">
+			<SectionField label="羽化">
 				<MaskNumberField
 					icon={<HugeiconsIcon icon={FeatherIcon} />}
 					param={featherParam}
@@ -592,7 +593,7 @@ function MaskParamsFields({
 				/>
 			</SectionField>
 
-			<SectionField label="Stroke">
+			<SectionField label="描边">
 				<div className="flex flex-col gap-2">
 					<div className="flex items-center gap-2">
 						<MaskNumberField
@@ -685,7 +686,7 @@ function TextMaskFields({
 
 	return (
 		<>
-			<SectionField label="Content">
+			<SectionField label="内容">
 				<Textarea
 					value={content.displayValue}
 					className="min-h-20"
@@ -694,7 +695,7 @@ function TextMaskFields({
 					onBlur={content.onBlur}
 				/>
 			</SectionField>
-			<SectionField label="Font">
+			<SectionField label="字体">
 				<FontPicker
 					defaultValue={mask.params.fontFamily}
 					onValueChange={(value) => {
@@ -703,7 +704,7 @@ function TextMaskFields({
 					}}
 				/>
 			</SectionField>
-			<SectionField label="Size">
+			<SectionField label="字号">
 				<MaskNumberField
 					icon={<HugeiconsIcon icon={TextFontIcon} />}
 					param={fontSizeParam}
@@ -712,7 +713,7 @@ function TextMaskFields({
 					onCommit={onCommit}
 				/>
 			</SectionField>
-			<SectionField label="Spacing">
+			<SectionField label="字间距">
 				<div className="flex items-start gap-2">
 					<MaskNumberField
 						className="w-1/2"
@@ -839,13 +840,13 @@ function EmptyView({ onAddMask }: EmptyViewProps) {
 		<div className="flex flex-col h-full items-center justify-center gap-4 text-center">
 			<OcShapesIcon className="size-10 text-muted-foreground" strokeWidth={1} />
 			<div className="flex flex-col gap-2">
-				<h3 className="font-medium text-foreground">No masks</h3>
+				<h3 className="font-medium text-foreground">暂无遮罩</h3>
 				<p className="text-muted-foreground text-sm text-balance max-w-40">
-					Add a mask to hide or reveal parts of this layer.
+					添加遮罩可隐藏或显示图层的局部区域。
 				</p>
 			</div>
 			<Button variant="default" size="sm" onClick={onAddMask}>
-				Add mask
+				添加遮罩
 			</Button>
 		</div>
 	);

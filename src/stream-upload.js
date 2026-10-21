@@ -120,7 +120,8 @@ async function registerMediaAsset(services, {
   clientThumbBuffer = null,
   source = 'sync',
   category = null,
-  manualTags = null
+  manualTags = null,
+  shelf = null
 }) {
   const { db, config, logger, interpreter } = services;
   const isVideo = isVideoFile(fileName);
@@ -155,7 +156,14 @@ async function registerMediaAsset(services, {
   // 0b. 导出标记（MLX1）：本端保存到相册的文件，拒绝再次入库
   try {
     const { extractExportTag } = require('./export-tag');
-    const tagBuf = fs.readFileSync(filePath);
+    const fd = fs.openSync(filePath, 'r');
+    let tagBuf;
+    try {
+      tagBuf = Buffer.alloc(Math.min(65536, size || 65536));
+      fs.readSync(fd, tagBuf, 0, tagBuf.length, 0);
+    } finally {
+      fs.closeSync(fd);
+    }
     const tag = extractExportTag(tagBuf);
     if (tag && (tag.fid || tag.kind)) {
       logger?.info?.(`[stream-upload] 导出标记拦截 name=${fileName} fid=${tag.fid || ''} kind=${tag.kind || ''}`);
@@ -167,6 +175,39 @@ async function registerMediaAsset(services, {
   } catch (e) {
     if (e.code === 'export_tag') throw e;
   }
+
+  // 0c. ML_SAVED_ 文件名识别拦截（本端保存素材）
+  if (/^ML_SAVED_/i.test(String(fileName || ''))) {
+    logger?.info?.(`[stream-upload] ML_SAVED_ 文件名拦截 name=${fileName}`);
+    try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (_) {}
+    const err = new Error('本端导出件（文件名包含 ML_SAVED_），拒绝重复入库');
+    err.code = 'export_saved_name';
+    throw err;
+  }
+
+  // 0d. 检查 export_registry、预览图/缩略图以及全部衍生图绝对哈希
+  try {
+    const regHit = db.prepare('SELECT source_fid, variant FROM export_registry WHERE sha256 = ? OR (md5 IS NOT NULL AND md5 = ?) LIMIT 1').get(sha256, sha256);
+    if (regHit) {
+      logger?.info?.(`[stream-upload] export_registry 绝对查重拦截 sha=${sha256.slice(0, 12)} fid=${regHit.source_fid}`);
+      try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (_) {}
+      return { fid: regHit.source_fid, deduped: true, reason: 'export_registry', sha256, matchedKind: regHit.variant };
+    }
+
+    const derivHit = db.prepare('SELECT asset_fid, kind FROM derivatives WHERE sha256 = ? OR (md5 IS NOT NULL AND md5 = ?) LIMIT 1').get(sha256, sha256);
+    if (derivHit) {
+      logger?.info?.(`[stream-upload] 衍生图绝对查重拦截 sha=${sha256.slice(0, 12)} fid=${derivHit.asset_fid}`);
+      try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (_) {}
+      return { fid: derivHit.asset_fid, deduped: true, reason: 'duplicate_of_derivative', sha256, matchedKind: derivHit.kind };
+    }
+
+    const visHit = db.prepare('SELECT fid FROM assets WHERE preview_sha256 = ? OR preview_md5 = ? OR thumb_sha256 = ? OR thumb_md5 = ? LIMIT 1').get(sha256, sha256, sha256, sha256);
+    if (visHit) {
+      logger?.info?.(`[stream-upload] 可见缓存图绝对查重拦截 sha=${sha256.slice(0, 12)} fid=${visHit.fid}`);
+      try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (_) {}
+      return { fid: visHit.fid, deduped: true, reason: 'visible_cache_duplicate', sha256 };
+    }
+  } catch (_) {}
 
   // 1. 去重检查：若同 sha256 已存在，直接返回
   try {
@@ -194,7 +235,7 @@ async function registerMediaAsset(services, {
       const fpHit = fpApi.findFingerprintHit(
         db,
         { md5: streamFp.md5, sha256: streamFp.sha256, phash: streamFp.phash },
-        {}
+        { exactOnly: true }
       );
       if (fpHit && fpHit.hit) {
         logger?.info?.(`[stream-upload] 指纹命中跳过入库 ${fpHit.reason} → ${fpHit.fid} (${fpHit.kind || ''})`);
@@ -431,6 +472,19 @@ async function registerMediaAsset(services, {
     `).run(Date.now(), fid);
   }
 
+  // 货架归属：编辑器导出/备份等入口通过 shelf 直接指定成品库等货架
+  const shelfName = ['original', 'retouched', 'finished'].includes(String(shelf || ''))
+    ? String(shelf)
+    : null;
+  if (shelfName) {
+    try {
+      db.prepare('UPDATE assets SET library_shelf=?, updated_at=? WHERE fid=?')
+        .run(shelfName, Date.now(), fid);
+    } catch (e) {
+      logger?.warn?.(`[stream-upload] 写入货架失败: ${e.message}`);
+    }
+  }
+
   // 5. 触发 AI 工作流解释器（成品库不打标）
   let queued = null;
   if (interpreter && !isVideo && !isFinished) {
@@ -467,7 +521,8 @@ async function handleDirectUpload(services, req, {
   dateModified = null,
   clientAssetId = null,
   clientThumbBuffer = null,
-  source = 'sync'
+  source = 'sync',
+  shelf = null
 } = {}) {
   const { config } = services;
   const ct = (req && req.headers && req.headers['content-type']) || '';
@@ -482,6 +537,7 @@ async function handleDirectUpload(services, req, {
   let targetSource = source || (req && req.headers && req.headers['x-source']) || 'sync';
   let targetCategory = (req && req.headers && req.headers['x-category']) || null;
   let targetManualTags = (req && req.headers && req.headers['x-manual-tags']) || null;
+  let targetShelf = (req && req.headers && req.headers['x-shelf']) || null;
 
 
   let sha256 = '';
@@ -510,6 +566,9 @@ async function handleDirectUpload(services, req, {
     }
     if (fields.manual_tags) {
       targetManualTags = fields.manual_tags;
+    }
+    if (fields.shelf) {
+      targetShelf = fields.shelf;
     }
     fs.writeFileSync(tempFile, file.data);
     sha256 = crypto.createHash('sha256').update(file.data).digest('hex');
@@ -540,7 +599,8 @@ async function handleDirectUpload(services, req, {
       clientThumbBuffer: targetThumbBuffer,
       source: targetSource,
       category: targetCategory,
-      manualTags: targetManualTags
+      manualTags: targetManualTags,
+      shelf: targetShelf
     });
   } finally {
     try {

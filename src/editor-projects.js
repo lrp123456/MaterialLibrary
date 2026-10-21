@@ -275,7 +275,7 @@ async function probeFile(file) {
 
 async function listLibraryMedia(services) {
   const rows = services.db.prepare(`
-    SELECT fid, file_name, kind, width, height
+    SELECT fid, file_name, kind, width, height, duration_s
     FROM assets
     WHERE status='ready' AND kind IN ('video', 'image', 'audio')
     ORDER BY created_at DESC
@@ -285,16 +285,24 @@ async function listLibraryMedia(services) {
   for (const row of rows) {
     const file = await resolveAssetFile(services, row.fid);
     const type = row.kind === 'audio' ? 'audio' : row.kind === 'video' ? 'video' : 'image';
-    let duration = type === 'image' ? 5 : 0;
+    let duration = type === 'image' ? 5 : (row.duration_s || 0);
     let hasAudio = type === 'audio';
     let width = row.width || 0;
     let height = row.height || 0;
-    if (file && type !== 'image') {
+    // PERF-02：优先使用 assets 表已有元数据，仅在字段缺失时才拉起 ffprobe 并回写缓存。
+    const hasDbMeta = (row.width > 0 && row.height > 0) || (type === 'audio' && row.duration_s > 0);
+    if (!hasDbMeta && file && type !== 'image') {
       const probe = await probeFile(file);
-      duration = probe.duration || 0;
+      duration = probe.duration || duration;
       hasAudio = type === 'audio' ? true : probe.hasAudio;
       width = width || probe.width;
       height = height || probe.height;
+      if (probe.width || probe.height || probe.duration) {
+        try {
+          services.db.prepare('UPDATE assets SET width=COALESCE(?,width), height=COALESCE(?,height), duration_s=COALESCE(?,duration_s) WHERE fid=?')
+            .run(probe.width || null, probe.height || null, probe.duration || null, row.fid);
+        } catch (_) {}
+      }
     }
     if (!file) {
       items.push({

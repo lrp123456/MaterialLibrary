@@ -88,6 +88,7 @@ async function completeChat({
   max_tokens = 4096,
   timeoutMs = 90000,
   response_format = null,
+  extraBody = null,
 }) {
   if (!baseUrl) {
     throw new Error('LiteLLM 未配置 base_url（llm_providers.litellm）');
@@ -103,6 +104,13 @@ async function completeChat({
     max_tokens,
   };
   if (response_format) body.response_format = response_format;
+  // 思考档位等厂商扩展字段：仅由服务端按模型 caps 组装后传入，拒绝客户端任意透传
+  if (extraBody && typeof extraBody === 'object') {
+    for (const [k, v] of Object.entries(extraBody)) {
+      if (v === undefined || v === null) continue;
+      body[k] = v;
+    }
+  }
   const res = await fetch(endpoint, {
     method: 'POST',
     headers: {

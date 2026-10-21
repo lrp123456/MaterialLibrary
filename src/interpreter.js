@@ -383,6 +383,15 @@ class WorkflowInterpreter {
     return { runId, count: fids.length, version: wf.version };
   }
 
+  async triggerSingleNode(assetFid, nodeId, opts = {}) {
+    return this.triggerRun({
+      workflowId: opts.workflowId || 'default',
+      assetFids: [assetFid],
+      targetNodeId: nodeId,
+      trigger: opts.trigger || 'manual_single_node'
+    });
+  }
+
   async queueMissingRestage({ limit = 2000 } = {}) {
     const { listAssetsNeedingRestage } = require('./restage');
     const fids = listAssetsNeedingRestage(this.db, limit);
@@ -692,7 +701,13 @@ class WorkflowInterpreter {
         UPDATE node_runs SET status=?, output_summary=?, derivative_id=?, error=?, duration_ms=?, updated_at=? WHERE id=?
       `).run(
         status,
-        JSON.stringify(res.output || {}),
+        (() => {
+          const outObj = (res.output && typeof res.output === 'object') ? { ...res.output } : { value: res.output };
+          if (Array.isArray(res.flags) && res.flags.length > 0) {
+            outObj._flags = res.flags;
+          }
+          return JSON.stringify(outObj);
+        })(),
         derivId,
         res.error || null,
         durationMs,

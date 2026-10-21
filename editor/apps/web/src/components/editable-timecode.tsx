@@ -153,7 +153,7 @@ export function EditableTimecode({
 				disabled && "cursor-default hover:bg-transparent",
 				className,
 			)}
-			title={disabled ? undefined : "Click to edit time"}
+			title={disabled ? undefined : "点击修改时间"}
 		>
 			{formattedTime}
 		</button>

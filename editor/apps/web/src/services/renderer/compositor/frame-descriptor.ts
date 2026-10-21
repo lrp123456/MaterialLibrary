@@ -15,11 +15,13 @@ import { ImageNode } from "../nodes/image-node";
 import { RootNode } from "../nodes/root-node";
 import { StickerNode } from "../nodes/sticker-node";
 import { renderTextToContext, TextNode } from "../nodes/text-node";
+import { TransitionNode } from "../nodes/transition-node";
 import { VideoNode } from "../nodes/video-node";
 import type { ResolvedVisualSourceNodeState } from "../nodes/visual-node";
 import type {
 	FrameDescriptor,
 	FrameItemDescriptor,
+	LayerDescriptor,
 	LayerMaskDescriptor,
 	QuadTransformDescriptor,
 	TextureCanvasDrawFn,
@@ -78,11 +80,42 @@ async function collectNode({
 	textures: Map<string, TextureUploadDescriptor>;
 }): Promise<void> {
 	if (node instanceof RootNode) {
+		// 预扫一遍：处于激活窗口的转场节点会把 from / to 两个片段"吃掉"，
+		// 它们的普通 layer 这一帧不能再单独出，否则画面会重复绘制。
+		const suppressed = new Set<AnyBaseNode>();
+		const pathByChild = new Map<AnyBaseNode, string>();
 		for (let index = 0; index < node.children.length; index++) {
+			const child = node.children[index];
+			pathByChild.set(child, `${path}:${index}`);
+			if (child instanceof TransitionNode && canCollectTransition(child)) {
+				suppressed.add(child.fromNode);
+				suppressed.add(child.toNode);
+			}
+		}
+
+		for (let index = 0; index < node.children.length; index++) {
+			const child = node.children[index];
+			if (suppressed.has(child)) {
+				continue;
+			}
+			if (child instanceof TransitionNode) {
+				if (!canCollectTransition(child)) {
+					continue;
+				}
+				collectTransitionNode({
+					node: child,
+					renderer,
+					fromPath: pathByChild.get(child.fromNode) ?? `${path}:${index}:from`,
+					toPath: pathByChild.get(child.toNode) ?? `${path}:${index}:to`,
+					items,
+					textures,
+				});
+				continue;
+			}
 			await collectNode({
-				node: node.children[index],
+				node: child,
 				renderer,
-				path: `${path}:${index}`,
+				path: pathByChild.get(child) ?? `${path}:${index}`,
 				items,
 				textures,
 			});
@@ -205,21 +238,34 @@ async function collectNode({
 	}
 }
 
-async function collectVisualSourceNode({
+function isVisualSourceNode(
+	node: AnyBaseNode,
+): node is VideoNode | ImageNode | StickerNode | GraphicNode {
+	return (
+		node instanceof VideoNode ||
+		node instanceof ImageNode ||
+		node instanceof StickerNode ||
+		node instanceof GraphicNode
+	);
+}
+
+/**
+ * 生成一个视觉节点的图层描述（纹理登记 + 变换 + 遮罩 + 特效）。
+ * 普通图层与转场 from / to 共用同一份逻辑，保证两条路径的画面完全一致。
+ */
+function buildVisualSourceLayer({
 	node,
 	renderer,
 	path,
-	items,
 	textures,
 }: {
 	node: VideoNode | ImageNode | StickerNode | GraphicNode;
 	renderer: CanvasRenderer;
 	path: string;
-	items: FrameItemDescriptor[];
 	textures: Map<string, TextureUploadDescriptor>;
-}) {
+}): { layer: LayerDescriptor; strokeLayer: LayerDescriptor | null } | null {
 	if (!node.resolved) {
-		return;
+		return null;
 	}
 
 	const source =
@@ -227,7 +273,7 @@ async function collectVisualSourceNode({
 			? node.getSource({ resolvedParams: node.resolved.resolvedParams })
 			: node.resolved.source;
 	if (!source) {
-		return;
+		return null;
 	}
 
 	const sourceWidth =
@@ -262,17 +308,112 @@ async function collectVisualSourceNode({
 		textures,
 	});
 
-	items.push({
-		type: "layer",
-		textureId,
-		transform,
-		opacity: node.resolved.opacity,
-		blendMode: node.params.blendMode ?? "normal",
-		effectPassGroups: node.resolved.effectPasses,
-		mask,
+	return {
+		layer: {
+			type: "layer",
+			textureId,
+			transform,
+			opacity: node.resolved.opacity,
+			blendMode: node.params.blendMode ?? "normal",
+			effectPassGroups: node.resolved.effectPasses,
+			mask,
+		},
+		strokeLayer,
+	};
+}
+
+/** 转场项能否真正建出来：两端都必须是有源纹理的视觉节点且本帧已解析 */
+function canCollectTransition(node: TransitionNode): boolean {
+	return (
+		node.resolved !== null &&
+		isVisualSourceNode(node.fromNode) &&
+		node.fromNode.resolved !== null &&
+		isVisualSourceNode(node.toNode) &&
+		node.toNode.resolved !== null
+	);
+}
+
+/**
+ * 转场帧项：from / to 各出一张图层描述，交给合成器的 transition pass 混合。
+ * 只在 canCollectTransition 为真时调用，保证不会出现"抑制了 A/B 却出不了 item"的空白帧。
+ */
+function collectTransitionNode({
+	node,
+	renderer,
+	fromPath,
+	toPath,
+	items,
+	textures,
+}: {
+	node: TransitionNode;
+	renderer: CanvasRenderer;
+	fromPath: string;
+	toPath: string;
+	items: FrameItemDescriptor[];
+	textures: Map<string, TextureUploadDescriptor>;
+}) {
+	if (!node.resolved) {
+		return;
+	}
+	if (!isVisualSourceNode(node.fromNode) || !isVisualSourceNode(node.toNode)) {
+		return;
+	}
+
+	const from = buildVisualSourceLayer({
+		node: node.fromNode,
+		renderer,
+		path: fromPath,
+		textures,
 	});
-	if (strokeLayer) {
-		items.push(strokeLayer);
+	const to = buildVisualSourceLayer({
+		node: node.toNode,
+		renderer,
+		path: toPath,
+		textures,
+	});
+	if (!from || !to) {
+		return;
+	}
+
+	items.push({
+		type: "transition",
+		from: from.layer,
+		to: to.layer,
+		progress: node.resolved.progress,
+		mode: node.params.mode,
+		scalars: node.params.scalars,
+		direction: node.params.direction,
+	});
+
+	// 遮罩描边是独立图层，转场期间照常叠在上面，否则描边会在窗口内消失
+	if (from.strokeLayer) {
+		items.push(from.strokeLayer);
+	}
+	if (to.strokeLayer) {
+		items.push(to.strokeLayer);
+	}
+}
+
+async function collectVisualSourceNode({
+	node,
+	renderer,
+	path,
+	items,
+	textures,
+}: {
+	node: VideoNode | ImageNode | StickerNode | GraphicNode;
+	renderer: CanvasRenderer;
+	path: string;
+	items: FrameItemDescriptor[];
+	textures: Map<string, TextureUploadDescriptor>;
+}) {
+	const built = buildVisualSourceLayer({ node, renderer, path, textures });
+	if (!built) {
+		return;
+	}
+	items.push(built.layer);
+	if (built.strokeLayer) {
+		items.push(built.strokeLayer);
 	}
 }
 
@@ -383,7 +524,7 @@ function buildMaskArtifacts({
 	textures: Map<string, TextureUploadDescriptor>;
 }): {
 	mask: LayerMaskDescriptor | null;
-	strokeLayer: FrameItemDescriptor | null;
+	strokeLayer: LayerDescriptor | null;
 } {
 	const mask = node.params.masks?.[0];
 	if (!mask) {
@@ -470,7 +611,7 @@ function buildMaskArtifacts({
 
 	const stroke = definition.renderer.stroke;
 	const hasStroke = mask.params.strokeWidth > 0 && Boolean(stroke);
-	let strokeLayer: FrameItemDescriptor | null = null;
+	let strokeLayer: LayerDescriptor | null = null;
 	if (hasStroke && stroke) {
 		const strokeTextureId = `${path}:mask-stroke`;
 		const strokeContentHash = `stroke:${mask.type}:${JSON.stringify(mask.params)}:${transformHash(transform)}:${canvasWidth}x${canvasHeight}:stroke=${stroke.kind}`;

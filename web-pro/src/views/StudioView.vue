@@ -1,5 +1,5 @@
 <template>
-  <div class="flex-1 flex flex-col h-[calc(100vh-56px)] overflow-hidden bg-studio-950 font-sans">
+  <div class="view-root studio-view flex-1 flex flex-col h-[calc(100vh-56px)] overflow-hidden bg-studio-950 font-sans">
     <!-- AI 创作二级分段导航栏 (高度 48px) -->
     <div class="h-12 bg-studio-900 border-b border-studio-700 px-5 flex items-center justify-between shrink-0 select-none">
       <div class="flex items-center space-x-2">

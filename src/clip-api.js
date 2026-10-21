@@ -9,10 +9,12 @@
  *   /editor-api/packs*       声明式资源包
  *   /editor-api/ai/*         AI 任务
  *   /editor-api/clip-assets* 剪辑素材库视图
+ *   /editor-api/projects/*   工程文件导出/导入（.mlsclip），未命中的工程读写交回 editor-projects
  */
 const { handleSnapshots, ensureSnapshotTables } = require('./clip-snapshots');
 const { handlePacks } = require('./clip-packs');
 const { handleAiJobs } = require('./clip-ai');
+const { handleProjectFileApi } = require('./clip-project-file');
 
 function sendJson(res, status, data) {
   const body = JSON.stringify(data);
@@ -70,6 +72,11 @@ async function handleClipApi(services, req, res) {
     }
     if (p.startsWith('/editor-api/ai/')) {
       if (await handleAiJobs(services, req, res, url)) return true;
+    }
+    // 工程文件（.mlsclip）：只认 export / import / downloads 三类路径，
+    // 其余 /editor-api/projects* 继续交回 editor-projects，别打乱既有工程读写。
+    if (p.startsWith('/editor-api/projects/')) {
+      if (await handleProjectFileApi(services, req, res, url)) return true;
     }
     if (p === '/editor-api/clip-assets' && req.method === 'GET') {
       const data = clipAssetsList(db, {

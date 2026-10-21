@@ -99,6 +99,49 @@
   --sidebar: hsl(0 0% 6%);
 }
 
+
+/* Material Studio Pro: 低蓝光温润护眼模式 (Eye-care Mode) */
+.eye-care {
+  --background: #F6F1E5;
+  --foreground: #241E15;
+  --card: #FAF5EB;
+  --card-foreground: #241E15;
+  --popover: #FAF5EB;
+  --popover-hover: #E8DEC8;
+  --popover-foreground: #241E15;
+  --primary: #B45309;
+  --primary-foreground: #FFFFFF;
+  --secondary: #EFE7D3;
+  --secondary-border: #D8CDAF;
+  --secondary-foreground: #9A4306;
+  --muted: #E4DAC4;
+  --muted-foreground: #7F745E;
+  --accent: #E8DEC8;
+  --accent-foreground: #241E15;
+  --border: #D8CDAF;
+  --input: #FFFDF8;
+  --ring: #B45309;
+  --sidebar-background: #EFE7D3;
+  --sidebar-foreground: #241E15;
+  --sidebar-border: #D8CDAF;
+}
+
+.eye-care .panel {
+  --background: #FAF5EB;
+  --foreground: #241E15;
+  --card: #FFFDF8;
+  --card-foreground: #241E15;
+  --secondary: #EFE7D3;
+  --secondary-border: #D8CDAF;
+  --secondary-foreground: #9A4306;
+  --muted: #E4DAC4;
+  --accent: #E8DEC8;
+  --accent-foreground: #241E15;
+  --border: #D8CDAF;
+  --input: #FFFDF8;
+  --ring: #B45309;
+}
+
 .dark .panel {
   --background: hsl(0 0% 10%);
   --foreground: hsl(0 0% 85%);
@@ -288,4 +331,41 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* Material Studio Pro: 适老化大字关怀模式 (Senior Care Mode) */
+html.senior-mode {
+  font-size: 16px !important;
+  letter-spacing: 0.015em;
+  /* 核心：支持根据父级广播的 --senior-scale 动态全屏等比例放大 */
+  zoom: var(--senior-scale, 1.3);
+}
+
+html.senior-mode button,
+html.senior-mode input,
+html.senior-mode select {
+  font-size: 14px !important;
+}
+
+html.senior-mode [role="dialog"] {
+  max-height: 94vh !important;
+  overflow-y: auto !important;
+}
+
+html.senior-mode .text-\[10px\],
+html.senior-mode .text-\[11px\] {
+  font-size: 13px !important;
+  line-height: 1.4 !important;
+}
+
+html.senior-mode .text-xs {
+  font-size: 14.5px !important;
+}
+
+html.senior-mode .text-sm {
+  font-size: 16px !important;
+}
+
+html.senior-mode button {
+  min-height: 38px;
 }

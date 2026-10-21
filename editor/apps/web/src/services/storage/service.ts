@@ -132,6 +132,19 @@ class StorageService {
 	}
 
 	async saveProject({ project }: { project: TProject }): Promise<void> {
+		const serializedProject = this.serializeProject({ project });
+
+		await this.projectsAdapter.set({
+			key: project.metadata.id,
+			value: serializedProject,
+		});
+	}
+
+	/**
+	 * 把内存里的工程拍成可落库的 JSON（不带 Date 对象）。
+	 * 导出 `.mlsclip` 也走这里，保证和本地存储、云端快照是同一份 schema。
+	 */
+	serializeProject({ project }: { project: TProject }): SerializedProject {
 		const duration =
 			project.metadata.duration ??
 			getProjectDurationFromScenes({ scenes: project.scenes });
@@ -145,10 +158,11 @@ class StorageService {
 			updatedAt: scene.updatedAt.toISOString(),
 		}));
 
-		const serializedProject: SerializedProject = {
+		return {
 			metadata: {
 				id: project.metadata.id,
 				name: project.metadata.name,
+				group: project.metadata.group || "",
 				thumbnail: project.metadata.thumbnail,
 				duration,
 				createdAt: project.metadata.createdAt.toISOString(),
@@ -160,11 +174,6 @@ class StorageService {
 			version: project.version,
 			timelineViewState: project.timelineViewState,
 		};
-
-		await this.projectsAdapter.set({
-			key: project.metadata.id,
-			value: serializedProject,
-		});
 	}
 
 	/**
@@ -220,6 +229,7 @@ class StorageService {
 			metadata: {
 				id: serializedProject.metadata.id,
 				name: serializedProject.metadata.name,
+				group: serializedProject.metadata.group || "",
 				thumbnail: serializedProject.metadata.thumbnail,
 				duration: roundMediaTime({
 					time:
@@ -277,6 +287,7 @@ class StorageService {
 			metadata.push({
 				id: serializedProject.metadata.id,
 				name: serializedProject.metadata.name,
+				group: serializedProject.metadata.group || "",
 				thumbnail: serializedProject.metadata.thumbnail,
 				duration: roundMediaTime({
 					time:

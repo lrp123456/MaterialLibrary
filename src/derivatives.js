@@ -144,6 +144,21 @@ async function createDerivative(services, {
     }
   } catch (_) {}
 
+  // 保证全量衍生图注册到 export_registry 并回写 derivatives 表字段
+  try {
+    const { registerVisibleImageHashes } = require('./export-tag');
+    registerVisibleImageHashes(db, {
+      filePath: absPath,
+      sourceFid: assetFid,
+      variant: kind,
+      exportedBy: 'derivative',
+    });
+    if (fp.sha256 || fp.md5) {
+      db.prepare('UPDATE derivatives SET sha256 = COALESCE(?, sha256), md5 = COALESCE(?, md5), phash = COALESCE(?, phash), file_size = COALESCE(?, file_size) WHERE id = ?')
+        .run(fp.sha256 || null, fp.md5 || null, fp.phash || null, fs.existsSync(absPath) ? fs.statSync(absPath).size : null, r.lastInsertRowid);
+    }
+  } catch (_) {}
+
   return {
     id: r.lastInsertRowid,
     asset_fid: assetFid,
@@ -169,13 +184,31 @@ async function ensurePreviewJpeg(services, fid, derivative, filePath) {
   const previewDir = path.join(config.dataDir, 'cache', 'preview');
   fs.mkdirSync(previewDir, { recursive: true });
   const dest = path.join(previewDir, `${fid}_${derivative.id}.jpg`);
-  if (fs.existsSync(dest)) return dest;
-  const sharp = require('sharp');
-  await sharp(filePath, { failOn: 'none' })
-    .rotate()
-    .resize(1280, 1280, { fit: 'inside', withoutEnlargement: true })
-    .jpeg({ quality: 78 })
-    .toFile(dest);
+  if (!fs.existsSync(dest)) {
+    const sharp = require('sharp');
+    await sharp(filePath, { failOn: 'none' })
+      .rotate()
+      .resize(1280, 1280, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 78 })
+      .toFile(dest);
+  }
+
+  if (dest && fs.existsSync(dest) && services?.db) {
+    try {
+      const { registerVisibleImageHashes } = require('./export-tag');
+      const h = registerVisibleImageHashes(services.db, {
+        filePath: dest,
+        sourceFid: fid,
+        variant: derivative?.id ? `preview_${derivative.id}` : 'preview_origin',
+        exportedBy: 'preview_cache',
+      });
+      if (h) {
+        services.db.prepare('UPDATE assets SET preview_sha256 = COALESCE(preview_sha256, ?), preview_md5 = COALESCE(preview_md5, ?) WHERE fid = ?')
+          .run(h.sha256, h.md5, fid);
+      }
+    } catch (_) {}
+  }
+
   return dest;
 }
 

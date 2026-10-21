@@ -6,6 +6,8 @@ export type ProjectsViewMode = "grid" | "list";
 
 interface ProjectsState {
 	searchQuery: string;
+	/** 分组筛选：空 = 全部，__ungrouped__ = 未分组，其余为具体分组名 */
+	groupFilter: string;
 	sortKey: TProjectSortKey;
 	sortOrder: "asc" | "desc";
 	viewMode: ProjectsViewMode;
@@ -14,6 +16,7 @@ interface ProjectsState {
 	isHydrated: boolean;
 	setIsHydrated: ({ isHydrated }: { isHydrated: boolean }) => void;
 	setSearchQuery: ({ query }: { query: string }) => void;
+	setGroupFilter: ({ group }: { group: string }) => void;
 	setSortKey: ({ sortKey }: { sortKey: TProjectSortKey }) => void;
 	setSortOrder: ({ sortOrder }: { sortOrder: "asc" | "desc" }) => void;
 	toggleSortOrder: () => void;
@@ -60,6 +63,7 @@ export const useProjectsStore = create<ProjectsState>()(
 	persist(
 		(set) => ({
 			searchQuery: "",
+			groupFilter: "",
 			sortKey: "updatedAt",
 			sortOrder: "desc",
 			viewMode: "grid",
@@ -68,6 +72,7 @@ export const useProjectsStore = create<ProjectsState>()(
 			isHydrated: false,
 			setIsHydrated: ({ isHydrated }) => set({ isHydrated }),
 			setSearchQuery: ({ query }) => set({ searchQuery: query }),
+			setGroupFilter: ({ group }) => set({ groupFilter: group }),
 			setSortKey: ({ sortKey }) => set({ sortKey }),
 			setSortOrder: ({ sortOrder }) => set({ sortOrder }),
 			toggleSortOrder: () =>
@@ -126,6 +131,7 @@ export const useProjectsStore = create<ProjectsState>()(
 				viewMode: state.viewMode,
 				sortKey: state.sortKey,
 				sortOrder: state.sortOrder,
+				groupFilter: state.groupFilter,
 			}),
 			onRehydrateStorage: () => (state) => {
 				state?.setIsHydrated({ isHydrated: true });

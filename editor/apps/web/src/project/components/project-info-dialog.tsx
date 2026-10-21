@@ -51,29 +51,29 @@ export function ProjectInfoDialog({
 				</DialogHeader>
 
 				<DialogBody className="flex flex-col">
-					<InfoRow label="Duration" value={durationFormatted} />
+					<InfoRow label="时长" value={durationFormatted} />
 					<InfoRow
-						label="Created"
+						label="创建时间"
 						value={formatDate({ date: project.createdAt })}
 					/>
 					<InfoRow
-						label="Modified"
+						label="最近修改"
 						value={formatDate({ date: project.updatedAt })}
 					/>
 					<InfoRow
-						label="Project ID"
+						label="工程 ID"
 						value={
 							<code className="text-xs bg-muted px-1.5 py-0.5 rounded">
 								{project.id.slice(0, 8)}
 							</code>
 						}
 					/>
+					<InfoRow label="分组" value={project.group || "未分组"} />
 				</DialogBody>
 				<DialogFooter>
 					<Button variant="outline" onClick={() => onOpenChange(false)}>
-						Close
+						关闭
 					</Button>
-					<Button onClick={() => onOpenChange(false)}>Done</Button>
 				</DialogFooter>
 			</DialogContent>
 		</Dialog>

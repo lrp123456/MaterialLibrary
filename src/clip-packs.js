@@ -1,8 +1,10 @@
 /**
- * 声明式资源包（转场 / 特效 / 文字模板 / LUT / 贴纸 / 素材包）。
+ * 声明式资源包（转场 / 特效 / 文字模板 / LUT / 贴纸 / 素材包 / 能力插件 operation）。
  *
  * 设计约束：
  * - 不执行任何第三方代码，只读 manifest + shader + 图片；
+ * - operation 包只声明能力（runner 标识 + 输入输出 + 参数），执行体固定在
+ *   <dataDir>/clip-ai-runners/<runner>.js，包目录里放什么都不会被执行；
  * - 清单校验失败一律拒绝加载，并在接口里返回具体原因；
  * - 包目录固定为 <dataDir>/clip-packs/<id>/，id 必须与目录名一致；
  * - 文件访问做路径包含校验，杜绝 ../ 穿越。
@@ -11,12 +13,17 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const PACK_TYPES = new Set(['effect', 'transition', 'textTemplate', 'lut', 'sticker', 'assetPack']);
+const PACK_TYPES = new Set(['effect', 'transition', 'textTemplate', 'lut', 'sticker', 'assetPack', 'operation']);
 const PARAM_TYPES = new Set(['number', 'boolean', 'color', 'enum', 'string', 'vec2']);
 const LICENSE_TYPES = new Set(['internal', 'cc0', 'cc-by', 'commercial', 'unknown']);
+/** operation 的输入种类：与 schema 的 enum 一致。 */
+const OPERATION_INPUTS = new Set(['video', 'audio', 'image', 'text']);
 const ID_RE = /^[a-z0-9]+(\.[a-z0-9][a-z0-9-]*)+$/;
 const KEY_RE = /^[a-zA-Z][a-zA-Z0-9_]{0,31}$/;
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
+/** runner 只做标识：单段小写标识符，不允许路径分隔符，因此不可能指向包内文件。 */
+const RUNNER_RE = /^[a-z0-9][a-z0-9-]*$/;
+const OUTPUT_RE = /^[a-z][a-z0-9-]*$/;
 
 function sendJson(res, status, data) {
   const body = JSON.stringify(data);
@@ -61,7 +68,15 @@ function isSafeRelPath(p) {
 }
 
 /** 与 rust/crates/effects/src/pipeline.rs 的 shader_defs 保持同步。 */
-const BUILTIN_SHADERS = new Set(['gaussian-blur', 'glow', 'sharpen', 'skin-smooth']);
+const BUILTIN_SHADERS = new Set([
+  'gaussian-blur',
+  'glow',
+  'sharpen',
+  'skin-smooth',
+  'grade',
+  'warp',
+  'channel',
+]);
 const SHADER_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
 
 function isShaderRef(s) {
@@ -69,6 +84,28 @@ function isShaderRef(s) {
   if (SHADER_ID_RE.test(s)) return true; // 内置 shader id
   if (!isSafeRelPath(s)) return false;
   return /\.(wgsl|glsl|frag)$/.test(s); // 包内文件（需重编 wasm 才能真正生效）
+}
+
+/** 参数声明校验（顶层 params 与 operation.params 共用同一套规则）。 */
+function validateParamList(list, label) {
+  const errs = [];
+  if (!Array.isArray(list)) return [`${label} 必须是数组`];
+  const keys = new Set();
+  for (const p of list) {
+    if (!p || typeof p !== 'object') { errs.push(`${label} 项必须是对象`); continue; }
+    const name = typeof p.key === 'string' ? p.key : String(p.key);
+    if (typeof p.key !== 'string' || !KEY_RE.test(p.key)) errs.push(`${label} key 非法：${p.key}`);
+    else if (keys.has(p.key)) errs.push(`${label} key 重复：${p.key}`);
+    else keys.add(p.key);
+    if (!PARAM_TYPES.has(p.type)) errs.push(`参数 ${name} 的 type 非法`);
+    if (!p.label || typeof p.label.zh !== 'string') errs.push(`参数 ${name} 缺少 label.zh`);
+    if (p.type === 'enum' && (!Array.isArray(p.options) || !p.options.length)) errs.push(`参数 ${name} 为 enum 但缺少 options`);
+    if (p.type === 'number') {
+      if (typeof p.default !== 'number') errs.push(`参数 ${name} 缺少数值 default`);
+      if (typeof p.min !== 'number' || typeof p.max !== 'number') errs.push(`参数 ${name} 缺少 min/max`);
+    }
+  }
+  return errs;
 }
 
 /** 手写校验器：只覆盖 manifest schema 里真正会出错的约束，错误信息可读。 */
@@ -87,24 +124,7 @@ function validateManifest(m, dirName) {
   if (!m.license || typeof m.license.source !== 'string' || !m.license.source.trim()) push('license.source 必填（来源说明）');
   if (m.preview && !isSafeRelPath(m.preview)) push('preview 必须是包内相对路径');
 
-  if (Array.isArray(m.params)) {
-    const keys = new Set();
-    for (const p of m.params) {
-      if (!p || typeof p !== 'object') { push('params 项必须是对象'); continue; }
-      if (typeof p.key !== 'string' || !KEY_RE.test(p.key)) push(`参数 key 非法：${p.key}`);
-      else if (keys.has(p.key)) push(`参数 key 重复：${p.key}`);
-      else keys.add(p.key);
-      if (!PARAM_TYPES.has(p.type)) push(`参数 ${p.key} 的 type 非法`);
-      if (!p.label || typeof p.label.zh !== 'string') push(`参数 ${p.key} 缺少 label.zh`);
-      if (p.type === 'enum' && (!Array.isArray(p.options) || !p.options.length)) push(`参数 ${p.key} 为 enum 但缺少 options`);
-      if (p.type === 'number') {
-        if (typeof p.default !== 'number') push(`参数 ${p.key} 缺少数值 default`);
-        if (typeof p.min !== 'number' || typeof p.max !== 'number') push(`参数 ${p.key} 缺少 min/max`);
-      }
-    }
-  } else if (m.params !== undefined) {
-    push('params 必须是数组');
-  }
+  if (m.params !== undefined) errs.push(...validateParamList(m.params, 'params'));
 
   const needsRender = m.type === 'effect' || m.type === 'transition';
   if (needsRender) {
@@ -117,7 +137,42 @@ function validateManifest(m, dirName) {
       }
     }
   }
-  if (m.type === 'transition' && (!m.transition || typeof m.transition !== 'object')) push('transition 类型必须提供 transition 配置');
+  if (m.type === 'transition') {
+    if (!m.transition || typeof m.transition !== 'object') {
+      push('transition 类型必须提供 transition 配置');
+    } else {
+      // 转场走 compositor 的 transition pass：shader 固定为 "transition"，
+      // mode 必须是 transition.wgsl 已实现的 0..11。
+      const passes = (m.render && Array.isArray(m.render.passes)) ? m.render.passes : [];
+      if (passes.length && passes[0].shader !== 'transition') {
+        push(`transition 类型的 render.passes[0].shader 必须是 "transition"，实际为 ${passes[0].shader}`);
+      }
+      const mode = m.transition.mode;
+      if (mode !== undefined) {
+        if (!Number.isInteger(mode) || mode < 0 || mode > 11) {
+          push(`transition.mode 必须是 0..11 的整数，实际为 ${JSON.stringify(mode)}`);
+        }
+      }
+      if (m.transition.defaultDuration !== undefined) {
+        if (typeof m.transition.defaultDuration !== 'number' || m.transition.defaultDuration <= 0) {
+          push('transition.defaultDuration 必须是正数（秒）');
+        }
+      }
+      // uniforms.mode 与 transition.mode 必须一致，避免"面板显示 A、实际渲染 B"
+      const uniformMode = passes[0] && passes[0].uniforms && passes[0].uniforms.mode;
+      if (uniformMode !== undefined) {
+        if (typeof uniformMode !== 'string') {
+          push('render.passes[0].uniforms.mode 必须是字符串（数字字面量或 $param）');
+        } else if (!/^\$[a-zA-Z]/.test(uniformMode)) {
+          const parsed = Number.parseFloat(uniformMode);
+          if (!Number.isFinite(parsed)) push(`uniforms.mode 无法解析为数字：${uniformMode}`);
+          else if (mode !== undefined && Math.trunc(parsed) !== mode) {
+            push(`uniforms.mode(${uniformMode}) 与 transition.mode(${mode}) 不一致`);
+          }
+        }
+      }
+    }
+  }
   if (m.type === 'textTemplate' && (!m.textTemplate || typeof m.textTemplate !== 'object')) push('textTemplate 类型必须提供 textTemplate 配置');
   if (m.type === 'lut') {
     if (!m.lut || ![17, 25, 32, 33, 64].includes(m.lut.size)) push('lut.size 必须是 17/25/32/33/64');
@@ -127,6 +182,30 @@ function validateManifest(m, dirName) {
     else for (const a of m.assets) {
       if (!a || !isSafeRelPath(a.path)) push(`assets[].path 非法：${a && a.path}`);
       if (!a || !['image', 'video', 'audio', 'sticker', 'font'].includes(a.kind)) push(`assets[].kind 非法：${a && a.kind}`);
+    }
+  }
+  // operation：只登记能力，不执行包内代码。runner 是标识，执行体固定在同名服务端文件。
+  if (m.type === 'operation') {
+    const op = m.operation;
+    if (!op || typeof op !== 'object' || Array.isArray(op)) {
+      push('operation 类型必须提供 operation 配置');
+    } else {
+      if (typeof op.runner !== 'string' || !RUNNER_RE.test(op.runner)) {
+        push(`operation.runner 必填，且必须匹配 ^[a-z0-9][a-z0-9-]*$（实际为 ${JSON.stringify(op.runner)}）`);
+      }
+      if (!Array.isArray(op.input) || !op.input.length) {
+        push('operation.input 必须是非空数组');
+      } else {
+        for (const kind of op.input) {
+          if (!OPERATION_INPUTS.has(kind)) {
+            push(`operation.input 项非法：${JSON.stringify(kind)}（可选 ${[...OPERATION_INPUTS].join(' / ')}）`);
+          }
+        }
+      }
+      if (typeof op.output !== 'string' || !OUTPUT_RE.test(op.output)) {
+        push(`operation.output 必填，且必须匹配 ^[a-z][a-z0-9-]*$（实际为 ${JSON.stringify(op.output)}）`);
+      }
+      if (op.params !== undefined) errs.push(...validateParamList(op.params, 'operation.params'));
     }
   }
 

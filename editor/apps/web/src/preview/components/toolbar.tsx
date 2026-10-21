@@ -25,6 +25,7 @@ import { usePreviewViewport } from "./preview-viewport";
 import { GridPopover } from "./guide-popover";
 import { usePreviewStore } from "@/preview/preview-store";
 import type { MediaTime } from "@/wasm";
+import { DEFAULT_FPS } from "@/fps/defaults";
 
 export function PreviewToolbar({
 	onToggleFullscreen,
@@ -62,7 +63,8 @@ export function PreviewToolbar({
 function TimecodeDisplay() {
 	const editor = useEditor();
 	const totalDuration = useEditor((e) => e.timeline.getTotalDuration());
-	const fps = useEditor((e) => e.project.getActive().settings.fps);
+	const fps =
+		useEditor((e) => e.project.getActiveOrNull()?.settings.fps) ?? DEFAULT_FPS;
 	const [currentTime, setCurrentTime] = useState<MediaTime>(() =>
 		editor.playback.getCurrentTime(),
 	);
@@ -119,7 +121,7 @@ function ZoomSelect() {
 		>
 			<SelectTrigger className="tabular-nums">{displayLabel}</SelectTrigger>
 			<SelectContent>
-				<SelectItem value="fit">Fit</SelectItem>
+				<SelectItem value="fit">适应窗口</SelectItem>
 				<SelectSeparator />
 				{PREVIEW_ZOOM_PRESETS.map((preset) => (
 					<SelectItem key={preset} value={String(preset)}>

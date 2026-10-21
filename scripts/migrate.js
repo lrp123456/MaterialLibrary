@@ -1178,11 +1178,12 @@ function seedTags(db) {
   db.exec("UPDATE tag_dict SET deprecated=1 WHERE dimension IN ('palette','luxury','era','temperature','functional','quality','color_style','flags','region','tone','view_composition','view_angle','lighting','material_family')");
   db.exec("UPDATE tag_dict SET deprecated=1 WHERE dimension='style_atom' AND dir LIKE '%_new'");
   db.exec("UPDATE tag_dict SET deprecated=1 WHERE dimension='space' AND dir='entryway'");
-  // 终审废弃：欧式轻奢/原木日式/日式/北欧/英式/旧扩展
-  db.exec("UPDATE tag_dict SET deprecated=1 WHERE dimension='style_atom' AND dir IN ('european_light_luxury','log_wood','japanese','nordic','british','japandi','french_light_luxury','italian_modern','american','american_farmhouse','american_modern','mid_century_global','tuscan_country')");
-  db.exec("UPDATE tag_dict SET deprecated=0 WHERE dimension='style_atom' AND dir IN ('wabi_sabi','song_aesthetic','neo_chinese','classical_chinese','french','italian','tuscan','mediterranean','modern_minimal','cream_style','industrial','mid_century','american_modern','american_country','nanyang_resort','eclectic_other')");
-  db.exec("UPDATE tag_dict SET deprecated=1 WHERE dimension='style_atom' AND dir IN ('natural_wood','dark_wood','natural_vintage_wood','dark_vintage_wood')");
-  db.exec("UPDATE tag_dict SET deprecated=0 WHERE dimension='wood_style' AND dir IN ('natural_wood','dark_wood','natural_vintage_wood','dark_vintage_wood')");
+  // 终审废弃：欧式轻奢/原木日式/日式/北欧/英式/旧扩展/混搭
+  db.exec("UPDATE tag_dict SET deprecated=1 WHERE dimension='style_atom' AND dir IN ('european_light_luxury','log_wood','japanese','nordic','british','japandi','french_light_luxury','italian_modern','american','american_farmhouse','mid_century_global','tuscan_country','eclectic_other')");
+  // 生效风格：文化流派 + 四种木色 + 其他风格(other)
+  db.exec("UPDATE tag_dict SET deprecated=0 WHERE dimension='style_atom' AND dir IN ('wabi_sabi','song_aesthetic','neo_chinese','classical_chinese','french','italian','tuscan','mediterranean','modern_minimal','cream_style','industrial','mid_century','american_modern','american_country','nanyang_resort','natural_wood','dark_wood','natural_vintage_wood','dark_vintage_wood','other')");
+  // wood_style 独立维度退役合并入 style_atom
+  db.exec("UPDATE tag_dict SET deprecated=1 WHERE dimension='wood_style'");
   db.exec("UPDATE tag_dict SET deprecated=0 WHERE dimension='gender' AND dir IN ('female','male')");
   db.exec("UPDATE tag_dict SET deprecated=1 WHERE dimension='gender' AND dir IN ('child','neutral')");
   db.exec("UPDATE tag_dict SET deprecated=0 WHERE dimension='person_style' AND dir IN ('gentle','dignified','capable','intellectual','sweet','guofeng','cool')");
@@ -1376,35 +1377,103 @@ function remapStyleTags(db) {
     }
   }
 
-  remapWoodStyleTags(db);
+  migrateWoodStyleAndEclecticToStyleAtom(db);
 }
 
-/** 原木日式/日式 → wood_style=自然原木风（仅当该资产尚无 wood_style） */
-function remapWoodStyleTags(db) {
-  const getTag = db.prepare("SELECT id FROM tag_dict WHERE dimension=? AND dir=?");
-  const natural = getTag.get('wood_style', 'natural_wood');
-  if (!natural) return;
-  const oldIds = ['log_wood', 'japanese', 'japanese_minimal']
-    .map((d) => getTag.get('style_atom', d))
-    .filter(Boolean)
-    .map((t) => t.id);
-  if (!oldIds.length) return;
-  const placeholders = oldIds.map(() => '?').join(',');
-  const rows = db.prepare(`
-    SELECT DISTINCT asset_fid FROM asset_tags WHERE tag_id IN (${placeholders})
-  `).all(...oldIds);
-  const hasWood = db.prepare(`
-    SELECT 1 FROM asset_tags at
-    JOIN tag_dict t ON t.id = at.tag_id
-    WHERE at.asset_fid=? AND t.dimension='wood_style' LIMIT 1
+/**
+ * 核心迁移：彻底下线「混搭」，四种木色正式并入 style_atom，兜底统一落入「其他风格」，确保风格永不为空
+ */
+function migrateWoodStyleAndEclecticToStyleAtom(db) {
+  // 1. 确保 style_atom 下拥有 other 以及 4 种木色，且均为非废弃状态
+  const ensureTag = db.prepare(`
+    INSERT INTO tag_dict(dimension, dir, label, aliases, is_fallback, deprecated, parent_dir)
+    VALUES(?, ?, ?, ?, 0, 0, ?)
+    ON CONFLICT(dimension, dir) DO UPDATE SET
+      label=excluded.label,
+      deprecated=0,
+      parent_dir=excluded.parent_dir
   `);
-  const ins = db.prepare(`
+
+  ensureTag.run('style_atom', 'other', '其他风格', JSON.stringify(['其他', '未分类风格', '混搭']), 'other_region');
+  ensureTag.run('style_atom', 'natural_wood', '自然原木风', JSON.stringify(['原木风', '浅色原木', '日式']), 'wood_system');
+  ensureTag.run('style_atom', 'dark_wood', '深色原木风', JSON.stringify(['深色原木', '深木']), 'wood_system');
+  ensureTag.run('style_atom', 'natural_vintage_wood', '自然复古原木风', JSON.stringify(['浅色做旧原木']), 'wood_system');
+  ensureTag.run('style_atom', 'dark_vintage_wood', '深色复古原木风', JSON.stringify(['深色做旧原木', '深色石头复古']), 'wood_system');
+
+  const getStyleTag = db.prepare("SELECT id FROM tag_dict WHERE dimension='style_atom' AND dir=?");
+  const insOrIgnore = db.prepare(`
     INSERT OR IGNORE INTO asset_tags(asset_fid, tag_id, role, confidence, source)
-    VALUES(?, ?, 'main', 0.8, 'migrate')
+    VALUES(?, ?, ?, ?, ?)
   `);
-  for (const r of rows) {
-    if (hasWood.get(r.asset_fid)) continue;
-    ins.run(r.asset_fid, natural.id);
+  const delAssetTag = db.prepare("DELETE FROM asset_tags WHERE tag_id=?");
+
+  // 2. 将旧的 eclectic_other（混搭）平滑迁移至 other（其他风格）
+  const eclecticTag = db.prepare("SELECT id FROM tag_dict WHERE dimension='style_atom' AND dir='eclectic_other'").get();
+  const otherTag = getStyleTag.get('other');
+  if (eclecticTag && otherTag && eclecticTag.id !== otherTag.id) {
+    const eclecticRows = db.prepare("SELECT asset_fid, role, confidence, source FROM asset_tags WHERE tag_id=?").all(eclecticTag.id);
+    for (const r of eclecticRows) {
+      insOrIgnore.run(r.asset_fid, otherTag.id, r.role || 'main', r.confidence || 0.8, r.source || 'migrate');
+    }
+    delAssetTag.run(eclecticTag.id);
+    db.prepare("UPDATE tag_dict SET deprecated=1 WHERE id=?").run(eclecticTag.id);
+    console.log(`[migrate] 已将 ${eclecticRows.length} 条历史「混搭」标签迁移为「其他风格」`);
+  }
+
+  // 3. 将旧的 wood_style（4 种木色）平滑迁移至 style_atom
+  const woodDirs = ['natural_wood', 'dark_wood', 'natural_vintage_wood', 'dark_vintage_wood'];
+  let woodMigratedCount = 0;
+  for (const dir of woodDirs) {
+    const oldWoodTag = db.prepare("SELECT id FROM tag_dict WHERE dimension='wood_style' AND dir=?").get(dir);
+    const newStyleTag = getStyleTag.get(dir);
+    if (oldWoodTag && newStyleTag) {
+      const rows = db.prepare("SELECT asset_fid, role, confidence, source FROM asset_tags WHERE tag_id=?").all(oldWoodTag.id);
+      for (const r of rows) {
+        insOrIgnore.run(r.asset_fid, newStyleTag.id, r.role || 'main', r.confidence || 0.85, r.source || 'migrate');
+        woodMigratedCount++;
+      }
+      delAssetTag.run(oldWoodTag.id);
+      db.prepare("UPDATE tag_dict SET deprecated=1 WHERE id=?").run(oldWoodTag.id);
+    }
+  }
+  if (woodMigratedCount > 0) {
+    console.log(`[migrate] 已将 ${woodMigratedCount} 条历史「wood_style」木系标签平滑迁移入「style_atom」风格`);
+  }
+
+  // 4. 将旧日式/原木日式等残留标签也平滑并入 natural_wood
+  const naturalWoodTag = getStyleTag.get('natural_wood');
+  if (naturalWoodTag) {
+    const legacyDirs = ['log_wood', 'japanese', 'japanese_minimal'];
+    for (const ld of legacyDirs) {
+      const lt = db.prepare("SELECT id FROM tag_dict WHERE dimension='style_atom' AND dir=?").get(ld);
+      if (lt) {
+        const rows = db.prepare("SELECT asset_fid, role, confidence, source FROM asset_tags WHERE tag_id=?").all(lt.id);
+        for (const r of rows) {
+          insOrIgnore.run(r.asset_fid, naturalWoodTag.id, r.role || 'main', r.confidence || 0.8, r.source || 'migrate');
+        }
+        delAssetTag.run(lt.id);
+        db.prepare("UPDATE tag_dict SET deprecated=1 WHERE id=?").run(lt.id);
+      }
+    }
+  }
+
+  // 5. 风格字段严禁为空：对无任何 style_atom 的空间素材补充 other 兜底
+  if (otherTag) {
+    const emptyStyleAssets = db.prepare(`
+      SELECT a.fid FROM assets a
+      WHERE COALESCE(a.category, 'interior') IN ('interior', 'exterior')
+        AND a.fid NOT IN (
+          SELECT at.asset_fid FROM asset_tags at
+          JOIN tag_dict td ON td.id = at.tag_id
+          WHERE td.dimension = 'style_atom'
+        )
+    `).all();
+    for (const a of emptyStyleAssets) {
+      insOrIgnore.run(a.fid, otherTag.id, 'main', 0.75, 'fallback');
+    }
+    if (emptyStyleAssets.length > 0) {
+      console.log(`[migrate] 已为 ${emptyStyleAssets.length} 个无风格标签的空间素材补充「其他风格」兜底`);
+    }
   }
 }
 

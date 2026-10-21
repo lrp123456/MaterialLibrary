@@ -223,14 +223,43 @@ export async function downloadAndSaveToAlbum({ url, fileName = '', isVideo = fal
     return saveLocalFile(url)
   }
 
+  // 改造下载 URL，在 URL 路径末尾带上标准 saveName，防止客户端截取为 image.jpg / image(x).jpg
+  let downloadUrl = url;
+  try {
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      const u = new URL(url);
+      if (u.pathname.endsWith('/image') || u.pathname.endsWith('/file')) {
+        u.pathname = `${u.pathname}/${encodeURIComponent(saveName)}`;
+        u.searchParams.set('download', '1');
+        downloadUrl = u.toString();
+      }
+    }
+  } catch (_) {}
+
   // 远程 URL 先下载为临时文件
   return new Promise((resolve, reject) => {
     uni.downloadFile({
-      url,
+      url: downloadUrl,
       success: async (res) => {
         if (res.statusCode === 200 && res.tempFilePath) {
           try {
-            const r = await saveLocalFile(res.tempFilePath)
+            let targetPath = res.tempFilePath;
+            if (typeof plus !== 'undefined' && plus.io && plus.io.resolveLocalFileSystemURL) {
+              try {
+                targetPath = await new Promise((resMove) => {
+                  plus.io.resolveLocalFileSystemURL(res.tempFilePath, (entry) => {
+                    plus.io.requestFileSystem(plus.io.PRIVATE_DOC, (fsSys) => {
+                      fsSys.root.getDirectory('exports', { create: true }, (dir) => {
+                        entry.moveTo(dir, saveName, (newEntry) => {
+                          resMove(newEntry.toLocalURL ? newEntry.toLocalURL() : newEntry.fullPath);
+                        }, () => resMove(res.tempFilePath));
+                      }, () => resMove(res.tempFilePath));
+                    }, () => resMove(res.tempFilePath));
+                  }, () => resMove(res.tempFilePath));
+                });
+              } catch (_) {}
+            }
+            const r = await saveLocalFile(targetPath)
             resolve(r)
           } catch (e) {
             reject(e)
@@ -483,12 +512,15 @@ export async function saveChatMessage(payload = {}) {
 
 /** ch01 元素标签对话：文本 + 引用芯片 → 豆包 → 回复 */
 export async function chatComplete(payload = {}) {
-  return request('/chat/complete', {
+  return request('/gen/chat', {
     method: 'POST',
     body: JSON.stringify(payload),
     timeout: 120000,
   })
 }
+
+/** ch01 对话别名（与 Web 端 sendChat 同名） */
+export const sendChat = chatComplete
 
 /** ch02 生成选项（分模型提示词结构目录） */
 export async function fetchGenOptions() {
@@ -514,7 +546,7 @@ export async function genTaskStatus(taskId) {
 
 /** ch03 精准编辑：选区 + 操作 + 提示词 → 贴回 */
 export async function aiEdit(payload = {}) {
-  return request('/ai/edit', {
+  return request('/edit/run', {
     method: 'POST',
     body: JSON.stringify(payload),
     timeout: 180000,

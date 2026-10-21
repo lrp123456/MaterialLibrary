@@ -456,6 +456,31 @@ const services = { db, config: { dataDir: testDir }, logger: console };
   assert(!db.prepare(visSql).get(qDeleted), '软删仍不可见');
   console.log('✅ 授权治理（相册解耦/撤销救回/软删隔离）通过');
 
+  console.log('=== 16. 自定义风格库与风格锚定描述合成 ===');
+  const styleStore = require('../src/custom-styles');
+  styleStore.ensureCustomStyleTables(db);
+  const cs = styleStore.createCustomStyle(db, {
+    name: '海边度假风',
+    description: '亚麻与原木，海盐色',
+    aiPrompt: '主色为海盐白与浅沙色；墙面为微水泥；地面为浅色橡木；藤编与亚麻织物；暖白灯光',
+    actor: 'admin',
+  });
+  assert(cs.id && cs.name === '海边度假风' && cs.aiPrompt.includes('海盐'));
+  assert(styleStore.listCustomStyles(db).some(s => s.id === cs.id), '自定义风格应出现在列表');
+  assert.throws(() => styleStore.createCustomStyle(db, { name: '   ' }), /名称/, '空名称必须拒绝');
+  const csUpd = styleStore.updateCustomStyle(db, cs.id, { name: '海边度假风2', aiPrompt: '新描述' });
+  assert.strictEqual(csUpd.name, '海边度假风2');
+  assert.strictEqual(csUpd.description, '亚麻与原木，海盐色', '未传的字段应保留');
+  const { buildStyleExtraPrompt } = require('../src/handlers/edit-run');
+  const styleExtra = buildStyleExtraPrompt('锚定描述', '不要动结构');
+  assert(styleExtra.includes('【风格锚定描述'));
+  assert(styleExtra.includes('锚定描述'));
+  assert(styleExtra.includes('【用户特别要求】不要动结构。'));
+  assert.strictEqual(buildStyleExtraPrompt('', ''), '');
+  assert(styleStore.deleteCustomStyle(db, cs.id), '删除应返回 true');
+  assert.strictEqual(styleStore.getCustomStyle(db, cs.id), null);
+  console.log('✅ 自定义风格 CRUD 与锚定描述合成通过');
+
   db.close();
   fs.rmSync(testDir, { recursive: true, force: true });
   console.log(`\n🎉 所有核心集成测试全部顺利通过！`);

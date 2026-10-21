@@ -174,10 +174,47 @@ function setRuntimeConfig(db, newConfig = {}) {
   const jsonStr = JSON.stringify(updated);
   db.prepare("INSERT OR REPLACE INTO kv (key, value) VALUES ('runtime_config', ?)").run(jsonStr);
 
-  return getRuntimeConfig(db);
+  const res = getRuntimeConfig(db);
+  try { applyRuntimeConfig(db); } catch (_) {}
+  return res;
+}
+
+
+/**
+ * 将运行时配置全面推送到 process.env 与 services 实例
+ */
+function applyRuntimeConfig(db, services) {
+  const cfg = getRuntimeConfig(db);
+  if (cfg.http_proxy !== undefined) {
+    process.env.HTTP_PROXY = cfg.http_proxy;
+    process.env.http_proxy = cfg.http_proxy;
+  }
+  if (cfg.https_proxy !== undefined) {
+    process.env.HTTPS_PROXY = cfg.https_proxy;
+    process.env.https_proxy = cfg.https_proxy;
+  }
+  if (cfg.no_proxy !== undefined) {
+    process.env.NO_PROXY = cfg.no_proxy;
+    process.env.no_proxy = cfg.no_proxy;
+  }
+  if (cfg.nas_dir) process.env.ML_NAS_DIR = cfg.nas_dir;
+  if (cfg.bff_public_base) process.env.BFF_PUBLIC_BASE = cfg.bff_public_base;
+  if (cfg.litellm_base_url) process.env.LITELLM_BASE_URL = cfg.litellm_base_url;
+  if (cfg.litellm_model) process.env.LITELLM_MODEL = cfg.litellm_model;
+  if (cfg.umbra_base_url) process.env.UMBRA_BASE_URL = cfg.umbra_base_url;
+  if (cfg.yolo_seg_url) process.env.YOLO_SEG_URL = cfg.yolo_seg_url;
+  if (cfg.skills_root) process.env.SKILLS_ROOT = cfg.skills_root;
+
+  if (services?.interpreter) {
+    if (cfg.tag_concurrency) services.interpreter.tagConcurrency = Number(cfg.tag_concurrency) || 8;
+    if (cfg.restage_concurrency) services.interpreter.restageConcurrency = Number(cfg.restage_concurrency) || 4;
+    services.interpreter.concurrency = (services.interpreter.tagConcurrency || 8) + (services.interpreter.restageConcurrency || 4);
+  }
+  return cfg;
 }
 
 module.exports = {
+  applyRuntimeConfig,
   CONFIG_SCHEMA,
   getRuntimeConfig,
   getEffectiveConfig,

@@ -38,6 +38,10 @@ import {
 import { ImageNode, loadImageSource } from "./nodes/image-node";
 import { StickerNode, loadStickerSource } from "./nodes/sticker-node";
 import { TextNode, type ResolvedTextNodeState } from "./nodes/text-node";
+import {
+	TransitionNode,
+	type ResolvedTransitionNodeState,
+} from "./nodes/transition-node";
 import { VideoNode } from "./nodes/video-node";
 import type {
 	ResolvedVisualNodeState,
@@ -89,6 +93,8 @@ async function resolveNode({
 		node.resolved = await resolveBlurBackgroundNode({ node, context });
 	} else if (node instanceof EffectLayerNode) {
 		node.resolved = resolveEffectLayerNode({ node, context });
+	} else if (node instanceof TransitionNode) {
+		node.resolved = resolveTransitionNode({ node, context });
 	}
 
 	await Promise.all(
@@ -445,6 +451,28 @@ async function resolveBackdropSource({
 		width: source.width,
 		height: source.height,
 	};
+}
+
+/**
+ * 转场窗口 [C - d/2, C + d/2] 内才激活；progress 用窗口内的相对位置线性换算。
+ * 窗口外返回 null，from / to 会各自走普通图层路径，画面不会重复。
+ */
+function resolveTransitionNode({
+	node,
+	context,
+}: {
+	node: TransitionNode;
+	context: ResolveContext;
+}): ResolvedTransitionNodeState | null {
+	const { startTime, duration } = node.params;
+	if (duration <= 0) {
+		return null;
+	}
+	const clipTime = context.time - startTime;
+	if (clipTime < 0 || clipTime >= duration) {
+		return null;
+	}
+	return { progress: Math.min(1, Math.max(0, clipTime / duration)) };
 }
 
 function resolveEffectLayerNode({

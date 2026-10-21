@@ -6,7 +6,7 @@
  * - 一次提交顺序组装：模板 -> 优化器 -> 写进提示词 -> 请求体字段/换算表/条件改交法 -> 厂商优化
  */
 const crypto = require('crypto');
-const { resolveModelCode, officialOf, OFFICIAL_STUDIO } = require('./studio-catalog');
+const { resolveModelCode, officialOf, OFFICIAL_STUDIO, familyOf, providerGroupOf } = require('./studio-catalog');
 const {
   CANONICAL_VOCABULARY,
   setDeepField,
@@ -121,8 +121,8 @@ const LITELLM_TEXT_CONTRACTS = [
   ['agnes-3.0-flash', 'Agnes 3.0 Flash', 1, false],
   ['gemma-4-26b-a4b-it', 'Gemma 4 26B', 1, false],
   ['gemma-4-31b-it', 'Gemma 4 31B', 1, false],
-  ['gemini-flash-lite-latest', 'Gemini Flash-Lite', 0, false],
-  ['gemini-flash-latest', 'Gemini Flash', 0, false],
+  ['gemini-flash-lite-latest', 'Gemini Flash-Lite', 1, false],
+  ['gemini-flash-latest', 'Gemini Flash', 1, false],
   ['doubao-seed-2-1-lite-260915', 'Doubao Seed 2.1 Lite', 1, false],
   ['doubao-seed-2-1-turbo-260628', 'Doubao Seed 2.1 Turbo', 1, false],
   ['doubao-seed-2-1-pro-260628', 'Doubao Seed 2.1 Pro', 1, false],
@@ -2660,11 +2660,18 @@ function getModelPublicCatalog(db) {
         }
       }
 
+      const fam = familyOf(`${m.id} ${m.model_code || ''}`, m.provider);
       const modelEntry = {
         id: m.id,
         name: m.name,
         kind: d,
         badge: m.badge || '',
+        // 安全契约：公开目录只暴露展示用 providerGroup/familyName，
+        // 严禁泄露内部 provider id（admin-model 测试第 4 步强制断言）
+        providerGroup: providerGroupOf(m.provider),
+        family: fam.family,
+        familyName: fam.familyName,
+        reasoning: m.caps?.reasoning || null,
         contextTokens: Number(m.caps?.contextTokens) > 0 ? Number(m.caps.contextTokens) : null,
         common_controls: commonControls,
         public_params: publicParams,
@@ -4174,7 +4181,64 @@ function reorderMountModules(db, mountPointId, orderedIds) {
   return getMountModules(db, mountPointId);
 }
 
+
+/**
+ * 四套模型表同步桥接器 (CONFLICT-001)
+ * 自动将 llm_endpoints 与 model_contracts 同步刷新到旧表 llm_providers, llm_models, gen_adapters
+ */
+function syncEndpointToLegacyTables(db) {
+  if (!db) return;
+  try {
+    const endpoints = db.prepare('SELECT * FROM llm_endpoints').all();
+    const now = Date.now();
+
+    for (const ep of endpoints) {
+      // 1. 同步刷新到 llm_providers
+      const pId = ep.id === 'volc_ark' ? 'volcengine' : (ep.id === 'local_host' ? 'local' : ep.id);
+      try {
+        db.prepare(`
+          UPDATE llm_providers
+          SET base_url = COALESCE(?, base_url), enabled = ?, updated_at = ?
+          WHERE id = ? OR id = ?
+        `).run(ep.base_url, ep.enabled, now, ep.id, pId);
+      } catch (_) {}
+
+      // 2. 同步刷新到 gen_adapters
+      try {
+        db.prepare(`
+          UPDATE gen_adapters
+          SET base_url = COALESCE(?, base_url), enabled = ?, updated_at = ?
+          WHERE id = ?
+        `).run(ep.base_url, ep.enabled, now, ep.id);
+      } catch (_) {}
+    }
+
+    // 3. 将 model_contracts 同步刷新到 llm_models 与 gen_adapters
+    const contracts = db.prepare('SELECT * FROM model_contracts').all();
+    for (const c of contracts) {
+      try {
+        db.prepare(`
+          UPDATE llm_models
+          SET model_code = COALESCE(?, model_code), enabled = ?, updated_at = ?
+          WHERE id = ? OR name = ?
+        `).run(c.vendor_model_id, c.enabled, now, c.id, c.name);
+      } catch (_) {}
+
+      try {
+        db.prepare(`
+          UPDATE gen_adapters
+          SET enabled = ?, updated_at = ?
+          WHERE id = ?
+        `).run(c.enabled, now, c.id);
+      } catch (_) {}
+    }
+  } catch (err) {
+    console.warn('[models-contract] syncEndpointToLegacyTables error:', err.message);
+  }
+}
+
 module.exports = {
+  syncEndpointToLegacyTables,
   DEFAULT_ENDPOINTS,
   DEFAULT_MODEL_CONTRACTS,
   LITELLM_TEXT_NAMES: GATEWAY_TEXT_NAMES,

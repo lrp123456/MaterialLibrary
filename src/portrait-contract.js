@@ -265,6 +265,7 @@ module.exports = {
   FETCH_TTL_MS,
   MAX_IMAGE_BYTES,
   assertPublicHttpsBase,
+  isPrivateHost,
   validateImageMeta,
   signFetchToken,
   verifyFetchToken,

@@ -10,20 +10,39 @@ export type FrameDescriptor = {
 	items: FrameItemDescriptor[];
 };
 
+export type LayerDescriptor = {
+	type: "layer";
+	textureId: string;
+	transform: QuadTransformDescriptor;
+	opacity: number;
+	blendMode: BlendMode;
+	effectPassGroups: EffectPass[][];
+	mask: LayerMaskDescriptor | null;
+};
+
+/**
+ * 双输入转场帧项。
+ *
+ * 与 Rust `FrameItemDescriptor::Transition` 逐字段对应（serde tag = "type"），
+ * 字段名必须保持逐字一致，否则 wasm 侧反序列化会直接报 Invalid frame descriptor。
+ */
+export type TransitionItemDescriptor = {
+	type: "transition";
+	from: LayerDescriptor;
+	to: LayerDescriptor;
+	progress: number;
+	mode: number;
+	scalars: [number, number, number, number];
+	direction: [number, number];
+};
+
 export type FrameItemDescriptor =
-	| {
-			type: "layer";
-			textureId: string;
-			transform: QuadTransformDescriptor;
-			opacity: number;
-			blendMode: BlendMode;
-			effectPassGroups: EffectPass[][];
-			mask: LayerMaskDescriptor | null;
-	  }
+	| LayerDescriptor
 	| {
 			type: "sceneEffect";
 			effectPassGroups: EffectPass[][];
-	  };
+	  }
+	| TransitionItemDescriptor;
 
 export type QuadTransformDescriptor = {
 	centerX: number;

@@ -89,15 +89,10 @@ function tagSpacePrompt(db, onlyDimensions = null) {
   const schema = {};
   if (want('space')) schema.space = `场景空间，严格单选 [${enumOptions(db, 'space')}]。门外未进户为 porch(门外门廊)，进门过渡区为 foyer(门内门厅)。`;
   if (want('style_atom')) {
-    schema.style_main = `文化/流派风格。输出字符串数组，0-3 个 dir，从枚举中选 [${enumOptions(db, 'style_atom')}]。
-判定要点：法式=护墙板/线脚/人字拼/对称；意式=大理石皮革低矮雕塑感；托斯卡纳=赤陶木梁锻铁陶罐乡土；地中海=白墙蓝白花砖拱廊；奶油风=无法式符号的浅暖软融；中古风=1945-75柚木细锥腿有机弧线；现代极简=冷感几何留白；工业=裸砖水泥管道；现代美式=当代舒适；美式乡村=农舍壁炉格纹旧木；南洋=藤编柚木绿植百叶；宋式美学=雅素文人；古典中式=明清红木繁雕对称；新中式=传统符号+现代转译；侘寂=斑驳枯寂；混搭=多风格强冲突。
-【禁止】欧式轻奢、原木日式、日式、北欧、英式、民宿风。只有实在拿不准时才用 eclectic_other(混搭)。`;
+    schema.style_main = `风格流派与木系风格。输出字符串数组，1-3 个 dir，从枚举中选 [${enumOptions(db, 'style_atom')}]。
+判定要点：法式=护墙板/线脚/人字拼/对称；意式=大理石皮革低矮雕塑感；托斯卡纳=赤陶木梁锻铁陶罐乡土；地中海=白墙蓝白花砖拱廊；奶油风=无法式符号的浅暖软融；中古风=1945-75柚木细锥腿有机弧线；现代极简=冷感几何留白；工业=裸砖水泥管道；现代美式=当代舒适；美式乡村=农舍壁炉格纹旧木；南洋=藤编柚木绿植百叶；宋式美学=雅素文人；古典中式=明清红木繁雕对称；新中式=传统符号+现代转译；侘寂=斑驳枯寂；自然原木风=浅色松/白橡/原色自然表面；深色原木风=胡桃/深橡/烟熏深木表面；自然复古原木风=浅色做旧/磨损/锯痕；深色复古原木风=深色做旧/历史斑驳感；other=不在以上体系内。
+【禁止】混搭、欧式轻奢、原木日式、日式、北欧、英式、民宿风。画面有多风格时输出具体各风格，不可输出混搭；无法归类才给 other，数组不得为空。`;
     schema.style_confidence = '0到1之间的小数，表示风格判定置信度';
-  }
-  if (want('wood_style')) {
-    schema.wood_style = `木系风格（深浅×做旧），严格单选 dir 或 null [${enumOptions(db, 'wood_style')}]。
-浅=松/白橡/原色，深=胡桃/深橡/烟熏；做旧=裂痕/虫眼/大面积包浆/明显磨损/粗糙锯痕。光滑均匀色面不算做旧。非木质主体必须 null。只看木面表面，不看布局文化。`;
-    schema.wood_confidence = '0到1之间的小数';
   }
   if (want('material_kind')) {
     schema.materials_hard = `硬装主材：地面/墙面/木作/五金/玻璃隔断等大面积主材，最多2个。【禁止】普通大白墙/顶面标 paint；普通透明门窗玻璃标 glass_clear，只有特色玻璃隔断/家具才标。只能选 [${enumMaterials(db, 'hard')}]`;
@@ -112,8 +107,8 @@ function tagSpacePrompt(db, onlyDimensions = null) {
     ? `【本次只需输出这些维度：${[...only].join(', ')}。其余字段不要输出。】`
     : '';
   return `你是室内设计空间素材标注器。只输出 JSON，不要 markdown。
-规则：空间 1 个；文化风格 style_main 为数组（0-3 个，可多选）；wood_style 木系单选或 null；硬装≤2、软装≤2。不要输出色系、地域、调性、构图、机位、光线、AI生成、装修实拍。
-dir 只能从枚举中选；空间拿不准给 other；风格实在拿不准才给 eclectic_other。
+规则：空间 1 个；风格 style_main 为数组（1-3 个，多标签共存检索，严禁为空）；硬装≤2、软装≤2。不要输出色系、地域、调性、构图、机位、光线、AI生成、装修实拍。
+dir 只能从枚举中选；空间拿不准给 other；若画面融合多种风格（如现代极简与原木风并存），必须输出所有对应的风格标签（最多3个）；严禁输出混搭；只有完全不属于任何已知风格时才输出 other。
 ${header}
 ${JSON.stringify(schema, null, 2)}`;
 }
@@ -133,8 +128,7 @@ function tagFurniturePrompt(db, onlyDimensions = null) {
   }
   if (want('furniture_craft')) schema.furniture_craft = `表面工艺与质感，最多3个 [${enumOptions(db, 'furniture_craft')}]`;
   if (want('furniture_form')) schema.furniture_form = `造型结构特征，单选 [${enumOptions(db, 'furniture_form')}]`;
-  if (want('style_atom')) schema.style_main = `设计流派/风格，可多选数组 [${enumOptions(db, 'style_atom')}]。禁止：欧式轻奢、原木日式、日式、北欧、英式。`;
-  if (want('wood_style')) schema.wood_style = `木系（深浅×做旧）单选或 null [${enumOptions(db, 'wood_style')}]。非木 null。`;
+  if (want('style_atom')) schema.style_main = `设计流派/风格（含四种木色），可多选数组（1-3个）[${enumOptions(db, 'style_atom')}]。严禁混搭、欧式轻奢、原木日式、日式、北欧、英式。拿不准给 other。`;
   if (want('classic_design')) schema.classic_design = `若为经典名品款名选一项，非名款给 other_classic 或 null [${enumOptions(db, 'classic_design')}]`;
   if (want('space')) schema.recommended_spaces = `推荐适用的室内空间，最多2个 [${enumOptions(db, 'space')}]`;
   if (want('flags')) schema.ai_generated = false;
@@ -629,31 +623,31 @@ async function executeTagSpace(services, nodeConfig, asset, runCtx = {}) {
     clearAiTagsOnDim('space');
     if (tags.space) applyTag('space', tags.space, conf);
   }
-  if (dimTouched('style_atom')) {
+  if (dimTouched('style_atom') || dimTouched('wood_style')) {
     clearAiTagsOnDim('style_atom');
+    clearAiTagsOnDim('wood_style');
     const rawStyles = Array.isArray(tags.style_main) ? tags.style_main
       : (tags.style_main ? [tags.style_main] : []);
+    if (tags.wood_style && !rawStyles.includes(tags.wood_style)) {
+      rawStyles.push(tags.wood_style);
+    }
     const styles = rawStyles
       .map((v) => {
-        const t = resolveTag('style_atom', v);
+        let t = resolveTag('style_atom', v);
+        if (!t && (v === 'natural_wood' || v === 'dark_wood' || v === 'natural_vintage_wood' || v === 'dark_vintage_wood')) {
+          t = resolveTag('style_atom', v);
+        }
         return t ? t.dir : null;
       })
       .filter(Boolean)
-      .slice(0, 4);
-    // 有解析出的叶子就采用；只有完全无法解析才落混搭
-    if (!styles.length) {
-      applyTag('style_atom', 'eclectic_other', conf);
+      .filter((v) => v !== 'eclectic_other'); // 彻底剔除混搭
+
+    const uniqueStyles = [...new Set(styles)].slice(0, 4);
+    // 风格字段严禁为空！有明确叶子采用，无任何有效匹配则落入 other (其他风格)
+    if (!uniqueStyles.length) {
+      applyTag('style_atom', 'other', conf);
     } else {
-      for (const dir of styles) applyTag('style_atom', dir, conf);
-    }
-  }
-  if (dimTouched('wood_style')) {
-    clearAiTagsOnDim('wood_style');
-    const woodConf = typeof tags.wood_confidence === 'number' ? tags.wood_confidence : conf;
-    const woodRaw = tags.wood_style;
-    if (woodRaw) {
-      const wt = resolveTag('wood_style', woodRaw);
-      if (wt) applyTag('wood_style', wt.dir, woodConf);
+      for (const dir of uniqueStyles) applyTag('style_atom', dir, conf);
     }
   }
 
@@ -731,6 +725,12 @@ async function executeTagSpace(services, nodeConfig, asset, runCtx = {}) {
       colors
     });
   }
+
+  try {
+    const domColor = Array.isArray(colors) ? colors[0] : (colors || null);
+    db.prepare('UPDATE assets SET dominant_color = COALESCE(?, dominant_color), status = ? WHERE fid = ?')
+      .run(domColor, 'processing', asset.fid);
+  } catch (_) {}
 
   return {
     success: true,
@@ -847,12 +847,15 @@ async function executeTagFurniture(services, nodeConfig, asset, runCtx = {}) {
 
   (Array.isArray(tags.furniture_craft) ? tags.furniture_craft : []).forEach(v => applyTag('furniture_craft', v, 0.85));
   if (tags.furniture_form) applyTag('furniture_form', tags.furniture_form, 0.85);
-  if (Array.isArray(tags.style_main)) {
-    tags.style_main.slice(0, 4).forEach(v => applyTag('style_atom', v, 0.85));
-  } else if (tags.style_main) {
-    applyTag('style_atom', tags.style_main, 0.85);
+  const furnStyles = (Array.isArray(tags.style_main) ? tags.style_main : (tags.style_main ? [tags.style_main] : []))
+    .concat(tags.wood_style ? [tags.wood_style] : [])
+    .filter((v) => v !== 'eclectic_other');
+  const resolvedFurnStyles = [...new Set(furnStyles.map((v) => resolveTag('style_atom', v)?.dir).filter(Boolean))].slice(0, 4);
+  if (!resolvedFurnStyles.length) {
+    applyTag('style_atom', 'other', 0.85);
+  } else {
+    resolvedFurnStyles.forEach((v) => applyTag('style_atom', v, 0.85));
   }
-  if (tags.wood_style) applyTag('wood_style', tags.wood_style, 0.85);
   if (tags.classic_design && tags.classic_design !== 'other_classic') {
     applyTag('classic_design', tags.classic_design, 0.9);
   }
@@ -1596,6 +1599,66 @@ async function executeRestageDual(services, nodeConfig, asset, runCtx) {
     };
   }
 
+  // ── 决策 3（方案 A）：若与近 7 天同品类有效素材存在 1 <= pHash <= 6 的高相似连拍图，暂缓双画幅重构 ──
+  const forceRestage = Boolean(nodeConfig?.forceRestage || runCtx?.forceRestage);
+  if (!forceRestage && asset.phash && asset.phash.length >= 16) {
+    const { hamming: hammingDistanceHex } = require('../qc');
+    const { isVideoExtractStill } = require('../cluster');
+    if (!isVideoExtractStill(asset)) {
+      const currentCategory = asset.category || runCtx?.lastOutput?.category || 'interior';
+      const sevenDaysAgo = (asset.created_at || Date.now()) - 7 * 86400 * 1000;
+      const peers = db.prepare(`
+        SELECT fid, phash, file_name, source, created_at
+        FROM assets
+        WHERE fid != ?
+          AND kind = 'image'
+          AND category = ?
+          AND status IN ('ready', 'ready_with_flags', 'processing', 'pending', 'tagged')
+          AND COALESCE(auth_state, 'live') IN ('live', 'authorized')
+          AND phash IS NOT NULL AND phash != ''
+          AND created_at >= ?
+        ORDER BY created_at ASC
+        LIMIT 300
+      `).all(asset.fid, currentCategory, sevenDaysAgo);
+
+      let ignoredSet = new Set();
+      try {
+        const rows = db.prepare(`
+          SELECT fid_a, fid_b FROM similarity_ignored_pairs WHERE fid_a = ? OR fid_b = ?
+        `).all(asset.fid, asset.fid);
+        ignoredSet = new Set(rows.map((r) => (r.fid_a === asset.fid ? r.fid_b : r.fid_a)));
+      } catch (_) {}
+
+      let hitPeerFid = null;
+      let hitDist = 99;
+      for (const p of peers) {
+        if (ignoredSet.has(p.fid)) continue;
+        if (isVideoExtractStill(p)) continue;
+        const d = hammingDistanceHex(asset.phash, p.phash);
+        if (d >= 1 && d <= 6) {
+          hitPeerFid = p.fid;
+          hitDist = d;
+          break;
+        }
+      }
+      if (hitPeerFid) {
+        logger?.info?.(`[restage_dual] 疑似连拍暂缓生图 fid=${asset.fid} 与 ${hitPeerFid} 距离=${hitDist}`);
+        return {
+          status: 'skipped',
+          skipped: true,
+          output: {
+            restaged: false,
+            skipped: true,
+            reason: 'deferred_restage_similar',
+            similarToFid: hitPeerFid,
+            phashDistance: hitDist,
+          },
+          flags: ['deferred_restage_similar'],
+        };
+      }
+    }
+  }
+
   // 1. CONFLICT-002：重复组退役——原「组员切片跳过生图、共享代表图成果」逻辑已移除，
   //    每个素材独立判断是否需要画幅重构（P2 去重工作台将另行提供批量去重生图）。
 
@@ -1875,8 +1938,17 @@ async function executeIndex(services, nodeConfig, asset, runCtx) {
   const currentCategory = asset.category || 'interior';
   if (currentCategory === 'clothing') {
     parts.push('类别:服装');
+    if (tagMap.clothing_category) parts.push(`类目:${tagMap.clothing_category.join(',')}`);
+    if (tagMap.clothing_silhouette) parts.push(`版型:${tagMap.clothing_silhouette.join(',')}`);
+    if (tagMap.clothing_fabric) parts.push(`面料:${tagMap.clothing_fabric.join(',')}`);
+    if (tagMap.clothing_scene) parts.push(`场景:${tagMap.clothing_scene.join(',')}`);
+    if (asset.dominant_color) parts.push(`主色:${asset.dominant_color}`);
   } else if (currentCategory === 'portrait') {
     parts.push('类别:人像');
+    if (tagMap.pose) parts.push(`姿态:${tagMap.pose.join(',')}`);
+    if (tagMap.character) parts.push(`角色:${tagMap.character.join(',')}`);
+    if (tagMap.shot_type) parts.push(`景别:${tagMap.shot_type.join(',')}`);
+    if (asset.dominant_color) parts.push(`主色:${asset.dominant_color}`);
   } else if (currentCategory === 'material') {
     parts.push('类别:材质纹理');
   } else if (currentCategory === 'exterior') {

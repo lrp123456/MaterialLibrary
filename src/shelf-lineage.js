@@ -34,8 +34,10 @@ function thumbUrl(fid) {
 
 function briefAsset(db, fid) {
   if (!fid) return null;
-  const row = db.prepare('SELECT fid, file_name, created_at, library_shelf, category FROM assets WHERE fid=?').get(fid);
-  if (!row) return { fid, file_name: '', url: thumbUrl(fid), missing: true };
+  const row = db.prepare('SELECT fid, file_name, created_at, library_shelf, category, status FROM assets WHERE fid=?').get(fid);
+  // 行不存在或已在回收站（软删）：血缘图中一律按缺失处理，不再渲染节点。
+  // 软删可恢复，引用数据本身保留在 lineage_json/parent_fid 中，恢复后血缘自动回归。
+  if (!row || row.status === 'deleted') return { fid, file_name: '', url: thumbUrl(fid), missing: true };
   return { ...row, url: thumbUrl(row.fid) };
 }
 
@@ -47,14 +49,41 @@ function lineageTree(db, fid) {
   `).get(fid);
   if (!self) return null;
   const record = parseLineage(self.lineage_json) || {};
-  const parentFid = record.parentFid || self.parent_fid || self.source_asset_id || '';
-  const refFids = Array.isArray(record.refFids) ? record.refFids.filter((id) => id && id !== parentFid) : [];
+  const rawParentFid = record.parentFid || self.parent_fid || self.source_asset_id || '';
+  const rawRefFids = Array.isArray(record.refFids) ? record.refFids.filter((id) => id && id !== rawParentFid) : [];
+
+  // 父图/参考图若已软删（在回收站），血缘图同步隐藏，避免出现点不开的孤儿节点
+  const parentBrief = rawParentFid ? briefAsset(db, rawParentFid) : null;
+  const parent = parentBrief && !parentBrief.missing ? parentBrief : null;
+  const parentFid = parent ? rawParentFid : '';
+  const refs = rawRefFids
+    .map((id) => briefAsset(db, id))
+    .filter((a) => a && !a.missing);
+  const refFids = refs.map((a) => a.fid);
+
+  // 衍生（子图）：排除回收站中的资产
   const children = db.prepare(`
     SELECT fid, file_name, created_at, library_shelf
     FROM assets
-    WHERE (parent_fid=? OR source_asset_id=?) AND fid!=?
+    WHERE (parent_fid=? OR source_asset_id=?) AND fid!=? AND status!='deleted'
     ORDER BY created_at ASC
   `).all(fid, fid, fid).map((row) => ({ ...row, url: thumbUrl(row.fid) }));
+
+  // 剪辑使用记录：剔除已删除素材，防止前端二次拉取详情时 404
+  let editUses = Array.isArray(record.editUses) ? record.editUses : [];
+  if (editUses.length) {
+    const useFids = [...new Set(editUses.map((u) => u && u.fid).filter(Boolean))];
+    if (useFids.length) {
+      const placeholders = useFids.map(() => '?').join(',');
+      const alive = new Set(
+        db.prepare(`SELECT fid FROM assets WHERE fid IN (${placeholders}) AND status!='deleted'`)
+          .all(...useFids)
+          .map((r) => r.fid)
+      );
+      editUses = editUses.filter((u) => u && u.fid && alive.has(u.fid));
+    }
+  }
+
   let usedByFilms = [];
   try {
     usedByFilms = require('./editor-projects').filmsUsing(db, fid).map((row) => ({
@@ -76,11 +105,11 @@ function lineageTree(db, fid) {
       at: record.at || self.created_at || null,
       sessionId: record.sessionId || '',
       projectId: record.projectId || '',
-      editUses: Array.isArray(record.editUses) ? record.editUses : []
+      editUses
     },
     self: { ...self, url: thumbUrl(fid) },
-    parent: briefAsset(db, parentFid),
-    refs: refFids.map((id) => briefAsset(db, id)),
+    parent,
+    refs,
     children,
     usedByFilms
   };

@@ -647,3 +647,108 @@ button.choice .choice-now {
   .library-sidebar,
   .library-scroll.is-loading { transition: none; }
 }
+
+/* ==============================================================================
+   6. 适老关怀（大字模式）下的整页可达性修复
+   ------------------------------------------------------------------------------
+   适老模式在 <html> 上设置 zoom 做等比放大，布局会自动重排；
+   但应用壳是"固定一屏 + overflow-hidden"结构，放大后右下角内容被裁切且无法滚动到达。
+   因此在 senior-mode 下：把固定视口链路改为自然高度 + 页面级滚动，
+   并让顶部导航吸顶；画布/对话区保留最小高度。非适老模式完全不受影响。
+   ============================================================================== */
+html.senior-mode body { overflow: auto; }
+
+/* 应用壳：放开一屏锁定，允许整页滚动（水平溢出也能到达） */
+html.senior-mode .app-shell {
+  height: auto;
+  min-height: 100vh;
+  overflow: visible;
+}
+html.senior-mode .app-shell > main {
+  flex: 1 0 auto;
+  overflow: visible;
+}
+
+/* 顶部导航整页滚动时吸顶，操作控件始终可见 */
+html.senior-mode .app-shell > header {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+}
+
+/* 各板块根视图：由固定高改为自然高 */
+html.senior-mode .view-root {
+  height: auto;
+  min-height: calc(100vh - 56px);
+  overflow: visible;
+}
+
+/* 二级分段导航（Studio / MediaHub）允许换行，避免放大后按钮被横向裁切 */
+html.senior-mode .studio-view > div.h-12,
+html.senior-mode .mediahub-view > div.h-12 {
+  height: auto;
+  min-height: 3rem;
+  flex-wrap: wrap;
+  row-gap: 0.25rem;
+  padding-top: 0.35rem;
+  padding-bottom: 0.35rem;
+}
+
+/* 素材库画廊：放开裁切，随整页滚动 */
+html.senior-mode .library-gallery {
+  overflow: visible;
+}
+
+/* ---- AI 快捷精准编辑工作台 ---- */
+html.senior-mode .qs-root {
+  height: auto;
+  min-height: calc(100vh - 56px);
+  overflow: visible;
+}
+html.senior-mode .qs-body {
+  flex: 1 0 auto;
+  overflow: visible;
+  align-items: stretch;
+}
+/* 顶部操作栏允许换行，保证右侧"开始执行"等按钮可达 */
+html.senior-mode .qs-root > header {
+  height: auto;
+  min-height: 3rem;
+  flex-wrap: wrap;
+  row-gap: 0.4rem;
+  padding-top: 0.4rem;
+  padding-bottom: 0.4rem;
+}
+/* 画布视口：自然高 + 最小可视高度，图片/标注区不被压扁；内部自己滚动 */
+html.senior-mode .qs-viewport {
+  overflow: auto;
+  min-height: 68vh;
+}
+/* 参数抽屉保持可读宽度，随整页纵向排列，避免被挤出右侧不可见 */
+html.senior-mode .qs-body > aside {
+  flex: 0 0 380px;
+  min-height: 70vh;
+  max-height: none;
+}
+
+/* ---- AI 对话式生成工作台 ---- */
+html.senior-mode .chat-root {
+  height: auto;
+  min-height: calc(100vh - 56px);
+  overflow: visible;
+}
+html.senior-mode .chat-main {
+  overflow: visible;
+}
+html.senior-mode .chat-scroll {
+  overflow: visible;
+  min-height: 50vh;
+}
+
+/* 多轨剪辑板块承载 OpenCut 编辑器（iframe 需占满固定高度），保留固定视口与内部滚动；
+   高度需扣除吸顶栏 56px，否则根节点整屏高导致页面多出 56px 纵向滚动、iframe 底部下沉 */
+html.senior-mode .mediahub-view {
+  height: calc(100vh - 56px);
+  min-height: calc(100vh - 56px);
+  overflow: hidden;
+}

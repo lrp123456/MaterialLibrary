@@ -1,10 +1,12 @@
 "use client";
 
+import { MlsBridge } from "@/components/mls-bridge";
+
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { KeyboardEvent, MouseEvent } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { EditorCore } from "@/core";
 import { MigrationDialog } from "@/project/components/migration-dialog";
@@ -38,6 +40,7 @@ import {
 	LeftToRightListDashIcon,
 	PlusSignIcon,
 	Search01Icon,
+	Upload01Icon,
 	Video01Icon,
 	MoreHorizontalIcon,
 	Delete02Icon,
@@ -45,6 +48,7 @@ import {
 	Edit03Icon,
 	ArrowDown02Icon,
 	InformationCircleIcon,
+	Folder03Icon,
 } from "@hugeicons/core-free-icons";
 import { OcVideoIcon } from "@/components/icons";
 import { Label } from "@/components/ui/label";
@@ -65,8 +69,10 @@ import {
 import { DeleteProjectDialog } from "@/project/components/delete-project-dialog";
 import { ProjectInfoDialog } from "@/project/components/project-info-dialog";
 import { RenameProjectDialog } from "@/project/components/rename-project-dialog";
+import { MoveToGroupDialog } from "@/project/components/move-to-group-dialog";
 import { cn } from "@/utils/ui";
 import { ChangelogNotification } from "@/changelog/components/changelog-notification";
+import { importProjectFile } from "@/services/mlsclip";
 const formatProjectDuration = ({
 	duration,
 }: {
@@ -82,19 +88,24 @@ const formatProjectDuration = ({
 };
 
 const VIEW_MODE_OPTIONS = [
-	{ mode: "grid" as const, icon: GridViewIcon, label: "Grid view" },
-	{ mode: "list" as const, icon: LeftToRightListDashIcon, label: "List view" },
+	{ mode: "grid" as const, icon: GridViewIcon, label: "网格卡片" },
+	{ mode: "list" as const, icon: LeftToRightListDashIcon, label: "紧凑列表" },
 ];
 
 export default function ProjectsPage() {
-	const { searchQuery, sortKey, sortOrder, viewMode } = useProjectsStore();
+	const { searchQuery, groupFilter, sortKey, sortOrder, viewMode } =
+		useProjectsStore();
 	const editor = useEditor();
 	const sortOption: TProjectSortOption = `${sortKey}-${sortOrder}`;
 
 	const isLoading = useEditor((e) => e.project.getIsLoading());
 	const isInitialized = useEditor((e) => e.project.getIsInitialized());
 	const projectsToDisplay = useEditor((e) =>
-		e.project.getFilteredAndSortedProjects({ searchQuery, sortOption }),
+		e.project.getFilteredAndSortedProjects({
+			searchQuery,
+			sortOption,
+			groupFilter,
+		}),
 	);
 
 	useEffect(() => {
@@ -105,6 +116,7 @@ export default function ProjectsPage() {
 
 	return (
 		<div className="bg-background min-h-screen">
+			<MlsBridge />
 			<MigrationDialog />
 			<StoragePersistenceDialog />
 			<ChangelogNotification />
@@ -149,14 +161,14 @@ function ProjectsHeader() {
 							<BreadcrumbItem>
 								<BreadcrumbLink asChild>
 									<Link href="/" className="text-sm sm:text-base">
-										Home
+										工作台
 									</Link>
 								</BreadcrumbLink>
 							</BreadcrumbItem>
 							<BreadcrumbSeparator />
 							<BreadcrumbItem>
 								<BreadcrumbPage className="text-sm sm:text-base font-medium">
-									All projects
+									所有剪辑工程
 								</BreadcrumbPage>
 							</BreadcrumbItem>
 						</BreadcrumbList>
@@ -184,6 +196,7 @@ function ProjectsHeader() {
 
 				<div className="flex items-center gap-3 md:gap-4">
 					<SearchBar className="hidden md:block" />
+					<ImportProjectButton />
 					<Button size="lg" variant="outline" className="px-4" asChild>
 						<Link href="/cloud">云端工程</Link>
 					</Button>
@@ -196,10 +209,10 @@ function ProjectsHeader() {
 }
 
 const SORT_LABELS: Record<TProjectSortKey, string> = {
-	createdAt: "Created",
-	updatedAt: "Modified",
-	name: "Name",
-	duration: "Duration",
+	createdAt: "创建时间",
+	updatedAt: "最近修改",
+	name: "工程名称",
+	duration: "视频时长",
 };
 
 function ProjectsToolbar({ projectIds }: { projectIds: string[] }) {
@@ -246,11 +259,13 @@ function ProjectsToolbar({ projectIds }: { projectIds: string[] }) {
 						}
 					/>
 					<span className="text-muted-foreground hidden md:block">
-						Select all
+						全选所有工程
 					</span>
 				</Label>
 
 				<div className="h-4 w-px bg-border/50" />
+
+				<GroupFilterDropdown />
 
 				<SortDropdown>
 					<Button variant="text" className="text-muted-foreground pl-2">
@@ -272,7 +287,7 @@ function ProjectsToolbar({ projectIds }: { projectIds: string[] }) {
 							});
 						}
 					}}
-					aria-label={`Sort ${sortOrder === "asc" ? "ascending" : "descending"}`}
+					aria-label={`排序：${sortOrder === "asc" ? "升序" : "降序"}`}
 				>
 					<HugeiconsIcon
 						icon={ArrowDown02Icon}
@@ -334,7 +349,7 @@ function SearchBar({
 						aria-hidden="true"
 					/>
 					<Input
-						placeholder="Search..."
+						placeholder="搜索工程名称..."
 						value={searchQuery}
 						onChange={(event) => setSearchQuery({ query: event.target.value })}
 						size="lg"
@@ -348,14 +363,20 @@ function SearchBar({
 
 const PROJECT_ACTIONS = [
 	{
+		id: "group",
+		label: "移动到分组",
+		icon: Folder03Icon,
+		variant: "outline" as const,
+	},
+	{
 		id: "duplicate",
-		label: "Duplicate",
+		label: "创建副本",
 		icon: Copy01Icon,
 		variant: "outline" as const,
 	},
 	{
 		id: "delete",
-		label: "Delete",
+		label: "删除工程",
 		icon: Delete02Icon,
 		variant: "destructive-foreground" as const,
 	},
@@ -397,8 +418,12 @@ function ProjectActions() {
 	const editor = useEditor();
 	const { selectedProjectIds, clearSelectedProjects } = useProjectsStore();
 	const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+	const [isGroupDialogOpen, setIsGroupDialogOpen] = useState(false);
 
 	const savedProjects = editor.project.getSavedProjects();
+	const groups = Array.from(
+		new Set(savedProjects.map((project) => project.group || "").filter(Boolean)),
+	).sort((a, b) => a.localeCompare(b, "zh-CN"));
 	const selectedProjectNames = savedProjects
 		.filter((project) => selectedProjectIds.includes(project.id))
 		.map((project) => project.name);
@@ -412,6 +437,12 @@ function ProjectActions() {
 		setIsDeleteDialogOpen(true);
 	};
 
+	const handleGroupConfirm = async (group: string) => {
+		await editor.project.setProjectsGroup({ ids: selectedProjectIds, group });
+		setIsGroupDialogOpen(false);
+		clearSelectedProjects();
+	};
+
 	const handleDeleteConfirm = async () => {
 		await deleteProjects({ editor, ids: selectedProjectIds });
 		clearSelectedProjects();
@@ -419,6 +450,7 @@ function ProjectActions() {
 	};
 
 	const actionHandlers: Record<string, () => void> = {
+		group: () => setIsGroupDialogOpen(true),
 		duplicate: handleDuplicate,
 		delete: handleDeleteClick,
 	};
@@ -467,7 +499,70 @@ function ProjectActions() {
 				projectNames={selectedProjectNames}
 				onConfirm={handleDeleteConfirm}
 			/>
+
+			<MoveToGroupDialog
+				isOpen={isGroupDialogOpen}
+				onOpenChange={setIsGroupDialogOpen}
+				projectCount={selectedProjectIds.length}
+				groups={groups}
+				onConfirm={handleGroupConfirm}
+			/>
 		</>
+	);
+}
+
+function GroupFilterDropdown() {
+	const editor = useEditor();
+	const { groupFilter, setGroupFilter } = useProjectsStore();
+
+	const groups = Array.from(
+		new Set(
+			editor.project
+				.getSavedProjects()
+				.map((project) => project.group || "")
+				.filter(Boolean),
+		),
+	).sort((a, b) => a.localeCompare(b, "zh-CN"));
+
+	const label =
+		!groupFilter
+			? "全部分组"
+			: groupFilter === "__ungrouped__"
+				? "未分组"
+				: groupFilter;
+
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger asChild>
+				<Button variant="text" className="text-muted-foreground gap-1.5">
+					<HugeiconsIcon icon={Folder03Icon} className="size-4" />
+					<span className="max-w-32 truncate">{label}</span>
+				</Button>
+			</DropdownMenuTrigger>
+			<DropdownMenuContent className="w-52" align="start">
+				<DropdownMenuCheckboxItem
+					checked={!groupFilter}
+					onCheckedChange={() => setGroupFilter({ group: "" })}
+				>
+					全部分组
+				</DropdownMenuCheckboxItem>
+				<DropdownMenuCheckboxItem
+					checked={groupFilter === "__ungrouped__"}
+					onCheckedChange={() => setGroupFilter({ group: "__ungrouped__" })}
+				>
+					未分组
+				</DropdownMenuCheckboxItem>
+				{groups.map((group) => (
+					<DropdownMenuCheckboxItem
+						key={group}
+						checked={groupFilter === group}
+						onCheckedChange={() => setGroupFilter({ group })}
+					>
+						{group}
+					</DropdownMenuCheckboxItem>
+				))}
+			</DropdownMenuContent>
+		</DropdownMenu>
 	);
 }
 
@@ -482,25 +577,25 @@ function SortDropdown({ children }: { children: React.ReactNode }) {
 					checked={sortKey === "createdAt"}
 					onCheckedChange={() => setSortKey({ sortKey: "createdAt" })}
 				>
-					Created
+					创建时间
 				</DropdownMenuCheckboxItem>
 				<DropdownMenuCheckboxItem
 					checked={sortKey === "updatedAt"}
 					onCheckedChange={() => setSortKey({ sortKey: "updatedAt" })}
 				>
-					Modified
+					最近修改
 				</DropdownMenuCheckboxItem>
 				<DropdownMenuCheckboxItem
 					checked={sortKey === "name"}
 					onCheckedChange={() => setSortKey({ sortKey: "name" })}
 				>
-					Name
+					工程名称
 				</DropdownMenuCheckboxItem>
 				<DropdownMenuCheckboxItem
 					checked={sortKey === "duration"}
 					onCheckedChange={() => setSortKey({ sortKey: "duration" })}
 				>
-					Duration
+					视频时长
 				</DropdownMenuCheckboxItem>
 			</DropdownMenuContent>
 		</DropdownMenu>
@@ -513,7 +608,7 @@ function NewProjectButton() {
 
 	const handleCreateProject = async () => {
 		const projectId = await editor.project.createNewProject({
-			name: "New project",
+			name: "新建工程",
 		});
 		router.push(`/editor/${projectId}`);
 	};
@@ -524,9 +619,89 @@ function NewProjectButton() {
 			className="flex px-5 md:px-6"
 			onClick={handleCreateProject}
 		>
-			<span className="text-sm font-medium hidden md:block">New project</span>
-			<span className="text-sm font-medium block md:hidden">New</span>
+			<span className="text-sm font-medium hidden md:block">新建剪辑工程</span>
+			<span className="text-sm font-medium block md:hidden">新建</span>
 		</Button>
+	);
+}
+
+/**
+ * 导入工程文件（.mlsclip）。
+ * 工程 id 由服务端换新，不会覆盖本机已有工程；缺素材只提示，不阻断打开。
+ */
+function ImportProjectButton() {
+	const router = useRouter();
+	const editor = useEditor();
+	const inputRef = useRef<HTMLInputElement>(null);
+	const [busy, setBusy] = useState(false);
+
+	const handlePick = () => {
+		if (busy) return;
+		inputRef.current?.click();
+	};
+
+	const handleChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+		const file = event.target.files?.[0];
+		// 允许连续导入同一个文件：清空 value，否则 onChange 不会再触发
+		event.target.value = "";
+		if (!file) return;
+
+		setBusy(true);
+		const toastId = toast.loading("正在导入工程…");
+		try {
+			const result = await importProjectFile({
+				file,
+				onProgress: (stage, percent) => {
+					toast.loading(`${stage} ${percent}%`, { id: toastId });
+				},
+			});
+			// 列表要立刻能看到新工程（之后从编辑器返回时也是最新的）
+			await editor.project.loadAllProjects();
+
+			if (result.missing.length > 0) {
+				const names = result.missing.slice(0, 5).map((m) => m.name);
+				toast.warning(`已导入「${result.name}」，${result.missing.length} 个素材缺失`, {
+					id: toastId,
+					description:
+						names.join("、") +
+						(result.missing.length > names.length ? " 等" : "") +
+						"。补齐素材后画面才会完整。",
+				});
+			} else {
+				toast.success(`已导入「${result.name}」`, { id: toastId });
+			}
+			router.push(`/editor/${result.projectId}`);
+		} catch (error) {
+			toast.error("导入工程失败", {
+				id: toastId,
+				description: error instanceof Error ? error.message : "请确认文件是 .mlsclip 工程包",
+			});
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	return (
+		<>
+			<Button
+				size="lg"
+				variant="outline"
+				className="px-4 hidden md:flex"
+				onClick={handlePick}
+				disabled={busy}
+				title="导入 .mlsclip 工程文件"
+			>
+				<HugeiconsIcon icon={Upload01Icon} className="size-4" />
+				<span className="text-sm font-medium">{busy ? "导入中…" : "导入工程"}</span>
+			</Button>
+			<input
+				ref={inputRef}
+				type="file"
+				accept=".mlsclip,application/zip"
+				className="hidden"
+				onChange={handleChange}
+			/>
+		</>
 	);
 }
 
@@ -550,10 +725,19 @@ function ProjectItem({
 	const [isRenameDialogOpen, setIsRenameDialogOpen] = useState(false);
 	const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 	const [isInfoDialogOpen, setIsInfoDialogOpen] = useState(false);
+	const [isGroupDialogOpen, setIsGroupDialogOpen] = useState(false);
 	const editor = useEditor();
 	const durationLabel = formatProjectDuration({ duration: project.duration });
 	const isMultiSelect = selectedProjectCount > 1;
 	const isGridView = viewMode === "grid";
+	const groups = Array.from(
+		new Set(
+			editor.project
+				.getSavedProjects()
+				.map((item) => item.group || "")
+				.filter(Boolean),
+		),
+	).sort((a, b) => a.localeCompare(b, "zh-CN"));
 
 	const handleRename = () => setIsRenameDialogOpen(true);
 	const handleDuplicate = async () => {
@@ -561,6 +745,11 @@ function ProjectItem({
 	};
 	const handleDeleteClick = () => setIsDeleteDialogOpen(true);
 	const handleInfoClick = () => setIsInfoDialogOpen(true);
+	const handleGroupClick = () => setIsGroupDialogOpen(true);
+	const handleGroupConfirm = async (group: string) => {
+		await editor.project.setProjectsGroup({ ids: [project.id], group });
+		setIsGroupDialogOpen(false);
+	};
 	const handleDeleteConfirm = async () => {
 		await deleteProjects({ editor, ids: [project.id] });
 		setIsDeleteDialogOpen(false);
@@ -587,7 +776,7 @@ function ProjectItem({
 					{project.thumbnail ? (
 						<Image
 							src={project.thumbnail}
-							alt="Project thumbnail"
+						alt="工程封面"
 							fill
 							className="object-cover"
 						/>
@@ -611,7 +800,12 @@ function ProjectItem({
 				</h3>
 				<div className="text-muted-foreground flex items-center gap-1.5 text-sm">
 					<HugeiconsIcon icon={Calendar04Icon} className="size-4" />
-					<span>Created {formatDate({ date: project.createdAt })}</span>
+					<span>创建于 {formatDate({ date: project.createdAt })}</span>
+					{project.group && (
+						<span className="bg-accent/60 ml-auto rounded-sm px-1.5 py-0.5 text-xs">
+							{project.group}
+						</span>
+					)}
 				</div>
 			</CardContent>
 		</Card>
@@ -623,7 +817,7 @@ function ProjectItem({
 				{project.thumbnail ? (
 					<Image
 						src={project.thumbnail}
-						alt="Project thumbnail"
+						alt="工程缩略图"
 						fill
 						className="object-cover"
 					/>
@@ -637,6 +831,12 @@ function ProjectItem({
 			<h3 className="group-hover:text-foreground/90 text-sm font-medium truncate flex-1 min-w-0">
 				{project.name}
 			</h3>
+
+			{project.group && (
+				<span className="text-muted-foreground bg-accent/60 shrink-0 rounded-sm px-1.5 py-0.5 text-xs">
+					{project.group}
+				</span>
+			)}
 
 			<span className="text-muted-foreground text-sm shrink-0 hidden sm:block">
 				{durationLabel ?? "—"}
@@ -673,14 +873,15 @@ function ProjectItem({
 
 			{!isMultiSelect && (
 				<ProjectMenu
-					isOpen={isDropdownOpen}
-					onOpenChange={setIsDropdownOpen}
-					variant="list"
-					onRenameClick={handleRename}
-					onDuplicateClick={handleDuplicate}
-					onDeleteClick={handleDeleteClick}
-					onInfoClick={handleInfoClick}
-				/>
+						isOpen={isDropdownOpen}
+						onOpenChange={setIsDropdownOpen}
+						variant="list"
+						onRenameClick={handleRename}
+						onDuplicateClick={handleDuplicate}
+						onMoveToGroupClick={handleGroupClick}
+						onDeleteClick={handleDeleteClick}
+						onInfoClick={handleInfoClick}
+					/>
 			)}
 		</div>
 	);
@@ -719,6 +920,7 @@ function ProjectItem({
 										onOpenChange={setIsDropdownOpen}
 										onRenameClick={handleRename}
 										onDuplicateClick={handleDuplicate}
+										onMoveToGroupClick={handleGroupClick}
 										onDeleteClick={handleDeleteClick}
 										onInfoClick={handleInfoClick}
 									/>
@@ -732,6 +934,7 @@ function ProjectItem({
 				<ProjectContextMenuContent
 					onRenameClick={handleRename}
 					onDuplicateClick={handleDuplicate}
+					onMoveToGroupClick={handleGroupClick}
 					onDeleteClick={handleDeleteClick}
 					onInfoClick={handleInfoClick}
 				/>
@@ -759,6 +962,15 @@ function ProjectItem({
 				onOpenChange={setIsInfoDialogOpen}
 				project={project}
 			/>
+
+			<MoveToGroupDialog
+				isOpen={isGroupDialogOpen}
+				onOpenChange={setIsGroupDialogOpen}
+				projectCount={1}
+				groups={groups}
+				currentGroup={project.group || ""}
+				onConfirm={handleGroupConfirm}
+			/>
 		</>
 	);
 }
@@ -766,11 +978,13 @@ function ProjectItem({
 function ProjectContextMenuContent({
 	onRenameClick,
 	onDuplicateClick,
+	onMoveToGroupClick,
 	onDeleteClick,
 	onInfoClick,
 }: {
 	onRenameClick: () => void;
 	onDuplicateClick: () => void;
+	onMoveToGroupClick: () => void;
 	onDeleteClick: () => void;
 	onInfoClick: () => void;
 }) {
@@ -780,19 +994,25 @@ function ProjectContextMenuContent({
 				icon={<HugeiconsIcon icon={Edit03Icon} />}
 				onClick={onRenameClick}
 			>
-				Rename
+				重命名
 			</ContextMenuItem>
 			<ContextMenuItem
 				icon={<HugeiconsIcon icon={Copy01Icon} />}
 				onClick={onDuplicateClick}
 			>
-				Duplicate
+				创建副本
+			</ContextMenuItem>
+			<ContextMenuItem
+				icon={<HugeiconsIcon icon={Folder03Icon} />}
+				onClick={onMoveToGroupClick}
+			>
+				移动到分组
 			</ContextMenuItem>
 			<ContextMenuItem
 				icon={<HugeiconsIcon icon={InformationCircleIcon} />}
 				onClick={onInfoClick}
 			>
-				Info
+				工程详情
 			</ContextMenuItem>
 			<ContextMenuSeparator />
 			<ContextMenuItem
@@ -800,7 +1020,7 @@ function ProjectContextMenuContent({
 				icon={<HugeiconsIcon icon={Delete02Icon} />}
 				onClick={onDeleteClick}
 			>
-				Delete
+				删除工程
 			</ContextMenuItem>
 		</ContextMenuContent>
 	);
@@ -812,6 +1032,7 @@ function ProjectMenu({
 	variant = "grid",
 	onRenameClick,
 	onDuplicateClick,
+	onMoveToGroupClick,
 	onDeleteClick,
 	onInfoClick,
 }: {
@@ -820,6 +1041,7 @@ function ProjectMenu({
 	variant?: "grid" | "list";
 	onRenameClick: () => void;
 	onDuplicateClick: () => void;
+	onMoveToGroupClick: () => void;
 	onDeleteClick: () => void;
 	onInfoClick: () => void;
 }) {
@@ -859,6 +1081,11 @@ function ProjectMenu({
 		onOpenChange(false);
 	};
 
+	const handleMoveToGroupClick = () => {
+		onMoveToGroupClick();
+		onOpenChange(false);
+	};
+
 	const handleInfoClick = () => {
 		onInfoClick();
 		onOpenChange(false);
@@ -877,7 +1104,7 @@ function ProjectMenu({
 							: "!bg-transparent !shadow-none"
 					}
 					size="icon"
-					aria-label="Project menu"
+					aria-label="工程操作"
 					onClick={(event) =>
 						handleMenuClick({
 							event: event as unknown as MouseEvent<HTMLButtonElement>,
@@ -900,19 +1127,23 @@ function ProjectMenu({
 			<DropdownMenuContent className="w-48" align="end">
 				<DropdownMenuItem onClick={handleRename}>
 					<HugeiconsIcon icon={Edit03Icon} />
-					Rename
+					重命名
 				</DropdownMenuItem>
 				<DropdownMenuItem onClick={handleDuplicate}>
 					<HugeiconsIcon icon={Copy01Icon} />
-					Duplicate
+					创建副本
+				</DropdownMenuItem>
+				<DropdownMenuItem onClick={handleMoveToGroupClick}>
+					<HugeiconsIcon icon={Folder03Icon} />
+					移动到分组
 				</DropdownMenuItem>
 				<DropdownMenuItem onClick={handleInfoClick}>
 					<HugeiconsIcon icon={InformationCircleIcon} />
-					Info
+					工程详情
 				</DropdownMenuItem>
 				<DropdownMenuItem variant="destructive" onClick={handleDeleteClick}>
 					<HugeiconsIcon icon={Delete02Icon} />
-					Delete
+					删除工程
 				</DropdownMenuItem>
 			</DropdownMenuContent>
 		</DropdownMenu>
@@ -959,13 +1190,13 @@ function EmptyState() {
 	const handleCreateProject = async () => {
 		try {
 			const projectId = await editor.project.createNewProject({
-				name: "New project",
+				name: "新建工程",
 			});
 			router.push(`/editor/${projectId}`);
 		} catch (error) {
-			toast.error("Failed to create project", {
+			toast.error("创建工程失败", {
 				description:
-					error instanceof Error ? error.message : "Please try again",
+					error instanceof Error ? error.message : "请稍后重试",
 			});
 		}
 	};
@@ -979,9 +1210,9 @@ function EmptyState() {
 						className="text-muted-foreground size-16 bg-accent/35 border rounded-md p-4"
 					/>
 					<div className="flex flex-col items-center gap-3">
-						<h3 className="text-lg font-medium">No results found</h3>
+						<h3 className="text-lg font-medium">未找到匹配工程</h3>
 						<p className="text-muted-foreground max-w-md">
-							Your search for "{searchQuery}" did not return any results.
+							没有与「{searchQuery}」匹配的工程，换个关键词或切换分组试试。
 						</p>
 					</div>
 				</div>
@@ -990,7 +1221,7 @@ function EmptyState() {
 					variant="outline"
 					size="lg"
 				>
-					Clear search
+					清空搜索
 				</Button>
 			</div>
 		);
@@ -1005,15 +1236,14 @@ function EmptyState() {
 						className="text-muted-foreground size-8"
 					/>
 				</div>
-				<h3 className="text-lg font-medium">No projects yet</h3>
+				<h3 className="text-lg font-medium">暂无剪辑工程</h3>
 				<p className="text-muted-foreground max-w-md">
-					Start creating your first project. Import media, edit, and export your
-					videos. All privately.
+					创建第一个工程，导入素材、剪辑并导出视频，全部在本地私密完成。
 				</p>
 			</div>
 			<Button size="lg" className="gap-2" onClick={handleCreateProject}>
 				<HugeiconsIcon icon={PlusSignIcon} />
-				Create your first project
+				创建第一个工程
 			</Button>
 		</div>
 	);

@@ -7,7 +7,7 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { hamming } = require('./qc');
+const { hamming, hex16Variants } = require('./qc');
 
 const PHASH_STRICT = 5;
 const PHASH_NEAR = 8;
@@ -89,7 +89,7 @@ function scanLibraryDuplicates(services, options = {}) {
 
   const assets = db.prepare(`
     SELECT fid, file_name, kind, size, width, height, sha256, md5, phash,
-           created_at, source_asset_id, main_derivative_id, status
+           category, export_tag, created_at, source_asset_id, main_derivative_id, status
     FROM assets
     WHERE (status IS NULL OR status != 'deleted')
     ORDER BY COALESCE(created_at, 0) ASC, fid ASC
@@ -136,8 +136,15 @@ function scanLibraryDuplicates(services, options = {}) {
       if (d.phash) derivPhashes.push({ phash: d.phash, kind, derivId: d.id });
     }
 
+    // PERF-03：优先读 assets.export_tag，命中后零磁盘 I/O；仅历史数据缺失时回退读文件头。
     let exportTag = null;
-    if (readExportTags) {
+    if (a.export_tag) {
+      try {
+        const t = JSON.parse(a.export_tag);
+        if (t && (t.fid || t.kind)) exportTag = t;
+      } catch (_) {}
+    }
+    if (!exportTag && readExportTags) {
       exportTag = loadExportTagFromFile(db, services, {
         ...a,
         storage_ref: (ds.find((x) => x.kind === 'origin') || {}).storage_ref,
@@ -146,6 +153,7 @@ function scanLibraryDuplicates(services, options = {}) {
 
     nodes.push({
       fid: a.fid,
+      category: a.category || 'interior',
       fileName: a.file_name,
       createdAt: Number(a.created_at) || 0,
       ownHashes,
@@ -193,10 +201,83 @@ function scanLibraryDuplicates(services, options = {}) {
     return '';
   };
 
+  // PERF-03：MIH 倒排候选生成，替代全量 O(N^2) 两两比较。
+  // 候选来源：精确哈希碰撞、pHash 4×16-bit 抽屉（含单/双比特翻转）、导出标记 fid、母子血缘。
+  const candidatePairs = new Map(); // nodeIdx -> Set<nodeIdx>
+  const addCandidate = (i, j) => {
+    if (i === j) return;
+    if (!candidatePairs.has(i)) candidatePairs.set(i, new Set());
+    candidatePairs.get(i).add(j);
+    if (!candidatePairs.has(j)) candidatePairs.set(j, new Set());
+    candidatePairs.get(j).add(i);
+  };
+
+  const fidIndex = new Map(nodes.map((n, idx) => [n.fid, idx]));
+  const hashIndex = new Map();
+  nodes.forEach((n, idx) => {
+    for (const h of n.ownHashes) {
+      if (!hashIndex.has(h)) hashIndex.set(h, []);
+      hashIndex.get(h).push(idx);
+    }
+    for (const h of n.derivHashes) {
+      if (!hashIndex.has(h)) hashIndex.set(h, []);
+      hashIndex.get(h).push(idx);
+    }
+  });
+  nodes.forEach((n, idx) => {
+    const lookup = (h) => (hashIndex.get(h) || []).forEach((j) => addCandidate(idx, j));
+    n.ownHashes.forEach(lookup);
+    n.derivHashes.forEach(lookup);
+    if (n.exportTag && n.exportTag.fid && fidIndex.has(n.exportTag.fid)) {
+      addCandidate(idx, fidIndex.get(n.exportTag.fid));
+    }
+    if (n.sourceAssetId && fidIndex.has(n.sourceAssetId)) {
+      addCandidate(idx, fidIndex.get(n.sourceAssetId));
+    }
+  });
+
+  const mihFlips = Math.max(phashStrict, phashNear) >= 8 ? 2 : 1;
+  const mihByCat = new Map();
+  nodes.forEach((n, idx) => {
+    const cat = n.category || 'interior';
+    if (!mihByCat.has(cat)) {
+      mihByCat.set(cat, { buckets: [new Map(), new Map(), new Map(), new Map()], members: [] });
+    }
+    const bucket = mihByCat.get(cat);
+    bucket.members.push(idx);
+    for (const p of [...n.ownPhashes, ...n.derivPhashes]) {
+      const ph = String(p.phash || '');
+      if (ph.length < 16) continue;
+      for (let k = 0; k < 4; k++) {
+        const seg = ph.slice(k * 4, k * 4 + 4);
+        if (!bucket.buckets[k].has(seg)) bucket.buckets[k].set(seg, []);
+        bucket.buckets[k].get(seg).push(idx);
+      }
+    }
+  });
+  for (const bucket of mihByCat.values()) {
+    for (const idx of bucket.members) {
+      const n = nodes[idx];
+      for (const p of [...n.ownPhashes, ...n.derivPhashes]) {
+        const ph = String(p.phash || '');
+        if (ph.length < 16) continue;
+        for (let k = 0; k < 4; k++) {
+          const seg = ph.slice(k * 4, k * 4 + 4);
+          for (const v of hex16Variants(seg, mihFlips)) {
+            for (const j of bucket.buckets[k].get(v) || []) addCandidate(idx, j);
+          }
+        }
+      }
+    }
+  }
+
   for (let i = 0; i < nodes.length; i++) {
     const a = nodes[i];
     if (dropSet.has(a.fid)) continue;
-    for (let j = i + 1; j < nodes.length; j++) {
+    const candidates = candidatePairs.get(i);
+    if (!candidates) continue;
+    for (const j of candidates) {
+      if (j <= i) continue;
       const b = nodes[j];
       if (dropSet.has(b.fid)) continue;
 

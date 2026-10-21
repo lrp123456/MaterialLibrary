@@ -1,5 +1,5 @@
 <template>
-  <div class="flex-1 flex flex-col h-[calc(100vh-56px)] bg-studio-950 overflow-hidden font-sans text-slate-100 select-none text-sm">
+  <div class="qs-root flex-1 flex flex-col h-[calc(100vh-56px)] bg-studio-950 overflow-hidden font-sans text-slate-100 select-none text-sm">
     <!-- 1. 顶部操作栏：模式切换 (精准编辑 vs 全局重绘) + 视口工具 -->
     <header class="h-12 bg-studio-900 border-b border-studio-750 px-5 flex items-center justify-between shrink-0">
       <div class="flex items-center space-x-2.5">
@@ -74,11 +74,11 @@
     </header>
 
     <!-- 2. 工作区主体：中央视口 + 右侧配置抽屉 -->
-    <div class="flex-1 flex overflow-hidden">
+    <div class="qs-body flex-1 flex overflow-hidden">
       <!-- 2.1 中央画布视口 -->
       <main
         ref="viewportRef"
-        class="flex-1 bg-studio-950 relative overflow-hidden flex items-center justify-center cursor-crosshair select-none"
+        class="qs-viewport flex-1 bg-studio-950 relative overflow-hidden flex items-center justify-center cursor-crosshair select-none"
         @wheel.prevent="onCanvasWheel"
         @mousedown="onViewportMouseDown"
         @mousemove="onViewportMouseMove"
@@ -945,23 +945,103 @@
         <!-- 模式 B：风格转换迁移 (严格使用打标系统 tags-seed.js 官方真实风格字典) -->
         <div v-else-if="activeGlobalMode === 'style'" class="p-4 rounded-xl bg-studio-950 border border-studio-800 space-y-3">
           <div class="flex items-center justify-between">
-            <span class="font-bold text-white">官方打标系统风格库：</span>
+            <span class="font-bold text-white">风格库（官方 + 自定义）：</span>
             <span class="text-[11px] text-studio-indigo font-bold">16 种文化大类</span>
           </div>
 
           <div class="grid grid-cols-2 gap-2 max-h-60 overflow-y-auto scrollbar-thin p-1">
             <button
-              v-for="style in officialStyles"
-              :key="style.key"
-              @click="selectedOfficialStyle = style.name"
+              @click="pickNewCustomStyle"
               :class="[
                 'p-2 rounded-lg border text-left text-xs transition-all cursor-pointer',
-                selectedOfficialStyle === style.name ? 'border-studio-indigo bg-studio-indigo/20 text-white font-bold' : 'border-studio-800 bg-studio-900 text-slate-300'
+                isCustomStyleMode && !editingCustomStyleId ? 'border-studio-indigo bg-studio-indigo/20 text-white font-bold' : 'border-dashed border-studio-700 bg-studio-900 text-slate-300'
+              ]"
+            >
+              <div class="font-bold">＋ 自定义风格</div>
+              <div class="text-[10px] text-slate-400">AI 解析并沉淀为我的风格</div>
+            </button>
+            <button
+              v-for="style in officialStyles"
+              :key="style.key"
+              @click="pickOfficialStyle(style)"
+              :class="[
+                'p-2 rounded-lg border text-left text-xs transition-all cursor-pointer',
+                !isCustomStyleMode && selectedOfficialStyle === style.name ? 'border-studio-indigo bg-studio-indigo/20 text-white font-bold' : 'border-studio-800 bg-studio-900 text-slate-300'
               ]"
             >
               <div class="font-bold">{{ style.name }}</div>
               <div class="text-[10px] text-slate-400">{{ style.region }}</div>
             </button>
+          </div>
+
+          <!-- 自定义风格编辑器：AI 解析生图模型更吃透的风格锚定描述 -->
+          <div v-if="isCustomStyleMode" class="p-3 rounded-xl bg-studio-900/70 border border-studio-indigo/40 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-white">自定义风格</span>
+              <button v-if="editingCustomStyleId" @click="pickNewCustomStyle" class="text-[11px] text-slate-400 hover:text-white cursor-pointer">新建</button>
+            </div>
+            <input
+              v-model="customStyleName"
+              placeholder="风格名称，如：海边度假风"
+              class="w-full px-2 py-1.5 rounded-lg bg-studio-950 border border-studio-800 text-xs text-white placeholder-slate-500 focus:border-studio-indigo outline-none"
+            />
+            <textarea
+              v-model="customStyleDesc"
+              rows="2"
+              placeholder="可选：描述你想要的色彩、材质或氛围，AI 会补全成专业风格描述"
+              class="w-full px-2 py-1.5 rounded-lg bg-studio-950 border border-studio-800 text-xs text-white placeholder-slate-500 focus:border-studio-indigo outline-none resize-none"
+            ></textarea>
+            <div class="flex gap-2">
+              <button
+                @click="analyzeCustomStyle"
+                :disabled="customAnalyzing"
+                class="flex-1 px-2 py-1.5 rounded-lg bg-studio-indigo text-white text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {{ customAnalyzing ? 'AI 解析中…' : 'AI 解析风格描述' }}
+              </button>
+              <button
+                @click="saveCustomStyle"
+                :disabled="customSaving"
+                class="px-2 py-1.5 rounded-lg border border-studio-800 text-slate-200 text-xs font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {{ customSaving ? '保存中…' : (editingCustomStyleId ? '更新到我的风格' : '保存到我的风格') }}
+              </button>
+            </div>
+            <div v-if="customAiPrompt" class="space-y-1">
+              <div class="flex justify-between text-[11px]">
+                <span class="text-slate-300">AI 风格锚定描述（可直接修改）</span>
+                <span class="text-slate-500">{{ customAiPrompt.length }} 字</span>
+              </div>
+              <textarea
+                v-model="customAiPrompt"
+                rows="5"
+                class="w-full px-2 py-1.5 rounded-lg bg-studio-950 border border-studio-800 text-xs text-white focus:border-studio-indigo outline-none resize-none"
+              ></textarea>
+            </div>
+          </div>
+
+          <!-- 我的风格：已保存的自定义风格 -->
+          <div v-if="customStyles.length" class="space-y-1.5 pt-2 border-t border-studio-850">
+            <span class="text-xs font-bold text-white">我的风格（{{ customStyles.length }}）</span>
+            <div class="grid grid-cols-2 gap-2">
+              <div v-for="cs in customStyles" :key="cs.id" class="relative">
+                <button
+                  @click="pickCustomStyle(cs)"
+                  :class="[
+                    'w-full p-2 pr-6 rounded-lg border text-left text-xs transition-all cursor-pointer',
+                    isCustomStyleMode && editingCustomStyleId === cs.id ? 'border-studio-indigo bg-studio-indigo/20 text-white font-bold' : 'border-studio-800 bg-studio-900 text-slate-300'
+                  ]"
+                >
+                  <div class="font-bold truncate">{{ cs.name }}</div>
+                  <div class="text-[10px] text-slate-400 truncate">{{ cs.aiPrompt || cs.description || '未生成锚定描述' }}</div>
+                </button>
+                <button
+                  @click.stop="removeCustomStyle(cs)"
+                  class="absolute top-1 right-1 text-slate-500 hover:text-red-400 text-[11px] cursor-pointer"
+                  title="删除"
+                >✕</button>
+              </div>
+            </div>
           </div>
 
           <div class="space-y-1 pt-2 border-t border-studio-850">
@@ -984,103 +1064,17 @@
       </aside>
     </div>
 
-    <!-- 素材库换图弹窗 -->
-    <!-- 素材库换图弹窗 -->
-    <div v-if="showAssetModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-150">
-      <div class="w-full max-w-[1200px] h-[88vh] rounded-2xl bg-studio-900 border border-studio-750 p-6 shadow-2xl space-y-4 flex flex-col">
-        <!-- 弹窗顶栏 -->
-        <div class="flex items-center justify-between pb-3 border-b border-studio-750 shrink-0">
-          <div class="flex items-center space-x-2">
-            <span class="text-base">🖼️</span>
-            <span class="text-sm font-bold text-white">{{ assetPickPurpose === 'install' ? '选择安装物' : '从素材库选取' }}</span>
-            <span class="text-xs font-mono text-slate-400 bg-studio-850 px-2 py-0.5 rounded border border-studio-750">
-              共 {{ modalTotal }} 张，已选 {{ modalSelected.length }}
-            </span>
-          </div>
-          <button @click="showAssetModal = false" class="w-7 h-7 rounded-lg bg-studio-850 hover:bg-studio-800 text-slate-400 hover:text-white flex items-center justify-center transition-all cursor-pointer">
-            ✕
-          </button>
-        </div>
-
-        <div class="flex-1 flex min-h-0 gap-3">
-        <aside class="picker-pane w-72 shrink-0 overflow-y-auto space-y-1">
-          <div class="lib-plates" style="padding:0">
-            <button v-for="plate in modalPlates" :key="plate.key" type="button" class="lib-plate" :class="{ 'is-on': modalShelf === plate.key }" @click="modalShelf = plate.key; loadModalAssets()">
-              <span class="lib-mark"></span>{{ plate.label }}
-            </button>
-          </div>
-          <button v-for="tab in modalMains" :key="tab.key" type="button" class="sidebar-row" :class="{ 'is-on': modalMain === tab.key }" @click="setModalMain(tab.key)">{{ tab.label }}</button>
-          <button v-for="sub in modalSubs" :key="sub.key" type="button" class="sidebar-row is-sub" :class="{ 'is-on': modalSub === sub.key }" @click="setModalSub(sub.key)">{{ sub.label }}</button>
-          <button type="button" class="filter-switch" :class="{ 'is-on': modalOnlyFav }" @click="modalOnlyFav = !modalOnlyFav; loadModalAssets()">
-            <span>只看收藏</span><span class="filter-switch-knob"></span>
-          </button>
-          <template v-if="modalMain === 'image'">
-            <section class="lib-group">
-              <button type="button" class="lib-group-head" @click="modalOpen.ratio = !modalOpen.ratio"><span>画幅</span><span class="lib-meta">{{ modalOpen.ratio ? '收起' : '展开' }}</span></button>
-              <div v-if="modalOpen.ratio" class="lib-chips">
-                <button v-for="item in modalOrientations" :key="item.key" type="button" class="lib-chip" :class="{ 'is-on': modalOrientation === item.key }" @click="modalOrientation = modalOrientation === item.key ? '' : item.key; loadModalAssets()">{{ item.label }}</button>
-              </div>
-            </section>
-            <section v-if="modalSub === 'interior_exterior'" class="lib-group">
-              <button type="button" class="lib-group-head" @click="modalOpen.space = !modalOpen.space"><span>空间</span><span class="lib-meta">{{ modalOpen.space ? '收起' : '展开' }}</span></button>
-              <div v-if="modalOpen.space" class="lib-chips">
-                <button v-for="item in modalSpaces" :key="item.dir" type="button" class="lib-chip" :class="{ 'is-on': modalSpace === item.dir }" @click="modalSpace = modalSpace === item.dir ? '' : item.dir; loadModalAssets()">{{ item.label }}</button>
-              </div>
-            </section>
-            <section v-if="modalSub === 'interior_exterior'" class="lib-group">
-              <button type="button" class="lib-group-head" @click="modalOpen.style = !modalOpen.style"><span>风格</span><span class="lib-meta">{{ modalOpen.style ? '收起' : '展开' }}</span></button>
-              <div v-if="modalOpen.style" class="lib-chips">
-                <button v-for="item in modalStyles" :key="item.dir" type="button" class="lib-chip" :class="{ 'is-on': modalStyle === item.dir }" @click="modalStyle = modalStyle === item.dir ? '' : item.dir; loadModalAssets()">{{ item.label }}</button>
-              </div>
-            </section>
-            <section v-if="modalSub === 'interior_exterior'" class="lib-group">
-              <button type="button" class="lib-group-head" @click="modalOpen.material = !modalOpen.material"><span>材质</span><span class="lib-meta">{{ modalOpen.material ? '收起' : '展开' }}</span></button>
-              <div v-if="modalOpen.material" class="lib-chips">
-                <button v-for="item in modalMaterials" :key="item.dir" type="button" class="lib-chip" :class="{ 'is-on': modalMaterial === item.dir }" @click="modalMaterial = modalMaterial === item.dir ? '' : item.dir; loadModalAssets()">{{ item.label }}</button>
-              </div>
-            </section>
-            <section class="lib-group">
-              <button type="button" class="lib-group-head" @click="modalOpen.color = !modalOpen.color"><span>主色</span><span class="lib-meta">{{ modalOpen.color ? '收起' : '展开' }}</span></button>
-              <div v-if="modalOpen.color" class="lib-chips">
-                <button v-for="item in modalColors" :key="item.dir || item.label" type="button" class="lib-chip" :class="{ 'is-on': modalColor === (item.dir || item.label) }" @click="modalColor = modalColor === (item.dir || item.label) ? '' : (item.dir || item.label); loadModalAssets()">{{ item.label }}</button>
-              </div>
-            </section>
-          </template>
-          <input v-model="modalKeyword" @keyup.enter="loadModalAssets" type="text" placeholder="搜索素材" class="w-full mt-2 px-3 py-2 rounded-lg border text-sm" />
-        </aside>
-        <div class="flex-1 overflow-y-auto scrollbar-thin min-h-0 p-1">
-          <div v-if="isModalLoading" class="h-64 flex flex-col items-center justify-center space-y-2 text-slate-400 text-xs">
-            <div class="w-7 h-7 rounded-full border-2 border-studio-accent border-t-transparent animate-spin"></div>
-            <span>正在读取素材库图片…</span>
-          </div>
-
-          <div v-else-if="modalAssets.length === 0" class="h-64 flex flex-col items-center justify-center space-y-2 text-slate-500 text-xs">
-            <span class="text-2xl">🏜️</span>
-            <span>该分类下暂无图片素材</span>
-          </div>
-
-          <div v-else class="grid grid-cols-4 sm:grid-cols-5 gap-3">
-            <div
-              v-for="item in modalAssets"
-              :key="item.fid"
-              @click="toggleModalAsset(item)"
-              class="group relative rounded-xl overflow-hidden border bg-studio-950 aspect-square cursor-pointer"
-              :class="modalSelected.some(s => s.fid === item.fid) ? 'border-studio-accent' : 'border-studio-750'"
-            >
-              <img :src="item.url" class="w-full h-full object-cover" />
-              <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex items-end p-2">
-                <span class="on-media text-[11px] font-bold text-white truncate w-full">{{ item.name }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-        </div>
-        <div class="shrink-0 flex justify-end gap-2">
-          <button type="button" class="px-4 py-2 text-sm cursor-pointer" @click="showAssetModal = false">取消</button>
-          <button type="button" class="px-4 py-2 rounded-lg bg-studio-accent text-sm font-bold cursor-pointer" :disabled="modalSelected.length === 0" @click="confirmModalAssets">确认选择</button>
-        </div>
-      </div>
-    </div>
+    <!-- 共享素材选择器（与 AI 对话同一组件） -->
+    <AssetPickerModal
+      :visible="showAssetModal"
+      context="edit"
+      :title="assetPickPurpose === 'install' ? '选择安装物' : '从素材库选取底图'"
+      :max-select="1"
+      :media-types="['image']"
+      :recent="recentEditedAssets"
+      @close="showAssetModal = false"
+      @confirm="onPickerConfirm"
+    />
   </div>
 </template>
 
@@ -1088,7 +1082,18 @@
 import { ref, computed, watch, onMounted } from 'vue';
 import StudioIcon from '../../components/StudioIcon.vue';
 import BeforeAfterSlider from '../../components/BeforeAfterSlider.vue';
-import { getAssetImageUrl, fetchAssets, expandJimeng, runEditPipeline, registerGeneratedAsset } from '../../api';
+import AssetPickerModal from '../../components/AssetPickerModal.vue';
+import {
+  expandJimeng,
+  runEditPipeline,
+  registerGeneratedAsset,
+  aiDetect,
+  fetchCustomStyles,
+  createCustomStyle,
+  updateCustomStyle,
+  deleteCustomStyle,
+  analyzeStyle
+} from '../../api';
 
 const props = defineProps({
   initialImage: { type: String, default: '' },
@@ -1103,66 +1108,13 @@ const showCompare = ref(false);
 const executing = ref(false);
 const detecting = ref(false);
 const showAssetModal = ref(false);
-const modalAssets = ref([]);
-const isModalLoading = ref(false);
-const modalKeyword = ref('');
-const modalTotal = ref(0);
-const modalSelected = ref([]);
 const assetPickPurpose = ref('base');
-const modalMain = ref('image');
-const modalSub = ref('interior_exterior');
-const modalOnlyFav = ref(false);
-const modalOrientation = ref('');
-const modalShelf = ref('original');
-const modalSpace = ref('');
-const modalStyle = ref('');
-const modalMaterial = ref('');
-const modalColor = ref('');
-const modalSpaces = ref([]);
-const modalStyles = ref([]);
-const modalMaterials = ref([]);
-const modalColors = ref([]);
-const modalOpen = ref({ ratio: true, space: true, style: false, material: false, color: false });
-const modalPlates = [
-  { key: 'original', label: '原素材' },
-  { key: 'retouched', label: '精修素材' },
-  { key: 'finished', label: '成品素材' }
-];
+// 最近调整过的素材：置顶到共享选择器，方便快速回到上一张底图
+const recentEditedAssets = ref([]);
 const lastFiledResult = ref('');
 const installPreview = ref('');
 const installFileName = ref('');
 const installFileInput = ref(null);
-const modalMains = [
-  { key: 'image', label: '图片' },
-  { key: 'video', label: '视频' },
-  { key: 'audio', label: '音频' }
-];
-const modalSubMap = {
-  image: [
-    { key: 'all', label: '全部图片' },
-    { key: 'interior_exterior', label: '室内外设计' },
-    { key: 'portrait', label: '空间人像' },
-    { key: 'clothing', label: '服装服饰' },
-    { key: 'furniture', label: '单品家具' }
-  ],
-  video: [
-    { key: 'all', label: '全部视频' },
-    { key: 'walkthrough', label: '空间漫游' },
-    { key: 'ad', label: '商业短片' }
-  ],
-  audio: [
-    { key: 'all', label: '全部音频' },
-    { key: 'bgm', label: '氛围背景乐' },
-    { key: 'sfx', label: '环境音效' }
-  ]
-};
-const modalSubs = computed(() => modalSubMap[modalMain.value] || []);
-const modalOrientations = [
-  { key: 'portrait', label: '9:16 竖图' },
-  { key: '3:4', label: '3:4 竖图' },
-  { key: 'landscape', label: '16:9 横图' },
-  { key: 'square', label: '1:1 方图' }
-];
 const imageNaturalSize = ref({ w: 0, h: 0 });
 
 watch(() => props.initialImage, (newVal) => {
@@ -1170,6 +1122,7 @@ watch(() => props.initialImage, (newVal) => {
     currentImage.value = newVal;
     resultImage.value = '';
     showCompare.value = false;
+    rememberEditedAsset({ fid: props.initialFid || '', url: newVal, name: '当前底图', mark: '最近调整' });
   }
 });
 
@@ -1193,101 +1146,68 @@ watch(resultImage, (url) => {
   registerGeneratedAsset(body).catch((err) => console.warn('快捷成图写入精修失败', err));
 });
 
-async function loadModalAssets() {
-  isModalLoading.value = true;
-  try {
-    const params = { limit: 60, pageSize: 60, page: 1 };
-    if (modalMain.value === 'video') {
-      params.media_type = 'video';
-      if (modalSub.value === 'ad') params.category = 'finished';
-      else if (modalSub.value === 'walkthrough') params.category = 'video';
-    } else if (modalMain.value === 'audio') {
-      params.media_type = 'music';
-      params.category = 'music';
-    } else {
-      params.media_type = 'image';
-      if (modalSub.value !== 'all') params.category = modalSub.value;
-    }
-    if (modalShelf.value) params.shelf = modalShelf.value;
-    if (modalOnlyFav.value) params.only_favorite = 1;
-    if (modalOrientation.value) params.orientation = modalOrientation.value;
-    if (modalSpace.value) params.space = modalSpace.value;
-    if (modalStyle.value) params.style = modalStyle.value;
-    if (modalMaterial.value) params.material = modalMaterial.value;
-    if (modalColor.value) params.color = modalColor.value;
-    if (modalKeyword.value.trim()) params.keyword = modalKeyword.value.trim();
-    const data = await fetchAssets(params);
-    const items = data.items || [];
-    const opts = data.filterOptions || {};
-    if (Array.isArray(opts.space)) modalSpaces.value = opts.space;
-    if (Array.isArray(opts.style_atom)) modalStyles.value = opts.style_atom;
-    if (Array.isArray(opts.material_kind)) modalMaterials.value = opts.material_kind.slice(0, 8);
-    if (Array.isArray(opts.colors)) modalColors.value = opts.colors.slice(0, 12);
-    modalTotal.value = data.total || items.length;
-    modalAssets.value = items.map(it => ({
-      fid: it.fid,
-      name: it.file_name || it.fileName || it.name,
-      url: getAssetImageUrl(it.fid, it.mediaToken)
-    }));
-  } catch (e) {
-    console.warn('加载素材底图失败:', e);
-  } finally {
-    isModalLoading.value = false;
-  }
+function rememberEditedAsset(item) {
+  if (!item || (!item.fid && !item.url)) return;
+  const key = item.fid || item.url;
+  const entry = {
+    fid: item.fid || '',
+    url: item.url,
+    name: item.name || '素材底图',
+    kind: 'image',
+    mark: '最近调整',
+  };
+  recentEditedAssets.value = [entry, ...recentEditedAssets.value.filter((it) => (it.fid || it.url) !== key)].slice(0, 12);
 }
 
-function setModalMain(key) {
-  modalMain.value = key;
-  modalSub.value = key === 'image' ? 'interior_exterior' : 'all';
-  loadModalAssets();
-}
-function setModalSub(key) {
-  modalSub.value = key;
-  loadModalAssets();
-}
-function toggleModalAsset(item) {
-  const idx = modalSelected.value.findIndex((s) => s.fid === item.fid);
-  if (idx >= 0) modalSelected.value.splice(idx, 1);
-  else modalSelected.value.push(item);
-}
-function confirmModalAssets() {
-  const first = modalSelected.value[0];
+// 共享素材选择器确认：支持原图与衍生图版本
+function onPickerConfirm(versions) {
+  const first = versions?.[0];
   if (!first) return;
   if (assetPickPurpose.value === 'install') {
     installPreview.value = first.url;
     installFileName.value = first.name;
+    rememberEditedAsset({ ...first, mark: '最近安装' });
   } else {
     selectBaseImage(first);
     return;
   }
   showAssetModal.value = false;
-  modalSelected.value = [];
 }
 function openInstallLibrary() {
   assetPickPurpose.value = 'install';
-  modalSelected.value = [];
   showAssetModal.value = true;
-  loadModalAssets();
 }
-function onInstallFile(e) {
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error('文件读取失败'));
+    reader.readAsDataURL(file);
+  });
+}
+async function onInstallFile(e) {
   const file = e.target.files?.[0];
   if (!file) return;
-  installPreview.value = URL.createObjectURL(file);
+  // 后端 Node 进程无法读取浏览器 blob: 内存地址，必须转成 data URL
+  try {
+    installPreview.value = await fileToDataUrl(file);
+  } catch (_) {
+    installPreview.value = '';
+  }
   installFileName.value = file.name;
 }
 function openAssetSelector() {
   assetPickPurpose.value = 'base';
-  modalSelected.value = [];
   showAssetModal.value = true;
-  if (!modalAssets.value.length) loadModalAssets();
 }
 
 const localUploadInput = ref(null);
 const baseFileName = ref('');
 
-function loadBaseFile(file) {
+async function loadBaseFile(file) {
   if (!file || !file.type.startsWith('image/')) return;
-  const url = URL.createObjectURL(file);
+  // 本地上传底图同样必须转 data URL，否则后端无法读取 blob:
+  const url = await fileToDataUrl(file);
   currentImage.value = url;
   currentAssetFid.value = '';
   resultImage.value = '';
@@ -1312,16 +1232,17 @@ function handleDropImage(e) {
   loadBaseFile(file);
 }
 
-onMounted(() => {
-  loadModalAssets();
-});
-
 function selectBaseImage(item) {
   currentImage.value = item.url;
   currentAssetFid.value = item.fid || '';
   resultImage.value = '';
   showCompare.value = false;
+  // 底图名称带上所选版本，避免换了 3:4 衍生图后不知道形状为何变化
+  baseFileName.value = item.derivativeKind && item.derivativeKind !== 'origin'
+    ? `${item.name || '素材底图'}（${item.label || '衍生版本'}）`
+    : (item.name || '');
   clearAnnotation();
+  rememberEditedAsset({ ...item, mark: '最近调整' });
   showAssetModal.value = false;
 }
 
@@ -1526,12 +1447,30 @@ function clearAnnotation() {
   avoidBBox.value = null;
 }
 
-function detectAutoSegment() {
+async function detectAutoSegment() {
+  if (!currentImage.value) {
+    alert('请先选择底图');
+    return;
+  }
   detecting.value = true;
-  setTimeout(() => {
+  try {
+    const data = await aiDetect({ image: currentImage.value });
+    const list = (Array.isArray(data?.detections) ? data.detections : [])
+      .filter((d) => d && d.bbox)
+      .sort((a, b) => (Number(b.confidence) || 0) - (Number(a.confidence) || 0));
+    const best = list[0];
+    if (!best) throw new Error('未检测到可编辑对象');
+    rectBBox.value = {
+      x1: Number(best.bbox.x1) || 0,
+      y1: Number(best.bbox.y1) || 0,
+      x2: Number(best.bbox.x2) || 0,
+      y2: Number(best.bbox.y2) || 0
+    };
+  } catch (e) {
+    alert('AI 自动识别失败: ' + e.message);
+  } finally {
     detecting.value = false;
-    rectBBox.value = { x1: 180, y1: 220, x2: 680, y2: 520 };
-  }, 900);
+  }
 }
 
 function onImageLoaded(e) {
@@ -1875,10 +1814,103 @@ const officialStyles = [
   { key: 'mid_century', name: '中古风 (MCM)', region: '现代流派' },
   { key: 'american_modern', name: '现代美式', region: '美洲' },
   { key: 'american_country', name: '美式乡村', region: '美洲' },
-  { key: 'wood_light', name: '浅木素净', region: '木系风格' },
-  { key: 'wood_dark', name: '深木沉稳', region: '木系风格' }
+  { key: 'nanyang_resort', name: '南洋度假', region: '东南亚' },
+  { key: 'natural_wood', name: '自然原木风', region: '木系风格' },
+  { key: 'dark_wood', name: '深色原木风', region: '木系风格' },
+  { key: 'natural_vintage_wood', name: '自然复古原木风', region: '木系风格' },
+  { key: 'dark_vintage_wood', name: '深色复古原木风', region: '木系风格' }
 ];
 const selectedOfficialStyle = ref('意式极简');
+
+// ===== 自定义风格（风格迁移）：LLM 解析成生图模型更吃透的风格锚定描述 =====
+const customStyles = ref([]);
+const isCustomStyleMode = ref(false);
+const editingCustomStyleId = ref('');
+const customStyleName = ref('');
+const customStyleDesc = ref('');
+const customAiPrompt = ref('');
+const customAnalyzing = ref(false);
+const customSaving = ref(false);
+
+function pickOfficialStyle(style) {
+  isCustomStyleMode.value = false;
+  editingCustomStyleId.value = '';
+  selectedOfficialStyle.value = style.name;
+}
+
+function pickNewCustomStyle() {
+  isCustomStyleMode.value = true;
+  editingCustomStyleId.value = '';
+  customStyleName.value = '';
+  customStyleDesc.value = '';
+  customAiPrompt.value = '';
+}
+
+function pickCustomStyle(style) {
+  isCustomStyleMode.value = true;
+  editingCustomStyleId.value = style.id;
+  customStyleName.value = style.name || '';
+  customStyleDesc.value = style.description || '';
+  customAiPrompt.value = style.aiPrompt || '';
+}
+
+async function loadCustomStyles() {
+  try {
+    customStyles.value = await fetchCustomStyles();
+  } catch (e) {
+    console.warn('[QuickStudio] 自定义风格列表加载失败:', e.message);
+  }
+}
+
+async function analyzeCustomStyle() {
+  const name = customStyleName.value.trim();
+  if (!name) { alert('请先填写风格名称'); return; }
+  customAnalyzing.value = true;
+  try {
+    const data = await analyzeStyle({ name, description: customStyleDesc.value.trim() });
+    customAiPrompt.value = data.aiPrompt || '';
+    if (!customAiPrompt.value) alert('AI 未返回风格描述，可重试，或直接用自由描述执行');
+  } catch (e) {
+    alert('AI 风格解析失败: ' + e.message);
+  } finally {
+    customAnalyzing.value = false;
+  }
+}
+
+async function saveCustomStyle() {
+  const name = customStyleName.value.trim();
+  if (!name) { alert('请先填写风格名称'); return; }
+  customSaving.value = true;
+  try {
+    const payload = {
+      name,
+      description: customStyleDesc.value.trim(),
+      aiPrompt: customAiPrompt.value.trim()
+    };
+    const saved = editingCustomStyleId.value
+      ? await updateCustomStyle(editingCustomStyleId.value, payload)
+      : await createCustomStyle(payload);
+    await loadCustomStyles();
+    if (saved) pickCustomStyle(saved);
+  } catch (e) {
+    alert('自定义风格保存失败: ' + e.message);
+  } finally {
+    customSaving.value = false;
+  }
+}
+
+async function removeCustomStyle(style) {
+  if (!window.confirm(`删除自定义风格「${style.name}」？`)) return;
+  try {
+    await deleteCustomStyle(style.id);
+    if (editingCustomStyleId.value === style.id) pickNewCustomStyle();
+    await loadCustomStyles();
+  } catch (e) {
+    alert('删除失败: ' + e.message);
+  }
+}
+
+onMounted(loadCustomStyles);
 
 // 执行生图处理 (真实打通火山即梦扩图与服务端 /edit/run 管线)
 async function runExecute() {
@@ -1908,11 +1940,16 @@ async function runExecute() {
     } else if (studioMode.value === 'global') {
       // 全局重绘增强模式：调用服务端真实 /edit/run 管线！
       if (activeGlobalMode.value === 'style') {
+        const useCustom = isCustomStyleMode.value;
+        const customName = customStyleName.value.trim();
+        if (useCustom && !customName) throw new Error('请先填写自定义风格名称');
         const res = await runEditPipeline({
           image: currentImage.value,
           assetFid: currentAssetFid.value || undefined,
           op: 'style_transfer',
-          targetStyle: selectedOfficialStyle.value,
+          targetStyle: useCustom ? customName : selectedOfficialStyle.value,
+          // 优先用 LLM 解析后的风格锚定描述；未解析则退回用户的自由描述
+          stylePrompt: useCustom ? (customAiPrompt.value.trim() || customStyleDesc.value.trim() || undefined) : undefined,
           strengthLevel: styleWeight.value > 70 ? 'strong' : (styleWeight.value > 40 ? 'standard' : 'subtle'),
           extraPrompt: expandPrompt.value || undefined
         });

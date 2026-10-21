@@ -45,6 +45,16 @@ const mediaTools = require('./media-tools');
 const studioPresets = require('./studio-presets');
 const menuTree = require('./menu-tree');
 
+// PERF-05：按 db 实例缓存表结构自检结果，避免每个 HTTP 请求重复跑 PRAGMA / 抛异常的 ALTER TABLE。
+const dbSchemaCache = new WeakMap();
+function schemaCheckedOnce(db, key) {
+  let keys = dbSchemaCache.get(db);
+  if (!keys) { keys = new Set(); dbSchemaCache.set(db, keys); }
+  if (keys.has(key)) return true;
+  keys.add(key);
+  return false;
+}
+
 const MIME = {
   '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
@@ -86,7 +96,7 @@ function decodeParamLoose(raw) {
 
 async function executeChatCompletion(db, config, {
   model, messages, images, videos, videoUrls, videoLocalPaths,
-  temperature = 0.4, max_tokens = 1024, timeoutMs = 60000,
+  temperature = 0.4, max_tokens = 1024, timeoutMs = 60000, reasoning = null,
 }) {
   const { completeChat } = require('./vlm');
   const { resolveLiteLlmChatConfig } = require('./providers');
@@ -138,6 +148,7 @@ async function executeChatCompletion(db, config, {
       temperature,
       max_tokens,
       timeoutMs,
+      extraBody: reasoning && typeof reasoning === 'object' ? reasoning : null,
     });
   } catch (e) {
     const msg = String(e.message || e);
@@ -146,6 +157,85 @@ async function executeChatCompletion(db, config, {
     }
     throw e;
   }
+}
+
+/**
+ * 按模型声明的思考能力组装透传参数。
+ * 只接受上层 caps.reasoning 里列出的档位，避免客户端把任意字段塞进上游请求。
+ * caps.reasoning.wire：
+ *   'reasoning'（默认，豆包等）→ 扁平 { reasoning_effort: level }
+ *   'reasoning-object'（Gemini）→ { reasoning: { effort: level } }
+ *   LiteLLM 对 Gemini 只在后者形态下返回可读的 message.reasoning_content。
+ */
+function buildChatReasoningPayload(reasoningCaps, body = {}) {
+  if (!reasoningCaps || !reasoningCaps.supported) return null;
+  const out = {};
+  if (reasoningCaps.mode === 'levels') {
+    const level = String(body.reasoning_effort || body.thinkingStrength || reasoningCaps.default || '');
+    if (Array.isArray(reasoningCaps.levels) && reasoningCaps.levels.includes(level)) {
+      if (reasoningCaps.wire === 'reasoning-object') {
+        out.reasoning = { effort: level };
+      } else {
+        out.reasoning_effort = level;
+      }
+    }
+  } else if (reasoningCaps.mode === 'toggle') {
+    const raw = String(body.thinkingStrength || body.thinking || reasoningCaps.default || 'on').toLowerCase();
+    const enabled = !['off', 'disabled', 'false', '0', 'none'].includes(raw);
+    out.thinking = { type: enabled ? 'enabled' : 'disabled' };
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+/**
+ * 对话模型的上游超时（毫秒）。
+ * Gemini Flash（非 Lite）经 LiteLLM 实测常需 90~140s，放宽到 240s；
+ * Flash-Lite 与其它模型保持 90s，让真正的故障尽快失败。
+ * 客户端显式传 b.timeoutMs 时以其为准（但不低于默认值，避免被故意设小绕过）。
+ */
+function chatTimeoutMs(modelCaps, raw) {
+  const DEFAULT_MS = 90000;
+  const SLOW_MS = 240000;
+  const id = String(modelCaps?.modelId || '').toLowerCase();
+  const slow = /gemini[_-]?flash(?!.*lite)/.test(id);
+  const base = slow ? SLOW_MS : DEFAULT_MS;
+  const asked = Number(raw);
+  if (Number.isFinite(asked) && asked > 0) return Math.max(asked, base);
+  return base;
+}
+
+/**
+ * 把模型返回的思考内容从正文里拆出来：
+ * - Doubao 等走 message.reasoning_content
+ * - Gemma 4 把 <thought>…</thought>（或 <thinking>）直接混在 content 里
+ * 返回 { content, reasoning }，客户端分别渲染思考块与回答块。
+ */
+function splitChatThinking(data) {
+  const msg = data?.choices?.[0]?.message;
+  if (!msg) return data;
+  let reasoning = typeof msg.reasoning_content === 'string' ? msg.reasoning_content : '';
+  let content = typeof msg.content === 'string' ? msg.content : '';
+
+  const blockRe = /<(thought|thinking)>([\s\S]*?)<\/\1>/gi;
+  content = content.replace(blockRe, (_, __, inner) => {
+    if (inner && inner.trim()) reasoning = reasoning ? `${reasoning}\n${inner.trim()}` : inner.trim();
+    return '';
+  });
+  // 未闭合的思考标签：把后半段整体当思考，正文留空由客户端兜底
+  const openRe = /<(thought|thinking)>([\s\S]*)$/i;
+  const open = content.match(openRe);
+  if (open) {
+    if (open[2] && open[2].trim()) reasoning = reasoning ? `${reasoning}\n${open[2].trim()}` : open[2].trim();
+    content = content.replace(openRe, '');
+  }
+
+  content = content.replace(/^\s+|\s+$/g, '');
+  reasoning = reasoning.replace(/^\s+|\s+$/g, '');
+  msg.content = content;
+  if (reasoning) msg.reasoning_content = reasoning;
+  else delete msg.reasoning_content;
+  data.reasoning = reasoning;
+  return data;
 }
 
 // 音频等无画面媒体的浏览占位图（sharp 生成，缓存到 thumbs）
@@ -310,64 +400,84 @@ function filterOptions(db, forceRefresh = false) {
   `).get();
   out.retouchedCount = retouchedCountRow?.count || 0;
 
-  for (const dim of primaryDims) {
-    if (dim === 'orientation') {
-      const rows = db.prepare(`
-        SELECT '9:16' as dir, COUNT(*) as c FROM assets a
-        WHERE ${BROWSE_READY} AND
-          (a.origin_orientation = '9:16' OR a.fid IN (SELECT asset_fid FROM derivatives WHERE kind = 'restage_9_16'))
-        UNION ALL
-        SELECT '3:4' as dir, COUNT(*) as c FROM assets a
-        WHERE ${BROWSE_READY} AND
-          (a.origin_orientation = '3:4' OR a.fid IN (SELECT asset_fid FROM derivatives WHERE kind = 'restage_3_4'))
-        UNION ALL
-        SELECT a.origin_orientation as dir, COUNT(*) as c FROM assets a
-        WHERE ${BROWSE_READY} AND a.origin_orientation IS NOT NULL
-          AND a.origin_orientation NOT IN ('9:16','3:4')
-        GROUP BY a.origin_orientation
-        ORDER BY c DESC
-      `).all();
-      const labelMap = orientationLabelMap();
-      out[dim] = rows
-        .filter(r => r.c > 0)
-        .map(r => ({ dir: r.dir, label: labelMap[r.dir] || r.dir, count: r.c }));
-    } else if (dim === 'material_kind') {
-      const rows = db.prepare(`
-        SELECT t.dir, t.label, COUNT(DISTINCT at.asset_fid) as count
-        FROM tag_dict t
-        JOIN asset_tags at ON at.tag_id = t.id
-        JOIN assets a ON a.fid = at.asset_fid
-        WHERE t.dimension = ? AND (t.deprecated IS NULL OR t.deprecated = 0) AND ${BROWSE_READY}
-        GROUP BY t.id HAVING count > 0
-        ORDER BY count DESC
-      `).all(dim);
-      const { getMaterialGroup } = require('./tags-seed');
-      out[dim] = rows.map(r => ({
-        ...r,
-        group: getMaterialGroup(r.dir)
-      }));
-      out.materials_hard = out[dim].filter(r => r.group === 'hard');
-      out.materials_soft = out[dim].filter(r => r.group === 'soft');
-    } else if (dim === 'style_atom' || dim === 'wood_style') {
-      out[dim] = db.prepare(`
-        SELECT t.dir, t.label, t.parent_dir as region, COUNT(DISTINCT at.asset_fid) as count
-        FROM tag_dict t
-        JOIN asset_tags at ON at.tag_id = t.id
-        JOIN assets a ON a.fid = at.asset_fid
-        WHERE t.dimension = ? AND (t.deprecated IS NULL OR t.deprecated = 0) AND ${BROWSE_READY}
-        GROUP BY t.id HAVING count > 0
-        ORDER BY count DESC
-      `).all(dim);
-    } else {
-      out[dim] = db.prepare(`
-        SELECT t.dir, t.label, COUNT(DISTINCT at.asset_fid) as count
-        FROM tag_dict t
-        JOIN asset_tags at ON at.tag_id = t.id
-        JOIN assets a ON a.fid = at.asset_fid
-        WHERE t.dimension = ? AND (t.deprecated IS NULL OR t.deprecated = 0) AND ${BROWSE_READY}
-        GROUP BY t.id HAVING count > 0
-        ORDER BY count DESC
-      `).all(dim);
+  // 需要特殊结构（materials_hard/soft、wood_style 兼容、画幅标签映射）的维度单独处理；
+  // 其余普通标签维度合并为 1 条批量聚合 SQL（PERF-07）。
+  const specialDims = new Set(['orientation', 'material_kind', 'style_atom', 'wood_style']);
+
+  if (primaryDims.includes('orientation')) {
+    const rows = db.prepare(`
+      SELECT '9:16' as dir, COUNT(*) as c FROM assets a
+      WHERE ${BROWSE_READY} AND
+        (a.origin_orientation = '9:16' OR a.fid IN (SELECT asset_fid FROM derivatives WHERE kind = 'restage_9_16'))
+      UNION ALL
+      SELECT '3:4' as dir, COUNT(*) as c FROM assets a
+      WHERE ${BROWSE_READY} AND
+        (a.origin_orientation = '3:4' OR a.fid IN (SELECT asset_fid FROM derivatives WHERE kind = 'restage_3_4'))
+      UNION ALL
+      SELECT a.origin_orientation as dir, COUNT(*) as c FROM assets a
+      WHERE ${BROWSE_READY} AND a.origin_orientation IS NOT NULL
+        AND a.origin_orientation NOT IN ('9:16','3:4')
+      GROUP BY a.origin_orientation
+      ORDER BY c DESC
+    `).all();
+    const labelMap = orientationLabelMap();
+    out.orientation = rows
+      .filter(r => r.c > 0)
+      .map(r => ({ dir: r.dir, label: labelMap[r.dir] || r.dir, count: r.c }));
+  }
+
+  if (primaryDims.includes('material_kind')) {
+    const rows = db.prepare(`
+      SELECT t.dir, t.label, COUNT(DISTINCT at.asset_fid) as count
+      FROM tag_dict t
+      JOIN asset_tags at ON at.tag_id = t.id
+      JOIN assets a ON a.fid = at.asset_fid
+      WHERE t.dimension = ? AND (t.deprecated IS NULL OR t.deprecated = 0) AND ${BROWSE_READY}
+      GROUP BY t.id HAVING count > 0
+      ORDER BY count DESC
+    `).all('material_kind');
+    const { getMaterialGroup } = require('./tags-seed');
+    out.material_kind = rows.map(r => ({
+      ...r,
+      group: getMaterialGroup(r.dir)
+    }));
+    out.materials_hard = out.material_kind.filter(r => r.group === 'hard');
+    out.materials_soft = out.material_kind.filter(r => r.group === 'soft');
+  }
+
+  if (primaryDims.includes('style_atom')) {
+    out.style_atom = db.prepare(`
+      SELECT t.dir, t.label, t.parent_dir as region, COUNT(DISTINCT a.fid) as count
+      FROM tag_dict t
+      LEFT JOIN asset_tags at ON at.tag_id = t.id
+      LEFT JOIN assets a ON a.fid = at.asset_fid AND ${BROWSE_READY}
+      WHERE t.dimension = 'style_atom' AND (t.deprecated IS NULL OR t.deprecated = 0)
+      GROUP BY t.id
+      ORDER BY count DESC, t.id ASC
+    `).all();
+    // 向后兼容旧客户端对 wood_style 的读取
+    out.wood_style = out.style_atom.filter(r => r.region === 'wood_system');
+  } else if (primaryDims.includes('wood_style') && !out.wood_style) {
+    // 保持空或已由 style_atom.wood_system 供给
+    out.wood_style = (out.style_atom || []).filter(r => r.region === 'wood_system');
+  }
+
+  const normalDims = primaryDims.filter(d => !specialDims.has(d));
+  if (normalDims.length) {
+    const ph = normalDims.map(() => '?').join(',');
+    const rows = db.prepare(`
+      SELECT t.dimension, t.dir, t.label, COUNT(DISTINCT at.asset_fid) as count
+      FROM tag_dict t
+      JOIN asset_tags at ON at.tag_id = t.id
+      JOIN assets a ON a.fid = at.asset_fid
+      WHERE t.dimension IN (${ph}) AND (t.deprecated IS NULL OR t.deprecated = 0) AND ${BROWSE_READY}
+      GROUP BY t.dimension, t.id HAVING count > 0
+      ORDER BY t.dimension ASC, count DESC
+    `).all(...normalDims);
+    for (const d of normalDims) out[d] = [];
+    for (const r of rows) {
+      if (!out[r.dimension]) out[r.dimension] = [];
+      out[r.dimension].push({ dir: r.dir, label: r.label, count: r.count });
     }
   }
 
@@ -387,6 +497,7 @@ function filterOptions(db, forceRefresh = false) {
 }
 
 function ensureAssetShelfColumns(db) {
+  if (schemaCheckedOnce(db, 'shelf_cols')) return;
   const names = new Set(db.prepare('PRAGMA table_info(assets)').all().map((c) => c.name));
   if (!names.has('library_shelf')) {
     db.exec("ALTER TABLE assets ADD COLUMN library_shelf TEXT DEFAULT 'original'");
@@ -517,6 +628,15 @@ function queryAssets(db, query = {}) {
     }
   }
 
+  // 相对时间范围（剪辑器素材库选择器使用）：7d / 30d / all，按入库时间倒推自然天数。
+  // 与精确 date 互斥，传了 date 时以 date 为准，避免两套时间条件互相裁剪。
+  const createdWithin = String(query.created_within || '').trim();
+  if (!query.date && (createdWithin === '7d' || createdWithin === '30d')) {
+    const days = createdWithin === '7d' ? 7 : 30;
+    where.push('COALESCE(a.created_at, a.discovered_at, 0) >= ?');
+    args.push(Date.now() - days * 86400000);
+  }
+
   const addTagFilter = (dim, val) => {
     if (!val) return;
     const list = (Array.isArray(val) ? val : String(val).split(','))
@@ -550,7 +670,11 @@ function queryAssets(db, query = {}) {
 
   addTagFilter('space', space);
   addTagFilter('style_atom', style);
-  addTagFilter('wood_style', woodStyle);
+  if (woodStyle) {
+    // 兼容旧 wood_style 入参，映射到已合并的 style_atom 及旧 wood_style
+    addTagFilter('style_atom', woodStyle);
+    addTagFilter('wood_style', woodStyle);
+  }
   // 大区筛选：资产挂 style_atom 叶子，经 parent_dir 归属大区
   if (styleRegion) {
     const regions = (Array.isArray(styleRegion) ? styleRegion : String(styleRegion).split(','))
@@ -651,7 +775,10 @@ function queryAssets(db, query = {}) {
     }
   }
 
-  if (keyword) {
+  // q 为 keyword 的短别名：剪辑器素材库选择器统一用 q 下发关键词，
+  // 两种写法语义完全一致（文件名 + 标签 label/dir），keyword 仍优先。
+  const keywordValue = keyword || query.q;
+  if (keywordValue) {
     where.push(`
       (a.file_name LIKE ? OR a.fid IN (
         SELECT at.asset_fid FROM asset_tags at
@@ -659,7 +786,7 @@ function queryAssets(db, query = {}) {
         WHERE t.label LIKE ? OR t.dir LIKE ?
       ))
     `);
-    args.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`);
+    args.push(`%${keywordValue}%`, `%${keywordValue}%`, `%${keywordValue}%`);
   }
 
   const whereSql = where.join(' AND ');
@@ -671,8 +798,14 @@ function queryAssets(db, query = {}) {
 
   // 排序：默认时间倒序（最新优先），与移动端相册时间线对齐展示今天、昨天、……；
   // 可选 sort=earliest（时间正序）、sort=recommend（AI重构与画幅优先）
-  let orderSql = `COALESCE(a.created_at, a.discovered_at, 0) DESC, (CASE WHEN a.fid IN (SELECT asset_fid FROM derivatives WHERE kind IN ('restage_dual', 'restage_9_16', 'restage_3_4')) THEN 0 ELSE 1 END) ASC, a.fid DESC`;
-  if (isOnlyFavorite || mediaType === 'favorite' || mediaType === 'favorites' || mediaType === 'all_favorites') {
+  let orderSql = `COALESCE(a.created_at, a.discovered_at, 0) DESC, (CASE WHEN EXISTS (SELECT 1 FROM derivatives d WHERE d.asset_fid = a.fid AND d.kind IN ('restage_dual', 'restage_9_16', 'restage_3_4')) THEN 0 ELSE 1 END) ASC, a.fid DESC`;
+  // 显式排序优先于「收藏/精修」的默认排序：调用方传了 name / size 就是要按它排。
+  // 这两个值只影响新调用方，latest / earliest / recommend 的既有分支保持不变。
+  if (sort === 'name') {
+    orderSql = 'a.file_name COLLATE NOCASE ASC, a.fid ASC';
+  } else if (sort === 'size') {
+    orderSql = 'COALESCE(a.size, 0) DESC, a.fid DESC';
+  } else if (isOnlyFavorite || mediaType === 'favorite' || mediaType === 'favorites' || mediaType === 'all_favorites') {
     orderSql = 'a.favorited_at DESC, a.fid DESC';
   } else if (mediaType === 'retouched' || category === 'retouched') {
     orderSql = `(SELECT COALESCE(MAX(created_at), 0) FROM derivatives WHERE asset_fid = a.fid AND kind IN ('style_transferred', 'quick_replace', 'quick_remove', 'quick_insert', 'clarity_enhanced', 'expand', 'retouched', 'manual_edit')) DESC, a.fid DESC`;
@@ -680,7 +813,7 @@ function queryAssets(db, query = {}) {
     orderSql = 'COALESCE(a.created_at, a.discovered_at, 0) ASC, a.fid ASC';
   } else if (sort === 'recommend') {
     orderSql = `
-      (CASE WHEN a.fid IN (SELECT asset_fid FROM derivatives WHERE kind IN ('restage_dual', 'restage_9_16', 'restage_3_4')) THEN 0 ELSE 1 END) ASC,
+      (CASE WHEN EXISTS (SELECT 1 FROM derivatives d WHERE d.asset_fid = a.fid AND d.kind IN ('restage_dual', 'restage_9_16', 'restage_3_4')) THEN 0 ELSE 1 END) ASC,
       (CASE WHEN a.has_watermark = 0 AND (a.origin_orientation IN ('9:16', '3:4')) THEN 0
             WHEN a.has_watermark = 0 THEN 1
             ELSE 2 END) ASC,
@@ -894,7 +1027,7 @@ function serveFromTrash(services, fid, res) {
  * 内部编排调用（如 AI 编辑流水线回读母素材）传 allowNonReady=true 走旁路，
  * 因为那些流程本来就在处理中间态素材。
  */
-function getAssetDetail(services, fid, { allowNonReady = false } = {}) {
+function getAssetDetail(services, fid, { allowNonReady = false, includeSimilar = false } = {}) {
   const { db } = services;
   const statusSql = allowNonReady ? '' : ' AND ' + BROWSE_READY_SQL;
   const asset = db.prepare('SELECT * FROM assets a WHERE a.fid = ? AND ' + AUTH_VISIBLE_SQL + statusSql).get(fid);
@@ -951,7 +1084,9 @@ function getAssetDetail(services, fid, { allowNonReady = false } = {}) {
 
   // CONFLICT-002：重复组概念已退役，组员/组长查询全部移除。
 
-  const similar = searchSimilar(services, fid, { limit: 8 });
+  // PERF-01：详情弹窗默认不阻塞在同步全表相似计算上；
+  // 仅当显式 include_similar=1（或内部明确需要）时才计算。
+  const similar = includeSimilar ? searchSimilar(services, fid, { limit: 8 }) : [];
   const originIdStmt = db.prepare("SELECT id FROM derivatives WHERE asset_fid=? AND kind='origin' LIMIT 1");
   for (const s of similar || []) {
     const sfid = s.fid || s.asset_fid;
@@ -1121,6 +1256,9 @@ async function handleApi(services, req, res, prefix = '/api') {
     ['GET', /^\/assets\/[^\/]+\/similar$/],
     ['GET', /^\/assets\/[^\/]+\/image$/],
     ['HEAD', /^\/assets\/[^\/]+\/image$/],
+    // 导出下载：/assets/<fid>/image/ML_SAVED_xxx.jpg（客户端另存/分享走同一路由）
+    ['GET', /^\/assets\/[^\/]+\/image\/[^\/]+$/],
+    ['HEAD', /^\/assets\/[^\/]+\/image\/[^\/]+$/],
     ['GET', /^\/assets\/[^\/]+\/file$/],
     ['HEAD', /^\/assets\/[^\/]+\/file$/],
     ['GET', /^\/assets\/[^\/]+\/video$/],
@@ -1156,6 +1294,9 @@ async function handleApi(services, req, res, prefix = '/api') {
     ['GET', /^\/lab\/runs\/[^\/]+\/[^\/]+$/],
     ['GET', /^\/cache\/temp\/[^\/]+$/],
     ['HEAD', /^\/cache\/temp\/[^\/]+$/],
+    // 云端视频供应商凭 media_token 免登拉取首帧/尾帧（帧中继：/frames/<token>/<file>）
+    ['GET', /^\/frames\/[^/]+\/[^/]+$/],
+    ['HEAD', /^\/frames\/[^/]+\/[^/]+$/],
     ['GET', /^\/app\/update$/],
     ['DELETE', /^\/assets\/[^\/]+$/],
     ['POST', /^\/assets\/[^\/]+\/delete$/],
@@ -1215,12 +1356,20 @@ async function handleApi(services, req, res, prefix = '/api') {
     ['GET', /^\/studio\/presets$/],
     // SEC-007：presets 写操作移出 viewer 白名单（管理员经 /api/* 操作）
     ['POST', /^\/tools\/extract-frames$/],
-    ['POST', /^\/tools\/convert-video$/]
+    ['POST', /^\/tools\/convert-video$/],
+    ['GET', /^\/assets\/similarity-workbench$/],
+    ['POST', /^\/assets\/similarity-workbench\/resolve$/],
+    ['POST', /^\/assets\/similarity-workbench\/clean-exact$/],
+    ['GET', /^\/assets\/similarity-workbench\/ignored$/],
+    ['DELETE', /^\/assets\/similarity-workbench\/ignored$/]
   ];
   if (pathname === '/viewer' || pathname.startsWith('/viewer/')) {
     pathname = pathname.slice('/viewer'.length) || '/';
-    const hit = VIEWER_WHITELIST.some(([m, re]) => req.method === m && re.test(pathname));
-    if (!hit) return sendJson(res, 404, { error: `视角端不支持的端点: ${pathname}` });
+    // 管理员直接豁免白名单限制；普通 viewer 校验白名单
+    if (!isAdmin) {
+      const hit = VIEWER_WHITELIST.some(([m, re]) => req.method === m && re.test(pathname));
+      if (!hit) return sendJson(res, 404, { error: `视角端不支持的端点: ${pathname}` });
+    }
   }
 
   // SEC-007：治理台写操作 / 技能流水线 / 沙盒执行一律管理员。
@@ -1247,6 +1396,16 @@ async function handleApi(services, req, res, prefix = '/api') {
       isAdmin,
     });
     if (handled) return;
+  }
+
+  // 帧中继公网读取（云端视频供应商拉取首帧/尾帧；免会话，token 在路径中段、文件名在末段）
+  const mFrame = pathname.match(/^\/frames\/([^/]+)\/([^/]+)$/);
+  if (mFrame && (req.method === 'GET' || req.method === 'HEAD')) {
+    return require('./frame-relay').serveFrame(
+      services, req, res,
+      decodeURIComponent(mFrame[2]),
+      decodeURIComponent(mFrame[1])
+    );
   }
 
   // 公开/登录接口
@@ -1347,7 +1506,7 @@ async function handleApi(services, req, res, prefix = '/api') {
 
   if (pathname === '/studio/schema' && req.method === 'GET') {
     try {
-      const data = menuTree.getStudioSchema();
+      const data = menuTree.getStudioSchema(db);
       return sendJson(res, 200, { success: true, data });
     } catch (e) {
       return sendJson(res, 500, { error: e.message });
@@ -1360,7 +1519,7 @@ async function handleApi(services, req, res, prefix = '/api') {
     if (pathname === '/studio/catalog') {
       // 仅允许公共模型目录直达
     } else {
-      const mImgCheck = pathname.match(/^\/assets\/([^\/]+)\/image$/);
+      const mImgCheck = pathname.match(/^\/assets\/([^\/]+)\/(?:image|file)(?:\/([^\/]+))?$/);
       const mMaskCheck = pathname.match(/^\/ai\/masks\/([^\/]+)$/);
       const mTempCheck = pathname.match(/^\/cache\/temp\/([^\/]+)$/);
       const mediaToken = urlObj.searchParams.get('media_token');
@@ -1739,6 +1898,65 @@ async function handleApi(services, req, res, prefix = '/api') {
       return sendJson(res, 200, { success: true, data: out });
     } catch (e) {
       return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  // ── 相似处理工作台 (Similarity Workbench) ──
+  if (pathname === '/assets/similarity-workbench' && req.method === 'GET') {
+    try {
+      const { scanSimilarityWorkbench } = require('./similarity-workbench');
+      const mode = urlObj.searchParams.get('mode') || 'visual';
+      const maxDist = urlObj.searchParams.get('maxDist') || urlObj.searchParams.get('max_dist');
+      const category = urlObj.searchParams.get('category') || 'all';
+      const result = await scanSimilarityWorkbench(services, { mode, maxDist, category });
+      return sendJson(res, 200, { success: true, data: result });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  if (pathname === '/assets/similarity-workbench/resolve' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '需要管理员权限' });
+    try {
+      const body = await parseBody(req);
+      const { resolveSimilarityCluster } = require('./similarity-workbench');
+      const result = await resolveSimilarityCluster(services, { ...body, actor: sessionUser?.username || 'admin' });
+      return sendJson(res, 200, { success: true, data: result });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  if (pathname === '/assets/similarity-workbench/clean-exact' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '需要管理员权限' });
+    try {
+      const { cleanExactDuplicates } = require('./similarity-workbench');
+      const result = await cleanExactDuplicates(services, { actor: sessionUser?.username || 'admin' });
+      return sendJson(res, 200, { success: true, data: result });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  if (pathname === '/assets/similarity-workbench/ignored' && req.method === 'GET') {
+    try {
+      const { listIgnoredPairs } = require('./similarity-workbench');
+      const result = listIgnoredPairs(db);
+      return sendJson(res, 200, { success: true, data: result });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  if (pathname === '/assets/similarity-workbench/ignored' && req.method === 'DELETE') {
+    if (!isAdmin) return sendJson(res, 403, { error: '需要管理员权限' });
+    try {
+      const body = await parseBody(req);
+      const { removeIgnoredPair } = require('./similarity-workbench');
+      removeIgnoredPair(db, body.fidA || body.fid_a, body.fidB || body.fid_b);
+      return sendJson(res, 200, { success: true });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
     }
   }
 
@@ -2423,7 +2641,7 @@ async function handleApi(services, req, res, prefix = '/api') {
         data: {
           stale,
           needRetag: stale.length > 0,
-          fallbackLabel: b.fallbackLabel || '混搭',
+          fallbackLabel: b.fallbackLabel || '其他风格',
         },
       });
     } catch (e) {
@@ -2762,15 +2980,13 @@ async function handleApi(services, req, res, prefix = '/api') {
       ...(Array.isArray(b.images) ? b.images : []),
       ...(b.image ? [b.image] : [])
     ].filter(Boolean);
-    const priorContext = String(b.priorContext || '').trim().slice(0, 6000);
-
+    // 优化只吃「当前提示词 + 本次上传的图片」，不再携带会话上下文
     const userMsg = [
       `原文：\n${rawPrompt}`,
       `当前生成模型: ${modelId}`,
       `当前模式: ${mode}`,
       `已挂槽位: ${JSON.stringify(slots)}`,
       refImages.length ? `已挂载参考图 ${refImages.length} 张。请结合图片里的真实空间、材质和光影来写。正文必须保留 @图片1 到 @图片${refImages.length}，每个编号都要出现，不要删掉，也不要改成「参考图」「这张图」或「图1」。` : '',
-      priorContext ? `同一会话里先前的对话和分析（改写时保留其中的空间、材质和光影，不要换成另一种风格）：\n${priorContext}` : '',
       `已锁定参数（不要写进提示词）: ${JSON.stringify(locked)}`,
     ].filter(Boolean).join('\n');
 
@@ -2817,32 +3033,34 @@ async function handleApi(services, req, res, prefix = '/api') {
     const filterStyle = (urlObj.searchParams.get('style') || '').trim();
     const pinnedOnly = urlObj.searchParams.get('pinned_only') === '1';
 
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS creation_templates (
-        id TEXT PRIMARY KEY,
-        user_id INTEGER DEFAULT 1,
-        title TEXT NOT NULL,
-        prompt TEXT NOT NULL,
-        aspect_ratio TEXT DEFAULT '16:9',
-        origin_images TEXT DEFAULT '[]',
-        result_images TEXT DEFAULT '[]',
-        params_json TEXT DEFAULT '{}',
-        tags TEXT DEFAULT '[]',
-        type TEXT DEFAULT 'image',
-        space TEXT DEFAULT '',
-        style TEXT DEFAULT '',
-        is_pinned INTEGER DEFAULT 0,
-        use_count INTEGER DEFAULT 0,
-        created_at INTEGER,
-        updated_at INTEGER
-      );
-    `);
-    try { db.exec("ALTER TABLE creation_templates ADD COLUMN type TEXT DEFAULT 'image';"); } catch (e) {}
-    try { db.exec("ALTER TABLE creation_templates ADD COLUMN space TEXT DEFAULT '';"); } catch (e) {}
-    try { db.exec("ALTER TABLE creation_templates ADD COLUMN style TEXT DEFAULT '';"); } catch (e) {}
-    try { db.exec("ALTER TABLE creation_templates ADD COLUMN is_pinned INTEGER DEFAULT 0;"); } catch (e) {}
-    try { db.exec("ALTER TABLE creation_templates ADD COLUMN use_count INTEGER DEFAULT 0;"); } catch (e) {}
-    try { db.exec("CREATE INDEX IF NOT EXISTS idx_creation_tpl_sort ON creation_templates(is_pinned DESC, use_count DESC, updated_at DESC);"); } catch (e) {}
+    if (!schemaCheckedOnce(db, 'creation_templates')) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS creation_templates (
+          id TEXT PRIMARY KEY,
+          user_id INTEGER DEFAULT 1,
+          title TEXT NOT NULL,
+          prompt TEXT NOT NULL,
+          aspect_ratio TEXT DEFAULT '16:9',
+          origin_images TEXT DEFAULT '[]',
+          result_images TEXT DEFAULT '[]',
+          params_json TEXT DEFAULT '{}',
+          tags TEXT DEFAULT '[]',
+          type TEXT DEFAULT 'image',
+          space TEXT DEFAULT '',
+          style TEXT DEFAULT '',
+          is_pinned INTEGER DEFAULT 0,
+          use_count INTEGER DEFAULT 0,
+          created_at INTEGER,
+          updated_at INTEGER
+        );
+      `);
+      try { db.exec("ALTER TABLE creation_templates ADD COLUMN type TEXT DEFAULT 'image';"); } catch (e) {}
+      try { db.exec("ALTER TABLE creation_templates ADD COLUMN space TEXT DEFAULT '';"); } catch (e) {}
+      try { db.exec("ALTER TABLE creation_templates ADD COLUMN style TEXT DEFAULT '';"); } catch (e) {}
+      try { db.exec("ALTER TABLE creation_templates ADD COLUMN is_pinned INTEGER DEFAULT 0;"); } catch (e) {}
+      try { db.exec("ALTER TABLE creation_templates ADD COLUMN use_count INTEGER DEFAULT 0;"); } catch (e) {}
+      try { db.exec("CREATE INDEX IF NOT EXISTS idx_creation_tpl_sort ON creation_templates(is_pinned DESC, use_count DESC, updated_at DESC);"); } catch (e) {}
+    }
 
     let sql = 'SELECT * FROM creation_templates WHERE 1=1';
     const params = [];
@@ -3465,6 +3683,7 @@ async function handleApi(services, req, res, prefix = '/api') {
         targetStyle: b.targetStyle || b.style || b.target_style,
         sourceStyle: b.sourceStyle || b.source_style,
         strengthLevel: b.strengthLevel || b.strength,
+        stylePrompt: b.stylePrompt || b.style_prompt || b.styleDescription,
         extraPrompt: b.extraPrompt || b.extra_prompt,
         assetFid: b.assetFid || b.fid,
         yaw: (b.glb && b.glb.yaw) != null ? b.glb.yaw : (b.yaw != null ? b.yaw : b.modelYaw),
@@ -3477,6 +3696,8 @@ async function handleApi(services, req, res, prefix = '/api') {
         expandRatio: b.expandRatio,
         useJimeng: b.useJimeng !== false,
         model: b.model,
+        targetClarity: b.targetClarity || b.clarity || null,
+        removeWatermark: b.removeWatermark === true || b.remove_watermark === true,
         vlmInfo: b.vlmInfo || b.vlm_info || null,
         describeRegion: b.describeRegion,
         avoidBBox: b.avoidBBox || b.clearBBox,
@@ -3498,6 +3719,89 @@ async function handleApi(services, req, res, prefix = '/api') {
     } catch (e) {
       console.error('[edit/run] 执行失败:', e);
       return sendJson(res, 502, { success: false, error: e.message });
+    }
+  }
+
+  // ===== 自定义风格库（风格迁移） =====
+  if (pathname === '/custom-styles' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const { listCustomStyles } = require('./custom-styles');
+      return sendJson(res, 200, { success: true, data: listCustomStyles(db) });
+    } catch (e) {
+      return sendJson(res, 500, { success: false, error: e.message || '自定义风格读取失败' });
+    }
+  }
+  if (pathname === '/custom-styles' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    try {
+      const { createCustomStyle } = require('./custom-styles');
+      const row = createCustomStyle(db, {
+        name: b.name,
+        description: b.description || b.desc,
+        aiPrompt: b.aiPrompt || b.ai_prompt,
+        actor: sessionUser?.username || '',
+      });
+      return sendJson(res, 200, { success: true, data: row });
+    } catch (e) {
+      return sendJson(res, 400, { success: false, error: e.message || '自定义风格保存失败' });
+    }
+  }
+  const mCustomStyle = pathname.match(/^\/custom-styles\/([^/]+)$/);
+  if (mCustomStyle && (req.method === 'PUT' || req.method === 'DELETE')) {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const styleId = decodeURIComponent(mCustomStyle[1]);
+    const styleStore = require('./custom-styles');
+    const existing = styleStore.getCustomStyle(db, styleId);
+    if (!existing) return sendJson(res, 404, { success: false, error: '自定义风格不存在' });
+    if (!isAdmin && existing.createdBy && existing.createdBy !== (sessionUser?.username || '')) {
+      return sendJson(res, 403, { success: false, error: '只能修改自己创建的风格' });
+    }
+    try {
+      if (req.method === 'DELETE') {
+        styleStore.deleteCustomStyle(db, styleId);
+        return sendJson(res, 200, { success: true, data: { id: styleId } });
+      }
+      const b = await parseBody(req);
+      const row = styleStore.updateCustomStyle(db, styleId, {
+        name: b.name,
+        description: b.description != null ? b.description : b.desc,
+        aiPrompt: b.aiPrompt != null ? b.aiPrompt : b.ai_prompt,
+      });
+      return sendJson(res, 200, { success: true, data: row });
+    } catch (e) {
+      return sendJson(res, 400, { success: false, error: e.message || '自定义风格更新失败' });
+    }
+  }
+
+  // ★ 用一次 LLM 把自定义风格翻译成生图模型更吃透的「风格锚定描述」
+  if (pathname === '/ai/style/analyze' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    const name = String(b.name || '').trim();
+    if (!name) return sendJson(res, 400, { success: false, error: '请先填写风格名称' });
+    const description = String(b.description || b.desc || '').trim();
+    try {
+      const { STYLE_ANALYZER_PROMPT, buildStyleAnalyzerUserMessage } = require('./custom-styles');
+      const opt = genGov.resolveOptimizerModel(db, '');
+      const data = await executeChatCompletion(db, config, {
+        model: b.optimizerModelId || opt.modelCode || opt.modelId,
+        messages: [
+          { role: 'system', content: STYLE_ANALYZER_PROMPT },
+          { role: 'user', content: buildStyleAnalyzerUserMessage(name, description) },
+        ],
+        temperature: 0.5,
+        max_tokens: 800,
+        timeoutMs: opt.timeoutMs || 90000,
+      });
+      const content = ((data && data.choices && data.choices[0] && data.choices[0].message
+        && data.choices[0].message.content) || '').trim().replace(/^["'“”]+|["'“”]+$/g, '');
+      if (!content) return sendJson(res, 502, { success: false, error: 'AI 未返回风格描述' });
+      return sendJson(res, 200, { success: true, data: { name, description, aiPrompt: content } });
+    } catch (e) {
+      console.error('[ai/style/analyze] 执行失败:', e);
+      return sendJson(res, 502, { success: false, error: e.message || 'AI 风格解析失败' });
     }
   }
 
@@ -3860,7 +4164,9 @@ async function handleApi(services, req, res, prefix = '/api') {
   const mDetail = pathname.match(/^\/assets\/([^\/]+)$/);
   if (mDetail && req.method === 'GET') {
     const fid = decodeParamLoose(mDetail[1]);
-    const detail = getAssetDetail(services, fid);
+    const detail = getAssetDetail(services, fid, {
+      includeSimilar: urlObj.searchParams.get('include_similar') === '1',
+    });
     if (!detail) {
       // 区分「从未存在」/「已删除可恢复」/「已清理」，
       // 客户端据此展示「去回收站」按钮而不是一句「资产不存在」
@@ -3977,10 +4283,11 @@ async function handleApi(services, req, res, prefix = '/api') {
   }
 
   // 流式输出图片 / 视频 / 音频 / 原始文件
-  const mImg = pathname.match(/^\/assets\/([^\/]+)\/(image|file|video)$/);
+  const mImg = pathname.match(/^\/assets\/([^\/]+)\/(image|file|video)(?:\/([^\/]+))?$/);
   if (mImg && (req.method === 'GET' || req.method === 'HEAD')) {
     const fid = decodeParamLoose(mImg[1]);
     const actionType = mImg[2]; // 'image' | 'file' | 'video'
+    const requestedFileName = mImg[3] ? decodeURIComponent(mImg[3]) : null;
     const isFileOrVideo = actionType === 'file' || actionType === 'video';
     const visCheck = db.prepare('SELECT auth_state FROM assets WHERE fid=?').get(fid);
     if (!visCheck) return sendJson(res, 404, { error: '资产不存在' });
@@ -3988,11 +4295,25 @@ async function handleApi(services, req, res, prefix = '/api') {
       return sendJson(res, 404, { error: '资产不可见' });
     }
     const derivativeId = urlObj.searchParams.get('derivative');
-    const isDl = urlObj.searchParams.get('dl') === '1' || (actionType === 'file' && urlObj.searchParams.get('download') === '1');
+    const isDl = urlObj.searchParams.get('dl') === '1' || urlObj.searchParams.get('download') === '1' || (actionType === 'file' && urlObj.searchParams.get('download') === '1') || !!requestedFileName;
     const isRaw = urlObj.searchParams.get('raw') === '1' || isFileOrVideo;
     const forceLocal = urlObj.searchParams.get('local') === '1';
     const thumb = path.join(config.dataDir, 'cache', 'thumbs', `${fid}.jpg`);
     const assetRow = db.prepare('SELECT thumb_url, main_derivative_id FROM assets WHERE fid=?').get(fid);
+
+    const buildStandardDisposition = (targetName, defaultExt = '.jpg', kind = 'origin') => {
+      const ext = path.extname(targetName || '') || defaultExt;
+      const safeFid = String(fid).replace(/[^A-Za-z0-9_-]/g, '');
+      const safeVar = String(kind || 'origin').replace(/[^A-Za-z0-9_-]/g, '');
+      let baseName = requestedFileName || targetName;
+      if (!baseName || !baseName.toLowerCase().startsWith('ml_saved_')) {
+        baseName = `ML_SAVED_${safeFid}_${safeVar}${ext}`;
+      }
+      const asciiExportName = baseName.replace(/[^\w.-]/g, '_');
+      const utf8ExportName = baseName;
+      const dispositionType = (isDl || urlObj.searchParams.get('download') === '1' || urlObj.searchParams.get('export') === '1') ? 'attachment' : 'inline';
+      return `${dispositionType}; filename="${asciiExportName}"; filename*=UTF-8''${encodeURIComponent(utf8ExportName)}`;
+    };
 
     // 仅在「公网隧道且未指定产物」时 302 外链；内网/本机直接读 NAS，更快
     const host = String(req.headers.host || '').split(':')[0] || '';
@@ -4016,9 +4337,15 @@ async function handleApi(services, req, res, prefix = '/api') {
       // 浏览网格：无 derivative 时允许共享缩略图；raw=1 时强制拉高清原图
       if (!isFileOrVideo && !isDl && !isRaw && fs.existsSync(thumb)) {
         const tbuf = fs.readFileSync(thumb);
+        try {
+          const { registerVisibleImageHashes } = require('./export-tag');
+          registerVisibleImageHashes(db, { buffer: tbuf, sourceFid: fid, variant: 'thumb', exportedBy: 'thumb_serve' });
+        } catch (_) {}
+        const thumbDisp = buildStandardDisposition(`ML_SAVED_${fid}_thumb.jpg`, '.jpg', 'thumb');
         res.writeHead(200, {
           'Content-Type': 'image/jpeg',
           'Content-Length': tbuf.length,
+          'Content-Disposition': thumbDisp,
           'Cache-Control': 'public, max-age=86400'
         });
         if (req.method === 'HEAD') return res.end();
@@ -4074,7 +4401,12 @@ async function handleApi(services, req, res, prefix = '/api') {
       const serveThumbIfAny = () => {
         if (fs.existsSync(thumb)) {
           const b = fs.readFileSync(thumb);
-          res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': b.length, 'Cache-Control': 'public, max-age=86400' });
+          try {
+            const { registerVisibleImageHashes } = require('./export-tag');
+            registerVisibleImageHashes(db, { buffer: b, sourceFid: fid, variant: 'thumb', exportedBy: 'thumb_serve' });
+          } catch (_) {}
+          const thumbDisp = buildStandardDisposition(`ML_SAVED_${fid}_thumb.jpg`, '.jpg', 'thumb');
+          res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': b.length, 'Content-Disposition': thumbDisp, 'Cache-Control': 'public, max-age=86400' });
           res.end(b);
           return true;
         }
@@ -4146,10 +4478,11 @@ async function handleApi(services, req, res, prefix = '/api') {
         const preview = await ensurePreviewJpeg(services, fid, deriv, filePath);
         if (preview && fs.existsSync(preview)) {
           const buf = fs.readFileSync(preview);
+          const previewDisp = buildStandardDisposition(path.basename(preview), '.jpg', deriv?.kind || 'preview');
           res.writeHead(200, {
             'Content-Type': 'image/jpeg',
             'Content-Length': buf.length,
-            'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(path.basename(preview))}`,
+            'Content-Disposition': previewDisp,
             'Cache-Control': 'private, max-age=3600, must-revalidate'
           });
           if (req.method === 'HEAD') return res.end();
@@ -4166,6 +4499,7 @@ async function handleApi(services, req, res, prefix = '/api') {
       const mime = (contentType.includes('video') || contentType.includes('audio')) ? contentType : defaultMime;
       const range = req.headers.range;
       const acceptRanges = 'bytes';
+      const mediaDisp = buildStandardDisposition(fileName, ext, deriv?.kind || (isVideo ? 'video' : 'audio'));
 
       if (range) {
         const m = /^bytes=(\d*)-(\d*)$/.exec(String(range).trim());
@@ -4185,7 +4519,7 @@ async function handleApi(services, req, res, prefix = '/api') {
               'Content-Length': end - start + 1,
               'Content-Range': `bytes ${start}-${end}/${total}`,
               'Accept-Ranges': acceptRanges,
-              'Content-Disposition': `${isDl ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+              'Content-Disposition': mediaDisp,
               'Cache-Control': isDl ? 'private, no-store' : 'private, max-age=3600, must-revalidate'
             });
             if (req.method === 'HEAD') return res.end();
@@ -4200,18 +4534,31 @@ async function handleApi(services, req, res, prefix = '/api') {
         'Content-Type': mime,
         'Content-Length': total,
         'Accept-Ranges': acceptRanges,
-        'Content-Disposition': `${isDl ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+        'Content-Disposition': mediaDisp,
         'Cache-Control': isDl ? 'private, no-store' : 'private, max-age=3600, must-revalidate'
       });
       if (req.method === 'HEAD') return res.end();
       return fs.createReadStream(filePath).pipe(res);
     }
 
-    const outBuf = fs.readFileSync(filePath);
+    let outBuf = fs.readFileSync(filePath);
+    const isJpeg = (contentType || '').includes('jpeg') || (contentType || '').includes('jpg') || ext === '.jpg' || ext === '.jpeg';
+    if ((isDl || urlObj.searchParams.get('download') === '1' || urlObj.searchParams.get('export') === '1') && isJpeg) {
+      try {
+        const { prepareExportableBuffer } = require('./export-tag');
+        outBuf = prepareExportableBuffer(db, outBuf, { fid, variant: deriv?.kind || 'origin', mime: contentType, exportedBy: 'http_export' });
+      } catch (_) {}
+    } else {
+      try {
+        const { registerVisibleImageHashes } = require('./export-tag');
+        registerVisibleImageHashes(db, { buffer: outBuf, sourceFid: fid, variant: deriv?.kind || 'origin', exportedBy: 'http_serve' });
+      } catch (_) {}
+    }
+    const finalDisp = buildStandardDisposition(fileName, ext, deriv?.kind || 'origin');
     res.writeHead(200, {
       'Content-Type': contentType,
       'Content-Length': outBuf.length,
-      'Content-Disposition': `${isDl ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+      'Content-Disposition': finalDisp,
       'Cache-Control': isDl ? 'private, no-store' : 'private, max-age=3600, must-revalidate'
     });
     if (req.method === 'HEAD') return res.end();
@@ -5614,30 +5961,48 @@ async function handleApi(services, req, res, prefix = '/api') {
     const assets = db.prepare(`
       SELECT fid, file_name FROM assets WHERE status = 'ready'
     `).all();
-    let updated = 0;
-    let fallback = 0;
-    for (const a of assets) {
-      const tags = db.prepare(`
-        SELECT t.dimension, t.label FROM asset_tags at
-        JOIN tag_dict t ON t.id = at.tag_id WHERE at.asset_fid=?
-      `).all(a.fid);
+    // PERF-08：一次性批量取标签，避免逐素材 N+1 查询。
+    const allTagRows = db.prepare(`
+      SELECT at.asset_fid, t.dimension, t.label FROM asset_tags at
+      JOIN tag_dict t ON t.id = at.tag_id
+    `).all();
+    const tagsByFid = new Map();
+    for (const t of allTagRows) {
+      if (!tagsByFid.has(t.asset_fid)) tagsByFid.set(t.asset_fid, []);
+      tagsByFid.get(t.asset_fid).push(t);
+    }
+    const jobs = assets.map((a) => {
       const tagMap = {};
-      tags.forEach(t => {
+      for (const t of tagsByFid.get(a.fid) || []) {
         if (!tagMap[t.dimension]) tagMap[t.dimension] = [];
         tagMap[t.dimension].push(t.label);
-      });
+      }
       const parts = [];
       if (tagMap.space) parts.push(`空间:${tagMap.space.join(',')}`);
       if (tagMap.style_atom) parts.push(`风格:${tagMap.style_atom.join(',')}`);
       if (tagMap.material_kind) parts.push(`材质:${tagMap.material_kind.join(',')}`);
       if (tagMap.palette) parts.push(`配色:${tagMap.palette.join(',')}`);
       if (a.file_name) parts.push(`文件:${a.file_name}`);
-      const caption = parts.join(' ') || '室内设计现代空间素材';
-      const embed = await embedCaption(services, caption, { provider: embeddingProvider, model: embeddingModel });
-      storeVector(db, a.fid, embed.vec, embed.model);
-      updated++;
-      if (embed.fallback) fallback++;
-    }
+      return { fid: a.fid, caption: parts.join(' ') || '室内设计现代空间素材' };
+    });
+
+    // PERF-08：并发度 6 的批处理池，替代逐条串行等待 Embedding 接口。
+    const CONCURRENCY = 6;
+    let updated = 0;
+    let fallback = 0;
+    let cursor = 0;
+    const worker = async () => {
+      while (true) {
+        const i = cursor++;
+        if (i >= jobs.length) return;
+        const job = jobs[i];
+        const embed = await embedCaption(services, job.caption, { provider: embeddingProvider, model: embeddingModel });
+        storeVector(db, job.fid, embed.vec, embed.model);
+        updated++;
+        if (embed.fallback) fallback++;
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, jobs.length) || 1 }, worker));
     return sendJson(res, 200, {
       success: true,
       data: { updated, fallback, status: getVectorStatus(db, { configuredModel: embeddingModel, configuredProvider: embeddingProvider }) }
@@ -6766,7 +7131,13 @@ module.exports = {
       });
       return sendJson(res, 200, result);
     } catch (e) {
-      const status = e.code === 'seedance_required' || e.code === 'portrait_missing' || e.code === 'portrait_not_active' ? 400 : 500;
+      const userFixable = [
+        'seedance_required', 'portrait_missing', 'portrait_not_active',
+        'agnes_keyframe_missing', 'agnes_bad_duration', 'agnes_bad_ratio',
+        'public_base_missing', 'public_base_private',
+        'frame_blob', 'frame_bad_data_url', 'frame_unresolved',
+      ].includes(e.code);
+      const status = userFixable ? 400 : 500;
       return sendJson(res, status, { error: e.message, code: e.code || 'error' });
     }
   }
@@ -6872,16 +7243,23 @@ module.exports = {
       const trimmed = trimChatMessages(messages, budget);
       messages = trimmed.messages.length ? trimmed.messages : messages;
 
-      const data = await executeChatCompletion(db, config, {
+      // 思考档位：只按该模型在官方目录声明的能力组装，未声明则忽略客户端传值
+      const reasoningPayload = buildChatReasoningPayload(modelCaps && modelCaps.reasoning, b);
+
+      const data = splitChatThinking(await executeChatCompletion(db, config, {
         model,
         messages,
         images: b.images,
         temperature: b.temperature ?? 0.4,
         max_tokens: b.max_tokens ?? 1024,
-        timeoutMs: b.timeoutMs || 90000
-      });
+        timeoutMs: chatTimeoutMs(modelCaps, b.timeoutMs),
+        reasoning: reasoningPayload,
+      }));
       return sendJson(res, 200, {
         ...data,
+        reasoning: data.reasoning || '',
+        reasoning_caps: modelCaps && modelCaps.reasoning ? modelCaps.reasoning : null,
+        applied_reasoning: reasoningPayload,
         context: {
           kept: trimmed.kept,
           dropped: trimmed.dropped,
@@ -7089,6 +7467,21 @@ module.exports = {
       return sendJson(res, 200, { success: true, data: u });
     } catch (err) {
       return sendJson(res, 400, { error: err.message });
+    }
+  }
+
+  // POST /upload — 剪辑台（OpenCut fork）统一上传入口。
+  // 编辑器侧历史调用为 /api/upload，此前后端未实现，导致「未知的 API 端点: /upload」。
+  // 这里复用流式上传（支持视频/图片、大文件），返回顶层 fid 供前端直接使用。
+  if (pathname === '/upload' && req.method === 'POST') {
+    if (!sessionUser) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const { handleDirectUpload } = require('./stream-upload');
+      const r = await handleDirectUpload(services, req, { source: 'edit' });
+      if (!r || !r.fid) return sendJson(res, 400, { error: '入库失败' });
+      return sendJson(res, 200, { success: true, ...r });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
     }
   }
 

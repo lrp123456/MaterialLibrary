@@ -44,6 +44,30 @@ function qwenRoutes(baseUrl) {
   };
 }
 
+/**
+ * 参考图瘦身：长边超过 maxEdge 时等比缩小并转 JPEG q88。
+ * 解析失败（非图片）时返回 null，调用方回退原图。
+ */
+async function compactRefBuffer(buf, maxEdge = 1536) {
+  try {
+    const img = sharp(buf, { failOn: 'none' });
+    const meta = await img.metadata();
+    if (!meta || !meta.width || !meta.height) return null;
+    const longest = Math.max(meta.width, meta.height);
+    let chain = img;
+    if (longest > maxEdge) chain = chain.resize({ width: meta.width >= meta.height ? maxEdge : null, height: meta.height > meta.width ? maxEdge : null, withoutEnlargement: true });
+    // 已经足够小且为 JPEG/WebP：重编码没有收益，原样保留
+    if (longest <= maxEdge && (meta.format === 'jpeg' || meta.format === 'webp')) return null;
+    if (meta.hasAlpha) {
+      // 蒙版/透明参考保留 alpha（压平白底会破坏编辑选区），仅缩放不改格式
+      return longest > maxEdge ? await chain.png({ compressionLevel: 9 }).toBuffer() : null;
+    }
+    return await chain.flatten({ background: '#ffffff' }).jpeg({ quality: 88, mozjpeg: true }).toBuffer();
+  } catch {
+    return null;
+  }
+}
+
 /** 把本地图片文件读成 base64（ncnn-vulkan 的 refs 接受内联 base64） */
 async function imageFileToBase64(filePath) {
   const buf = fs.readFileSync(filePath);
@@ -69,6 +93,8 @@ async function submitJob({ baseUrl, prompt, negative, width, height, steps, cfg,
   const snappedH = snapMultiple(height, attached.length ? 32 : 16);
   if (snappedW) form.append('width', String(snappedW));
   if (snappedH) form.append('height', String(snappedH));
+  // 实测：本机 ncnn 版步数 8→20 只多约 5s（耗时主要是每张图重新加载模型 ~85s + 像素量），
+  // 20 步质量/指令遵循更好，保留 20 为默认。
   const stepNum = qwenModel === 'turbo' ? 8 : steps;
   if (stepNum) form.append('steps', String(stepNum));
   if (cfg != null) form.append('cfg', String(cfg));
@@ -159,15 +185,29 @@ async function runImageJob(services, adapter, input) {
     .concat(input.imageLocalPaths || [])
     .concat(input.imageUrls || [])
     .filter(Boolean);
-  const refs = [];
-  for (const raw of rawRefs) {
+  const { resolveAssetBuffer } = require('../ai-tasks');
+  const resolved = await Promise.all(rawRefs.map(async (raw) => {
     try {
-      const { resolveAssetBuffer } = require('../ai-tasks');
-      const buf = await resolveAssetBuffer(services, raw);
-      if (buf && buf.length) refs.push(buf);
-      else logger?.warn?.(`[qwenimage] 参考图没有落到本地文件: ${String(raw).slice(0, 180)}`);
+      return await resolveAssetBuffer(services, raw);
     } catch (e) {
       logger?.warn?.(`[qwenimage] 参考图读取失败: ${e.message}`);
+      return null;
+    }
+  }));
+  const refs = [];
+  for (let i = 0; i < resolved.length; i++) {
+    let buf = resolved[i];
+    if (buf && buf.length) {
+      // 传输优化：参考图长边压到 1536（生成分辨率本就 ≤2K，更大的参考图只会增加
+      // multipart 体积与面板解码时间，不带来质量收益）。JPEG q88 通常 3~8 倍压缩。
+      const compact = await compactRefBuffer(buf);
+      if (compact && compact.length < buf.length) {
+        logger?.info?.(`[qwenimage] 参考图 #${i + 1} 压缩 ${(buf.length / 1024 / 1024).toFixed(1)}MB → ${(compact.length / 1024 / 1024).toFixed(2)}MB`);
+        buf = compact;
+      }
+      refs.push(buf);
+    } else {
+      logger?.warn?.(`[qwenimage] 参考图没有落到本地文件: ${String(rawRefs[i]).slice(0, 180)}`);
     }
   }
 
@@ -178,6 +218,7 @@ async function runImageJob(services, adapter, input) {
   const qwenModel = extras.qwen_model === 'turbo' || extras.model === 'turbo' ? 'turbo' : 'base';
 
   let submitted;
+  const tSubmitStart = Date.now();
   try {
     submitted = await submitJob({
       baseUrl,
@@ -205,11 +246,12 @@ async function runImageJob(services, adapter, input) {
   if (!taskId) {
     return { ok: false, success: false, error: `QwenImage 未返回 task_id: ${JSON.stringify(submitted).slice(0, 200)}`, files: [] };
   }
-  logger?.info?.(`[qwenimage] 任务已提交 ${taskId}（${input.width}x${input.height} seed=${seed}），轮询中`);
+  logger?.info?.(`[qwenimage] 任务已提交 ${taskId}（${input.width}x${input.height} seed=${seed}，提交含传输 ${Date.now() - tSubmitStart}ms，参考图 ${refs.length} 张），轮询中`);
 
   // 轮询
   const start = Date.now();
   let lastStatus = '';
+  let pendingMs = 0;
   let task = null;
   while (Date.now() - start < timeoutMs) {
     await new Promise(r => setTimeout(r, pollIntervalMs));
@@ -221,6 +263,10 @@ async function runImageJob(services, adapter, input) {
     }
     const st = task.status || '';
     if (st !== lastStatus) {
+      if (st === 'processing' && lastStatus === 'pending') {
+        pendingMs = Date.now() - start;
+        logger?.info?.(`[qwenimage] ${taskId} 排队等待 ${(pendingMs / 1000).toFixed(0)}s 后开始处理`);
+      }
       logger?.info?.(`[qwenimage] ${taskId} → ${st} ${task.progress || 0}% ${task.message || ''}`);
       lastStatus = st;
     }
@@ -233,6 +279,7 @@ async function runImageJob(services, adapter, input) {
   }
 
   let files;
+  const tDlStart = Date.now();
   try {
     files = await downloadOutputs({
       productBase,
@@ -241,6 +288,7 @@ async function runImageJob(services, adapter, input) {
       prefix: `qwen_${taskId}`,
       logger,
     });
+    logger?.info?.(`[qwenimage] 产物下载 ${files.length} 张耗时 ${Date.now() - tDlStart}ms`);
   } catch (e) {
     return { ok: false, success: false, error: `QwenImage 产物下载失败: ${e.message}`, files: [] };
   }
@@ -248,7 +296,7 @@ async function runImageJob(services, adapter, input) {
     return { ok: false, success: false, error: 'QwenImage 完成但无产物', files: [] };
   }
 
-  return { ok: true, success: true, files, taskId, seed, elapsedMs: Date.now() - start };
+  return { ok: true, success: true, files, taskId, seed, elapsedMs: Date.now() - start, panelElapsedSec: Number(task.elapsed) || null };
 }
 
-module.exports = { runImageJob, submitJob, fetchTask, downloadOutputs, imageFileToBase64, snapMultipleOf32, snapMultiple, qwenRoutes };
+module.exports = { runImageJob, submitJob, fetchTask, downloadOutputs, imageFileToBase64, snapMultipleOf32, snapMultiple, qwenRoutes, compactRefBuffer };

@@ -97,6 +97,23 @@ function ensureTables(db) {
     );
     CREATE INDEX IF NOT EXISTS idx_phash_bl ON phash_blacklist(phash);
   `);
+  // 保证 phash_blacklist 唯一索引 (Batch D.5)
+  try {
+    db.exec(`
+      DELETE FROM phash_blacklist WHERE id NOT IN (
+        SELECT MIN(id) FROM phash_blacklist GROUP BY phash
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_phash_blacklist_phash ON phash_blacklist(phash);
+    `);
+  } catch (_) {}
+
+  // assets 表补充 reject_reason/detail
+  try {
+    const aCols = db.prepare('PRAGMA table_info(assets)').all().map((r) => r.name);
+    if (!aCols.includes('reject_reason')) db.exec('ALTER TABLE assets ADD COLUMN reject_reason TEXT');
+    if (!aCols.includes('reject_detail')) db.exec('ALTER TABLE assets ADD COLUMN reject_detail TEXT');
+  } catch (_) {}
+
   // 历史表补列（SQLite ALTER ADD COLUMN 幂等：重复执行会抛错，需捕获）
   const cols = db.prepare('PRAGMA table_info(asset_trash)').all().map((r) => r.name);
   if (!cols.includes('dispose_source')) {
@@ -276,6 +293,41 @@ function softDeleteAsset(services, fid, { deletedBy = '', reason = 'user_delete'
   db.transaction(() => {
     addBlacklist(db, keys, { reason, createdBy: deletedBy });
     db.prepare("UPDATE assets SET status='deleted', updated_at=? WHERE fid=?").run(now, fid);
+
+    // 血缘同步清除（软删时即断开孤儿引用）：衍生图或素材软删除后，
+    // 立即清洗其他存活资产对该 fid 的引用，避免血缘图展示已删除的幽灵节点导致「关系没有查出来」报错
+    try {
+      db.prepare('UPDATE assets SET parent_fid=NULL, updated_at=? WHERE parent_fid=?').run(now, fid);
+      db.prepare('UPDATE assets SET source_asset_id=NULL, updated_at=? WHERE source_asset_id=?').run(now, fid);
+      const holders = db.prepare(
+        "SELECT fid, lineage_json FROM assets WHERE lineage_json IS NOT NULL AND lineage_json LIKE ?"
+      ).all(`%${fid}%`);
+      for (const holder of holders) {
+        let rec = null;
+        try { rec = JSON.parse(holder.lineage_json); } catch { continue; }
+        if (!rec || typeof rec !== 'object') continue;
+        let changed = false;
+        if (rec.parentFid === fid) { rec.parentFid = ''; changed = true; }
+        if (Array.isArray(rec.refFids)) {
+          const next = rec.refFids.filter((x) => x && x !== fid);
+          if (next.length !== rec.refFids.length) { rec.refFids = next; changed = true; }
+        }
+        if (Array.isArray(rec.children)) {
+          const next = rec.children.filter((c) => (typeof c === 'string' ? c !== fid : c?.fid !== fid));
+          if (next.length !== rec.children.length) { rec.children = next; changed = true; }
+        }
+        if (Array.isArray(rec.editUses)) {
+          const next = rec.editUses.filter((u) => u && u.fid !== fid);
+          if (next.length !== rec.editUses.length) { rec.editUses = next; changed = true; }
+        }
+        if (changed) {
+          db.prepare('UPDATE assets SET lineage_json=?, updated_at=? WHERE fid=?')
+            .run(JSON.stringify(rec), now, holder.fid);
+        }
+      }
+    } catch (lineageErr) {
+      logger?.warn?.('[assets-delete] 软删清理血缘异常:', lineageErr.message);
+    }
     db.prepare(`
       INSERT INTO asset_trash (fid, file_name, nas_rel, trash_rel, size, deleted_by, deleted_at, dispose_source, dispose_detail, dispose_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -657,6 +709,37 @@ function purgeTrashAssetOne(services, fid) {
     db.prepare('DELETE FROM derivatives WHERE asset_fid=?').run(fid);
     db.prepare('DELETE FROM asset_tags WHERE asset_fid=?').run(fid);
     db.prepare('DELETE FROM asset_colors WHERE asset_fid=?').run(fid);
+
+    // 血缘同步清除：物理删除后，其他资产对该 fid 的引用会变成永久孤儿节点
+    // （点击即「关系没有读出来」）。先断开列引用，再清洗 lineage_json 内的记录。
+    try {
+      db.prepare('UPDATE assets SET parent_fid=NULL WHERE parent_fid=?').run(fid);
+      db.prepare('UPDATE assets SET source_asset_id=NULL WHERE source_asset_id=?').run(fid);
+      const holders = db.prepare(
+        "SELECT fid, lineage_json FROM assets WHERE lineage_json IS NOT NULL AND lineage_json LIKE ?"
+      ).all(`%${fid}%`);
+      for (const holder of holders) {
+        let rec = null;
+        try { rec = JSON.parse(holder.lineage_json); } catch { continue; }
+        if (!rec || typeof rec !== 'object') continue;
+        let changed = false;
+        if (rec.parentFid === fid) { rec.parentFid = ''; changed = true; }
+        if (Array.isArray(rec.refFids)) {
+          const next = rec.refFids.filter((x) => x && x !== fid);
+          if (next.length !== rec.refFids.length) { rec.refFids = next; changed = true; }
+        }
+        if (Array.isArray(rec.editUses)) {
+          const next = rec.editUses.filter((u) => u && u.fid !== fid);
+          if (next.length !== rec.editUses.length) { rec.editUses = next; changed = true; }
+        }
+        if (changed) {
+          db.prepare('UPDATE assets SET lineage_json=? WHERE fid=?').run(JSON.stringify(rec), holder.fid);
+        }
+      }
+    } catch (lineageErr) {
+      logger?.warn?.(`[assets-delete] lineage cleanup failed for ${fid}:`, lineageErr.message);
+    }
+
     db.prepare('DELETE FROM assets WHERE fid=?').run(fid);
     db.prepare('DELETE FROM asset_trash WHERE fid=?').run(fid);
     // 连带清理附属表的孤儿行。

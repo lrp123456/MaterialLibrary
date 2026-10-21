@@ -643,10 +643,21 @@ function convertAgnesVideoRequest(arg = {}) {
 
   const VALID_RATIOS = ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'];
   let aspect_ratio = String(merged.aspect_ratio || merged.ratio || '16:9').trim();
-  if (!VALID_RATIOS.includes(aspect_ratio)) aspect_ratio = '16:9';
+  if (!VALID_RATIOS.includes(aspect_ratio)) {
+    const err = new Error(`[Agnes Video] 画幅不支持「${aspect_ratio}」，可选：${VALID_RATIOS.join(' / ')}`);
+    err.code = 'agnes_bad_ratio';
+    throw err;
+  }
 
-  const secNum = parseInt(String(merged.seconds ?? merged.duration ?? 5), 10);
-  const seconds = !isNaN(secNum) && secNum >= 4 && secNum <= 12 ? String(secNum) : '5';
+  // 时长：官方仅支持 4–12 秒整数。越界必须显式报错，不能静默回退（否则前端显示 60s、实际却按 5s 生成）。
+  const rawSec = merged.seconds ?? merged.duration ?? 5;
+  const secNum = parseInt(String(rawSec), 10);
+  if (isNaN(secNum) || secNum < 4 || secNum > 12) {
+    const err = new Error(`[Agnes Video] 时长需在 4–12 秒之间（当前：${rawSec}），请调整时长参数后重试`);
+    err.code = 'agnes_bad_duration';
+    throw err;
+  }
+  const seconds = String(secNum);
 
   const payload = {
     model: canon.vendorModelId || 'agnes-video-2.5-flash',
@@ -668,15 +679,18 @@ function convertAgnesVideoRequest(arg = {}) {
     if (f1) payload.first_frame = f1;
     if (f2) payload.last_frame = f2;
     if (!payload.first_frame && !payload.last_frame) {
-      throw new Error('[Agnes Video keyframe] 需要至少一张可公网访问的首帧或尾帧 URL');
+      const err = new Error('[Agnes Video 首尾帧] 需要至少一张首帧或尾帧图片（云端会自行拉取）。请重新上传首尾帧图片，或切换到「文生视频」模式');
+      err.code = 'agnes_keyframe_missing';
+      throw err;
     }
   } else if (mode === 'reference') {
     if (images.length > 0) payload.images = images.slice(0, 5);
     if (audios.length > 0) payload.audios = audios.slice(0, 3);
   }
 
-  if (payload.first_frame) payload.first_frame_image = payload.first_frame;
-  if (payload.last_frame) payload.last_frame_image = payload.last_frame;
+  // 注意：Agnes Video 云端只接受 first_frame/last_frame，
+  // 不接受 first_frame_image/last_frame_image（会 400 invalid_request），
+  // 因此这里**不能**像图片协议那样补 *_image 别名字段。
   return {
     ...payload,
     prompt: compiled.prompt,

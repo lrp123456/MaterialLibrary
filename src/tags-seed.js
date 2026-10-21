@@ -1,17 +1,17 @@
 /**
  * 标签字典种子：
- * 室内主维：space（单选）/ style_atom（文化风格，多选）/ wood_style（木系深浅×做旧，组内四选一）/ material_kind（硬装≤2 + 软装≤2）/ orientation（质检）
+ * 室内主维：space（单选）/ style_atom（文化风格与木系风格，多选0-3个，永不为空）/ material_kind（硬装≤2 + 软装≤2）/ orientation（质检）
  * 主色走 assets.dominant_color 与 asset_colors（12 色板质检，不进 VLM）
  * 单品主维：furniture_* / classic_design（本轮不重打）
- * 辅助维与 flags/color_style/旧 palette 等全部 deprecated
- * 风格树：地域/文化大区 → 叶子；木系扩展与文化叶子并存（wood_style 单选可空）
+ * 辅助维与 flags/color_style/旧 palette/wood_style 等全部 deprecated
+ * 风格树：地域/文化/木系大区 → 叶子；四种木色并入 style_atom 统一打标与检索；去除「混搭」，兜底落入「其他风格」
  */
 
 const DIMENSIONS = [
   { dimKey: 'space',              label: '空间',         multi: false, isPrimary: true },
   { dimKey: 'style_atom',         label: '风格',         multi: true,  isPrimary: true },
   { dimKey: 'style_region',       label: '风格大区',     multi: false, isPrimary: false },
-  { dimKey: 'wood_style',         label: '木系风格',     multi: false, isPrimary: true },
+  { dimKey: 'wood_style',         label: '木系风格',     multi: false, deprecated: true },
   { dimKey: 'material_kind',     label: '材质',         multi: true,  isPrimary: true },
   { dimKey: 'orientation',        label: '画幅',         multi: false, isPrimary: true },
 
@@ -100,13 +100,13 @@ const VALUES = [
   ['american_country','美式乡村','style_atom','americas', ['美式农舍','农舍','美式乡村风']],
   // 东南亚 / 其他
   ['nanyang_resort','南洋度假','style_atom','southeast_asia', ['南洋','度假风']],
-  ['eclectic_other','混搭','style_atom','other_region', ['其他混搭','Japandi']],
+  ['other','其他风格','style_atom','other_region', ['其他','未分类风格','混搭','其他混搭']],
 
-  // wood_style（木系 2×2：深浅×做旧，组内四选一，可空；日式视觉只看木面）
-  ['natural_wood','自然原木风','wood_style','wood_system', ['原木风','浅色原木','日式']],
-  ['dark_wood','深色原木风','wood_style','wood_system', ['深色原木','深木']],
-  ['natural_vintage_wood','自然复古原木风','wood_style','wood_system', ['浅色做旧原木']],
-  ['dark_vintage_wood','深色复古原木风','wood_style','wood_system', ['深色做旧原木','深色石头复古']],
+  // 木系风格 4 种（并入 style_atom 统一打标与检索）
+  ['natural_wood','自然原木风','style_atom','wood_system', ['原木风','浅色原木','日式','浅色原木风']],
+  ['dark_wood','深色原木风','style_atom','wood_system', ['深色原木','深木','深木风']],
+  ['natural_vintage_wood','自然复古原木风','style_atom','wood_system', ['浅色做旧原木','做旧原木']],
+  ['dark_vintage_wood','深色复古原木风','style_atom','wood_system', ['深色做旧原木','深色石头复古']],
 
   // ---------------- 人像专属维度 ----------------
   ['female','女','gender', null, ['女性','女生','女士']],

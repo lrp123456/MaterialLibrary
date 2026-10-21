@@ -3,6 +3,9 @@
  * 用途：保存后即使被改名/重编码部分场景，入库时仍可识别为本端导出件并拒绝重复入库。
  * 标记串：MLX1|<json>，json: {fid,kind,ts,sha256?}
  */
+const crypto = require('crypto')
+const fs = require('fs')
+
 const MARKER_PREFIX = 'MLX1|'
 
 function buildExportTag({ fid, kind, ts, sha256 } = {}) {
@@ -19,7 +22,8 @@ function buildExportTag({ fid, kind, ts, sha256 } = {}) {
 function injectJpegComMarker(buf, tag) {
   try {
     if (!buf || buf.length < 4 || buf[0] !== 0xff || buf[1] !== 0xd8) return buf
-    const comment = Buffer.from(String(tag), 'utf8')
+    const tagStr = (tag && typeof tag === 'object') ? buildExportTag(tag) : String(tag || '')
+    const comment = Buffer.from(tagStr, 'utf8')
     // COM: FF FE len(2, 含自身) data
     const len = comment.length + 2
     if (len > 0xffff) return buf
@@ -71,6 +75,13 @@ function extractExportTag(buf) {
 
 function parseTag(raw) {
   const t = String(raw || '').trim()
+  const start = t.indexOf('{')
+  const end = t.lastIndexOf('}')
+  if (start >= 0 && end > start) {
+    try {
+      return JSON.parse(t.slice(start, end + 1))
+    } catch (_) {}
+  }
   if (!t.startsWith(MARKER_PREFIX)) {
     try {
       return JSON.parse(t)
@@ -95,6 +106,56 @@ function isExportedByTag(buf, extra = {}) {
   return true
 }
 
+/**
+ * 为任意前端可见图片文件计算 sha256/md5 并登记到 export_registry
+ */
+function registerVisibleImageHashes(db, { filePath, buffer, sourceFid, variant = 'origin', exportedBy = 'system' } = {}) {
+  if (!db || !sourceFid) return null;
+  try {
+    const buf = buffer || (filePath && fs.existsSync(filePath) ? fs.readFileSync(filePath) : null);
+    if (!buf || !buf.length) return null;
+    const sha256 = crypto.createHash('sha256').update(buf).digest('hex');
+    const md5 = crypto.createHash('md5').update(buf).digest('hex');
+    const now = Date.now();
+    db.prepare(`
+      INSERT INTO export_registry (sha256, md5, source_fid, variant, file_size, exported_by, exported_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(sha256) DO UPDATE SET
+        md5 = COALESCE(excluded.md5, export_registry.md5),
+        source_fid = COALESCE(export_registry.source_fid, excluded.source_fid),
+        variant = COALESCE(export_registry.variant, excluded.variant)
+    `).run(sha256, md5, String(sourceFid), String(variant || 'origin'), buf.length, exportedBy, now);
+    return { sha256, md5, size: buf.length };
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * 对导出的 JPEG Buffer 自动注入 MLX1 COM 暗标，并将注入前后的双份哈希全部写入 export_registry
+ */
+function prepareExportableBuffer(db, buf, { fid, variant = 'origin', mime = 'image/jpeg', exportedBy = 'export' } = {}) {
+  if (!Buffer.isBuffer(buf) || buf.length < 4) return buf;
+  // 1. 先登记原始可见图本身哈希（应对浏览器直接右键另存缓存图）
+  const rawHashes = registerVisibleImageHashes(db, { buffer: buf, sourceFid: fid, variant, exportedBy });
+  // 2. 若是 JPEG（0xFF 0xD8），注入 MLX1 COM 标记并同时登记注入后的新哈希
+  const isJpeg = (buf[0] === 0xff && buf[1] === 0xd8) || /jpe?g/i.test(String(mime || ''));
+  if (!isJpeg) return buf;
+  try {
+    const tag = {
+      fid: String(fid || 'unknown'),
+      kind: String(variant || 'origin'),
+      sha256: rawHashes ? rawHashes.sha256 : '',
+    };
+    const taggedBuf = injectJpegComMarker(buf, tag);
+    if (taggedBuf && taggedBuf !== buf) {
+      registerVisibleImageHashes(db, { buffer: taggedBuf, sourceFid: fid, variant: `${variant}_tagged`, exportedBy });
+      return taggedBuf;
+    }
+  } catch (_) {}
+  return buf;
+}
+
 module.exports = {
   MARKER_PREFIX,
   buildExportTag,
@@ -102,4 +163,6 @@ module.exports = {
   extractExportTag,
   parseTag,
   isExportedByTag,
+  registerVisibleImageHashes,
+  prepareExportableBuffer,
 }

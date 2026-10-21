@@ -18,22 +18,21 @@ export function StoragePersistenceDialog() {
 		<Dialog open={showDialog} onOpenChange={(open) => !open && onDismiss()}>
 			<DialogContent className="sm:max-w-md">
 				<DialogHeader>
-					<DialogTitle>Don't lose your projects</DialogTitle>
+					<DialogTitle>别让工程丢失</DialogTitle>
 				</DialogHeader>
 				<DialogBody>
 					<p className="text-base text-muted-foreground">
-						Your browser can automatically delete your projects when storage
-						runs low.
+						浏览器在存储空间不足时，可能会自动清理你本地的剪辑工程。
 					</p>
 					<p className="text-base text-muted-foreground">
-						Allow OpenCut to protect them?
+						是否允许剪辑工作台申请持久化存储保护这些工程？
 					</p>
 				</DialogBody>
 				<DialogFooter>
 					<Button variant="outline" onClick={onDismiss}>
-						Not now
+						暂不开启
 					</Button>
-					<Button onClick={onConfirm}>Allow</Button>
+					<Button onClick={onConfirm}>允许保护</Button>
 				</DialogFooter>
 			</DialogContent>
 		</Dialog>
