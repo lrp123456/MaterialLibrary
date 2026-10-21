@@ -15,6 +15,11 @@ import { processMediaAssets } from "@/media/processing";
 import { generateUUID } from "@/utils/id";
 import type { TProject } from "@/project/types";
 import type { SerializedProject } from "@/services/storage/types";
+import {
+	formatMediaFidRef,
+	parseMediaFidRef,
+	type MediaFidRef,
+} from "./fid-ref";
 
 const FID_MAP_KEY = "ml_media_fid_map";
 const SNAPSHOT_MAP_KEY = "ml_project_snapshot_map";
@@ -51,14 +56,55 @@ function writeMap(key: string, value: Record<string, string>) {
 	}
 }
 
-export function registerMediaFid(mediaId: string, fid: string) {
+/** 深拷贝并把所有 mediaId 按映射换成新的本地 id。 */
+function remapMediaIds<T>({
+	value,
+	map,
+}: {
+	value: T;
+	map: Record<string, string>;
+}): T {
+	const walk = (node: unknown): unknown => {
+		if (Array.isArray(node)) return node.map(walk);
+		if (node && typeof node === "object") {
+			const out: Record<string, unknown> = {};
+			for (const [key, child] of Object.entries(node as Record<string, unknown>)) {
+				out[key] =
+					key === "mediaId" && typeof child === "string" && map[child]
+						? map[child]
+						: walk(child);
+			}
+			return out;
+		}
+		return node;
+	};
+	return walk(value) as T;
+}
+
+/**
+ * 记录本地 mediaId → 云端版本引用。
+ * 传 derivativeId 表示该本地素材实际是某衍生版，备份时据此还原版本。
+ */
+export function registerMediaFid(mediaId: string, fid: string, derivativeId?: string) {
+	if (!mediaId || !fid) return;
 	const map = readMap(FID_MAP_KEY);
-	map[mediaId] = fid;
+	map[mediaId] = formatMediaFidRef(fid, derivativeId);
 	writeMap(FID_MAP_KEY, map);
 }
 
+/** 只要裸 fid（AI 引用、上传去重等旧调用方依赖这个语义）。 */
 export function getMediaFid(mediaId: string): string | null {
-	return readMap(FID_MAP_KEY)[mediaId] || null;
+	const raw = readMap(FID_MAP_KEY)[mediaId];
+	if (!raw) return null;
+	return parseMediaFidRef(raw).fid || null;
+}
+
+/** 完整版本引用，需要区分衍生版时用这个。 */
+export function getMediaFidRef(mediaId: string): MediaFidRef | null {
+	const raw = readMap(FID_MAP_KEY)[mediaId];
+	if (!raw) return null;
+	const parsed = parseMediaFidRef(raw);
+	return parsed.fid ? parsed : null;
 }
 
 async function uploadFileToLibrary(file: File): Promise<string> {
@@ -79,10 +125,34 @@ async function uploadFileToLibrary(file: File): Promise<string> {
 export interface SnapshotSummary {
 	id: string;
 	name: string;
+	group: string;
 	rev: number;
 	assetsCount: number;
 	sizeBytes: number;
 	updatedAt: number;
+}
+
+export function getSnapshotBinding(
+	projectId: string,
+): { id: string; rev: number } | null {
+	try {
+		const raw = readMap(SNAPSHOT_MAP_KEY)[projectId];
+		if (!raw) return null;
+		const parsed = JSON.parse(raw);
+		if (!parsed || !parsed.id) return null;
+		return { id: String(parsed.id), rev: Number(parsed.rev) || 1 };
+	} catch {
+		return null;
+	}
+}
+
+export function bindSnapshot(
+	projectId: string,
+	binding: { id: string; rev: number },
+) {
+	const map = readMap(SNAPSHOT_MAP_KEY);
+	map[projectId] = JSON.stringify(binding);
+	writeMap(SNAPSHOT_MAP_KEY, map);
 }
 
 export async function listCloudSnapshots(): Promise<SnapshotSummary[]> {
@@ -116,6 +186,7 @@ export async function backupProject({
 	const media = await storageService.loadAllMediaAssets({ projectId });
 	const fidMap = readMap(FID_MAP_KEY);
 	const fids: string[] = [];
+	const mediaFidMap: Record<string, string> = {};
 	let uploaded = 0;
 
 	let done = 0;
@@ -124,32 +195,66 @@ export async function backupProject({
 		const known = fidMap[item.id];
 		if (known) {
 			fids.push(known);
+			mediaFidMap[item.id] = known;
 			continue;
 		}
 		onProgress?.(`上传素材 ${done}/${media.length}`, 5 + Math.round((done / Math.max(1, media.length)) * 60));
 		const fid = await uploadFileToLibrary(item.file);
 		registerMediaFid(item.id, fid);
 		fids.push(fid);
+		mediaFidMap[item.id] = fid;
 		uploaded += 1;
 	}
 
-	const snapshotMap = readMap(SNAPSHOT_MAP_KEY);
-	const existing = snapshotMap[projectId] ? JSON.parse(snapshotMap[projectId]) : null;
+	const existing = getSnapshotBinding(projectId);
 
 	onProgress?.("写入快照", 80);
 	const payload = {
 		name: project.metadata.name,
-		data: project,
+		group: project.metadata.group || "",
+		// 本地 mediaId → 库里 fid 跟着工程一起存云端，拉取端据此换成自己的本地 id
+		data: { ...project, mediaFidMap },
 		assets: [...new Set(fids)].map((fid) => ({ fid, role: "media" })),
 		...(existing ? { rev: existing.rev } : {}),
 	};
 
-	const url = existing ? `/editor-api/snapshots/${existing.id}` : "/editor-api/snapshots";
-	const res = await fetch(url, {
-		method: existing ? "PUT" : "POST",
+	let url = existing ? `/editor-api/snapshots/${existing.id}` : "/editor-api/snapshots";
+	let method: "POST" | "PUT" = existing ? "PUT" : "POST";
+	let res = await fetch(url, {
+		method,
 		headers: headers(true),
 		body: JSON.stringify(payload),
 	});
+
+	// 绑定已失效（快照被删）：退化成新建
+	if (existing && res.status === 404) {
+		url = "/editor-api/snapshots";
+		method = "POST";
+		const { rev: _dropRev, ...rest } = payload;
+		res = await fetch(url, {
+			method,
+			headers: headers(true),
+			body: JSON.stringify(rest),
+		});
+	}
+
+	// 版本冲突：拉回最新 rev 后重试一次（本地内容为准）
+	if (existing && res.status === 409) {
+		const latestRes = await fetch(`/editor-api/snapshots/${existing.id}`, {
+			headers: headers(),
+		});
+		if (latestRes.ok) {
+			const latest = await latestRes.json();
+			const latestRev = Number(latest?.snapshot?.rev) || existing.rev;
+			bindSnapshot(projectId, { id: existing.id, rev: latestRev });
+			res = await fetch(`/editor-api/snapshots/${existing.id}`, {
+				method: "PUT",
+				headers: headers(true),
+				body: JSON.stringify({ ...payload, rev: latestRev }),
+			});
+		}
+	}
+
 	if (!res.ok) {
 		const text = await res.text();
 		if (res.status === 409) {
@@ -159,8 +264,7 @@ export async function backupProject({
 	}
 	const data = await res.json();
 	const snap = data.snapshot;
-	snapshotMap[projectId] = JSON.stringify({ id: snap.id, rev: snap.rev });
-	writeMap(SNAPSHOT_MAP_KEY, snapshotMap);
+	bindSnapshot(projectId, { id: snap.id, rev: snap.rev });
 
 	onProgress?.("完成", 100);
 	return { snapshotId: snap.id, rev: snap.rev, assets: payload.assets.length, uploaded };
@@ -193,27 +297,34 @@ export async function pullSnapshot({
 	if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
 	const { snapshot } = await res.json();
 
-	const serialized = snapshot.data as SerializedProject;
+	const serialized = snapshot.data as SerializedProject & {
+		mediaFidMap?: Record<string, string>;
+	};
+	const remoteMediaFidMap = serialized.mediaFidMap || {};
+	const serializedWithoutMap: SerializedProject = { ...serialized };
+	delete (serializedWithoutMap as { mediaFidMap?: Record<string, string> }).mediaFidMap;
 	const localId = `local_${Date.now().toString(36)}`;
 	const projectName = snapshot.name || serialized.metadata.name || "云端工程";
 
 	const localSerialized: SerializedProject = {
-		...serialized,
+		...serializedWithoutMap,
 		metadata: {
 			...serialized.metadata,
 			id: localId,
 			name: `${projectName}`,
+			// 分组随工程一起从云端带下来，保持两端归类一致
+			group: snapshot.group || serialized.metadata.group || "",
 			createdAt: serialized.metadata.createdAt,
 			updatedAt: new Date().toISOString(),
 		},
 	};
 
 	onProgress?.("写入工程", 15);
-	await storageService.saveSerializedProject({ project: localSerialized });
 
 	const assets = (snapshot.assets || []) as Array<{ fid: string; role: string }>;
 	const mediaAssets = assets.filter((a) => a.role === "media" || a.role === "audio");
 	const missing: string[] = [];
+	const fidToLocalId: Record<string, string> = {};
 	let imported = 0;
 
 	for (let i = 0; i < mediaAssets.length; i += 1) {
@@ -244,12 +355,32 @@ export async function pullSnapshot({
 					mediaAsset,
 				});
 				registerMediaFid(mediaAsset.id, fid);
+				fidToLocalId[fid] = mediaAsset.id;
 				imported += 1;
 			}
 		} catch {
 			missing.push(fid);
 		}
 	}
+
+	// 云端不带本地 mediaId，拉取后时间轴里引用的仍是旧机器上的 id，
+	// 按备份时记录的映射换成新导入的本地 id，否则画面会整片空白。
+	const mediaFidMap = remoteMediaFidMap;
+	const idRemap: Record<string, string> = {};
+	for (const [oldId, fid] of Object.entries(mediaFidMap)) {
+		const localMediaId = fidToLocalId[fid];
+		if (localMediaId) idRemap[oldId] = localMediaId;
+	}
+
+	onProgress?.("写入工程", 92);
+	await storageService.saveSerializedProject({
+		project:
+			Object.keys(idRemap).length > 0
+				? remapMediaIds({ value: localSerialized, map: idRemap })
+				: localSerialized,
+	});
+	// 绑定云端快照：此后该工程的改动会由后台自动同步回同一个快照
+	bindSnapshot(localId, { id: snapshot.id, rev: snapshot.rev || 1 });
 
 	onProgress?.("完成", 100);
 	return {

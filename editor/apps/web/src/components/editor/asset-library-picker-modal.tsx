@@ -448,9 +448,9 @@ export function AssetLibraryPickerModal({
 				}
 				createdCount += 1;
 
-				if (picked.fid) {
-					// 先绑定裸 fid，保证备份不丢素材；版本号在 Task 7 接上
-					registerMediaFid(created.id, picked.fid);
+				if (picked?.fid) {
+					// 版本引用交给云备份/拉取共用，保证衍生版本能随工程往返
+					registerMediaFid(created.id, picked.fid, picked.derivativeId || "");
 				}
 
 				if (autoInsertTimeline || directInsertTimeline) {
