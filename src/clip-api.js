@@ -25,22 +25,35 @@ function sendJson(res, status, data) {
   res.end(body);
 }
 
-function clipAssetsList(db, { limit = 60, offset = 0 } = {}) {
+/**
+ * 云素材库列表。
+ *
+ * 注意：这里查的是**素材库全量**，不是"被云端快照引用的素材"。
+ * 早先版本用 JOIN clip_snapshot_assets，结果没备份过工程的用户看到的永远是空列表。
+ * "被哪些剪辑工程引用"只是 used_by 这个计数字段，不该作为过滤条件。
+ */
+function clipAssetsList(db, { limit = 60, offset = 0, kind = '' } = {}) {
   ensureSnapshotTables(db);
+  const where = ["a.status <> 'deleted'"];
+  const args = [];
+  if (kind) {
+    where.push('a.kind = ?');
+    args.push(String(kind));
+  }
+  const clause = where.join(' AND ');
   const rows = db.prepare(`
     SELECT a.fid, a.file_name, a.kind, a.width, a.height, a.duration_s AS duration,
            a.thumb_url, a.size, a.updated_at,
-           COUNT(cs.snapshot_id) AS used_by
+           (SELECT COUNT(*) FROM clip_snapshot_assets cs WHERE cs.fid = a.fid) AS used_by
     FROM assets a
-    JOIN clip_snapshot_assets cs ON cs.fid = a.fid
-    GROUP BY a.fid
-    ORDER BY used_by DESC, a.updated_at DESC
+    WHERE ${clause}
+    ORDER BY a.updated_at DESC
     LIMIT ? OFFSET ?
-  `).all(Math.min(200, Math.max(1, limit)), Math.max(0, offset));
-  const total = db.prepare(`
-    SELECT COUNT(DISTINCT fid) AS c FROM clip_snapshot_assets
-  `).get().c;
-  return { items: rows, total: Number(total) || 0 };
+  `).all(...args, Math.min(200, Math.max(1, limit)), Math.max(0, offset));
+  const total = Number(
+    db.prepare(`SELECT COUNT(*) AS c FROM assets a WHERE ${clause}`).get(...args).c,
+  ) || 0;
+  return { items: rows, total };
 }
 
 async function handleClipApi(services, req, res) {
