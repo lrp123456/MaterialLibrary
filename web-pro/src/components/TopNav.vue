@@ -219,8 +219,9 @@ import StudioIcon from './StudioIcon.vue';
 import {
   ensureServerBase,
   listCandidates,
-  onServerStatusChange,
-  serverLabel
+  // server-resolve 导出的是原名，别名只在 api.js 里做；这里直接按原名导入
+  onStatusChange as onServerStatusChange,
+  currentLabel as serverLabel
 } from '../server-resolve.js';
 
 const props = defineProps({

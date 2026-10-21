@@ -902,8 +902,8 @@ function MediaActions({
 					</DropdownMenu>
 					<TooltipContent>
 						<p>
-							Sort by {sortBy} (
-							{sortOrder === "asc" ? "ascending" : "descending"})
+							按「{({ name: "名称", type: "类型", duration: "时长", size: "文件大小" } as Record<string, string>)[sortBy] ?? sortBy}」
+							{sortOrder === "asc" ? "升序" : "降序"}排列
 						</p>
 					</TooltipContent>
 				</Tooltip>
@@ -916,7 +916,7 @@ function MediaActions({
 				className="items-center justify-center gap-1.5"
 			>
 				<HugeiconsIcon icon={CloudUploadIcon} />
-				Import
+				导入
 			</Button>
 		</div>
 	);

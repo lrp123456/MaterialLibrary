@@ -207,7 +207,8 @@ export function formatRulerLabel({
 	}
 
 	const frameWithinSecond = getFrameWithinSecond({ timeInSeconds, fps: frameRateToFloat(fps) });
-	return `${frameWithinSecond}f`;
+	// 刻度用中文单位，保持与界面其余文案一致
+	return `${frameWithinSecond}帧`;
 }
 
 /**
