@@ -400,7 +400,6 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import { fetchAssets, fetchAssetDetail, getAssetImageUrl, getAssetOriginalUrl, getDerivativeImageUrl } from '../api';
 import {
   derivativeLabel,
-  versionKey,
   versionsOf as buildVersions,
   stripVersionKey,
   toggleSelection,
@@ -698,8 +697,11 @@ async function ensureDerivatives(item) {
 }
 
 async function openVersions(item) {
-  if (!item.fid || item.kind === 'video' || item.kind === 'audio') {
-    pick(item, versionsOf(item)[0]);
+  // 无 fid 的条目无法下载/入库，直接忽略点击
+  if (!item.fid) return;
+  if (item.kind === 'video' || item.kind === 'audio') {
+    const origin = versionsOf(item)[0];
+    if (origin) pick(item, origin);
     return;
   }
   if (expandedFid.value === item.fid) {
@@ -724,12 +726,17 @@ function pick(item, version) {
 }
 
 function selectAllCurrentPage() {
+  const next = selected.value.slice();
   for (const item of libraryItems.value) {
-    if (selected.value.length >= props.maxSelect) break;
-    const key = versionKey(item.fid, '');
-    if (isSelected(key)) continue;
-    selected.value.push(stripVersionKey(versionsOf(item)[0]));
+    if (next.length >= props.maxSelect) break;
+    if (!item.fid) continue;
+    // 该素材已有任一版本入选时跳过，避免原图与衍生版重复占位
+    if (next.some((v) => v.fid === item.fid)) continue;
+    const version = versionsOf(item)[0];
+    if (!version) continue;
+    next.push({ ...version, name: version.name || item.name });
   }
+  selected.value = next;
 }
 
 function confirm() {
