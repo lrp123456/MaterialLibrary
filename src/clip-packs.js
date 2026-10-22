@@ -35,9 +35,21 @@ function sendJson(res, status, data) {
 }
 
 function packsDir(config) {
-  const dir = process.env.CLIP_PACKS_DIR
+  const primary = process.env.CLIP_PACKS_DIR
     ? path.resolve(process.env.CLIP_PACKS_DIR)
     : path.join(config.dataDir, 'clip-packs');
+  // 自愈：主目录缺失/为空时回退到仓库内的 data/clip-packs。
+  // 历史坑：.env 里的 CLIP_PACKS_DIR 写的是 Windows 路径，Linux 后端
+  // path.resolve 成无效相对路径 → 扫描结果恒空（表现为"资源包不在"）。
+  const fallback = path.join(__dirname, '..', 'data', 'clip-packs');
+  const usable = (dir) => {
+    try {
+      return fs.existsSync(dir) && fs.readdirSync(dir).some((n) => !n.startsWith('.'));
+    } catch {
+      return false;
+    }
+  };
+  const dir = usable(primary) ? primary : fallback;
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -318,7 +330,14 @@ async function handlePacks(services, req, res, url) {
 
   if (p === '/editor-api/packs' && req.method === 'GET') {
     const enabledOnly = url.searchParams.get('all') !== '1';
-    sendJson(res, 200, { items: listPacks(db, { enabledOnly }) });
+    let items = listPacks(db, { enabledOnly });
+    // 自愈：表空 = 从未成功扫描登记（目录换过/被清过），自动扫一次再返回。
+    // 不再依赖用户手动点「重新加载资源包」。
+    if (items.length === 0) {
+      try { scanPacks(db, config); } catch (_) { /* 扫描失败保持空表 */ }
+      items = listPacks(db, { enabledOnly });
+    }
+    sendJson(res, 200, { items });
     return true;
   }
 
