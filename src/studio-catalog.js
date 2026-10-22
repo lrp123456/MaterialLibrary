@@ -71,23 +71,30 @@ const R_NONE = {
 };
 
 /* ---------- 文本模型思考能力（客户端据此渲染档位选择器） ---------- *
- * mode:
- *   'levels' 多档位，经 LiteLLM reasoning_effort 透传
- *   'toggle' 只有开/关，经 LiteLLM thinking 透传
- *   'always' 模型自带思考，参数无法关闭（如 Gemma 4）
- *   'none'   上游未提供思考控制
- * supported=false 时不显示档位选择器，只显示说明。
+ * 档位以模型真实能力为准：前端只渲染 levels，后端只接受 levels 内的值。
+ * 官方文档（2026-10）：
+ *   Gemini 3.8 Flash        low / medium / high，默认 medium，不支持 minimal
+ *   Gemini 3.5 Flash-Lite   minimal / low / medium / high，默认 minimal
+ *   豆包 Seed 2.1           minimal / low / medium / high，默认 high
+ * Gemini 的 OpenAI 兼容入口只认扁平 reasoning_effort；发 none 会被上游拒绝，
+ * 再叠加 LiteLLM fallback 就会出现「选 Gemini、Agnes 回答」的静默替换。
  */
 const REASONING = {
-  gemini: {
+  geminiFlashLite: {
     supported: true,
     mode: 'levels',
-    levels: ['none', 'low', 'medium', 'high'],
-    default: 'none',
-    // Gemini 经 LiteLLM 必须发 reasoning:{effort} 才会在 message.reasoning_content 返回可读思考；
-    // 发 reasoning_effort 只能拿到加密 thought_signature。豆包则用扁平的 reasoning_effort。
-    wire: 'reasoning-object',
-    note: '经 LiteLLM 透传 reasoning.effort；Gemini Flash-Lite 默认思考很轻，reasoning_content 自动拆到思考块',
+    levels: ['minimal', 'low', 'medium', 'high'],
+    default: 'minimal',
+    wire: 'reasoning_effort',
+    note: 'Gemini Flash-Lite 支持 minimal/low/medium/high，默认 minimal；只影响思考深度，思考过程不回传',
+  },
+  geminiFlash: {
+    supported: true,
+    mode: 'levels',
+    levels: ['low', 'medium', 'high'],
+    default: 'medium',
+    wire: 'reasoning_effort',
+    note: 'Gemini Flash 当前别名支持 low/medium/high，默认 medium；上游不接受 minimal',
   },
   gemmaAlways: {
     supported: false,
@@ -100,8 +107,9 @@ const REASONING = {
     supported: true,
     mode: 'levels',
     levels: ['minimal', 'low', 'medium', 'high'],
-    default: 'medium',
-    note: '豆包 Seed 2.1 经 LiteLLM 透传 reasoning_effort；minimal=关闭思考直接回答，low/medium/high 调节思维链长度，medium 为官方默认；reasoning_content 自动拆到思考块',
+    default: 'high',
+    wire: 'reasoning_effort',
+    note: '豆包 Seed 2.1 支持 minimal/low/medium/high，官方默认 high；reasoning_content 自动拆到思考块',
   },
   agnesNone: {
     supported: false,
@@ -126,7 +134,7 @@ const OFFICIAL_STUDIO = {
       M({
         id: 'gemini_flash_lite_latest', name: 'Gemini Flash-Lite', model_code: 'gemini-flash-lite-latest',
         provider: 'gemini', providerName: 'Google', badge: '多模态免费', capabilities: 'chat,vision,tag',
-        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: true, reasoning: REASONING.gemini },
+        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: true, reasoning: REASONING.geminiFlashLite },
       }),
       M({
         id: 'agnes3_0flash', name: 'Agnes 3.0 Flash', model_code: 'agnes-3.0-flash',
@@ -156,7 +164,7 @@ const OFFICIAL_STUDIO = {
       M({
         id: 'gemini_flash_latest', name: 'Gemini Flash', model_code: 'gemini-flash-latest',
         provider: 'gemini', providerName: 'Google', badge: '多模态备用', capabilities: 'chat,vision,tag',
-        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: false, reasoning: REASONING.gemini },
+        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: false, reasoning: REASONING.geminiFlash },
       }),
       M({
         id: 'doubao_seed_2_1_lite', dbId: 'volc_doubao_seed_2_1_lite', name: 'Doubao-Seed-2.1-lite', model_code: 'doubao-seed-2-1-lite-260915',

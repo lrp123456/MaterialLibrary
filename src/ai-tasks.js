@@ -78,7 +78,8 @@ function viewerAssetRef(raw) {
   if (!m) return null;
   let derivative = '';
   try {
-    derivative = new URL(s).searchParams.get('derivative') || '';
+    // 前端发的是相对路径（/api/assets/...?derivative=123），必须带 base 才能解析 query。
+    derivative = new URL(s, 'http://local.invalid').searchParams.get('derivative') || '';
   } catch {}
   return { fid: decodeURIComponent(m[1]), derivative };
 }

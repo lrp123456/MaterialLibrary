@@ -2672,6 +2672,8 @@ function getModelPublicCatalog(db) {
         family: fam.family,
         familyName: fam.familyName,
         reasoning: m.caps?.reasoning || null,
+        input: m.caps?.input || null,
+        output: m.caps?.output || null,
         contextTokens: Number(m.caps?.contextTokens) > 0 ? Number(m.caps.contextTokens) : null,
         common_controls: commonControls,
         public_params: publicParams,

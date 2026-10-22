@@ -96,7 +96,7 @@ function decodeParamLoose(raw) {
 
 async function executeChatCompletion(db, config, {
   model, messages, images, videos, videoUrls, videoLocalPaths,
-  temperature = 0.4, max_tokens = 1024, timeoutMs = 60000, reasoning = null,
+  temperature = 0.4, max_tokens = 4096, timeoutMs = 60000, reasoning = null,
 }) {
   const { completeChat } = require('./vlm');
   const { resolveLiteLlmChatConfig } = require('./providers');
@@ -118,13 +118,14 @@ async function executeChatCompletion(db, config, {
   }
 
   let msgs = Array.isArray(messages) ? messages.map((m) => ({ ...m })) : [];
+  let imageNotes = [];
+  let tempKeys = [];
   if (extraImages.length) {
-    const { chatImageDataUrl } = require('./chat-images');
-    const imageParts = [];
-    for (const img of extraImages) {
-      const url = await chatImageDataUrl(db, config, img);
-      if (url) imageParts.push({ type: 'image_url', image_url: { url } });
-    }
+    const { prepareChatImages } = require('./chat-images');
+    const prepared = await prepareChatImages(db, config, extraImages);
+    imageNotes = prepared.notes;
+    tempKeys = prepared.tempKeys;
+    const imageParts = prepared.parts;
     const lastUser = [...msgs].reverse().find((m) => m.role === 'user');
     if (lastUser) {
       if (typeof lastUser.content === 'string') {
@@ -140,7 +141,7 @@ async function executeChatCompletion(db, config, {
   }
 
   try {
-    return await completeChat({
+    const data = await completeChat({
       baseUrl: llm.baseUrl,
       apiKey: llm.apiKey,
       model: llm.model,
@@ -150,41 +151,43 @@ async function executeChatCompletion(db, config, {
       timeoutMs,
       extraBody: reasoning && typeof reasoning === 'object' ? reasoning : null,
     });
+    if (imageNotes.length) data.image_notes = imageNotes;
+    return data;
   } catch (e) {
     const msg = String(e.message || e);
+    if (imageNotes.length) e.image_notes = imageNotes;
     if (/ECONNREFUSED|fetch failed|network|ENOTFOUND|timed out|timeout/i.test(msg)) {
-      throw new Error(`LiteLLM 不可用（${llm.baseUrl}）：${msg}`);
+      const wrapped = new Error(`LiteLLM 不可用（${llm.baseUrl}）：${msg}`);
+      if (imageNotes.length) wrapped.image_notes = imageNotes;
+      throw wrapped;
     }
     throw e;
+  } finally {
+    if (tempKeys.length) {
+      const { cleanupChatTempObjects } = require('./chat-images');
+      await cleanupChatTempObjects({ db, config }, tempKeys);
+    }
   }
 }
 
 /**
  * 按模型声明的思考能力组装透传参数。
  * 只接受上层 caps.reasoning 里列出的档位，避免客户端把任意字段塞进上游请求。
- * caps.reasoning.wire：
- *   'reasoning'（默认，豆包等）→ 扁平 { reasoning_effort: level }
- *   'reasoning-object'（Gemini）→ { reasoning: { effort: level } }
- *   LiteLLM 对 Gemini 只在后者形态下返回可读的 message.reasoning_content。
+ * Gemini 的 OpenAI 兼容入口与豆包都使用扁平 reasoning_effort；
+ * 不能发 reasoning:{effort}，也不能发 Gemini 不支持的 none。
+ * 客户端传了模型不支持的档位时回落到该模型默认档，实际值随响应回传。
+ * LiteLLM 的 openai provider 未声明 reasoning_effort，drop_params 会把它吞掉，
+ * 必须同时发 allowed_openai_params 才会真正透传到上游。
  */
 function buildChatReasoningPayload(reasoningCaps, body = {}) {
-  if (!reasoningCaps || !reasoningCaps.supported) return null;
-  const out = {};
-  if (reasoningCaps.mode === 'levels') {
-    const level = String(body.reasoning_effort || body.thinkingStrength || reasoningCaps.default || '');
-    if (Array.isArray(reasoningCaps.levels) && reasoningCaps.levels.includes(level)) {
-      if (reasoningCaps.wire === 'reasoning-object') {
-        out.reasoning = { effort: level };
-      } else {
-        out.reasoning_effort = level;
-      }
-    }
-  } else if (reasoningCaps.mode === 'toggle') {
-    const raw = String(body.thinkingStrength || body.thinking || reasoningCaps.default || 'on').toLowerCase();
-    const enabled = !['off', 'disabled', 'false', '0', 'none'].includes(raw);
-    out.thinking = { type: enabled ? 'enabled' : 'disabled' };
-  }
-  return Object.keys(out).length ? out : null;
+  if (!reasoningCaps || !reasoningCaps.supported || reasoningCaps.mode !== 'levels') return null;
+  const levels = Array.isArray(reasoningCaps.levels) ? reasoningCaps.levels : [];
+  if (!levels.length) return null;
+  const asked = String(body.reasoning_effort ?? body.thinkingStrength ?? '').trim().toLowerCase();
+  const level = levels.includes(asked)
+    ? asked
+    : (levels.includes(reasoningCaps.default) ? reasoningCaps.default : levels[0]);
+  return { reasoning_effort: level, allowed_openai_params: ['reasoning_effort'] };
 }
 
 /**
@@ -2897,7 +2900,7 @@ async function handleApi(services, req, res, prefix = '/api') {
           model: chatCode,
           messages,
           images: Array.isArray(b.images) ? b.images : [],
-          max_tokens: b.max_tokens || 1024,
+          max_tokens: b.max_tokens || 4096,
           timeoutMs: b.timeoutMs || 90000,
         });
         const reply = data?.choices?.[0]?.message?.content || '';
@@ -7251,15 +7254,25 @@ module.exports = {
         messages,
         images: b.images,
         temperature: b.temperature ?? 0.4,
-        max_tokens: b.max_tokens ?? 1024,
+        max_tokens: b.max_tokens ?? 4096,
         timeoutMs: chatTimeoutMs(modelCaps, b.timeoutMs),
         reasoning: reasoningPayload,
       }));
+      const requestedModel = exec?.model?.vendor_model_id || model;
+      const servedModel = data?.model ? String(data.model) : '';
+      const substituted = Boolean(servedModel && requestedModel && servedModel !== String(requestedModel));
+      const finishReason = data?.choices?.[0]?.finish_reason || null;
       return sendJson(res, 200, {
         ...data,
         reasoning: data.reasoning || '',
+        requested_model: requestedModel,
+        served_model: servedModel || null,
+        substituted,
+        finish_reason: finishReason,
+        truncated: finishReason === 'length',
         reasoning_caps: modelCaps && modelCaps.reasoning ? modelCaps.reasoning : null,
         applied_reasoning: reasoningPayload,
+        image_notes: Array.isArray(data.image_notes) ? data.image_notes : [],
         context: {
           kept: trimmed.kept,
           dropped: trimmed.dropped,
@@ -7269,7 +7282,7 @@ module.exports = {
         },
       });
     } catch (e) {
-      return sendJson(res, 500, { error: e.message });
+      return sendJson(res, 500, { error: e.message, image_notes: Array.isArray(e.image_notes) ? e.image_notes : [] });
     }
   }
 

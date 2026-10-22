@@ -416,7 +416,7 @@
         <div v-for="(msg, i) in messages" :key="i" class="flex flex-col space-y-2">
           <!-- 用户消息 (图文混排呈现) -->
           <div v-if="msg.role === 'user'" class="flex justify-end">
-            <div class="max-w-2xl rounded-2xl rounded-tr-xs bg-studio-accent px-4 py-3 text-white text-xs leading-relaxed shadow-lg">
+            <div class="max-w-2xl rounded-2xl rounded-tr-xs bg-studio-accent px-4 py-3 text-white text-xs leading-relaxed shadow-lg select-text">
               <div class="space-y-2">
                 <div v-if="msg.referencedCard" class="px-2 py-1 rounded bg-black/25 text-studio-cyan text-[11px] border border-studio-cyan/40 flex items-center space-x-1.5">
                   <StudioIcon name="wand" :size="12" />
@@ -458,14 +458,25 @@
 
           <!-- AI 生成产物消息 -->
           <div v-else class="flex justify-start">
-            <div class="max-w-3xl w-full rounded-2xl rounded-tl-xs bg-studio-900 border border-studio-750 p-4 text-slate-200 text-xs shadow-md space-y-3">
+            <div class="max-w-3xl w-full rounded-2xl rounded-tl-xs bg-studio-900 border border-studio-750 p-4 text-slate-200 text-xs shadow-md space-y-3 select-text">
               <div class="flex items-center justify-between text-[11px] text-slate-400 font-mono pb-2 border-b border-studio-800">
                 <span class="flex items-center gap-1.5 text-studio-accent font-medium">
                   <StudioIcon :name="msg.modality === 'video' ? 'video' : (msg.modality === 'music' ? 'music' : 'sparkles')" :size="14" />
                   {{ msg.model || 'Seedream 5.0 Flash' }}
                 </span>
-                <span v-if="!msg.isError">
-                  {{ msg.modality === 'video' ? `时长: ${msg.duration || '5s'} · 分辨率: ${msg.resolution || '1080p'}` : (msg.modality === 'music' ? `时长: ${msg.duration || '30s'} · 320kbps` : `耗时: ${msg.duration || ''} · 分辨率: ${msg.resolution || ''}`) }}
+                <span class="flex items-center gap-2">
+                  <span v-if="!msg.isError">
+                    {{ msg.modality === 'video' ? `时长: ${msg.duration || '5s'} · 分辨率: ${msg.resolution || '1080p'}` : (msg.modality === 'music' ? `时长: ${msg.duration || '30s'} · 320kbps` : `耗时: ${msg.duration || ''} · 分辨率: ${msg.resolution || ''}`) }}
+                  </span>
+                  <button
+                    v-if="!msg.isError && msg.content"
+                    type="button"
+                    class="msg-copy-all"
+                    title="复制这条回复的 Markdown 原文"
+                    @click="copyText(msg.content, $event.currentTarget)"
+                  >
+                    复制全文
+                  </button>
                 </span>
               </div>
 
@@ -624,6 +635,11 @@
                 </div>
               </div>
 
+              <!-- 模型替换 / 图片未送达等非致命问题：必须显式告知，不能静默 -->
+              <div v-if="msg.warning" class="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-200">
+                {{ msg.warning }}
+              </div>
+
               <!-- 思考过程：与回答正文分离，默认折叠，可展开查看 -->
               <div v-if="msg.thinking" class="rounded-xl border border-studio-750 bg-studio-950/70 overflow-hidden">
                 <button
@@ -708,7 +724,7 @@
                   <option v-for="lv in chatReasoningCaps.levels" :key="lv" :value="lv">{{ thinkingLevelLabel(lv) }}</option>
                 </select>
                 <span v-else class="text-slate-400 font-normal" :title="chatReasoningCaps?.note || '模型未声明思考档位'">
-                  {{ chatReasoningCaps?.mode === 'always' ? '内置思考·不可关' : (chatReasoningCaps?.mode === 'none' ? '无档位' : '未声明') }}
+                  {{ chatReasoningCaps?.mode === 'always' ? '内置思考·不可调' : (chatReasoningCaps?.mode === 'none' ? '该模型无思考档位' : '未声明') }}
                 </span>
               </label>
               <span class="text-slate-500">|</span>
@@ -1761,8 +1777,9 @@ function splitClientThinking(content, reasoning) {
   return { content: text.trim(), thinking: think.trim() };
 }
 
-// 助手正文按 Markdown 渲染：marked 解析 + DOMPurify 净化后再 v-html，杜绝 XSS。
-// 链接强制 noopener/新标签；纯文本命中换行/列表/标题等标记时也走同一条路径。
+// 助手正文按 Markdown 渲染：marked 解析 + DOMPurify 净化，再组装成「可选中、可分段复制」的文本块。
+// 分块规则：h1–h4 按层级嵌套成卡片（标题即卡片头），代码块/引用/表格各自独立成块，
+// 每块一个复制按钮；点击只写入构建期算好的纯文本，不依赖 innerText 的渲染态。
 marked.setOptions({ gfm: true, breaks: true });
 // 所有外链安全地在新标签打开（DOMPurify 净化后再补属性）
 DOMPurify.addHook('afterSanitizeAttributes', (node) => {
@@ -1771,42 +1788,187 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
     node.setAttribute('rel', 'noopener noreferrer');
   }
 });
+const MD_SANITIZE = {
+  ALLOWED_TAGS: ['h1','h2','h3','h4','h5','h6','p','br','hr','strong','b','em','i','del','code','pre','blockquote','ul','ol','li','a','img','table','thead','tbody','tr','th','td','span','div'],
+  ALLOWED_ATTR: ['href','src','alt','title','class','target','rel'],
+  RETURN_DOM: true,
+};
+const MD_BLOCK_TAGS = new Set(['H1','H2','H3','H4','H5','H6','P','UL','OL','LI','BLOCKQUOTE','PRE','TABLE','THEAD','TBODY','TR','DIV']);
+
+function mdNodeText(node) {
+  if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || '';
+  if (node.nodeType !== Node.ELEMENT_NODE) return '';
+  if (node.hasAttribute('data-md-no-copy')) return '';
+  if (node.tagName === 'BR') return '\n';
+  let s = '';
+  for (let i = 0; i < node.childNodes.length; i += 1) s += mdNodeText(node.childNodes[i]);
+  if (node.tagName === 'TD' || node.tagName === 'TH') return `${s.trim()}\t`;
+  if (MD_BLOCK_TAGS.has(node.tagName)) return s.trim() ? `\n${s.trim()}\n` : '';
+  return s;
+}
+
+function mdPlainText(el) {
+  return mdNodeText(el)
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function mdCodeLang(pre) {
+  const code = pre && pre.querySelector('code');
+  const m = code ? /language-([\w-]+)/.exec(code.className || '') : null;
+  return m ? m[1] : '文本';
+}
+
+function mdUnitBox(kind, labelText) {
+  const box = document.createElement('div');
+  box.className = `md-unit md-unit-${kind}`;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'md-copy-btn';
+  btn.setAttribute('data-md-copy', '1');
+  btn.setAttribute('data-md-no-copy', '1');
+  btn.textContent = '复制';
+  if (labelText) {
+    const bar = document.createElement('div');
+    bar.className = 'md-unit-bar';
+    bar.setAttribute('data-md-no-copy', '1');
+    const label = document.createElement('span');
+    label.className = 'md-unit-label';
+    label.textContent = labelText;
+    bar.appendChild(label);
+    bar.appendChild(btn);
+    box.appendChild(bar);
+  } else {
+    box.appendChild(btn);
+  }
+  return { box, btn };
+}
+
+// 代码块/引用/表格是「可独立复制的叶子块」，无论出现在正文顶层还是列表项内部都要成块：
+// 反向遍历保证先包最深层，已被包裹的不再重复包裹。
+function mdWrapLeaves(root) {
+  const found = Array.from(root.querySelectorAll('pre, blockquote, table'));
+  for (let i = found.length - 1; i >= 0; i -= 1) {
+    const node = found[i];
+    if (node.parentElement && node.parentElement.closest('.md-unit')) continue;
+    const kind = node.tagName === 'PRE' ? 'code' : node.tagName === 'TABLE' ? 'table' : 'quote';
+    const unit = mdUnitBox(kind, kind === 'code' ? mdCodeLang(node) : null);
+    node.parentNode.replaceChild(unit.box, node);
+    unit.box.appendChild(node);
+  }
+}
+
+function buildMdUnits(root) {
+  mdWrapLeaves(root);
+  const out = document.createElement('div');
+  const stack = [];
+  const target = () => (stack.length ? stack[stack.length - 1].box : out);
+  for (const node of Array.from(root.childNodes)) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      if (node.textContent && node.textContent.trim()) target().appendChild(node);
+      continue;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) continue;
+    const tag = node.tagName;
+    const heading = /^H([1-4])$/.exec(tag);
+    if (heading) {
+      const level = Number(heading[1]);
+      while (stack.length && stack[stack.length - 1].level >= level) stack.pop();
+      const unit = mdUnitBox('sec');
+      target().appendChild(unit.box);
+      unit.box.appendChild(node);
+      stack.push({ level, box: unit.box });
+      continue;
+    }
+    // 分隔线只用来结束当前分段：卡片本身已有边框，再画一条反而杂乱
+    if (tag === 'HR') {
+      stack.length = 0;
+      continue;
+    }
+    target().appendChild(node);
+  }
+  // 只取直接子按钮，嵌套卡片的按钮不会被外层认领
+  for (const unit of Array.from(out.querySelectorAll('.md-unit'))) {
+    const btn = unit.querySelector(':scope > .md-copy-btn, :scope > .md-unit-bar > .md-copy-btn');
+    if (btn) btn.setAttribute('data-copy', mdPlainText(unit));
+  }
+  return out;
+}
+
 const mdHtmlCache = new Map();
 function renderMarkdown(src) {
   const text = typeof src === 'string' ? src : '';
   if (!text) return '';
   const hit = mdHtmlCache.get(text);
   if (hit !== undefined) return hit;
-  const rawHtml = marked.parse(text, { async: false });
-  const html = DOMPurify.sanitize(rawHtml, {
-    ALLOWED_TAGS: ['h1','h2','h3','h4','h5','h6','p','br','hr','strong','b','em','i','del','code','pre','blockquote','ul','ol','li','a','img','table','thead','tbody','tr','th','td','span','div'],
-    ALLOWED_ATTR: ['href','src','alt','title','class','target','rel'],
-  });
+  const dom = DOMPurify.sanitize(marked.parse(text, { async: false }), MD_SANITIZE);
+  const html = buildMdUnits(dom).innerHTML;
   mdHtmlCache.set(text, html);
   if (mdHtmlCache.size > 200) mdHtmlCache.delete(mdHtmlCache.keys().next().value);
-  // 给每个代码块包一层复制按钮容器（样式见 .md-code-block / .md-copy-btn）
-  return html.replace(/<pre([^>]*)>/g, '<div class="md-code-block"><button type="button" class="md-copy-btn" data-md-copy>复制</button><pre$1>')
-    .replace(/<\/pre>/g, '</pre></div>');
+  return html;
 }
 
-// 代码块复制：renderMarkdown 给每个 <pre> 包一层带复制按钮的容器，
-// 点击事件由 .chat-md 容器统一委托（v-html 内容无法直接绑 Vue 事件）。
+// 30002 常以 http://内网IP 访问，非安全上下文下 navigator.clipboard 直接不可用，
+// 所以必须保留 textarea + execCommand 这条兜底路径。
+function legacyCopyText(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.readOnly = true;
+  ta.style.position = 'fixed';
+  ta.style.top = '-1000px';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  ta.setSelectionRange(0, text.length);
+  let ok = false;
+  try {
+    ok = document.execCommand('copy');
+  } catch {
+    ok = false;
+  }
+  document.body.removeChild(ta);
+  return ok;
+}
+
+// 复制反馈只改按钮自身文案（本项目没有全局 toast，也不为一个提示引入依赖）
+function flashCopyBtn(btn, label) {
+  if (!btn) return;
+  const idle = btn.getAttribute('data-idle-label') || btn.textContent;
+  btn.setAttribute('data-idle-label', idle);
+  btn.textContent = label;
+  setTimeout(() => {
+    btn.textContent = idle;
+  }, 1500);
+}
+
+async function copyText(text, btn) {
+  const value = typeof text === 'string' ? text : '';
+  if (!value) {
+    flashCopyBtn(btn, '无内容');
+    return;
+  }
+  let ok = false;
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(value);
+      ok = true;
+    } catch {
+      ok = false;
+    }
+  }
+  if (!ok) ok = legacyCopyText(value);
+  flashCopyBtn(btn, ok ? '已复制' : '复制失败');
+}
+
+// 分段复制：按钮在 renderMarkdown 构建期写好 data-copy，事件由 .chat-md 容器委托
+// （v-html 内容无法直接绑 Vue 事件）。
 function onMdClick(event) {
   const btn = event.target.closest('[data-md-copy]');
   if (!btn) return;
-  const block = btn.closest('.md-code-block');
-  const pre = block && block.querySelector('pre');
-  const text = pre ? pre.innerText : '';
-  if (!text) return;
-  navigator.clipboard
-    .writeText(text)
-    .then(() => {
-      btn.textContent = '已复制';
-      setTimeout(() => {
-        btn.textContent = '复制';
-      }, 1500);
-    })
-    .catch(() => toast.error('复制失败，请手动选择复制'));
+  event.stopPropagation();
+  copyText(btn.getAttribute('data-copy'), btn);
 }
 const activeGenMode = ref('');
 const schemaParams = ref({});
@@ -2879,7 +3041,8 @@ async function portableImageUrl(ref) {
   if (/^https?:\/\//i.test(url) || url.startsWith('/') || url.startsWith('data:image/')) return url;
   if (!url.startsWith('blob:')) return '';
   const file = localFileByUrl.get(url);
-  if (!file || file.size > 1500000) return '';
+  // 上限放宽到 12MB：服务端会 sharp 压缩，压不到 1.5MB 再走 OSS 公网兜底。
+  if (!file || file.size > 12 * 1024 * 1024) return '';
   return await new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
@@ -3348,7 +3511,7 @@ function getModelDisplayName(key) {
     volc_doubao_seed_2_1_pro: 'Doubao-Seed-2.1-pro (火山方舟)',
     volc_doubao_seed_2_1_turbo: 'Doubao-Seed-2.1-turbo',
     volc_doubao_seed_2_1_lite: 'Doubao-Seed-2.1-lite',
-    gemini_flash_latest: 'Gemini 2.5 Flash',
+    gemini_flash_latest: 'Gemini Flash',
     gemini_flash_lite_latest: 'Gemini Flash-Lite',
     agnes3_0flash: 'Agnes 3.0 Flash',
     litellm_doubao_seed_2_1_pro: 'Doubao-Seed-2.1-pro (LiteLLM)',
@@ -3456,18 +3619,26 @@ async function sendMessage() {
     if (currentMod === 'chat') {
       const chatModel = (studioModels.value.chat || []).find((item) => item.id === chatModelKey.value);
       const historyContext = trimChatMessages(messages.value, contextBudgetTokens(chatModel?.contextTokens)).messages;
+      const imageLimit = Math.max(0, Number(chatModel?.input?.images ?? 2));
       const visionRefs = [];
-      for (let i = messages.value.length - 1; i >= 0 && visionRefs.length < 4; i--) {
-        if (messages.value[i].role !== 'user') continue;
-        visionRefs.push(...messageAttachments(messages.value[i]));
+      const seenRefUrls = new Set();
+      if (imageLimit > 0) {
+        for (let i = messages.value.length - 1; i >= 0 && visionRefs.length < imageLimit; i--) {
+          if (messages.value[i].role !== 'user') continue;
+          for (const ref of messageAttachments(messages.value[i])) {
+            if (visionRefs.length >= imageLimit) break;
+            const url = String(ref?.url || '');
+            if (!url || seenRefUrls.has(url)) continue;
+            seenRefUrls.add(url);
+            visionRefs.push(ref);
+          }
+        }
       }
-      const images = await portableImageUrls(visionRefs, 2);
+      const images = await portableImageUrls(visionRefs, imageLimit);
 
       const reasoningCaps = chatReasoningCaps.value;
-      const reasoningParam = reasoningCaps && reasoningCaps.supported
-        ? (reasoningCaps.mode === 'levels'
-          ? { reasoning_effort: thinkingStrength.value }
-          : { thinkingStrength: thinkingStrength.value })
+      const reasoningParam = reasoningCaps && reasoningCaps.supported && reasoningCaps.mode === 'levels'
+        ? { reasoning_effort: thinkingStrength.value }
         : {};
       const res = await generateAiChat({
         model: chatModelKey.value,
@@ -3477,6 +3648,23 @@ async function sendMessage() {
         ...reasoningParam
       });
 
+      const warnings = [];
+      if (res.substituted) {
+        const served = res.served_model ? getModelDisplayName(res.served_model) : '其他模型';
+        warnings.push(`请求的是 ${getModelDisplayName(chatModelKey.value)}，网关实际由 ${served} 回答。`);
+      }
+      const appliedLevel = res.applied_reasoning?.reasoning_effort || '';
+      if (appliedLevel && reasoningCaps?.supported && appliedLevel !== thinkingStrength.value) {
+        warnings.push(`思考档位「${thinkingLevelLabel(thinkingStrength.value)}」不受该模型支持，已按「${thinkingLevelLabel(appliedLevel)}」执行。`);
+      }
+      if (res.truncated || res.finish_reason === 'length') {
+        warnings.push('回答达到长度上限被截断，请重试或让问题更聚焦。');
+      }
+      for (const note of (res.image_notes || [])) {
+        if (note.delivery === 'dropped') warnings.push(`图片未送达模型：${note.reason || '未知原因'}`);
+        else if (note.warning) warnings.push(note.warning);
+      }
+
       const rawReply = res.choices?.[0]?.message?.content || res.reply || res.text || res.data?.reply || '已完成空间需求分析。';
       const split = splitClientThinking(rawReply, res.reasoning || res.choices?.[0]?.message?.reasoning_content || '');
       const replyText = split.content;
@@ -3485,7 +3673,10 @@ async function sendMessage() {
         modality: 'chat',
         content: replyText,
         thinking: split.thinking,
-        model: getModelDisplayName(chatModelKey.value)
+        model: getModelDisplayName(chatModelKey.value),
+        servedModel: res.served_model || null,
+        reasoningLevel: appliedLevel || null,
+        warning: warnings.length ? warnings.join('；') : ''
       };
       messages.value.push(asstMsg);
 
@@ -4231,8 +4422,41 @@ html.eye-care .chat-md {
 .chat-md :deep(th) { background: var(--md-table-head-bg); font-weight: 700; }
 .chat-md :deep(img) { max-width: 100%; border-radius: 8px; }
 
-/* 代码块复制按钮：md-copy-btn 由 renderMarkdown 注入，事件走容器委托 */
-.chat-md :deep(.md-code-block) { position: relative; }
+/* 可复制文本块：md-unit 由 renderMarkdown 注入（sec 按标题层级嵌套，code/quote/table 独立成块），
+   按钮文字统一走容器委托事件；正文需显式覆盖 body 上的 select-none 才能选中 */
+.chat-md {
+  user-select: text;
+  -webkit-user-select: text;
+}
+.chat-md :deep(.md-unit) { position: relative; }
+.chat-md :deep(.md-unit-sec) {
+  border: 1px solid var(--md-code-border);
+  border-radius: 12px;
+  padding: 0.5em 0.65em 0.6em;
+  background: rgba(148, 163, 184, 0.06);
+}
+.chat-md :deep(.md-unit-sec + .md-unit-sec),
+.chat-md :deep(.md-unit) + .md-unit { margin-top: 0.55em; }
+.chat-md :deep(.md-unit-sec .md-unit-sec) { background: transparent; }
+.chat-md :deep(.md-unit-sec) > :is(h1, h2, h3, h4) {
+  margin-top: 0;
+  padding-right: 3.8em;
+}
+.chat-md :deep(.md-unit-bar) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 0.35em;
+}
+.chat-md :deep(.md-unit-label) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--md-muted);
+}
 .chat-md :deep(.md-copy-btn) {
   position: absolute;
   top: 0.4em;
@@ -4245,9 +4469,33 @@ html.eye-care .chat-md {
   border: 1px solid var(--md-code-border);
   background: var(--md-code-bg);
   color: var(--md-pre-fg);
-  opacity: 0;
-  transition: opacity 0.12s ease;
+  opacity: 0.55;
+  transition: opacity 0.12s ease, background-color 0.12s ease;
   cursor: pointer;
+  user-select: none;
 }
-.chat-md :deep(.md-code-block:hover) .md-copy-btn { opacity: 1; }
+.chat-md :deep(.md-unit-bar .md-copy-btn) { position: static; opacity: 0.8; }
+.chat-md :deep(.md-unit:hover) > .md-copy-btn,
+.chat-md :deep(.md-unit-bar .md-copy-btn:hover),
+.chat-md :deep(.md-copy-btn:focus-visible) { opacity: 1; }
+.chat-md :deep(.md-unit-quote) { padding-right: 3.4em; }
+.chat-md :deep(.md-unit-table) { padding-top: 1.1em; }
+
+/* 气泡头部的「复制全文」：拿到的是这条回复的 Markdown 原文 */
+.msg-copy-all {
+  padding: 1px 8px;
+  border-radius: 7px;
+  border: 1px solid var(--md-code-border);
+  background: var(--md-code-bg);
+  color: var(--theme-text-secondary, #cbd5e1);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+}
+html.light .msg-copy-all,
+html.eye-care .msg-copy-all {
+  color: #334155;
+}
+.msg-copy-all:hover { filter: brightness(1.12); }
 </style>

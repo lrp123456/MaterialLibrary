@@ -296,10 +296,30 @@ async function handleAiJobs(services, req, res, url) {
 
   if (p === '/editor-api/ai/capabilities' && req.method === 'GET') {
     const dir = runnersDir(config);
-    const items = [...JOB_TYPES].map((type) => ({
-      type,
-      // tts 是内置引擎，就绪与否看适配器；其余看 runner 文件。
-      ready: type === 'tts' ? ttsReady(db) : fs.existsSync(path.join(dir, `${type}.js`)),
+    // runner 可以导出 probe() 做真实依赖探测（如 demucs 是否装好）。
+    // 没有 probe 的仍按「文件存在」判定；结果缓存 60 秒，避免面板反复打开就起重进程。
+    const probeCache = handleAiJobs.probeCache || (handleAiJobs.probeCache = new Map());
+    const items = await Promise.all([...JOB_TYPES].map(async (type) => {
+      if (type === 'tts') return { type, ready: ttsReady(db) };
+      const file = path.join(dir, `${type}.js`);
+      if (!fs.existsSync(file)) {
+        return { type, ready: false, error: `缺少 runner 脚本：${file}` };
+      }
+      const cached = probeCache.get(type);
+      if (cached && Date.now() - cached.at < 60 * 1000) return cached.value;
+      let value = { type, ready: true };
+      try {
+        delete require.cache[require.resolve(file)];
+        const mod = require(file);
+        if (mod && typeof mod.probe === 'function') {
+          const r = await mod.probe();
+          value = { type, ready: !!r?.ready, ...(r?.error ? { error: r.error } : {}), ...(r?.detail ? { detail: r.detail } : {}) };
+        }
+      } catch (e) {
+        value = { type, ready: false, error: `runner 加载失败：${e && e.message}` };
+      }
+      probeCache.set(type, { at: Date.now(), value });
+      return value;
     }));
     sendJson(res, 200, { items });
     return true;

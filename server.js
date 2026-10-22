@@ -281,6 +281,18 @@ server.listen(PORT, () => {
   } catch (e) {
     console.warn('[nas] 检测失败', e.message);
   }
+  try {
+    const oss = require('./src/oss');
+    if (oss.isOssEnabled(services)) {
+      const sweep = () => oss.sweepChatTemp(services)
+        .then((r) => { if (r.deleted) console.log(`[oss] 已清理 ${r.deleted} 个过期对话临时图片`); })
+        .catch((e) => console.warn('[oss] 临时图片清扫失败:', e.message));
+      sweep();
+      setInterval(sweep, 6 * 60 * 60 * 1000).unref();
+    }
+  } catch (e) {
+    console.warn('[oss] 初始化清扫失败:', e.message);
+  }
 });
 
 // ---- 30002 端口：web-pro 桌面工作台 ----
