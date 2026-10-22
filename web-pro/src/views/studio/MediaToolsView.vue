@@ -1,5 +1,5 @@
 <template>
-  <div class="flex-1 flex flex-col h-[calc(100vh-56px)] bg-studio-950 overflow-hidden text-slate-100 font-sans text-sm">
+  <div class="flex-1 min-h-0 flex flex-col bg-studio-950 overflow-hidden text-slate-100 font-sans text-sm">
     <!-- 常用媒体工具顶部标头 -->
     <header class="h-12 bg-studio-900 border-b border-studio-750 px-6 flex items-center justify-between shrink-0">
       <div class="flex items-center space-x-3">
@@ -59,6 +59,18 @@
             <span class="px-2 py-1 rounded bg-studio-cyan/10 text-studio-cyan border border-studio-cyan/30 text-xs font-mono font-bold">
               视频元素寻帧
             </span>
+            <span
+              class="px-2 py-1 rounded bg-studio-850 text-slate-300 border border-studio-750 text-[11px] font-mono max-w-[220px] truncate"
+              :title="videoSource.name"
+            >
+              {{ videoSource.kind === 'cloud' ? '☁︎' : (videoSource.kind === 'local' ? '⚟' : '◦') }} {{ videoSource.name }}
+            </span>
+            <button
+              @click="openVideoPicker('frames')"
+              class="px-3.5 py-1.5 rounded-xl bg-studio-850 hover:bg-studio-800 border border-studio-700 text-studio-cyan text-xs font-extrabold flex items-center space-x-1.5 cursor-pointer ml-2"
+            >
+              <span>☁︎ 从素材库选择</span>
+            </button>
             <button
               @click="triggerVideoInput"
               class="px-3.5 py-1.5 rounded-xl bg-studio-accent text-white text-xs font-extrabold shadow hover:brightness-110 flex items-center space-x-1.5 cursor-pointer ml-2"
@@ -79,7 +91,7 @@
             </div>
 
             <!-- 主画面画布容器 -->
-            <div class="relative w-full h-[480px] bg-studio-950 flex items-center justify-center rounded-xl overflow-hidden">
+            <div ref="frameStageRef" class="relative w-full h-[480px] bg-studio-950 flex items-center justify-center rounded-xl overflow-hidden">
               <canvas
                 ref="frameCanvasRef"
                 class="max-w-full max-h-full object-contain"
@@ -91,6 +103,7 @@
                 class="hidden"
                 playsinline
                 preload="auto"
+                crossorigin="anonymous"
                 @loadedmetadata="onVideoLoaded"
                 @seeked="onVideoSeeked"
                 @timeupdate="onVideoTimeUpdate"
@@ -389,6 +402,12 @@
 
             <div class="flex items-center space-x-2">
               <button
+                @click="openVideoPicker('convert')"
+                class="px-3 py-1.5 rounded-lg bg-studio-850 hover:bg-studio-800 border border-studio-750 text-studio-cyan text-xs font-bold flex items-center space-x-1 cursor-pointer"
+              >
+                <span>☁︎ 从素材库选择</span>
+              </button>
+              <button
                 @click="triggerConvertFilePicker"
                 class="px-3 py-1.5 rounded-lg bg-studio-850 hover:bg-studio-800 border border-studio-750 text-slate-200 text-xs font-bold flex items-center space-x-1 cursor-pointer"
               >
@@ -558,12 +577,20 @@
               </div>
             </div>
 
-            <button
-              @click="triggerCompressFilePicker"
-              class="px-3 py-1.5 rounded-lg bg-studio-850 hover:bg-studio-800 border border-studio-750 text-slate-200 text-xs font-bold cursor-pointer"
-            >
-              📂 更换视频
-            </button>
+            <div class="flex items-center space-x-2">
+              <button
+                @click="openVideoPicker('compress')"
+                class="px-3 py-1.5 rounded-lg bg-studio-850 hover:bg-studio-800 border border-studio-750 text-studio-cyan text-xs font-bold cursor-pointer"
+              >
+                ☁︎ 从素材库选择
+              </button>
+              <button
+                @click="triggerCompressFilePicker"
+                class="px-3 py-1.5 rounded-lg bg-studio-850 hover:bg-studio-800 border border-studio-750 text-slate-200 text-xs font-bold cursor-pointer"
+              >
+                📂 更换视频
+              </button>
+            </div>
             <input ref="compressFileInputRef" type="file" accept="video/*" class="hidden" @change="onCompressFileSelected" />
           </div>
 
@@ -718,13 +745,26 @@
         </div>
       </div>
     </main>
+
+    <AssetPickerModal
+      :visible="showVideoPicker"
+      context="edit"
+      title="从素材库选择视频"
+      submitLabel="载入到工具台"
+      :max-select="1"
+      initial-main="video"
+      :media-types="['video']"
+      @close="showVideoPicker = false"
+      @confirm="onVideoPicked"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import StudioIcon from '../../components/StudioIcon.vue';
-import { authFetch, registerGeneratedAsset } from '../../api';
+import AssetPickerModal from '../../components/AssetPickerModal.vue';
+import { authFetch, registerGeneratedAsset, getAssetPlayableUrl } from '../../api';
 
 const toolTabs = [
   { key: 'frames', label: '视频元素寻帧', icon: '🎬' },
@@ -738,9 +778,14 @@ const activeTool = ref('frames');
 // =============================================================================
 const videoRef = ref(null);
 const frameCanvasRef = ref(null);
+const frameStageRef = ref(null);
 const videoFileInput = ref(null);
 // 默认视频直接引用本地极速视频源，杜绝跨洋外部请求卡顿！
 const videoSrc = ref('/sample-video.mp4');
+// 当前视频来源：local=本地文件，cloud=素材库 fid（转码/压缩页据此决定要不要先上传）
+const videoSource = ref({ kind: 'default', fid: '', name: 'sample-video.mp4' });
+const showVideoPicker = ref(false);
+const pickerTarget = ref('frames'); // frames | convert | compress
 
 const currentTimestamp = ref(0);
 const videoDuration = ref(15);
@@ -755,7 +800,11 @@ const savingLibrary = ref(false);
 const capturedFrames = ref([]);
 
 let isSeeking = false;
-let pendingSeekTime = null;
+// 步进队列：连续按方向键时排队目标帧，画完当前帧立刻发下一帧，
+// 取代原先 pendingSeekTime 单槽（一次只能记一个，中途的帧被丢掉且必须等 seeked 串行）
+const seekQueue = [];
+let rvfcHandle = 0;
+let seekWatchdog = 0;
 
 const currentFrameNumber = computed(() => {
   return Math.round(currentTimestamp.value * videoFps.value);
@@ -786,55 +835,131 @@ function onVideoLoaded() {
   videoDuration.value = v.duration || 15;
   videoWidth.value = v.videoWidth || 1920;
   videoHeight.value = v.videoHeight || 1080;
+  seekQueue.length = 0;
+  isSeeking = false;
   renderCurrentFrameToCanvas();
 }
 
 function onVideoSeeked() {
+  clearTimeout(seekWatchdog);
   isSeeking = false;
-  renderCurrentFrameToCanvas();
-  if (pendingSeekTime !== null) {
-    const nextTime = pendingSeekTime;
-    pendingSeekTime = null;
-    performFastSeek(nextTime);
-  }
+  scheduleFramePaint();
 }
 
 function onVideoTimeUpdate() {
   const v = videoRef.value;
   if (v && isPlaying.value) {
     currentTimestamp.value = v.currentTime;
-    renderCurrentFrameToCanvas();
+    // 支持 rVFC 时由帧回调驱动绘制，timeupdate (~4Hz) 不再重复画一遍
+    if (typeof v.requestVideoFrameCallback !== 'function') renderCurrentFrameToCanvas();
   }
 }
 
-// 快速帧绘制 (结合 requestVideoFrameCallback 达到 100% 同步准确率)
+// 绘制时机：requestVideoFrameCallback 保证"这一帧真的呈现出来了"再画，
+// 消除 seeked 触发时画面还是上一帧的错位；不支持的浏览器回落直接画。
+function scheduleFramePaint() {
+  const v = videoRef.value;
+  if (!v) return;
+  if (typeof v.requestVideoFrameCallback === 'function') {
+    if (rvfcHandle) v.cancelVideoFrameCallback(rvfcHandle);
+    rvfcHandle = v.requestVideoFrameCallback(() => {
+      rvfcHandle = 0;
+      currentTimestamp.value = v.currentTime;
+      renderCurrentFrameToCanvas();
+      drainSeekQueue();
+    });
+    return;
+  }
+  renderCurrentFrameToCanvas();
+  drainSeekQueue();
+}
+
+// 预览画布只画到显示区尺寸（480 高那段），不是视频原始分辨率。
+// 逐帧 drawImage 全分辨率 1080p/4K 是本页卡顿的主因；导出走 captureFullFrameDataUrl。
+const PREVIEW_MAX_EDGE = 1280;
+
+function previewTargetSize(v) {
+  const stage = frameStageRef.value;
+  const availW = stage ? stage.clientWidth : 0;
+  const availH = stage ? stage.clientHeight : 0;
+  const baseW = availW || v.videoWidth;
+  const baseH = availH || v.videoHeight;
+  const scale = Math.min(baseW / v.videoWidth, baseH / v.videoHeight, 1);
+  let tw = Math.max(2, Math.round(v.videoWidth * scale));
+  let th = Math.max(2, Math.round(v.videoHeight * scale));
+  const edge = Math.max(tw, th);
+  if (edge > PREVIEW_MAX_EDGE) {
+    const k = PREVIEW_MAX_EDGE / edge;
+    tw = Math.max(2, Math.round(tw * k));
+    th = Math.max(2, Math.round(th * k));
+  }
+  return [tw, th];
+}
+
 function renderCurrentFrameToCanvas() {
   const v = videoRef.value;
   const c = frameCanvasRef.value;
   if (!v || !c || !v.videoWidth) return;
-
-  if (c.width !== v.videoWidth || c.height !== v.videoHeight) {
-    c.width = v.videoWidth;
-    c.height = v.videoHeight;
+  const [tw, th] = previewTargetSize(v);
+  if (c.width !== tw || c.height !== th) {
+    c.width = tw;
+    c.height = th;
   }
   const ctx = c.getContext('2d');
-  ctx.drawImage(v, 0, 0, c.width, c.height);
+  ctx.drawImage(v, 0, 0, tw, th);
 }
 
-// 极速步进与防抖寻帧 (FastSeek)
-function performFastSeek(targetTime) {
+// 截帧/导出/复制必须按原始分辨率离屏重画，不受预览降采样污染
+function captureFullFrameDataUrl() {
+  const v = videoRef.value;
+  if (!v || !v.videoWidth) return '';
+  const c = document.createElement('canvas');
+  c.width = v.videoWidth;
+  c.height = v.videoHeight;
+  c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+  return c.toDataURL('image/png');
+}
+
+function captureFullFrameBlob() {
+  return new Promise((resolve) => {
+    const url = captureFullFrameDataUrl();
+    if (!url) return resolve(null);
+    fetch(url).then((r) => r.blob()).then(resolve).catch(() => resolve(null));
+  });
+}
+
+function drainSeekQueue() {
+  if (isSeeking || !seekQueue.length) return;
+  const next = seekQueue.shift();
+  performFastSeek(next.time, true, next.precise);
+}
+
+// 极速步进：正在寻帧时把目标帧排队，而不是覆盖掉前一个待寻帧
+// precise=true 走 currentTime（逐帧步进必须帧准确）；false 走 fastSeek（粗拖只找关键帧，更跟手）
+function performFastSeek(targetTime, enqueue = false, precise = false) {
   const v = videoRef.value;
   if (!v) return;
   const clamped = Math.max(0, Math.min(videoDuration.value, targetTime));
   currentTimestamp.value = clamped;
 
   if (isSeeking) {
-    pendingSeekTime = clamped;
+    if (enqueue && seekQueue.length < 60) seekQueue.push({ time: clamped, precise });
     return;
   }
 
   isSeeking = true;
-  if ('fastSeek' in v) {
+  // fastSeek 寻到同一位置可能不发 seeked；另外后台页面的 rVFC 回调根本不来，
+  // 看门狗负责兜底画一帧并把排队的步进继续推下去，否则整条链会永久卡住。
+  clearTimeout(seekWatchdog);
+  seekWatchdog = setTimeout(() => {
+    if (!isSeeking) return;
+    isSeeking = false;
+    currentTimestamp.value = v.currentTime;
+    renderCurrentFrameToCanvas();
+    drainSeekQueue();
+  }, 250);
+
+  if (!precise && 'fastSeek' in v) {
     try {
       v.fastSeek(clamped);
     } catch {
@@ -864,19 +989,22 @@ function handleKeydown(e) {
 function stepFrame(framesDelta) {
   if (isPlaying.value) togglePlay();
   const newFrame = Math.max(0, Math.min(totalFrames.value, currentFrameNumber.value + framesDelta));
-  jumpToFrame(newFrame);
+  jumpToFrame(newFrame, true);
 }
 
-function jumpToFrame(frameIndex) {
+function jumpToFrame(frameIndex, enqueue = false) {
   const targetTime = frameIndex / videoFps.value;
-  performFastSeek(targetTime);
+  performFastSeek(targetTime, enqueue, true);
 }
 
 function jumpTime(secDelta) {
+  seekQueue.length = 0;
   performFastSeek(currentTimestamp.value + secDelta);
 }
 
 function onTimelineSliderInput() {
+  // 拖时间轴时排队的步进目标已过期，丢掉只跟手
+  seekQueue.length = 0;
   performFastSeek(currentTimestamp.value);
 }
 
@@ -898,16 +1026,48 @@ function triggerVideoInput() {
 
 function onVideoSelected(e) {
   const f = e.target.files?.[0];
-  if (f) {
-    videoSrc.value = URL.createObjectURL(f);
-    currentTimestamp.value = 0;
+  if (!f) return;
+  applyVideoSource({ kind: 'local', fid: '', name: f.name, url: URL.createObjectURL(f) });
+}
+
+// 「从素材库选视频」：三个工具页共用一个弹窗，pickerTarget 决定回填给谁
+function openVideoPicker(target) {
+  pickerTarget.value = target;
+  showVideoPicker.value = true;
+}
+
+function applyVideoSource({ kind, fid, name, url }) {
+  videoSource.value = { kind, fid, name };
+  videoSrc.value = url;
+  currentTimestamp.value = 0;
+  targetJumpFrame.value = 0;
+  seekQueue.length = 0;
+  isSeeking = false;
+}
+
+function onVideoPicked(items) {
+  showVideoPicker.value = false;
+  const item = (items || [])[0];
+  if (!item?.fid) return;
+  const name = item.name || item.file_name || item.fid;
+  if (pickerTarget.value === 'convert') {
+    convertCloudFid.value = item.fid;
+    convertFileObj.value = null;
+    convertSourceFileName.value = name;
+    return;
   }
+  if (pickerTarget.value === 'compress') {
+    compressCloudFid.value = item.fid;
+    compressFileObj.value = null;
+    compressSourceFileName.value = name;
+    return;
+  }
+  applyVideoSource({ kind: 'cloud', fid: item.fid, name, url: getAssetPlayableUrl(item.fid) });
 }
 
 function saveCurrentFrameToLibrary() {
-  const c = frameCanvasRef.value;
-  if (!c) return;
-  const dataUrl = c.toDataURL('image/png');
+  const dataUrl = captureFullFrameDataUrl();
+  if (!dataUrl) return;
   capturedFrames.value.unshift({
     frame: currentFrameNumber.value,
     timeStr: currentTimecode.value,
@@ -916,21 +1076,19 @@ function saveCurrentFrameToLibrary() {
 }
 
 function exportCurrentFramePNG() {
-  const c = frameCanvasRef.value;
-  if (!c) return;
+  const dataUrl = captureFullFrameDataUrl();
+  if (!dataUrl) return;
   const a = document.createElement('a');
   a.download = `frame_${currentFrameNumber.value}_${currentTimecode.value}.png`;
-  a.href = c.toDataURL('image/png');
+  a.href = dataUrl;
   a.click();
 }
 
 async function copyCurrentFrame() {
-  const c = frameCanvasRef.value;
-  if (!c) return;
-  c.toBlob(blob => {
-    navigator.clipboard?.write([new ClipboardItem({ 'image/png': blob })]);
-    alert('已复制当前帧图像至剪贴板！');
-  });
+  const blob = await captureFullFrameBlob();
+  if (!blob) return;
+  navigator.clipboard?.write([new ClipboardItem({ 'image/png': blob })]);
+  alert('已复制当前帧图像至剪贴板！');
 }
 
 function removeCapturedFrame(idx) {
@@ -974,6 +1132,8 @@ async function batchSaveToLibrary() {
 const convertSourceFileName = ref('全景客厅空间漫游.mp4');
 const convertFileInputRef = ref(null);
 const convertFileObj = ref(null);
+// 云素材来源：有 fid 时直接交给后端按 fid 解析原文件，跳过本地上传
+const convertCloudFid = ref('');
 const convertTargetFormat = ref('mp4');
 const convertResolution = ref('source');
 const convertExtractAudioOnly = ref(false);
@@ -990,6 +1150,7 @@ function onConvertFileSelected(e) {
   const f = e.target.files?.[0];
   if (f) {
     convertFileObj.value = f;
+    convertCloudFid.value = '';
     convertSourceFileName.value = f.name;
   }
 }
@@ -1031,8 +1192,8 @@ async function runVideoConversion() {
 
   let timer = null;
   try {
-    if (!convertFileObj.value) {
-      throw new Error('请先选择本地视频文件');
+    if (!convertCloudFid.value && !convertFileObj.value) {
+      throw new Error('请先选择本地视频，或从素材库挑一个云视频');
     }
     const isAudioOnly = convertExtractAudioOnly.value || ['mp3', 'wav'].includes(convertTargetFormat.value);
     const targetFmt = isAudioOnly ? (convertTargetFormat.value === 'wav' ? 'wav' : 'mp3') : convertTargetFormat.value;
@@ -1045,12 +1206,15 @@ async function runVideoConversion() {
       }
     }, 400);
 
-    convertStageText.value = '正在上传源视频到服务端...';
-    const uploaded = await uploadLocalVideo(convertFileObj.value);
+    let fid = convertCloudFid.value;
+    if (!fid) {
+      convertStageText.value = '正在上传源视频到服务端...';
+      fid = (await uploadLocalVideo(convertFileObj.value)).fid;
+    }
 
     convertStageText.value = '正在调用原生 FFmpeg 进行深度转码与封装...';
     convertResult.value = await callConvertVideo({
-      fid: uploaded.fid,
+      fid,
       targetFormat: targetFmt,
       extractAudio: isAudioOnly,
       crf: 23,
@@ -1093,6 +1257,7 @@ async function saveConvertResultToLibrary() {
 const compressSourceFileName = ref('全景客厅空间漫游.mp4');
 const compressFileInputRef = ref(null);
 const compressFileObj = ref(null);
+const compressCloudFid = ref('');
 const compressPreset = ref('web');
 const compressCrf = ref(25);
 const compressing = ref(false);
@@ -1108,6 +1273,7 @@ function onCompressFileSelected(e) {
   const f = e.target.files?.[0];
   if (f) {
     compressFileObj.value = f;
+    compressCloudFid.value = '';
     compressSourceFileName.value = f.name;
   }
 }
@@ -1146,8 +1312,8 @@ async function runVideoCompression() {
 
   let timer = null;
   try {
-    if (!compressFileObj.value) {
-      throw new Error('请先选择本地视频文件');
+    if (!compressCloudFid.value && !compressFileObj.value) {
+      throw new Error('请先选择本地视频，或从素材库挑一个云视频');
     }
     timer = setInterval(() => {
       if (compressProgress.value < 85) {
@@ -1157,12 +1323,15 @@ async function runVideoCompression() {
       }
     }, 450);
 
-    compressStageText.value = '正在上传源视频到服务端...';
-    const uploaded = await uploadLocalVideo(compressFileObj.value);
+    let fid = compressCloudFid.value;
+    if (!fid) {
+      compressStageText.value = '正在上传源视频到服务端...';
+      fid = (await uploadLocalVideo(compressFileObj.value)).fid;
+    }
 
     compressStageText.value = `正在使用 CRF=${compressCrf.value} 进行两趟量化压缩...`;
     compressResult.value = await callConvertVideo({
-      fid: uploaded.fid,
+      fid,
       targetFormat: 'mp4',
       crf: compressCrf.value,
       extractAudio: false,

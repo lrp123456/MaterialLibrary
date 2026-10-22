@@ -155,6 +155,18 @@ export function getAssetPosterUrl(fid, mediaToken = '') {
 }
 
 /**
+ * 获取素材原文件的「可播放流」URL：走 /file（等价 raw=1），服务端按 Range 回 206，
+ * 且不像 getAssetDownloadUrl 那样带 download=1（那会 no-store，逐帧拖拽要反复回源）。
+ */
+export function getAssetPlayableUrl(fid) {
+  if (!fid) return '';
+  const token = getToken();
+  const q = new URLSearchParams();
+  if (token) q.set('token', token);
+  return resolveApiUrl(`/api/viewer/assets/${encodeURIComponent(fid)}/file?${q.toString()}`);
+}
+
+/**
  * 获取素材原文件下载 URL
  */
 export function getAssetDownloadUrl(fid) {
