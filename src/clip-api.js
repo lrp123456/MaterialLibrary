@@ -26,24 +26,38 @@ function sendJson(res, status, data) {
 }
 
 /**
- * 云素材库列表。
+ * 剪辑素材架列表 —— 只给"剪辑域"的内容，不再是全库镜像。
  *
- * 注意：这里查的是**素材库全量**，不是"被云端快照引用的素材"。
- * 早先版本用 JOIN clip_snapshot_assets，结果没备份过工程的用户看到的永远是空列表。
- * "被哪些剪辑工程引用"只是 used_by 这个计数字段，不该作为过滤条件。
+ * scope='input'（默认）：被云端快照引用过的素材，可按项目（快照分组名或工程名）再筛；
+ * scope='output'：剪辑导出的成片，即 assets.source='edit'（写入点见 editor-projects.js:524）。
+ *
+ * 曾经因为"没备份过工程的用户看到空列表"而把这里改成查全库（00f5636），
+ * 但那是一次修错对象：编辑器云素材面板走的是 /api/viewer/assets，
+ * 这个端点只有素材库「剪辑素材」这一处调用方。空列表应该用引导文案解决，
+ * 不该用"把整个素材库倒进来"解决——那会把 AI 创作图混进剪辑架。
  */
-function clipAssetsList(db, { limit = 60, offset = 0, kind = '' } = {}) {
+const PROJECT_LABEL = "COALESCE(NULLIF(s.group_name, ''), s.name)";
+
+function clipAssetsList(db, { limit = 60, offset = 0, scope = 'input', project = '' } = {}) {
   ensureSnapshotTables(db);
+  const output = scope === 'output';
   const where = ["a.status <> 'deleted'"];
   const args = [];
-  if (kind) {
-    where.push('a.kind = ?');
-    args.push(String(kind));
+  if (output) {
+    where.push("a.source = 'edit'");
+  } else {
+    let sub = 'SELECT cs.fid FROM clip_snapshot_assets cs JOIN clip_snapshots s ON s.id = cs.snapshot_id';
+    const proj = String(project || '').trim();
+    if (proj) {
+      sub += ` WHERE ${PROJECT_LABEL} = ?`;
+      args.push(proj);
+    }
+    where.push(`a.fid IN (${sub})`);
   }
   const clause = where.join(' AND ');
   const rows = db.prepare(`
     SELECT a.fid, a.file_name, a.kind, a.width, a.height, a.duration_s AS duration,
-           a.thumb_url, a.size, a.updated_at,
+           a.thumb_url, a.size, a.updated_at, a.source,
            (SELECT COUNT(*) FROM clip_snapshot_assets cs WHERE cs.fid = a.fid) AS used_by
     FROM assets a
     WHERE ${clause}
@@ -53,7 +67,14 @@ function clipAssetsList(db, { limit = 60, offset = 0, kind = '' } = {}) {
   const total = Number(
     db.prepare(`SELECT COUNT(*) AS c FROM assets a WHERE ${clause}`).get(...args).c,
   ) || 0;
-  return { items: rows, total };
+  const projects = db.prepare(`
+    SELECT ${PROJECT_LABEL} AS label, COUNT(DISTINCT cs.fid) AS count
+    FROM clip_snapshots s
+    JOIN clip_snapshot_assets cs ON cs.snapshot_id = s.id
+    GROUP BY label
+    ORDER BY count DESC, label ASC
+  `).all().filter((p) => p.label);
+  return { items: rows, total, projects };
 }
 
 async function handleClipApi(services, req, res) {
@@ -95,6 +116,8 @@ async function handleClipApi(services, req, res) {
       const data = clipAssetsList(db, {
         limit: Number(url.searchParams.get('limit')) || 60,
         offset: Number(url.searchParams.get('offset')) || 0,
+        scope: url.searchParams.get('scope') || 'input',
+        project: url.searchParams.get('project') || '',
       });
       sendJson(res, 200, data);
       return true;

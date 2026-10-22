@@ -58,6 +58,19 @@
                 <span class="lib-l2-label">{{ sub.label }}</span>
                 <span v-if="activeSubCategory === sub.key" class="lib-now">当前</span>
               </button>
+              <!-- 剪辑「素材」库：按云端快照项目再筛一层 -->
+              <button
+                v-for="pr in clipProjectChips"
+                :key="cat.key + '-proj-' + (pr.key || 'all')"
+                type="button"
+                class="lib-l2 lib-l2-nested"
+                :class="{ 'is-on': activeClipProject === pr.key }"
+                :aria-current="activeClipProject === pr.key ? 'true' : undefined"
+                @click="selectClipProject(pr.key); closeSidebarOnNarrow()"
+              >
+                <span class="lib-l2-label">{{ pr.label }}</span>
+                <span v-if="pr.count != null" class="lib-count">{{ pr.count }}</span>
+              </button>
             </div>
           </template>
         </div>
@@ -353,16 +366,23 @@
           class="flex flex-col items-center justify-center py-32 space-y-4 text-center"
         >
           <div class="w-16 h-16 rounded-2xl bg-studio-900 border border-studio-700 flex items-center justify-center text-3xl">
-            {{ activeMainTab === 'trash' ? '🗑️' : '📂' }}
+            {{ activeMainTab === 'trash' ? '🗑️' : (activeMainTab === 'clip' ? '🎬' : '📂') }}
           </div>
           <div class="space-y-1">
             <h3 class="text-base font-bold text-slate-200">
-              {{ activeMainTab === 'trash' ? '回收站暂无素材' : '未找到匹配的素材资产' }}
+              {{ activeMainTab === 'trash' ? '回收站暂无素材'
+                : (activeMainTab === 'clip'
+                  ? (activeSubCategory === 'output' ? '还没有剪辑成片' : (activeClipProject ? '这个项目没引用过素材' : '还没有备份过剪辑工程'))
+                  : '未找到匹配的素材资产') }}
             </h3>
             <p class="text-xs text-slate-400 max-w-sm">
               {{ activeMainTab === 'trash'
                 ? '已被拦截或删除的废弃资产将保留在此处 30 天，期间可随时恢复。'
-                : '请尝试切换分类大项、清空关键词搜索或重置筛选条件。' }}
+                : (activeMainTab === 'clip'
+                  ? (activeSubCategory === 'output'
+                    ? '剪辑导出成片后会自动登记到这里（assets.source = edit）。'
+                    : '剪辑素材只收进被云端快照引用过的内容。到剪辑台点「备份到云端」，之后即可在此按项目查看。')
+                  : '请尝试切换分类大项、清空关键词搜索或重置筛选条件。') }}
             </p>
           </div>
           <button
@@ -1331,6 +1351,13 @@ function cancelTagEdit() {
 }
 const activeMainTab = ref('image'); // 默认展示图片大类
 const activeSubCategory = ref('interior_exterior'); // 默认进入室内外设计
+// 剪辑素材架的两个子库：素材=被云端快照引用过的输入，成品=剪辑导出的 mp4
+const CLIP_SCOPES = [
+  { key: 'input', label: '素材' },
+  { key: 'output', label: '成品' }
+];
+const clipProjects = ref([]);
+const activeClipProject = ref('');
 const keyword = ref('');
 const layoutMode = ref('masonry'); // 'masonry' | 'grid'
 const showSidebarTimeline = ref(true);
@@ -1446,9 +1473,18 @@ const activeMainTabConfig = computed(() => {
 });
 
 const currentSubCategories = computed(() => {
-  // 剪辑素材没有品类细分，避免显示上一级的二级菜单
-  if (activeMainTab.value === 'clip') return [];
+  // 剪辑素材下设「素材 / 成品」两个库，不复用上一级的品类细分
+  if (activeMainTab.value === 'clip') return CLIP_SCOPES;
   return SUB_CATEGORIES_CONFIG[activeMainTab.value] || [];
+});
+
+const clipProjectChips = computed(() => {
+  if (activeMainTab.value !== 'clip' || activeSubCategory.value !== 'input') return [];
+  if (clipProjects.value.length === 0) return [];
+  return [
+    { key: '', label: '全部项目', count: null },
+    ...clipProjects.value.map((p) => ({ key: p.label, label: p.label, count: p.count }))
+  ];
 });
 
 const mainTabsWithoutTrash = computed(() => MAIN_TABS.filter((tab) => tab.key !== 'trash'));
@@ -1877,17 +1913,25 @@ function switchMainTab(key) {
   if (activeMainTab.value === key) return;
   activeMainTab.value = key;
   // 联动设定二级默认值
-  activeSubCategory.value = key === 'image' ? 'interior_exterior' : 'all';
+  activeSubCategory.value = key === 'image' ? 'interior_exterior' : (key === 'clip' ? 'input' : 'all');
+  activeClipProject.value = '';
   filterDate.value = '';
   clearAllFilters();
   reloadAssets(true);
   loadTimelineDays();
 }
 
+// 剪辑「素材」库内按项目再筛一层；'' = 全部项目
+function selectClipProject(key) {
+  activeClipProject.value = key;
+  reloadAssets(true);
+}
+
 // 切换二级分类
 function switchSubCategory(key) {
   if (activeSubCategory.value === key) return;
   activeSubCategory.value = key;
+  if (activeMainTab.value === 'clip') activeClipProject.value = '';
   clearAllFilters();
   reloadAssets(true);
   loadTimelineDays();
@@ -2044,14 +2088,20 @@ async function reloadAssets(reset = true) {
   try {
     await ensureToken();
 
-    // 剪辑素材：只读视图，数据来自 clip_snapshot_assets 关联表。
+    // 剪辑素材：只读视图，严格限定在剪辑域内。
+    // 素材 = clip_snapshot_assets 关联到云端快照的输入；成品 = source='edit' 的导出片。
     // 不参与分页搜索的常规参数（keyword/date 等），保持简单。
     if (activeMainTab.value === 'clip') {
       const token = localStorage.getItem('ml_token') || '';
       const offset = (currentPage.value - 1) * pageSize;
-      const res = await fetch(`/editor-api/clip-assets?limit=${pageSize}&offset=${offset}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-      });
+      const scope = activeSubCategory.value === 'output' ? 'output' : 'input';
+      const projectQuery = scope === 'input' && activeClipProject.value
+        ? `&project=${encodeURIComponent(activeClipProject.value)}`
+        : '';
+      const res = await fetch(
+        `/editor-api/clip-assets?limit=${pageSize}&offset=${offset}&scope=${scope}${projectQuery}`,
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+      );
       if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
       const data = await res.json();
       const items = (data.items || []).map((it) => ({
@@ -2060,6 +2110,7 @@ async function reloadAssets(reset = true) {
         fileName: it.file_name,
         thumbUrl: it.thumb_url || null
       }));
+      clipProjects.value = data.projects || [];
       assetsList.value = items;
       totalAssetsCount.value = Number(data.total) || items.length;
       hasMore.value = items.length >= pageSize;
