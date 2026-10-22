@@ -670,6 +670,7 @@ function TrackLabelsPanel({
 											className="flex shrink-0 items-center justify-end gap-2 px-3"
 											style={{ height: `${baseHeight}px` }}
 										>
+											<TrackNameLabel track={track} />
 											{canTrackHaveAudio(track) && (
 												<TrackToggleIcon
 													isOff={track.muted}
@@ -901,6 +902,55 @@ function TimelineGutter({
 
 function TrackIcon({ track }: { track: TimelineTrack }) {
 	return <>{TRACK_ICONS[track.type]}</>;
+}
+
+/**
+ * 轨道名：双击进入改名。
+ * 自动命名（人声/背景音等）用的是同一字段，改名即覆盖。
+ */
+function TrackNameLabel({ track }: { track: TimelineTrack }) {
+	const timeline = useEditor((e) => e.timeline);
+	const [editing, setEditing] = useState(false);
+	const [draft, setDraft] = useState(track.name);
+
+	const commit = () => {
+		const name = draft.trim();
+		if (name && name !== track.name) {
+			timeline.renameTrack({ trackId: track.id, name });
+		}
+		setEditing(false);
+	};
+
+	if (editing) {
+		return (
+			<input
+				autoFocus
+				value={draft}
+				onChange={(e) => setDraft(e.target.value)}
+				onBlur={commit}
+				onMouseDown={(e) => e.stopPropagation()}
+				onKeyDown={(e) => {
+					if (e.key === "Enter") commit();
+					if (e.key === "Escape") setEditing(false);
+				}}
+				className="min-w-0 flex-1 rounded border border-border bg-background px-1 text-[11px]"
+			/>
+		);
+	}
+
+	return (
+		<span
+			title="双击重命名轨道"
+			onDoubleClick={(e) => {
+				e.stopPropagation();
+				setDraft(track.name);
+				setEditing(true);
+			}}
+			className="min-w-0 flex-1 cursor-text truncate text-right text-[11px] text-muted-foreground hover:text-foreground"
+		>
+			{track.name}
+		</span>
+	);
 }
 
 function TrackToggleIcon({

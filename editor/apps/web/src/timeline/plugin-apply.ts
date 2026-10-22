@@ -26,12 +26,21 @@ const OUTPUT_TRACKS: Record<string, { file: string; trackName: string }[]> = {
 		{ file: "vocals.wav", trackName: "人声" },
 		{ file: "no_vocals.wav", trackName: "背景音" },
 	],
+	// 镜头切分没有产出文件，产出是 result.cuts（切点秒数），由调用方切元素
+	"scene-split": [],
 };
 
 export interface PluginOutput {
 	blob: Blob;
 	fileName: string;
 	trackName: string;
+}
+
+export interface PluginRunResult {
+	/** 产出文件（人声分离等）；镜头切分为空 */
+	outputs: PluginOutput[];
+	/** 任务的结构化结果（scene-split 的 cuts 等） */
+	result: any;
 }
 
 /**
@@ -52,7 +61,7 @@ export async function runPluginOnAsset({
 	fid: string;
 	params?: Record<string, unknown>;
 	onProgress?: (stage: string) => void;
-}): Promise<PluginOutput[]> {
+}): Promise<PluginRunResult> {
 	const tracks = OUTPUT_TRACKS[pluginType];
 	if (!tracks) {
 		throw new Error(`插件「${pluginName}」暂不支持拖拽应用`);
@@ -108,10 +117,10 @@ export async function runPluginOnAsset({
 			trackName: t.trackName,
 		});
 	}
-	if (outputs.length === 0) {
+	if (outputs.length === 0 && tracks.length > 0) {
 		throw new Error("任务完成但没有产出文件");
 	}
-	return outputs;
+	return { outputs, result: job?.result ?? null };
 }
 
 /** 失败时统一的轻提示（调用方在 catch 里用）。 */

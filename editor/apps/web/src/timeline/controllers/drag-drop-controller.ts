@@ -30,7 +30,7 @@ import type {
 import type { TimelineDragData } from "@/timeline/drag";
 import type { MediaAsset } from "@/media/types";
 import type { ProcessedMediaAsset } from "@/media/processing";
-import { roundFrameTime, type MediaTime } from "@/wasm";
+import { roundFrameTime, mediaTimeFromSeconds, type MediaTime } from "@/wasm";
 import { toast } from "sonner";
 import { EditorCore } from "@/core";
 import { runPluginOnAsset, toastPluginError } from "@/timeline/plugin-apply";
@@ -542,13 +542,32 @@ export class DragDropController {
 
 		void (async () => {
 			try {
-				const outputs = await runPluginOnAsset({
+				const { outputs, result } = await runPluginOnAsset({
 					pluginType: dragData.pluginType,
 					pluginName: dragData.name,
 					fid,
 				});
 
 				const editor = EditorCore.getInstance();
+
+				// 镜头切分：按切点从后往前切开目标元素（时间从后往前，避免后续切点偏移）
+				if (dragData.pluginType === "scene-split") {
+					const cuts: number[] = Array.isArray(result?.cuts)
+						? (result.cuts as number[]).filter((x) => Number.isFinite(x))
+						: [];
+					if (cuts.length === 0) {
+						throw new Error("没有检测到镜头切点");
+					}
+					const targets = [{ trackId: hit.trackId, elementId: hit.elementId }];
+					for (const sec of [...cuts].sort((a, b) => b - a)) {
+						editor.timeline.splitElements({
+							elements: targets,
+							splitTime: mediaTimeFromSeconds({ seconds: sec }),
+						});
+					}
+					toast.success(`「${dragData.name}」完成，已切成 ${cuts.length + 1} 段`);
+					return;
+				}
 				const projectId = editor.project.getActive().metadata.id;
 				const commands: Command[] = [];
 

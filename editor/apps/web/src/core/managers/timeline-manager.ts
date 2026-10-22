@@ -33,6 +33,7 @@ import {
 	AddTrackCommand,
 	RemoveTrackCommand,
 	ToggleTrackMuteCommand,
+	RenameTrackCommand,
 	ToggleTrackVisibilityCommand,
 	InsertElementCommand,
 	DeleteElementsCommand,
@@ -181,6 +182,11 @@ export class TimelineManager {
 
 	toggleTrackVisibility({ trackId }: { trackId: string }): void {
 		const command = new ToggleTrackVisibilityCommand(trackId);
+		this.editor.command.execute({ command });
+	}
+
+	renameTrack({ trackId, name }: { trackId: string; name: string }): void {
+		const command = new RenameTrackCommand({ trackId, name });
 		this.editor.command.execute({ command });
 	}
 
