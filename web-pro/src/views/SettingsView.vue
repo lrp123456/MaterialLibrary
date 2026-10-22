@@ -1,5 +1,5 @@
 <template>
-  <div class="view-root settings-view flex-1 flex flex-col h-[calc(100vh-56px)] overflow-hidden bg-studio-950 p-7 overflow-y-auto scrollbar-thin">
+  <div class="view-root settings-view flex-1 min-h-0 flex flex-col overflow-hidden bg-studio-950 p-7 overflow-y-auto scrollbar-thin">
     <div class="max-w-4xl mx-auto space-y-7">
       <!-- 页面标题 -->
       <div class="flex items-center justify-between pb-4 border-b border-studio-700">

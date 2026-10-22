@@ -1,5 +1,5 @@
 <template>
-  <div class="qs-root flex-1 flex flex-col h-[calc(100vh-56px)] bg-studio-950 overflow-hidden font-sans text-slate-100 select-none text-sm">
+  <div class="qs-root flex-1 min-h-0 flex flex-col bg-studio-950 overflow-hidden font-sans text-slate-100 select-none text-sm">
     <!-- 1. 顶部操作栏：模式切换 (精准编辑 vs 全局重绘) + 视口工具 -->
     <header class="h-12 bg-studio-900 border-b border-studio-750 px-5 flex items-center justify-between shrink-0">
       <div class="flex items-center space-x-2.5">
