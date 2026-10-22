@@ -243,12 +243,6 @@ export function MediaView({ filter = "all" }: { filter?: MediaTypeFilter }) {
 				contentClassName="h-full"
 				{...dragProps}
 			>
-				<MediaSourceSwitch
-					source={mediaSource}
-					onChange={setMediaSource}
-					localCount={localRows.length}
-					cloudCount={cloud.total > cloudRows.length ? cloud.total : cloudRows.length}
-				/>
 				<CloudStatus
 					isLoading={cloud.isLoading}
 					error={cloud.error}

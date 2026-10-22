@@ -146,16 +146,15 @@ function toMaterialItem(raw: any, token: string): MaterialAssetItem {
 	const fid = String(raw?.fid || "");
 	const kind = (raw?.kind || (raw?.category === "music" ? "audio" : "image")) as MaterialAssetItem["kind"];
 
-	// 列表接口的 thumb_url 可能为空，视频退回 poster、其余退回主图
-	let thumb = String(raw?.thumb_url || raw?.poster_url || "");
-	if (!thumb && fid) {
-		thumb = kind === "video"
-			? `/api/viewer/assets/${encodeURIComponent(fid)}/poster`
-			: `/api/viewer/assets/${encodeURIComponent(fid)}/image`;
-	}
-	if (thumb && token && !thumb.includes("token=")) {
-		thumb += (thumb.includes("?") ? "&" : "?") + `token=${encodeURIComponent(token)}`;
-	}
+	// 缩略图一律走后端代理端点（poster/image，带 token）。
+	// 不再使用 thumb_url/poster_url：网盘同步素材的 thumb_url 存的是夸克网盘
+	// 分享页链接（网页而非图片），<img> 渲染不出内容——即"云素材弹窗看不到预览"。
+	const thumb =
+		kind === "video"
+			? `/api/viewer/assets/${encodeURIComponent(fid)}/poster${token ? `?token=${encodeURIComponent(token)}` : ""}`
+			: kind === "audio"
+				? ""
+				: `/api/viewer/assets/${encodeURIComponent(fid)}/image${token ? `?token=${encodeURIComponent(token)}` : ""}`;
 
 	const tagLabels: string[] = Array.isArray(raw?.tags)
 		? raw.tags
@@ -471,6 +470,35 @@ export function AssetLibraryPickerModal({
 		fileInputRef.current?.click();
 	};
 
+	/**
+	 * 本地上传同时入两边：
+	 * 1. 本次素材（media pool，立即可上轨）——走 onLocalFilesSelected
+	 * 2. 企业素材库（云端持久化，素材库 = 剪辑库素材）——走 /api/sync/upload
+	 */
+	const uploadToLibrary = async (files: File[]) => {
+		const ok: string[] = [];
+		for (const file of files) {
+			try {
+				const fd = new FormData();
+				fd.append("file", file);
+				fd.append("filename", file.name);
+				const res = await fetch("/api/sync/upload", {
+					method: "POST",
+					headers: authHeaders(),
+					body: fd,
+				});
+				if (res.ok) ok.push(file.name);
+			} catch (err) {
+				console.error("上传素材库失败:", err);
+			}
+		}
+		if (ok.length > 0) {
+			toast.success(`已入库素材库 ${ok.length} 个文件（云端可再选）`);
+		} else {
+			toast.error("上传素材库失败（本次素材不受影响）");
+		}
+	};
+
 	const handleLocalFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
 		const files = Array.from(e.target.files || []);
 		if (files.length > 0) {
@@ -478,6 +506,8 @@ export function AssetLibraryPickerModal({
 			if (onLocalFilesSelected) {
 				onLocalFilesSelected(files);
 			}
+			// 异步入库素材库，不阻塞本次素材的导入
+			void uploadToLibrary(files);
 		}
 		e.target.value = "";
 	};
