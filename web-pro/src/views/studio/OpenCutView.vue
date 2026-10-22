@@ -114,15 +114,14 @@ async function reload() {
 function syncThemeToFrame() {
   if (!frameRef.value || !frameRef.value.contentWindow) return;
   const currentTheme = localStorage.getItem('material_theme') || 'dark';
-  const isSenior = localStorage.getItem('ml_senior_mode') === 'true';
-  const seniorZoom = Number(localStorage.getItem('ml_senior_zoom')) || 1;
   const token = localStorage.getItem('ml_token') || '';
   frameRef.value.contentWindow.postMessage(
     {
       type: 'MLS_THEME_CHANGE',
       theme: currentTheme,
-      seniorMode: isSenior,
-      seniorZoom,
+      // 适老缩放已下架：编辑器内部永远 100% 渲染，不再接收缩放档位
+      seniorMode: false,
+      seniorZoom: 1,
       token
     },
     '*'

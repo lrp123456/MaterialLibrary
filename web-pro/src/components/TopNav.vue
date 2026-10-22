@@ -46,7 +46,14 @@
     <div class="ml-auto flex items-center gap-2 text-sm shrink-0 relative">
       <!-- 适老化关怀：开关 + 自定义字号调节浮层（所有区域等比例缩放） -->
       <div class="relative flex items-center">
+        <!--
+          适老缩放功能已下架（2026-10-22）：
+          外壳不缩放自身，单边放大 iframe 里的编辑器会导致内外比例失调、
+          100vh 布局溢出（页面"变形"）。编辑器内部也改为永远 100% 渲染。
+          恢复方式：去掉下面的 v-if="false"，并在编辑器 theme-sync 中恢复 zoom。
+        -->
         <div
+          v-if="false"
           class="flex items-center rounded-xl border bg-studio-850 border-studio-700 shrink-0 overflow-hidden shadow-xs"
           :title="seniorMode ? `适老关怀已开启 (${zoomPercent}%)，点击齿轮或 A− / A+ 调整全局大小` : '开启适老关怀大字模式'"
         >

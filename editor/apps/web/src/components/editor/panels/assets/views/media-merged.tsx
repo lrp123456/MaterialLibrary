@@ -94,26 +94,38 @@ export async function fetchCloudAssets({
 
 	const json = await res.json();
 	const rawList = (json?.data?.items || json?.items || []) as any[];
+	const total =
+		Number(json?.data?.total ?? json?.total ?? rawList.length) || rawList.length;
 	const token = getAuthToken();
 
-	return rawList.map((it) => {
-		let thumb = it.thumb_url;
-		if (!thumb) {
-			thumb =
-				it.kind === "video"
-					? `/api/viewer/assets/${encodeURIComponent(it.fid)}/poster${token ? `?token=${encodeURIComponent(token)}` : ""}`
-					: `/api/viewer/assets/${encodeURIComponent(it.fid)}/image${token ? `?token=${encodeURIComponent(token)}` : ""}`;
-		} else if (token && !thumb.includes("token=")) {
-			thumb += (thumb.includes("?") ? "&" : "?") + `token=${encodeURIComponent(token)}`;
-		}
+	const list = rawList.map((it) => {
+		const kind = it.kind || (it.category === "music" ? "audio" : "image");
+		const tokenQ = token ? `?token=${encodeURIComponent(token)}` : "";
+		/*
+		 * 缩略图一律走后端端点（poster/image，带 token），不再使用 it.thumb_url。
+		 * 原因：网盘同步类素材（Camera_XHS、FB_IMG 等）的 thumb_url 存的是
+		 * 夸克网盘分享页链接（open-api-drive.quark.cn/s/...），是网页不是图片，
+		 * <img> 渲染不出内容——这就是"云素材大量不可见"的根因。
+		 * 后端 poster/image 端点由服务端代理生成真正的缩略图。
+		 */
+		const thumb =
+			kind === "video"
+				? `/api/viewer/assets/${encodeURIComponent(it.fid)}/poster${tokenQ}`
+				: kind === "audio"
+					? ""
+					: `/api/viewer/assets/${encodeURIComponent(it.fid)}/image${tokenQ}`;
 
 		return {
 			fid: it.fid,
 			file_name: it.file_name || it.fileName || "未命名素材",
-			kind: it.kind || (it.category === "music" ? "audio" : "image"),
+			kind,
 			mime:
 				it.mime ||
-				(it.kind === "video" ? "video/mp4" : it.kind === "audio" ? "audio/mpeg" : "image/jpeg"),
+				(kind === "video"
+					? "video/mp4"
+					: kind === "audio"
+						? "audio/mpeg"
+						: "image/jpeg"),
 			size: it.size || 0,
 			duration: it.duration_s || it.duration || 0,
 			width: it.width,
@@ -121,6 +133,11 @@ export async function fetchCloudAssets({
 			thumb_url: thumb,
 		} as MaterialAssetItem;
 	});
+
+	// 分页元信息挂在数组上（保持数组返回形状，library 视图零改动）
+	(list as any).__total = total;
+	(list as any).__page = Number(new URLSearchParams(search).get("page")) || 1;
+	return list;
 }
 
 /** 云端列表的故障提示只弹一次（视图会随 chip 切换反复挂载）。 */
@@ -128,21 +145,29 @@ let cloudErrorNotified = false;
 
 /** 统一列表挂载时拉一次云端目录；带 token 握手事件与失败重试。 */
 export function useCloudMediaList() {
+	/** 后端单页上限是 100（api.js: Math.min(100, pageSize)），按 100 拉满 */
+	const PAGE_SIZE = 100;
 	const [items, setItems] = useState<MaterialAssetItem[]>([]);
+	const [total, setTotal] = useState(0);
 	const [isLoading, setIsLoading] = useState(false);
+	const [isLoadingMore, setIsLoadingMore] = useState(false);
 	const [error, setError] = useState("");
 
-	const reload = useCallback(async () => {
-		setIsLoading(true);
+	const fetchPage = useCallback(async (page: number, append: boolean) => {
+		if (append) setIsLoadingMore(true);
+		else setIsLoading(true);
 		setError("");
 		try {
-			const list = await fetchCloudAssets({ query: { pageSize: "80", page: "1" } });
+			const list = await fetchCloudAssets({
+				query: { pageSize: String(PAGE_SIZE), page: String(page) },
+			});
 			cloudErrorNotified = false;
-			setItems(list);
+			setTotal(Number((list as any).__total) || 0);
+			setItems((prev) => (append ? [...prev, ...list] : list));
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "未知错误";
 			setError(message);
-			setItems([]);
+			if (!append) setItems([]);
 			// 未登录时面板内联状态条已经说清楚了，不必再弹红条；
 			// 切二级 chip 会重新挂载本视图，同一次故障也只提示一次。
 			const authRequired = err instanceof CloudAssetsError && err.authRequired;
@@ -152,8 +177,17 @@ export function useCloudMediaList() {
 			}
 		} finally {
 			setIsLoading(false);
+			setIsLoadingMore(false);
 		}
 	}, []);
+
+	const reload = useCallback(() => fetchPage(1, false), [fetchPage]);
+
+	const loadMore = useCallback(() => {
+		if (isLoading || isLoadingMore) return;
+		if (items.length === 0 || (total > 0 && items.length >= total)) return;
+		void fetchPage(Math.floor(items.length / PAGE_SIZE) + 1, true);
+	}, [fetchPage, isLoading, isLoadingMore, items.length, total]);
 
 	useEffect(() => {
 		void reload();
@@ -168,7 +202,7 @@ export function useCloudMediaList() {
 		return () => window.removeEventListener("mls_token_updated", onTokenUpdated);
 	}, [reload]);
 
-	return { items, isLoading, error, reload };
+	return { items, total, isLoading, isLoadingMore, error, reload, loadMore };
 }
 
 /* ------------------------------------------------------------------ */

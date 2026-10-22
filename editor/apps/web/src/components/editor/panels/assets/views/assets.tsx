@@ -247,7 +247,7 @@ export function MediaView({ filter = "all" }: { filter?: MediaTypeFilter }) {
 					source={mediaSource}
 					onChange={setMediaSource}
 					localCount={localRows.length}
-					cloudCount={cloudRows.length}
+					cloudCount={cloud.total > cloudRows.length ? cloud.total : cloudRows.length}
 				/>
 				<CloudStatus
 					isLoading={cloud.isLoading}
@@ -282,6 +282,20 @@ export function MediaView({ filter = "all" }: { filter?: MediaTypeFilter }) {
 								onRemove={handleRemove}
 							/>
 						)}
+						{mediaSource === "cloud" &&
+						!cloud.isLoading &&
+						cloud.total > cloudRows.length ? (
+							<button
+								type="button"
+								onClick={() => cloud.loadMore()}
+								disabled={cloud.isLoadingMore}
+								className="text-muted-foreground hover:text-foreground mx-auto mt-3 block cursor-pointer rounded-md border border-dashed border-border/60 px-3 py-1.5 text-[11px] font-bold transition-colors disabled:opacity-50"
+							>
+								{cloud.isLoadingMore
+									? "加载中…"
+									: `加载更多（已显示 ${cloudRows.length} / ${cloud.total}）`}
+							</button>
+						) : null}
 					</SelectableSurface>
 				)}
 			</PanelView>
