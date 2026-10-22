@@ -52,15 +52,18 @@ if (!distDir) {
 }
 
 console.log(`[editor] 启动中 · 端口 ${port} · distDir ${distDir}`);
-console.log('[editor] 访问地址：http://127.0.0.1:' + port + '/editor/projects');
+console.log('[editor] 访问地址：http://127.0.0.1:30002 （请统一走 30002，勿直接访问本端口）');
 
 const child = spawn(
   process.execPath,
-  [nextBin, 'start', '-p', String(port)],
+  // 端口走 PORT 环境变量，不用 -p：
+  // 服务面板经 cmd.exe /c 包装启动时，-p 3010 会解析失败，Next 回退到 next.config 的
+  // 3000（正好被 WSL 里另一份 OpenCut 占用），结果两头都起不来。
+  [nextBin, 'start'],
   {
     cwd: webDir,
     stdio: 'inherit',
-    env: { ...process.env, NEXT_DIST_DIR: distDir },
+    env: { ...process.env, NEXT_DIST_DIR: distDir, PORT: String(port) },
   },
 );
 

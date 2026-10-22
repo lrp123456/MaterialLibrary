@@ -128,7 +128,7 @@ const SERVICES = [
   {
     id: 'clip-editor',
     name: '剪辑编辑器 (OpenCut)',
-    desc: 'fork 自 OpenCut Classic · 由 30002 以 /editor 反代（端口 3000）',
+    desc: 'fork 自 OpenCut Classic · 内部端口 3010，经 30002 的 /editor 反代访问',
     port: 3010,
     url: 'http://127.0.0.1:30002/editor',
     kind: 'node',
@@ -500,6 +500,57 @@ const server = http.createServer(async (req, res) => {
     if (data.port != null && data.port !== '' && svc.portEditable) applyPort(svc, data.port);
     exec(`start "" "${svc.url}"`);
     return json(res, 200, { ok: true, url: svc.url });
+  }
+
+  // 一键重建：把仓库最新代码构建成产物并重启编辑器服务。
+  // 端口约定（勿改）：服务端 30001 / 客户端入口 30002 / 临时测试 30003（测完同步回 30002）。
+  if (p === '/api/rebuild' && req.method === 'POST') {
+    const node = process.execPath;
+    const steps = [];
+
+    const run = (label, cmd, args, opts) => new Promise((resolve) => {
+      const child = spawn(cmd, args, { cwd: opts.cwd, env: { ...process.env, ...opts.env }, shell: false });
+      let out = '';
+      child.stdout.on('data', (c) => { out += c; });
+      child.stderr.on('data', (c) => { out += c; });
+      child.on('exit', (code) => {
+        steps.push({ label, ok: code === 0, tail: out.split(/\r?\n/).filter(Boolean).slice(-6).join('\n') });
+        resolve(code === 0);
+      });
+      child.on('error', (e) => {
+        steps.push({ label, ok: false, tail: e.message });
+        resolve(false);
+      });
+    });
+
+    // 1) 客户端产物（web-pro → dist，30002 直接生效，无需重启）
+    await run('web-pro 构建', node, [path.join(ROOT, 'web-pro', 'node_modules', 'vite', 'bin', 'vite.js'), 'build'], {
+      cwd: path.join(ROOT, 'web-pro'),
+      env: {},
+    });
+
+    // 2) 编辑器产物（NEXT 用全新 dist 目录，规避批量删除保护）
+    const distDir = `.next-build${Date.now()}`;
+    await run('编辑器构建', node, [path.join(ROOT, 'editor', 'apps', 'web', 'node_modules', 'next', 'dist', 'bin', 'next'), 'build'], {
+      cwd: path.join(ROOT, 'editor', 'apps', 'web'),
+      env: {
+        NEXT_DIST_DIR: distDir,
+        NEXT_TELEMETRY_DISABLED: '1',
+        SKIP_CONTENT_COLLECTIONS: '1',
+      },
+    });
+
+    // 3) 重启编辑器服务（加载新产物）
+    const clip = SERVICES.find((s) => s.id === 'clip-editor');
+    if (clip) {
+      await stopService(clip);
+      await new Promise((x) => setTimeout(x, 1200));
+      const r = await startService(clip);
+      steps.push({ label: '重启剪辑服务', ok: !!r?.ok, tail: r?.note || r?.log || '' });
+    }
+
+    const services = await snapshot();
+    return json(res, 200, { ok: steps.every((s) => s.ok), steps, services });
   }
 
   json(res, 404, { ok: false, error: 'not found' });

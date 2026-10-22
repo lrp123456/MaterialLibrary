@@ -68,8 +68,9 @@ main{flex:1;padding:14px;max-width:560px;width:100%;margin:0 auto}
       </div>
       <button class="btn open" id="btnRefresh">刷新</button>
     </div>
-    <div style="margin-top:12px">
+    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn all" id="btnAll">一键启动全部</button>
+      <button class="btn open" id="btnRebuild">一键重建（构建最新代码并重启剪辑服务）</button>
     </div>
   </div>
   <div id="list"></div>
@@ -211,6 +212,28 @@ async function action(id, act) {
 }
 
 $('btnRefresh').onclick = load
+$('btnRebuild').onclick = async () => {
+  $('btnRebuild').disabled = true
+  toast('⏳ 正在重建：web-pro → 编辑器 → 重启剪辑服务…（约 1 分钟）')
+  try {
+    const d = await safeJson(await fetch(API + '/api/rebuild', { method: 'POST' }))
+    if (d && d.steps) {
+      const bad = d.steps.filter((s) => !s.ok)
+      if (bad.length) {
+        toast('✗ 重建失败：' + bad[0].label + ' — ' + (bad[0].tail || '').split('\n').pop())
+      } else {
+        toast('✅ 重建完成，已加载最新代码 · 入口 http://127.0.0.1:30002（Ctrl+F5 刷新）')
+      }
+    } else {
+      toast('✗ 重建失败：' + ((d && d.error) || '无响应'))
+    }
+  } catch (e) {
+    toast('✗ 重建失败：' + e.message)
+  } finally {
+    $('btnRebuild').disabled = false
+    load()
+  }
+}
 $('btnAll').onclick = async () => {
   const failed = []
   for (const id of ['ml-server', 'pack-studio', 'web-h5']) {
