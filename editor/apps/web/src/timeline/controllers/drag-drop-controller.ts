@@ -31,6 +31,10 @@ import type { TimelineDragData } from "@/timeline/drag";
 import type { MediaAsset } from "@/media/types";
 import type { ProcessedMediaAsset } from "@/media/processing";
 import { roundFrameTime, type MediaTime } from "@/wasm";
+import { toast } from "sonner";
+import { EditorCore } from "@/core";
+import { runPluginOnAsset, toastPluginError } from "@/timeline/plugin-apply";
+import { getMediaFid } from "@/services/cloud-snapshots";
 
 // --- Config ---
 
@@ -98,6 +102,9 @@ function elementTypeFromDrag({
 			return "effect";
 		case "media":
 			return dragData.mediaType;
+		case "plugin":
+			// 插件不落新元素，指示器按效果样式高亮目标即可
+			return "effect";
 	}
 }
 
@@ -106,6 +113,7 @@ function getTargetElementTypesForDrag({
 }: {
 	dragData: TimelineDragData;
 }): string[] | undefined {
+	if (dragData.type === "plugin") return ["audio", "video", "image"];
 	if (dragData.type === "effect") return dragData.targetElementTypes;
 	if (dragData.type === "media") return dragData.targetElementTypes;
 	return undefined;
@@ -488,6 +496,103 @@ export class DragDropController {
 		}
 
 		this.insertAtTarget({ element, target, trackType: "effect" });
+	}
+
+	/**
+	 * 插件拖拽应用：不是落元素，而是对目标素材执行 AI 任务。
+	 * 目前支持人声分离——完成自动落「人声」「背景音」两条命名轨。
+	 */
+	private executePluginDrop({
+		target,
+		dragData,
+	}: {
+		target: DropTarget;
+		dragData: Extract<TimelineDragData, { type: "plugin" }>;
+	}): void {
+		const hit = target.targetElement;
+		if (!hit) {
+			toastPluginError(dragData.name, new Error("请拖到时间线上的音频/视频素材上"));
+			return;
+		}
+
+		// 元素 → mediaId → 云素材 fid（AI 任务按 fid 消费）
+		const tracks = orderedTracks({ sceneTracks: this.config.getSceneTracks() });
+		let mediaId: string | null = null;
+		for (const track of tracks) {
+			if (!("elements" in track)) continue;
+			const found = (track.elements as { id: string; mediaId?: string }[]).find(
+				(el) => el.id === hit.elementId,
+			);
+			if (found) {
+				mediaId = found.mediaId ?? null;
+				break;
+			}
+		}
+		const fid = mediaId ? getMediaFid(mediaId) : null;
+		if (!fid) {
+			toastPluginError(
+				dragData.name,
+				new Error("目标素材没有云素材 id（请先「导入到本次」或从素材库导入）"),
+			);
+			return;
+		}
+
+		const startTime = target.xPosition;
+		toast.info(`「${dragData.name}」任务已提交，完成后自动落轨`);
+
+		void (async () => {
+			try {
+				const outputs = await runPluginOnAsset({
+					pluginType: dragData.pluginType,
+					pluginName: dragData.name,
+					fid,
+				});
+
+				const editor = EditorCore.getInstance();
+				const projectId = editor.project.getActive().metadata.id;
+				const commands: Command[] = [];
+
+				for (const out of outputs) {
+					const file = new File([out.blob], out.fileName, { type: "audio/wav" });
+					const processed = await processMediaAssets({ files: [file] });
+					const asset = processed[0];
+					if (!asset) continue;
+					const created = await editor.media.addMediaAsset({ projectId, asset });
+					if (!created) continue;
+
+					// 每份产出一条命名轨（人声 / 背景音），便于区分
+					const addTrack = new AddTrackCommand({
+						type: "audio",
+						name: out.trackName,
+					});
+					const element = buildElementFromMedia({
+						mediaId: created.id,
+						mediaType: created.type,
+						name: out.trackName,
+						duration: toElementDurationTicks({
+							seconds: created.duration ?? asset.duration,
+						}),
+						startTime,
+					});
+					commands.push(
+						addTrack,
+						new InsertElementCommand({
+							element,
+							placement: { mode: "explicit", trackId: addTrack.getTrackId() },
+						}),
+					);
+				}
+
+				if (commands.length > 0) {
+					this.config.executeCommand(new BatchCommand(commands));
+				}
+				toast.success(
+					`「${dragData.name}」完成，已落轨：${outputs.map((o) => o.trackName).join(" / ")}`,
+				);
+			} catch (error) {
+				toastPluginError(dragData.name, error);
+			}
+		})();
 	}
 
 	private async executeFileDrop({

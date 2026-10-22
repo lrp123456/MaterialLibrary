@@ -15,6 +15,7 @@ import {
 } from "@/services/clip-packs";
 import { PanelView } from "./base-panel";
 import { TtsView } from "./tts";
+import { useEditor } from "@/editor/use-editor";
 
 /**
  * 「插件」栏的两个二级视图。
@@ -84,6 +85,7 @@ function authHeaders(): Record<string, string> {
 }
 
 export function AiToolsView() {
+	const editor = useEditor();
 	const [panel, setPanel] = useState<"list" | "tts">("list");
 	const [caps, setCaps] = useState<Capability[]>([]);
 	const [voices, setVoices] = useState<VoiceItem[]>([]);
@@ -155,6 +157,23 @@ export function AiToolsView() {
 						key={card.type}
 						type="button"
 						disabled={!card.openable}
+						draggable={ready}
+						title={ready ? "拖到时间线上的音频/视频素材上即可自动处理" : undefined}
+						onDragStart={(e) => {
+							if (!ready) {
+								e.preventDefault();
+								return;
+							}
+							editor.timeline.dragSource.begin({
+								dataTransfer: e.dataTransfer,
+								dragData: {
+									type: "plugin",
+									pluginType: card.type,
+									name: card.name,
+								},
+							});
+						}}
+						onDragEnd={() => editor.timeline.dragSource.end()}
 						onClick={card.openable ? () => setPanel("tts") : undefined}
 						className={`flex flex-col gap-1 rounded-md border p-2 text-left ${
 							card.openable

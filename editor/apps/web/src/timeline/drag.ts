@@ -34,9 +34,20 @@ export interface EffectDragData extends BaseDragData {
 	targetElementTypes: VisualElement["type"][];
 }
 
+/**
+ * 插件拖拽：不是"落一个元素"，而是"对目标素材执行 AI 任务"。
+ * 例：人声分离拖到音频元素上 → 产出人声轨 + 背景音轨。
+ */
+export interface PluginDragData {
+	type: "plugin";
+	pluginType: string;
+	name: string;
+}
+
 export type TimelineDragData =
 	| MediaDragData
 	| TextDragData
 	| StickerDragData
 	| GraphicDragData
-	| EffectDragData;
+	| EffectDragData
+	| PluginDragData;

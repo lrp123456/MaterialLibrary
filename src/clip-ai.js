@@ -376,7 +376,13 @@ async function handleAiJobs(services, req, res, url) {
     const job = getJob(db, decodeURIComponent(outputMatch[1]));
     if (!job || !job.outputUrl) { sendJson(res, 404, { error: '没有产出文件' }); return true; }
     const row = db.prepare('SELECT output_path FROM clip_ai_jobs WHERE id=?').get(job.id);
-    const abs = row.output_path;
+    let abs = row.output_path;
+    // ?file= 取同目录下的其它产出（如人声分离的 no_vocals.wav 伴奏）。
+    // 只允许 basename，防目录穿越。
+    const want = String(url.searchParams.get('file') || '');
+    if (want) {
+      abs = path.join(path.dirname(abs || ''), path.basename(want));
+    }
     if (!abs || !fs.existsSync(abs)) { sendJson(res, 404, { error: '产出文件已清理' }); return true; }
     const buf = fs.readFileSync(abs);
     const name = path.basename(abs);
