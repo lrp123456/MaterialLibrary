@@ -119,9 +119,24 @@ get_running_pid() {
 }
 
 # 启动服务（后台 + watchdog 自动重启）
+# 剪辑资源包 / AI runner 是代码，随仓库维护；后端从数据目录读。
+# 启动前自动同步，保证"改了代码 → 重启后端"即生效，不用手工拷贝。
+sync_clip_runtime() {
+  local data_dir="${ML_DATA_DIR:-$HOME/.dsh-material-library}"
+  mkdir -p "$data_dir/clip-packs" "$data_dir/clip-ai-runners"
+  if [ -d "$PROJECT_DIR/data/clip-packs" ]; then
+    cp -r "$PROJECT_DIR/data/clip-packs/." "$data_dir/clip-packs/" 2>/dev/null || true
+  fi
+  if [ -d "$PROJECT_DIR/data/clip-ai-runners" ]; then
+    cp -r "$PROJECT_DIR/data/clip-ai-runners/." "$data_dir/clip-ai-runners/" 2>/dev/null || true
+  fi
+  info "已同步剪辑资源包与 AI runner 到 $data_dir"
+}
+
 start_server() {
   check_node
   check_frontend
+  sync_clip_runtime
 
   local running_pid wd_pid
   running_pid=$(get_running_pid)
