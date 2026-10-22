@@ -52,7 +52,7 @@ export function PropertyParamField({
 					<KeyframeToggle
 						isActive={keyframe.isActive}
 						isDisabled={keyframe.isDisabled}
-						title={`切换 ${displayLabel} 关键帧`}
+						title={`切换「${param.label}」关键帧`}
 						onToggle={keyframe.onToggle}
 					/>
 				) : undefined
