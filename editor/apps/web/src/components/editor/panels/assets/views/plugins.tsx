@@ -16,6 +16,7 @@ import {
 import { PanelView } from "./base-panel";
 import { TtsView } from "./tts";
 import { useEditor } from "@/editor/use-editor";
+import { toast } from "sonner";
 
 /**
  * 「插件」栏的两个二级视图。
@@ -156,12 +157,17 @@ export function AiToolsView() {
 					<button
 						key={card.type}
 						type="button"
-						disabled={!card.openable}
+						// 不用 disabled：disabled 的按钮无法触发拖拽（曾导致"拖上去无反应"）。
+						// 不可打开的卡片用 aria-disabled 表达，点击仍由 onClick 自行判断。
+						aria-disabled={!card.openable}
 						draggable={ready}
-						title={ready ? "拖到时间线上的音频/视频素材上即可自动处理" : undefined}
+						title={ready ? "拖到时间线上的音频/视频素材上即可自动处理" : "能力未配置，暂不可用"}
 						onDragStart={(e) => {
 							if (!ready) {
 								e.preventDefault();
+								toast.error(
+									`「${card.name}」未配置：${detail || "缺少 runner 脚本"}`,
+								);
 								return;
 							}
 							editor.timeline.dragSource.begin({
