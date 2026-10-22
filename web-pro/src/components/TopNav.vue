@@ -402,20 +402,22 @@ function setExactZoom(val) {
 
 function applySeniorMode(enabled) {
   const el = document.documentElement;
-  const effectiveZoom = seniorZoom.value > 1 ? seniorZoom.value : 1;
+  /*
+   * 适老化不再使用 zoom（2026-10-22 下架缩放）：
+   * zoom 会把 100vh / calc(100vh - Npx) 的布局整体撑溢出，页面"变形"，
+   * 而且外壳缩放 + iframe 再缩放会双重放大。
+   * 现在只放大文字与控件（见 style.css 的 html.senior-mode 字号规则），
+   * 编辑器画布保持 100% 精确渲染。
+   */
   if (enabled) {
     el.classList.add('senior-mode');
-    el.style.zoom = String(effectiveZoom);
-    el.style.setProperty('--senior-scale', String(effectiveZoom));
   } else {
     el.classList.remove('senior-mode');
-    el.style.zoom = '';
-    el.style.removeProperty('--senior-scale');
   }
   // 全局广播通知（包括 iframe 联动）
   try {
     window.dispatchEvent(new CustomEvent('ml_senior_zoom_changed', {
-      detail: { enabled, zoom: enabled ? effectiveZoom : 1 }
+      detail: { enabled, zoom: 1 }
     }));
   } catch (_) {}
 }

@@ -115,12 +115,13 @@ function syncThemeToFrame() {
   if (!frameRef.value || !frameRef.value.contentWindow) return;
   const currentTheme = localStorage.getItem('material_theme') || 'dark';
   const token = localStorage.getItem('ml_token') || '';
+  // 适老化：只通知"开/关"，编辑器据此放大字号与控件（不做 zoom，画布保持 100%）
+  const isSenior = localStorage.getItem('ml_senior_mode') !== 'false';
   frameRef.value.contentWindow.postMessage(
     {
       type: 'MLS_THEME_CHANGE',
       theme: currentTheme,
-      // 适老缩放已下架：编辑器内部永远 100% 渲染，不再接收缩放档位
-      seniorMode: false,
+      seniorMode: isSenior,
       seniorZoom: 1,
       token
     },

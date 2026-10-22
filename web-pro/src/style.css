@@ -752,3 +752,29 @@ html.senior-mode .mediahub-view {
   min-height: calc(100vh - 56px);
   overflow: hidden;
 }
+
+/* ---- 适老化（2026-10-22 调整）：彻底移除 zoom，只放大文字与控件 ----
+   之前 html.senior-mode 用 zoom 1.3 整页放大，导致：
+   1) 外壳放大 + 编辑器 iframe 内再放大 = 双重放大，页面"变形"；
+   2) 100vh / calc(100vh - Npx) 布局整体溢出。
+   现在编辑器画布永远 100% 精确渲染，适老化只放大字号。
+   上方 659-750 行的布局补丁是 zoom 时代的产物，移除 zoom 后与常规布局
+   等价，保留无害。 */
+html.senior-mode body {
+  font-size: 15px;
+}
+html.senior-mode button {
+  font-size: 14px;
+}
+html.senior-mode .text-\[10px\] {
+  font-size: 12px !important;
+}
+html.senior-mode .text-\[11px\] {
+  font-size: 13px !important;
+}
+html.senior-mode .text-xs {
+  font-size: 13.5px !important;
+}
+html.senior-mode .text-sm {
+  font-size: 15px !important;
+}
