@@ -1,5 +1,5 @@
 <template>
-  <div class="view-root studio-view flex-1 flex flex-col h-[calc(100vh-56px)] overflow-hidden bg-studio-950 font-sans">
+  <div class="view-root studio-view flex-1 min-h-0 flex flex-col overflow-hidden bg-studio-950 font-sans">
     <!-- AI 创作二级分段导航栏 (高度 48px) -->
     <div class="h-12 bg-studio-900 border-b border-studio-700 px-5 flex items-center justify-between shrink-0 select-none">
       <div class="flex items-center space-x-2">
@@ -13,9 +13,7 @@
         >
           <span class="choice-mark" aria-hidden="true"></span>
           <StudioIcon name="chat" :size="16" />
-          <span>AI 对话式生成</span>
-          <span v-if="activeSub === 'chat'" class="choice-now">当前</span>
-          <span class="text-xs font-mono opacity-80">豆包/千问创作流</span>
+          <span>对话生成</span>
         </button>
 
         <button
@@ -28,9 +26,7 @@
         >
           <span class="choice-mark" aria-hidden="true"></span>
           <StudioIcon name="wand" :size="16" />
-          <span>AI 快捷精准编辑</span>
-          <span v-if="activeSub === 'quick'" class="choice-now">当前</span>
-          <span class="text-xs font-mono opacity-80">6大专业模式</span>
+          <span>精准编辑</span>
         </button>
       </div>
 
