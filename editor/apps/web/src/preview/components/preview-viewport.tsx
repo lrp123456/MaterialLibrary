@@ -305,6 +305,17 @@ export function usePreviewViewportState({
 		});
 	}, [canvasHeight, canvasWidth]);
 
+	/**
+	 * fit 规则（用户确认版）：
+	 * - 容器尺寸或画布尺寸（工程切换、画布设置）发生任何变化 → 自动回到"适应"；
+	 * - 只有点击具体百分比档位才进入精确缩放（此时才允许滚动条）；
+	 * - 但下一次尺寸变化仍会重新 fit，保证"永不因尺寸变化产生滚动条"。
+	 */
+	useEffect(() => {
+		setZoomState(1);
+		setCenter({ x: canvasWidth / 2, y: canvasHeight / 2 });
+	}, [canvasWidth, canvasHeight, viewportHeight, viewportWidth]);
+
 	const zoomIn = useCallback(() => {
 		setZoomState((previousZoom) =>
 			getClampedZoom({

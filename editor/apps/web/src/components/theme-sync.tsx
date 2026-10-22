@@ -37,9 +37,20 @@ export function ThemeSync() {
 
 			if (isSenior) {
 				root.classList.add("senior-mode");
-				const effectiveZoom = zoom > 1 ? zoom : 1.3;
-				root.style.zoom = String(effectiveZoom);
-				root.style.setProperty("--senior-scale", String(effectiveZoom));
+				/*
+				 * 只在"独立打开"时按档位缩放。
+				 * 嵌在主应用 iframe 里时绝不缩放：外层没有跟着缩放，
+				 * 单边放大 1.3 倍就会出现内外比例不一致、面板被撑变形的问题。
+				 * 嵌入态的适老化由 .senior-mode 的字号规则负责。
+				 */
+				if (window.parent === window) {
+					const effectiveZoom = zoom > 1 ? zoom : 1.3;
+					root.style.zoom = String(effectiveZoom);
+					root.style.setProperty("--senior-scale", String(effectiveZoom));
+				} else {
+					root.style.zoom = "";
+					root.style.removeProperty("--senior-scale");
+				}
 			} else {
 				root.style.zoom = "";
 				root.style.removeProperty("--senior-scale");

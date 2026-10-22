@@ -664,7 +664,7 @@
                   </button>
                 </div>
               </div>
-              <div v-else class="chat-md text-slate-200" v-html="renderMarkdown(msg.content)"></div>
+              <div v-else class="chat-md" v-html="renderMarkdown(msg.content)" @click="onMdClick"></div>
             </div>
           </div>
         </div>
@@ -1784,7 +1784,29 @@ function renderMarkdown(src) {
   });
   mdHtmlCache.set(text, html);
   if (mdHtmlCache.size > 200) mdHtmlCache.delete(mdHtmlCache.keys().next().value);
-  return html;
+  // 给每个代码块包一层复制按钮容器（样式见 .md-code-block / .md-copy-btn）
+  return html.replace(/<pre([^>]*)>/g, '<div class="md-code-block"><button type="button" class="md-copy-btn" data-md-copy>复制</button><pre$1>')
+    .replace(/<\/pre>/g, '</pre></div>');
+}
+
+// 代码块复制：renderMarkdown 给每个 <pre> 包一层带复制按钮的容器，
+// 点击事件由 .chat-md 容器统一委托（v-html 内容无法直接绑 Vue 事件）。
+function onMdClick(event) {
+  const btn = event.target.closest('[data-md-copy]');
+  if (!btn) return;
+  const block = btn.closest('.md-code-block');
+  const pre = block && block.querySelector('pre');
+  const text = pre ? pre.innerText : '';
+  if (!text) return;
+  navigator.clipboard
+    .writeText(text)
+    .then(() => {
+      btn.textContent = '已复制';
+      setTimeout(() => {
+        btn.textContent = '复制';
+      }, 1500);
+    })
+    .catch(() => toast.error('复制失败，请手动选择复制'));
 }
 const activeGenMode = ref('');
 const schemaParams = ref({});
@@ -4109,13 +4131,48 @@ function registerVideoEl(idx, el) {
 }
 
 /* ---- 助手正文 Markdown 排版（v-html 注入：宿主 .chat-md 带 scoped 属性，
-        其内部标签不带，故命中内部标签需 :deep；直接子元素用普通 scoped 选择器即可） ---- */
-.chat-md { font-size: 12.5px; line-height: 1.7; word-break: break-word; }
+        其内部标签不带，故命中内部标签需 :deep；直接子元素用普通 scoped 选择器即可）
+        颜色全部走 --md-* 变量：默认深色（聊天面板底色），浅色主题由
+        html.light / html.eye-care 覆盖，跟随主题切换 ---- */
+.chat-md {
+  --md-heading: #f1f5f9;
+  --md-strong: #f8fafc;
+  --md-link: #22d3ee;
+  --md-muted: #94a3b8;
+  --md-quote-border: rgba(34, 211, 238, 0.5);
+  --md-code-bg: rgba(148, 163, 184, 0.15);
+  --md-code-border: rgba(148, 163, 184, 0.22);
+  --md-pre-bg: #0b1220;
+  --md-pre-fg: #e2e8f0;
+  --md-table-border: rgba(148, 163, 184, 0.28);
+  --md-table-head-bg: rgba(148, 163, 184, 0.12);
+  --md-hr: rgba(148, 163, 184, 0.25);
+  color: var(--md-strong);
+  font-size: 12.5px;
+  line-height: 1.7;
+  word-break: break-word;
+}
+html.light .chat-md,
+html.eye-care .chat-md {
+  --md-heading: #1e293b;
+  --md-strong: #0f172a;
+  --md-link: #0891b2;
+  --md-muted: #64748b;
+  --md-quote-border: rgba(8, 145, 178, 0.45);
+  --md-quote-fg: #475569;
+  --md-code-bg: rgba(100, 116, 139, 0.12);
+  --md-code-border: rgba(100, 116, 139, 0.25);
+  --md-pre-bg: #f1f5f9;
+  --md-pre-fg: #1e293b;
+  --md-table-border: rgba(100, 116, 139, 0.3);
+  --md-table-head-bg: rgba(100, 116, 139, 0.12);
+  --md-hr: rgba(100, 116, 139, 0.3);
+}
 .chat-md > * + * { margin-top: 0.6em; }
 .chat-md :deep(h1),
 .chat-md :deep(h2),
 .chat-md :deep(h3),
-.chat-md :deep(h4) { font-weight: 700; color: #f1f5f9; line-height: 1.4; }
+.chat-md :deep(h4) { font-weight: 700; color: var(--md-heading); line-height: 1.4; }
 .chat-md :deep(h1) { font-size: 1.35em; }
 .chat-md :deep(h2) { font-size: 1.22em; }
 .chat-md :deep(h3) { font-size: 1.1em; }
@@ -4127,25 +4184,25 @@ function registerVideoEl(idx, el) {
 .chat-md :deep(li) { margin: 0.2em 0; }
 .chat-md :deep(li > ul),
 .chat-md :deep(li > ol) { margin-top: 0.2em; }
-.chat-md :deep(strong) { color: #f8fafc; font-weight: 700; }
+.chat-md :deep(strong) { color: var(--md-strong); font-weight: 700; }
 .chat-md :deep(em) { font-style: italic; }
-.chat-md :deep(a) { color: #22d3ee; text-decoration: underline; text-underline-offset: 2px; }
+.chat-md :deep(a) { color: var(--md-link); text-decoration: underline; text-underline-offset: 2px; }
 .chat-md :deep(blockquote) {
-  border-left: 3px solid rgba(34, 211, 238, 0.5);
+  border-left: 3px solid var(--md-quote-border);
   padding: 0.2em 0 0.2em 0.9em;
-  color: #94a3b8;
+  color: var(--md-muted);
 }
 .chat-md :deep(code) {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.88em;
-  background: rgba(148, 163, 184, 0.15);
-  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: var(--md-code-bg);
+  border: 1px solid var(--md-code-border);
   border-radius: 5px;
   padding: 0.1em 0.4em;
 }
 .chat-md :deep(pre) {
-  background: #0b1220;
-  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: var(--md-pre-bg);
+  border: 1px solid var(--md-code-border);
   border-radius: 10px;
   padding: 0.8em 1em;
   overflow-x: auto;
@@ -4155,9 +4212,9 @@ function registerVideoEl(idx, el) {
   border: none;
   padding: 0;
   font-size: 0.85em;
-  color: #e2e8f0;
+  color: var(--md-pre-fg);
 }
-.chat-md :deep(hr) { border: none; border-top: 1px solid rgba(148, 163, 184, 0.25); }
+.chat-md :deep(hr) { border: none; border-top: 1px solid var(--md-hr); }
 .chat-md :deep(table) {
   width: 100%;
   border-collapse: collapse;
@@ -4167,10 +4224,30 @@ function registerVideoEl(idx, el) {
 }
 .chat-md :deep(th),
 .chat-md :deep(td) {
-  border: 1px solid rgba(148, 163, 184, 0.28);
+  border: 1px solid var(--md-table-border);
   padding: 0.4em 0.7em;
   text-align: left;
 }
-.chat-md :deep(th) { background: rgba(148, 163, 184, 0.12); font-weight: 700; }
+.chat-md :deep(th) { background: var(--md-table-head-bg); font-weight: 700; }
 .chat-md :deep(img) { max-width: 100%; border-radius: 8px; }
+
+/* 代码块复制按钮：md-copy-btn 由 renderMarkdown 注入，事件走容器委托 */
+.chat-md :deep(.md-code-block) { position: relative; }
+.chat-md :deep(.md-copy-btn) {
+  position: absolute;
+  top: 0.4em;
+  right: 0.4em;
+  z-index: 2;
+  padding: 0.15em 0.6em;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 6px;
+  border: 1px solid var(--md-code-border);
+  background: var(--md-code-bg);
+  color: var(--md-pre-fg);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  cursor: pointer;
+}
+.chat-md :deep(.md-code-block:hover) .md-copy-btn { opacity: 1; }
 </style>

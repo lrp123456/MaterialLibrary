@@ -337,8 +337,13 @@
 html.senior-mode {
   font-size: 16px !important;
   letter-spacing: 0.015em;
-  /* 核心：支持根据父级广播的 --senior-scale 动态全屏等比例放大 */
-  zoom: var(--senior-scale, 1.3);
+  /*
+   * 不要在这里用 zoom。
+   * 外层（web-pro）并不会缩放自己，只有编辑器被放进 iframe 后单独 zoom，
+   * 结果内外比例不一致；zoom 还会让 100vh / calc(100vh - Npx) 这类布局溢出，
+   * 面板与时间线直接被撑变形。
+   * 适老化的放大效果交给下面的字号与控件尺寸规则。
+   */
 }
 
 html.senior-mode button,

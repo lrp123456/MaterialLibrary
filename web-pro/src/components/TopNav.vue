@@ -346,7 +346,10 @@ onUnmounted(() => {
 });
 
 function onWindowClick(e) {
-  if (showZoomPanel.value && !e.target.closest('.relative')) {
+  // 缩放面板属于顶栏的一部分：用户点顶栏内的其它控件（切主题、护眼、A-/A+）
+  // 时不应收起面板，否则"开适老 → 调大小 → 切主题"会被打断。
+  // 只有点击顶栏以外区域才关闭。
+  if (showZoomPanel.value && !e.target.closest('header')) {
     showZoomPanel.value = false;
   }
 }
