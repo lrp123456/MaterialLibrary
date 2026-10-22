@@ -115,8 +115,8 @@ function syncThemeToFrame() {
   if (!frameRef.value || !frameRef.value.contentWindow) return;
   const currentTheme = localStorage.getItem('material_theme') || 'dark';
   const token = localStorage.getItem('ml_token') || '';
-  // 适老化：只通知"开/关"，编辑器据此放大字号与控件（不做 zoom，画布保持 100%）
-  const isSenior = localStorage.getItem('ml_senior_mode') !== 'false';
+  // 适老化：常开（只放大编辑器的字号与控件，画布保持 100%）
+  const isSenior = true;
   frameRef.value.contentWindow.postMessage(
     {
       type: 'MLS_THEME_CHANGE',

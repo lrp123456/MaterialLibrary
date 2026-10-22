@@ -318,7 +318,9 @@ onMounted(() => {
   setTheme(saved);
 
   const savedSenior = localStorage.getItem('ml_senior_mode');
-  seniorMode.value = savedSenior === null ? true : savedSenior === 'true';
+  // 适老字号强制常开（2026-10-22）：缩放下架后，适老化只剩"字号适当放大"这一件事，
+  // 用户明确要求默认生效，不再读旧开关的存储值（历史脏数据可能是 false）。
+  seniorMode.value = true;
 
   const savedZoom = Number(localStorage.getItem('ml_senior_zoom'));
   if (savedZoom >= 1 && savedZoom <= 2.2) {
