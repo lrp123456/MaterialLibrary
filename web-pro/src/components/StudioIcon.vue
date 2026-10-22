@@ -91,6 +91,9 @@
     <!-- arrowUp 向上箭头 -->
     <path v-else-if="name === 'arrowUp'" d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z" />
 
+    <!-- arrowDown 向下箭头（对话快速回底） -->
+    <path v-else-if="name === 'arrowDown'" d="M20 12l-1.41-1.41L13 16.17V4h-2v12.17l-5.58-5.59L4 12l8 8 8-8z" />
+
     <!-- chevronDown 下拉箭头 -->
     <path v-else-if="name === 'chevronDown'" d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z" />
 

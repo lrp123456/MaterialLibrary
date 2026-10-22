@@ -1,5 +1,5 @@
 <template>
-  <div class="chat-root flex-1 flex h-[calc(100vh-56px)] overflow-hidden bg-studio-950 font-sans text-slate-100 text-sm">
+  <div class="chat-root flex-1 min-h-0 flex overflow-hidden bg-studio-950 font-sans text-slate-100 text-sm">
     <!-- ========================================================================= -->
     <!-- 1. 左侧抽屉栏：豆包/千问双模式（会话历史 / 我的创作库） -->
     <!-- ========================================================================= -->
@@ -83,7 +83,12 @@
     <!-- ========================================================================= -->
     <main class="chat-main flex-1 flex flex-col justify-between overflow-hidden bg-studio-950 relative p-4 space-y-3">
       <!-- 2.1 中间工作区：空状态居中灵感与参考看板 VS 真实消息流 -->
-      <div ref="messageScroller" class="chat-scroll flex-1 overflow-y-auto px-2 space-y-4 scrollbar-thin">
+      <div class="relative flex min-h-0 flex-1 flex-col">
+      <div
+        ref="messageScroller"
+        class="chat-scroll flex-1 overflow-y-auto px-2 space-y-4 scrollbar-thin"
+        @scroll.passive="onChatScroll"
+      >
         <!-- 空状态展示 (根据当前底部选中的主模式，展示不同形态的大号参考图工作台！) -->
         <div v-if="messages.length === 0" class="h-full flex flex-col items-center justify-center text-center max-w-4xl mx-auto py-4 space-y-5 select-none">
           <!-- A. 纯对话模式 (默认) -->
@@ -691,6 +696,22 @@
             <span class="leading-relaxed">{{ generatingHint }}</span>
           </div>
         </div>
+      </div>
+
+      <!-- 快速回底：仅在用户上滑脱离钉底时出现；流式输出期间带红点提示有新内容 -->
+      <button
+        v-show="!pinned"
+        type="button"
+        class="absolute bottom-4 left-1/2 z-20 -translate-x-1/2 flex h-10 w-10 items-center justify-center rounded-full bg-studio-850 text-slate-200 shadow-xl border border-studio-700 hover:bg-studio-800 hover:text-white transition-all cursor-pointer"
+        title="回到最新"
+        @click="jumpToLatest"
+      >
+        <StudioIcon name="arrowDown" :size="18" />
+        <span
+          v-if="hasNewBelow"
+          class="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-studio-rose ring-2 ring-studio-950"
+        ></span>
+      </button>
       </div>
 
       <!-- ========================================================================= -->
@@ -2467,12 +2488,30 @@ onMounted(async () => {
   }
   resetSchemaForModel();
   window.addEventListener('keydown', handleGlobalKeydown);
+  streamRO = new ResizeObserver(() => {
+    if (pinned.value) {
+      if (!pinRaf) pinRaf = requestAnimationFrame(() => { pinRaf = 0; stickToBottom(); });
+    } else {
+      hasNewBelow.value = true;
+    }
+  });
+  streamMO = new MutationObserver(() => observeStreamRows());
+  if (messageScroller.value) {
+    streamMO.observe(messageScroller.value, { childList: true });
+    observeStreamRows();
+  }
   await loadTemplates();
   await loadSessions();
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleGlobalKeydown);
+  if (pinRaf) cancelAnimationFrame(pinRaf);
+  pinRaf = 0;
+  if (streamRO) streamRO.disconnect();
+  if (streamMO) streamMO.disconnect();
+  streamRO = null;
+  streamMO = null;
 });
 
 function handleGlobalKeydown(e) {
@@ -2528,10 +2567,59 @@ function rememberSessionRefs(items, origin = 'upload') {
     });
   }
 }
-async function scrollMessagesToEnd() {
-  await nextTick();
+// ---- 消息流「钉底」滚动 ----------------------------------------------------
+// chat-scroll 是真正的滚动容器（适老化的 overflow:visible 补丁已删除），
+// 用 ResizeObserver 观察每一行消息：新行、流式文字增长、图片加载撑高都会触发，
+// 钉住时跟到底，用户上滑后只提示不抢滚动条。
+const PIN_THRESHOLD = 48;
+const pinned = ref(true);
+const hasNewBelow = ref(false);
+let streamRO = null;
+let streamMO = null;
+let pinRaf = 0;
+let programmaticUntil = 0;
+
+function stickToBottom() {
   const el = messageScroller.value;
   if (el) el.scrollTop = el.scrollHeight;
+}
+
+function observeStreamRows() {
+  const el = messageScroller.value;
+  if (!el || !streamRO) return;
+  for (const row of el.children) streamRO.observe(row);
+}
+
+function onChatScroll() {
+  if (Date.now() < programmaticUntil) return;
+  const el = messageScroller.value;
+  if (!el) return;
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= PIN_THRESHOLD;
+  if (atBottom) {
+    pinned.value = true;
+    hasNewBelow.value = false;
+  } else {
+    pinned.value = false;
+  }
+}
+
+function scrollToBottom({ behavior = 'auto' } = {}) {
+  pinned.value = true;
+  hasNewBelow.value = false;
+  nextTick(() => {
+    const el = messageScroller.value;
+    if (!el) return;
+    if (behavior === 'smooth') {
+      programmaticUntil = Date.now() + 700;
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    } else {
+      stickToBottom();
+    }
+  });
+}
+
+function jumpToLatest() {
+  scrollToBottom({ behavior: 'smooth' });
 }
 
 // 跨板块：将真实素材直接挂载为 @图1 并插入富文本输入框！
@@ -3132,6 +3220,8 @@ async function selectSession(s) {
   if (!s || !s.id) return;
   currentSessionId.value = s.id;
   messages.value = [];
+  pinned.value = true;
+  hasNewBelow.value = false;
   try {
     const rawMsgs = await fetchChatMessages(s.id);
     if (Array.isArray(rawMsgs)) {
@@ -3197,7 +3287,7 @@ async function selectSession(s) {
   } catch (e) {
     console.warn('加载会话消息失败:', e);
   }
-  scrollMessagesToEnd();
+  scrollToBottom();
 }
 
 async function createNewSession() {
@@ -3585,6 +3675,7 @@ async function sendMessage() {
     images: currentTray.map((item) => item.url)
   });
   rememberSessionRefs(currentTray, 'upload');
+  scrollToBottom();
 
   if (richEditorRef.value) {
     richEditorRef.value.innerHTML = '';
@@ -3921,7 +4012,7 @@ async function sendMessage() {
     }
   } finally {
     generating.value = false;
-    scrollMessagesToEnd();
+    scrollToBottom();
   }
 }
 
