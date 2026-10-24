@@ -10,7 +10,7 @@
  * 4. 默认贴回 (pasteback !== false)，可关。
  */
 const sharp = require('sharp');
-const { pastebackComposite, selectionBounds } = require('./image-ops');
+const { pastebackToTarget, selectionBounds } = require('./image-ops');
 const { findImageAdapter, readAdapterOutput } = require('./adapter-io');
 
 /**
@@ -63,6 +63,7 @@ async function handleReplace(services, {
   model = null,
   regionClauseText = null,
   maskPath = null,
+  outSpec = null,
 }) {
   if (!glbFid) throw new Error('改（物体替换）必须选择带 GLB 的单品');
   if (!fixedCameraRefBuffer) {
@@ -122,13 +123,19 @@ async function handleReplace(services, {
     kind: 'image',
     model: model || undefined,
     maskPath: maskPath || undefined,
+    // 出图档位/画幅由 handlers/edit-size 从模型契约算出，这里只负责原样透传
+    size: outSpec && outSpec.sizeField ? outSpec.sizeField : undefined,
+    ratio: outSpec && outSpec.ratioField ? outSpec.ratioField : undefined,
   });
   const generatedBuffer = readAdapterOutput(res);
   if (!generatedBuffer) throw new Error('图像适配器未返回替换结果');
 
   if (pasteback !== false && String(pasteback) !== 'false') {
-    const cropRect = { left: 0, top: 0, width: sw, height: sh };
-    return pastebackComposite(sceneImageBuffer, generatedBuffer, cropRect, quadOrBbox);
+    return pastebackToTarget(sceneImageBuffer, generatedBuffer, {
+      selection: quadOrBbox,
+      outW: outSpec ? outSpec.outW : sw,
+      outH: outSpec ? outSpec.outH : sh,
+    });
   }
   return generatedBuffer;
 }

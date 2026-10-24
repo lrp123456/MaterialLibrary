@@ -16,7 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { listVoices, prepareTtsParams, runTtsJob, ttsReady } = require('./clip-ai-tts');
+const { listVoices, prepareTtsParams, runTtsJob, ttsStatus } = require('./clip-ai-tts');
 
 const JOB_TYPES = new Set([
   'subtitle', 'matting', 'beauty_pro', 'face_reshape', 'upscale',
@@ -177,6 +177,22 @@ function startWorker(services, { intervalMs = 2000 } = {}) {
   const { db, config } = services;
   ensureAiTables(db);
 
+  /**
+   * 新进程里不可能还有任务真的在跑：上一次重启/崩溃留下的 running 全是僵尸行，
+   * 前端会一直轮询一个不存在的进程（"人声分离卡住不动"的成因之一）。开机即判失败。
+   */
+  const reclaimed = db
+    .prepare(
+      `UPDATE clip_ai_jobs
+         SET status='failed', stage='已中断', progress=100,
+             error='服务重启，任务进程已丢失，请重新提交', updated_at=?, finished_at=?
+       WHERE status='running'`,
+    )
+    .run(Date.now(), Date.now());
+  if (reclaimed.changes > 0) {
+    console.log(`[clip-ai] 回收 ${reclaimed.changes} 个中断的 AI 任务（标记为失败）`);
+  }
+
   const tick = async () => {
     if (working) return;
     const row = db.prepare(
@@ -212,7 +228,8 @@ function startWorker(services, { intervalMs = 2000 } = {}) {
         if (buf.length > MAX_INPUT_BYTES) {
           throw new Error(`源素材 ${(buf.length / 1024 / 1024).toFixed(0)} MB 超过 ${MAX_INPUT_BYTES / 1024 / 1024} MB 上限`);
         }
-        inputPath = path.join(inputDir, `source${guessExt(row.fid)}`);
+        const fileName = db.prepare('SELECT file_name FROM assets WHERE fid=?').get(row.fid)?.file_name;
+        inputPath = path.join(inputDir, `source${guessExt(row.fid, fileName)}`);
         fs.writeFileSync(inputPath, buf);
       }
 
@@ -229,7 +246,18 @@ function startWorker(services, { intervalMs = 2000 } = {}) {
           });
         } catch { /* 进度写失败不影响主流程 */ }
       };
-      const payload = { params, workDir: jobDir, outputDir, job: jobMeta, onProgress };
+      /**
+       * 取消不能只改库里的状态：runner 必须有机会把远端任务真的 kill 掉，
+       * 否则 GPU 上会继续跑完这条已经没人等的任务（串行队列 → 后面全堵）。
+       */
+      const isCanceled = () => {
+        try {
+          return (db.prepare('SELECT status FROM clip_ai_jobs WHERE id=?').get(row.id)?.status) === 'canceled';
+        } catch {
+          return false;
+        }
+      };
+      const payload = { params, workDir: jobDir, outputDir, job: jobMeta, onProgress, isCanceled };
       const out = (builtin
         ? await builtin({ services, ...payload })
         : await run({ inputPath, ...payload })) || {};
@@ -252,14 +280,20 @@ function startWorker(services, { intervalMs = 2000 } = {}) {
       });
       console.log(`[clip-ai] ${row.id} ${row.type} 完成，用时 ${Date.now() - started}ms`);
     } catch (e) {
+      /**
+       * 取消是「用户主动停」，不是失败：runner 把远端任务 kill 掉后抛错回来，
+       * 这里若一律写 failed，前端就把「已取消」显示成红色报错。
+       */
+      const dbStatus = db.prepare('SELECT status FROM clip_ai_jobs WHERE id=?').get(row.id)?.status;
+      const canceled = dbStatus === 'canceled';
       updateJob(db, row.id, {
-        status: 'failed',
+        status: canceled ? 'canceled' : 'failed',
         progress: 100,
-        stage: '失败',
+        stage: canceled ? '已取消' : '失败',
         error: (e && e.message ? e.message : String(e)).slice(0, 800),
         finished_at: Date.now(),
       });
-      console.warn(`[clip-ai] ${row.id} ${row.type} 失败：${e && e.message}`);
+      console.warn(`[clip-ai] ${row.id} ${row.type} ${canceled ? '已取消' : '失败'}：${e && e.message}`);
     } finally {
       working = false;
     }
@@ -270,9 +304,14 @@ function startWorker(services, { intervalMs = 2000 } = {}) {
   console.log(`[clip-ai] worker 已启动，runner 目录：${runnersDir(config)}`);
 }
 
-function guessExt(fid) {
-  const m = String(fid).match(/\.(mp4|mov|webm|mkv|mp3|wav|m4a|png|jpg|jpeg|webp)$/i);
-  return m ? `.${m[1].toLowerCase()}` : '.bin';
+function guessExt(fid, fileName) {
+  // 本地上传的素材 fid 是 local_<hash>，没有扩展名；只看 fid 会把输入落成一个
+  // 没有后缀的 .bin，超分之类「按扩展名认格式」的服务会直接拒收（HTTP 400）。
+  for (const name of [fileName, fid]) {
+    const m = String(name || '').match(/\.(mp4|mov|webm|mkv|mp3|wav|m4a|png|jpg|jpeg|webp)$/i);
+    if (m) return `.${m[1].toLowerCase()}`;
+  }
+  return '.bin';
 }
 
 /**
@@ -300,7 +339,10 @@ async function handleAiJobs(services, req, res, url) {
     // 没有 probe 的仍按「文件存在」判定；结果缓存 60 秒，避免面板反复打开就起重进程。
     const probeCache = handleAiJobs.probeCache || (handleAiJobs.probeCache = new Map());
     const items = await Promise.all([...JOB_TYPES].map(async (type) => {
-      if (type === 'tts') return { type, ready: ttsReady(db) };
+      if (type === 'tts') {
+        const status = await ttsStatus(db);
+        return { type, ...status };
+      }
       const file = path.join(dir, `${type}.js`);
       if (!fs.existsSync(file)) {
         return { type, ready: false, error: `缺少 runner 脚本：${file}` };

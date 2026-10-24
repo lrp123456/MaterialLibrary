@@ -455,6 +455,7 @@ function convertArkSeedanceVideoRequest({
       prompt: promptText,
       images: canon.refs.images,
       firstFrameUrl: canon.refs.first_frame || '',
+      lastFrameUrl: canon.refs.last_frame || '',
       genMode: canon.mode,
       ratio: merged.ratio,
       duration: merged.duration,

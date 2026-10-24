@@ -379,7 +379,10 @@ function getMenuTree(db) {
       icon: 'video',
       children: [
         { key: 'walkthrough', label: '空间漫游' },
+        { key: 'product', label: '单品展示' },
+        { key: 'detail', label: '细节特写' },
         { key: 'ad', label: '商业短片' },
+        { key: 'portrait', label: '人像动态' },
       ],
       facets: [
         {
@@ -471,10 +474,11 @@ function readStudioModels(db) {
         SELECT id, name, vendor_model_id, capability_id
         FROM model_contracts
         WHERE enabled=1
-          AND capability_id IN ('ark_image','agnes_image','qwenimage_local','ark_video','agnes_video')
+          AND capability_id IN ('ark_image','agnes_image','qwenimage_local','qwenimage_modelscope','ark_video','agnes_video')
         ORDER BY CASE capability_id
           WHEN 'ark_image' THEN 0 WHEN 'agnes_image' THEN 1 WHEN 'qwenimage_local' THEN 2
-          WHEN 'ark_video' THEN 3 ELSE 4 END, id
+          WHEN 'qwenimage_modelscope' THEN 3
+          WHEN 'ark_video' THEN 4 ELSE 5 END, id
       `).all();
     } catch (_) {
       rows = [];
@@ -483,12 +487,16 @@ function readStudioModels(db) {
   if (!rows.length) return DEFAULT_STUDIO_MODELS;
 
   const models = rows.map((r) => {
-    const isVideo = /video/i.test(r.capability_id || '');
+    const capId = String(r.capability_id || '');
+    const isVideo = /video/i.test(capId);
+    // 云端 Qwen 走魔搭，别被 /qwen/ 的「本机」规则吞掉
+    const provider = capId === 'qwenimage_modelscope' ? 'modelscope'
+      : (/agnes/i.test(capId) ? 'agnes' : (/qwen/i.test(capId) ? 'local' : 'volcengine'));
     return {
       id: r.vendor_model_id || r.id,
       name: r.name || r.id,
       desc: isVideo ? '服务端契约注册的空间视频生成引擎' : '服务端契约注册的图像生成引擎',
-      provider: /agnes/i.test(r.capability_id || '') ? 'agnes' : (/qwen/i.test(r.capability_id || '') ? 'local' : 'volcengine'),
+      provider,
       isDefault: false,
       type: isVideo ? 'video' : 'image',
       caps: isVideo ? ['motion_control', 'camera_walkthrough'] : ['coords_bbox', 'inpaint'],
@@ -505,7 +513,8 @@ function readStudioModels(db) {
  */
 function getStudioSchema(db) {
   return {
-    version: '2026.10.11',
+    // 2026.10.23：新增魔搭云端 Qwen-Image 2.1 Turbo（qwenimage_modelscope），客户端需重取模型表
+    version: '2026.10.23',
     // 1. 模型列表 (支持 Web 与 App 下拉切换，动态来自 model_contracts)
     models: readStudioModels(db),
 

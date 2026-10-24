@@ -8,6 +8,13 @@ const path = require('path');
 const crypto = require('crypto');
 const sharp = require('sharp');
 const { shapeVolcVideo } = require('../portrait-contract');
+const { fetchNet, describeFetchError, isPreSendError } = require('./net-retry');
+
+function logNetRetry({ attempt, useDirect, error, what, url }) {
+  let host = '';
+  try { host = new URL(url).hostname; } catch (_) {}
+  console.warn(`[gen] ${what}传输失败(${host || url}${useDirect ? ' 直连' : ' 代理'}): ${describeFetchError(error)}，第 ${attempt + 1} 次重试`);
+}
 
 function getNested(obj, pathStr) {
   if (!obj || !pathStr) return undefined;
@@ -42,7 +49,7 @@ function fillTemplate(tpl, vars) {
 async function downloadToFile(url, destPath, { timeoutMs = 60000, headers = {} } = {}) {
   let res;
   try {
-    res = await fetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
+    res = await fetchNet(url, { headers }, { timeoutMs, what: '下载产物', onRetry: logNetRetry });
   } catch (e) {
     throw enrichFetchError(e, '下载产物网络失败');
   }
@@ -51,16 +58,6 @@ async function downloadToFile(url, destPath, { timeoutMs = 60000, headers = {} }
   fs.mkdirSync(path.dirname(destPath), { recursive: true });
   fs.writeFileSync(destPath, buf);
   return buf;
-}
-
-function describeFetchError(e) {
-  const cause = e?.cause;
-  const detail = cause
-    ? (cause.message || cause.code || cause.errno || String(cause))
-    : '';
-  const base = e?.message || String(e);
-  if (detail && !base.includes(detail)) return `${base} (${detail})`;
-  return base;
 }
 
 function enrichFetchError(e, what) {
@@ -291,6 +288,13 @@ function noteVendorOutcome(input, ok, errText) {
 }
 
 async function executeAdapter(services, adapter, input) {
+  // 默认按用户主动请求处理；工作流节点显式传 gpuPriority:'low' 让出队头。
+  const { withGpuPriority } = require('./lan-fetch');
+  const priority = (input && input.gpuPriority) || 'high';
+  return withGpuPriority(priority, () => executeAdapterInner(services, adapter, input));
+}
+
+async function executeAdapterInner(services, adapter, input) {
   const { config, logger } = services;
   // 生图/下载前确保全局代理 dispatcher 可用（启动探测失败后可恢复）
   try {
@@ -450,36 +454,71 @@ async function executeAdapter(services, adapter, input) {
     }
 
     // 4. 素材库资产 (/api/viewer/assets/:fid/image 或 /api/assets/:fid/image)
+    //    以前只要 cache/thumbs 存在就直接返回它 —— 那是 512px 预览图，参考给供应商既糊又可能画幅不符，
+    //    而且原查询写的 derivatives.storage_path 列根本不存在（真实列是 storage_ref），一直是静默 catch。
+    //    现在按 URL 查询串取「用户实际选中的那一版」：?derivative=N → ?raw=1 原图 → 素材主衍生。
     const mAsset = s.match(/\/api\/(?:viewer\/)?assets\/([^/?#]+)/);
     if (mAsset) {
       const fid = decodeURIComponent(mAsset[1]);
-      const thumb = path.join(config.dataDir, 'cache', 'thumbs', `${fid}.jpg`);
-      if (fs.existsSync(thumb)) {
+      let q = new URLSearchParams();
+      try { q = new URL(s, 'http://local.invalid').searchParams; } catch (e) {}
+      const IMAGE_MIME = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif', '.bmp': 'image/bmp' };
+      const inlineImage = (fp, mime) => {
+        if (!fp || !fs.existsSync(fp)) return null;
+        const guess = mime || IMAGE_MIME[path.extname(String(fp).toLowerCase())] || 'image/jpeg';
+        if (!guess.startsWith('image/')) return null; // 视频/音频衍生不能当图片内联
         try {
-          const buf = fs.readFileSync(thumb);
-          return `data:image/jpeg;base64,${buf.toString('base64')}`;
-        } catch (e) {}
-      }
+          return `data:${guess};base64,${fs.readFileSync(fp).toString('base64')}`;
+        } catch (e) { return null; }
+      };
       try {
-        const row = services.db?.prepare("SELECT storage_path FROM derivatives WHERE asset_fid=? AND storage_type='nas' LIMIT 1").get(fid)
-                 || services.db?.prepare("SELECT storage_path FROM assets WHERE fid=?").get(fid);
-        if (row?.storage_path && fs.existsSync(row.storage_path)) {
-          const buf = fs.readFileSync(row.storage_path);
-          const ext = path.extname(row.storage_path).toLowerCase();
-          const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
-          return `data:${mime};base64,${buf.toString('base64')}`;
+        const { getDerivativeById, resolveDerivativeFile, ensurePreviewJpeg } = require('../derivatives');
+        const db = services.db;
+        const originRow = () => db.prepare("SELECT * FROM derivatives WHERE asset_fid=? AND kind='origin' ORDER BY id DESC LIMIT 1").get(fid);
+        const derivId = Number(q.get('derivative') || 0);
+        let deriv = null;
+        if (derivId) deriv = getDerivativeById(db, derivId);
+        else if (q.get('raw') === '1') deriv = originRow();
+        else {
+          const asset = db.prepare('SELECT main_derivative_id FROM assets WHERE fid=?').get(fid);
+          deriv = asset?.main_derivative_id ? getDerivativeById(db, asset.main_derivative_id) : originRow();
         }
-      } catch (e) {}
+        if (deriv && deriv.asset_fid === fid) {
+          const fp = await resolveDerivativeFile(services, deriv);
+          if (fp) {
+            // 手机直出原图动辄 10MB+，方舟一类供应商会直接拒收；超阈值换 1280px 预览档
+            if (fs.statSync(fp).size > 8 * 1024 * 1024) {
+              const preview = await ensurePreviewJpeg(services, fid, deriv, fp);
+              const hit = inlineImage(preview, 'image/jpeg');
+              if (hit) return hit;
+            }
+            const hit = inlineImage(fp, deriv.mime);
+            if (hit) return hit;
+          }
+        }
+      } catch (e) {
+        if (logger?.warn) logger.warn('[gen] 素材衍生图解析失败，回退本地缓存:', e.message);
+      }
     }
 
     // 4.5 素材库本地缓存兜底：local_cache 衍生图存在 derivatives.storage_ref，
-    //     上面按 storage_path 的查询覆盖不到，复用帧中继的本地解析（含 originals/thumbs/derivatives）
+    //     复用帧中继的本地解析（含 originals/thumbs/derivatives）
     try {
       const local = require('../frame-relay').readLocalRef(services, s);
-      if (local?.buf?.length) {
+      if (local?.buf?.length && String(local.mime || 'image/jpeg').startsWith('image/')) {
         return `data:${local.mime || 'image/jpeg'};base64,${local.buf.toString('base64')}`;
       }
     } catch (e) {}
+
+    // 4.6 视频/音频素材或全图缺失：海报缩略图是最后一个还能给的静态参考
+    if (mAsset) {
+      const thumb = path.join(config.dataDir, 'cache', 'thumbs', `${decodeURIComponent(mAsset[1])}.jpg`);
+      if (fs.existsSync(thumb)) {
+        try {
+          return `data:image/jpeg;base64,${fs.readFileSync(thumb).toString('base64')}`;
+        } catch (e) {}
+      }
+    }
 
     // 5. 各种 HTTP/HTTPS URL（自动将本地/穿透端口转换为 127.0.0.1 回环拉取，避免 NAT 限制与外网解析）
     if (/^https?:\/\//i.test(s) || s.startsWith('/')) {
@@ -841,6 +880,7 @@ async function executeAdapter(services, adapter, input) {
       prompt,
       images,
       firstFrameUrl: v.first_frame || (inp && inp.firstFrame) || '',
+      lastFrameUrl: v.last_frame || (inp && inp.lastFrame) || '',
       genMode: (inp && inp.genMode) || v.gen_mode || '',
       ratio: body.aspect_ratio || body.ratio || (inp && inp.ratio) || v.ratio,
       duration: body.duration || (inp && inp.durationSec) || v.duration,
@@ -861,7 +901,21 @@ async function executeAdapter(services, adapter, input) {
     }
 
     const content = [{ type: 'text', text: String(prompt).trim() }];
-    const refs = images.slice(0, 6);
+    let refs = images.slice(0, 6);
+    // 首尾帧必须带 role：不带时方舟只会当普通参考图，画面既不从首帧起、也不会收在尾帧。
+    // 线上这条路以前只有「有人像」时才走 shapeVolcVideo 拼 role，普通首尾帧一直是坏的。
+    const mode = String((inp && inp.genMode) || v.gen_mode || '');
+    const firstUrl = String(v.first_frame || (inp && inp.firstFrame) || '');
+    const lastUrl = String(v.last_frame || (inp && inp.lastFrame) || '');
+    let first = firstUrl;
+    let last = lastUrl;
+    if (!first && mode === 'first_last_frame') first = refs[0] || '';
+    if (!last && mode === 'first_last_frame' && firstUrl) last = refs.find((u) => u !== first) || '';
+    if (first || last) {
+      if (first) content.push({ type: 'image_url', image_url: { url: first }, role: 'first_frame' });
+      if (last) content.push({ type: 'image_url', image_url: { url: last }, role: 'last_frame' });
+      refs = refs.filter((u) => u !== first && u !== last);
+    }
     if (refs.length <= 1) {
       if (refs[0]) content.push({ type: 'image_url', image_url: { url: refs[0] } });
     } else {
@@ -913,12 +967,11 @@ async function executeAdapter(services, adapter, input) {
 
     let res;
     try {
-      res = await fetch(reqUrl, {
+      res = await fetchNet(reqUrl, {
         method: cfg.method || 'POST',
         headers,
-        body: JSON.stringify(bodyObj),
-        signal: AbortSignal.timeout(timeoutMs)
-      });
+        body: JSON.stringify(bodyObj)
+      }, { timeoutMs, what: '生成服务请求', retryOn: isPreSendError, onRetry: logNetRetry });
     } catch (e) {
       noteVendorOutcome(input, false, e.message || '');
       throw enrichFetchError(e, '生成服务网络请求失败');
@@ -1028,6 +1081,14 @@ async function executeAdapter(services, adapter, input) {
     return qwenLocal.runImageJob(services, adapter, input);
   }
 
+  // ---- 魔搭云端 Qwen-Image 2.1（API-Inference 异步任务）----
+  // 与本机 qwenimage_local 是「同模型、不同算力」：云端走 X-ModelScope-Async-Mode 提交、
+  // /v1/tasks 轮询、output_images 下载；参考图直接内联 data URI，不需要先传 OSS。
+  if (adapter.protocol === 'qwenimage_modelscope') {
+    const msQwen = require('./qwenimage-modelscope');
+    return msQwen.runImageJob(services, adapter, { ...input, __apiKey: apiKey });
+  }
+
   // ---- 2. 异步任务轮询协议 (async_http_job) ----
   if (adapter.protocol === 'async_http_job') {
     const submitUrl = resolveUrl(baseUrl, cfg.submitPath);
@@ -1042,11 +1103,16 @@ async function executeAdapter(services, adapter, input) {
 
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        submitRes = await fetch(submitUrl, {
+        submitRes = await fetchNet(submitUrl, {
           method: 'POST',
           headers,
-          body: JSON.stringify(submitBody),
-          signal: AbortSignal.timeout(60000)
+          body: JSON.stringify(submitBody)
+        }, {
+          timeoutMs: 60000,
+          what: '异步任务提交',
+          // 只在请求确定没发出去时重提，避免重复计费
+          retryOn: isPreSendError,
+          onRetry: logNetRetry,
         });
       } catch (e) {
         noteVendorOutcome(input, false, e.message || '');
@@ -1100,14 +1166,25 @@ async function executeAdapter(services, adapter, input) {
     const startTime = Date.now();
     const pollUrlTemplate = cfg.pollPathTemplate || '/v1/tasks/{{taskId}}';
 
+    let pollNetFailures = 0;
     while (Date.now() - startTime < timeoutMs) {
       await new Promise(r => setTimeout(r, pollInterval));
       const pollUrl = resolvePollUrl(baseUrl, pollUrlTemplate, vars, taskId);
-      const pollRes = await fetch(pollUrl, {
-        method: cfg.pollMethod || 'GET',
-        headers,
-        signal: AbortSignal.timeout(30000)
-      });
+      let pollRes;
+      try {
+        pollRes = await fetchNet(pollUrl, {
+          method: cfg.pollMethod || 'GET',
+          headers
+        }, { timeoutMs: 30000, attempts: 2, what: '任务轮询', onRetry: logNetRetry });
+        pollNetFailures = 0;
+      } catch (e) {
+        lastPollErr = e;
+        pollNetFailures += 1;
+        // 任务已在云端渲染，单次抖动不能判死；连续失败超过阈值才放弃
+        if (pollNetFailures >= 6) throw enrichFetchError(e, '任务轮询网络失败');
+        console.warn(`[gen] 任务轮询第 ${pollNetFailures} 次网络失败，继续等待: ${describeFetchError(e)}`);
+        continue;
+      }
       if (!pollRes.ok) continue;
 
       const pollData = await pollRes.json();
@@ -1184,12 +1261,11 @@ async function executeAdapter(services, adapter, input) {
     };
     if (imageDataUrl) submitBody.input.image_data_url = imageDataUrl;
 
-    const submitRes = await fetch(submitUrl, {
+    const submitRes = await fetchNet(submitUrl, {
       method: 'POST',
       headers,
-      body: JSON.stringify(submitBody),
-      signal: AbortSignal.timeout(60000)
-    });
+      body: JSON.stringify(submitBody)
+    }, { timeoutMs: 60000, what: '统一网关提交', retryOn: isPreSendError, onRetry: logNetRetry });
     const submitText = await submitRes.text();
     if (!submitRes.ok) {
       throw new Error(`统一网关提交失败 HTTP ${submitRes.status}: ${submitText.slice(0, 300)}`);
@@ -1206,12 +1282,11 @@ async function executeAdapter(services, adapter, input) {
     const startTime = Date.now();
     while (Date.now() - startTime < timeoutMs) {
       await new Promise(r => setTimeout(r, pollInterval));
-      const pollRes = await fetch(pollUrl, {
+      const pollRes = await fetchNet(pollUrl, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ request_id: requestId }),
-        signal: AbortSignal.timeout(30000)
-      });
+        body: JSON.stringify({ request_id: requestId })
+      }, { timeoutMs: 30000, attempts: 2, what: '统一网关轮询', onRetry: logNetRetry });
       if (!pollRes.ok) continue;
       const pollData = await pollRes.json();
       const status = String(getNested(pollData, cfg.statusPath || 'status') || '').toLowerCase();

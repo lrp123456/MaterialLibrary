@@ -77,6 +77,16 @@ const DEFAULT_PROVIDERS = [
     enabled: 1
   },
   {
+    id: 'newapi',
+    name: 'New API 聚合网关',
+    protocol: 'openai',
+    base_url: process.env.NEWAPI_BASE_URL || 'https://newapi.naite.cc/v1',
+    api_key: '',
+    secrets_json: JSON.stringify({}),
+    config_json: JSON.stringify({ description: '自建 OpenAI 兼容聚合网关（newapi.naite.cc），gemini-4-argon 走这里' }),
+    enabled: 1
+  },
+  {
     id: 'local',
     name: '本机',
     protocol: 'local',
@@ -90,6 +100,17 @@ const DEFAULT_PROVIDERS = [
 
 const DEFAULT_MODELS = [
   ...toDefaultModelRows(),
+  // New API 直连：gemini-4-argon（OpenAI 兼容，密钥只在 .env）
+  {
+    id: 'newapi_gemini_4_argon',
+    provider_id: 'newapi',
+    name: 'Gemini 4 Argon (New API)',
+    model_code: 'gemini-4-argon',
+    capabilities: 'chat,vision',
+    params_json: JSON.stringify({ temperature: 0.2, max_tokens: 4096 }),
+    is_default: 0,
+    enabled: 1
+  },
   // 直连 Agnes AI（免费期，支持图像 URL 输入）
   {
     id: 'agnes_3_0_flash',
@@ -380,6 +401,11 @@ function initProvidersTables(db) {
     console.warn('[providers] qwenimage_local 适配器跳过', e.message);
   }
   try {
+    ensureQwenImageModelScopeAdapter(db);
+  } catch (e) {
+    console.warn('[providers] qwenimage_modelscope 适配器跳过', e.message);
+  }
+  try {
     ensureLocalAudioAdapters(db);
   } catch (e) {
     console.warn('[providers] 本机语音/音乐适配器跳过', e.message);
@@ -464,6 +490,51 @@ function ensureQwenImageAdapter(db) {
     'image',
     1,
     'qwenimage_local',
+    config.apiBase,
+    '{}',
+    JSON.stringify(config),
+    1,
+    now,
+    now
+  );
+}
+
+/**
+ * 注册魔搭云端 Qwen-Image 2.1 通道（ModelScope API-Inference 异步任务）。
+ *
+ * 与本机 qwenimage_local 是**同模型、不同算力**：本机 GPU 排队/关机时走云端。
+ * 密钥不落库：由接入点 modelscope 从 .env 的 MODELSCOPE_API_KEY 解析。
+ *
+ * 幂等：已存在则只回填空的 base_url，不改管理员改过的配置。
+ */
+function ensureQwenImageModelScopeAdapter(db) {
+  const now = Date.now();
+  const config = {
+    apiBase: process.env.MODELSCOPE_API_BASE || 'https://api-inference.modelscope.cn',
+    defaultModel: process.env.MODELSCOPE_QWEN_MODEL || 'Qwen/Qwen-Image-2.1-Turbo',
+    // Qwen-Image-Edit 系列官方给的是 1~3 张参考图，再多会被上游丢弃
+    maxRefs: 3,
+    // 云端排队 + 渲染一般 20~90s，给 10 分钟兜底
+    timeoutMs: 600000,
+    pollIntervalMs: 5000,
+  };
+  const hit = db.prepare("SELECT base_url FROM gen_adapters WHERE id='qwenimage_modelscope'").get();
+  if (hit) {
+    if (!hit.base_url) {
+      db.prepare('UPDATE gen_adapters SET base_url=? WHERE id=?').run(config.apiBase, 'qwenimage_modelscope');
+    }
+    return;
+  }
+  db.prepare(`
+    INSERT OR IGNORE INTO gen_adapters
+      (id, label, kind, builtin, protocol, base_url, secrets_json, config_json, enabled, created_at, updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    'qwenimage_modelscope',
+    '魔搭云端 QwenImage (Qwen-Image 2.1 Turbo · ModelScope)',
+    'image',
+    1,
+    'qwenimage_modelscope',
     config.apiBase,
     '{}',
     JSON.stringify(config),
@@ -1128,6 +1199,7 @@ async function testModel(services, modelId, { prompt = '请用一句话描述室
 
     const result = await executeAdapter(services, adapter, {
       kind: 'image',
+      gpuPriority: 'low',
       prompt: prompt || '现代极简室内设计客厅效果图，自然采光，原木质感',
       model: m.model_code
     });
@@ -1170,6 +1242,7 @@ async function testModel(services, modelId, { prompt = '请用一句话描述室
       try {
         const result = await executeAdapter(services, adapter, {
           kind: 'video',
+          gpuPriority: 'low',
           prompt: prompt || '现代极简客厅空间漫游镜头推近',
           model: m.model_code,
           timeoutMs: 15000,
@@ -1332,6 +1405,7 @@ function resolveProviderApiKey(db, adapter, secretsInput = null) {
   if (epId === 'groq' && process.env.GROQ_API_KEY) return process.env.GROQ_API_KEY;
   if (epId === 'kilo' && process.env.KILO_API_KEY) return process.env.KILO_API_KEY;
   if (epId === 'modelscope' && process.env.MODELSCOPE_API_KEY) return process.env.MODELSCOPE_API_KEY;
+  if (epId === 'newapi' && process.env.NEWAPI_API_KEY) return process.env.NEWAPI_API_KEY;
   if (epId === 'local_host' && (process.env.UMBRA_TOKEN || process.env.CREATION_PUBLIC_TOKEN)) return process.env.UMBRA_TOKEN || process.env.CREATION_PUBLIC_TOKEN;
 
   return '';

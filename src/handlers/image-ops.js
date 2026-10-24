@@ -522,7 +522,8 @@ async function pastebackComposite(originalSceneBuffer, generatedCropBuffer, crop
           <feGaussianBlur stdDeviation="${feather}" />
         </filter>
       </defs>
-      <rect width="${maskW}" height="${maskH}" fill="black" />
+      <!-- 底必须透明：dest-in 只认 alpha，不透明的黑底会让整幅生成图盖住框外 -->
+      <rect width="${maskW}" height="${maskH}" fill="black" fill-opacity="0" />
       ${shape}
     </svg>
   `;
@@ -544,6 +545,65 @@ async function pastebackComposite(originalSceneBuffer, generatedCropBuffer, crop
   return finalResult;
 }
 
+/**
+ * cover 居中裁切下「源画布像素 -> 目标画布像素」的映射。
+ * 原图放大到目标档时会被裁掉一点点边，选区必须跟着同一变换走，否则贴回位置会偏。
+ */
+function coverTransform(srcW, srcH, dstW, dstH) {
+  const s = Math.max(dstW / srcW, dstH / srcH);
+  return { s, dx: (srcW * s - dstW) / 2, dy: (srcH * s - dstH) / 2 };
+}
+
+/** 回传 unit:'px'，避免整数坐标被 axisToPx 当成 0-1 比例重读 */
+function scaleSelection(input, t, srcW, srcH) {
+  const pts = normalizeQuadOrRect(input, srcW, srcH);
+  if (!pts.length) return null;
+  return {
+    quad: pts.map((p) => ({ x: Math.round(p.x * t.s - t.dx), y: Math.round(p.y * t.s - t.dy) })),
+    unit: 'px',
+  };
+}
+
+function scaleRect(rect, t) {
+  const left = Number(rect.left) || 0;
+  const top = Number(rect.top) || 0;
+  const width = Number(rect.width || (Number(rect.right) - left)) || 0;
+  const height = Number(rect.height || (Number(rect.bottom) - top)) || 0;
+  return {
+    left: Math.round(left * t.s - t.dx),
+    top: Math.round(top * t.s - t.dy),
+    width: Math.round(width * t.s),
+    height: Math.round(height * t.s),
+  };
+}
+
+/**
+ * 贴回并让输出真的落在目标像素档上：先把原图按 cover 放大到 outW×outH 当底，
+ * 选区与裁切框同步映射，再把模型结果贴进框内。
+ * 目标尺寸等于原图时直接走原路径，不做无谓重采样。
+ */
+async function pastebackToTarget(sceneBuffer, generatedBuffer, { selection = null, cropRect = null, outW = 0, outH = 0 } = {}) {
+  const meta = await sharp(sceneBuffer).metadata();
+  const sw = meta.width;
+  const sh = meta.height;
+  const fullRect = { left: 0, top: 0, width: sw, height: sh };
+  if (!outW || !outH || (outW === sw && outH === sh)) {
+    return pastebackComposite(sceneBuffer, generatedBuffer, cropRect || fullRect, selection || cropRect || fullRect);
+  }
+  const t = coverTransform(sw, sh, outW, outH);
+  const baseBuffer = await sharp(sceneBuffer)
+    .resize(outW, outH, { fit: 'cover', position: 'centre' })
+    .jpeg({ quality: 96 })
+    .toBuffer();
+  // 没给裁剪框就是整幅：cover 之后目标画布整体都在可视区内，
+  // 再拿源图尺寸去缩放会算出比画布更高的框（宽幅时直接溢出报错）。
+  const scaledRect = cropRect
+    ? scaleRect(cropRect, t)
+    : { left: 0, top: 0, width: outW, height: outH };
+  const scaledSel = selection ? scaleSelection(selection, t, sw, sh) : null;
+  return pastebackComposite(baseBuffer, generatedBuffer, scaledRect, scaledSel || scaledRect);
+}
+
 module.exports = {
   axisToPx,
   normalizeQuadOrRect,
@@ -552,4 +612,8 @@ module.exports = {
   affineCompositeToScene,
   cropNeighborhood,
   pastebackComposite,
+  coverTransform,
+  scaleSelection,
+  scaleRect,
+  pastebackToTarget,
 };

@@ -152,7 +152,7 @@ function mergePrompt(userPrompt, caption) {
   return `${line}\n${stripped}`;
 }
 
-function buildImageOrder({ hasFirstFrame, portraits, refCount }) {
+function buildImageOrder({ hasFirstFrame, portraits, refCount, hasLastFrame }) {
   const items = [];
   let n = 1;
   if (hasFirstFrame) {
@@ -174,12 +174,16 @@ function buildImageOrder({ hasFirstFrame, portraits, refCount }) {
     items.push({ kind: 'ref', index: n, label: `图片${n}` });
     n += 1;
   }
+  // 尾帧排在参考图之后，与 content 的推送顺序一致，图片编号才对得上
+  if (hasLastFrame) {
+    items.push({ kind: 'last', index: n, label: `图片${n}是尾帧` });
+  }
   return items;
 }
 
 function buildCaption(order) {
   const bits = (order || [])
-    .filter((it) => it.kind === 'first' || it.kind === 'portrait')
+    .filter((it) => it.kind === 'first' || it.kind === 'last' || it.kind === 'portrait')
     .map((it) => it.label);
   if (!bits.length) return '';
   return `${bits.join('。')}。`;
@@ -204,6 +208,7 @@ function shapeVolcVideo({
   prompt,
   images,
   firstFrameUrl,
+  lastFrameUrl,
   genMode,
   ratio,
   duration,
@@ -215,7 +220,9 @@ function shapeVolcVideo({
 
   let refs = collectRefUrls(images);
   let first = '';
+  let last = '';
   const explicit = String(firstFrameUrl || '');
+  const explicitLast = String(lastFrameUrl || '');
   const mode = String(genMode || '');
   if (explicit) {
     first = explicit;
@@ -227,11 +234,16 @@ function shapeVolcVideo({
       refs = refs.slice(1);
     }
   }
+  if (explicitLast) {
+    last = explicitLast;
+    refs = refs.filter((u) => u !== last);
+  }
 
   const order = buildImageOrder({
     hasFirstFrame: !!first,
     portraits: list,
     refCount: refs.length,
+    hasLastFrame: !!last,
   });
   const caption = buildCaption(order);
   const content = [{ type: 'text', text: mergePrompt(prompt, caption) }];
@@ -248,6 +260,9 @@ function shapeVolcVideo({
   }
   for (const url of refs) {
     content.push({ type: 'image_url', image_url: { url }, role: 'reference_image' });
+  }
+  if (last) {
+    content.push({ type: 'image_url', image_url: { url: last }, role: 'last_frame' });
   }
 
   const out = { model: model || 'doubao-seedance-2-0-260128', content };

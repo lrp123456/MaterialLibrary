@@ -181,6 +181,12 @@ const OFFICIAL_STUDIO = {
         provider: 'volcengine', providerName: '火山方舟', badge: '2.1 Pro(付费)', capabilities: 'vision,tag,chat',
         caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: false, reasoning: REASONING.doubaoLevels },
       }),
+      M({
+        // New API 聚合网关直连（.env: NEWAPI_API_KEY）。走 newapi_chat 能力，不经过本地 LiteLLM。
+        id: 'gemini_4_argon', name: 'Gemini 4 Argon', model_code: 'gemini-4-argon',
+        provider: 'newapi', providerName: 'New API', badge: '聚合直连', capabilities: 'chat,vision',
+        caps: { output: 'text', input: { images: 4, videos: 0, audios: 0 }, contextTokens: 1048576, region: R_NONE, multiRef: true, ratioFromImage1: false, refStyle: 'generic', polishId: null, freeTier: false, reasoning: REASONING.litellmNone },
+      }),
     ],
   },
 
@@ -303,6 +309,29 @@ const OFFICIAL_STUDIO = {
           ratioFromImage1: false,
           refStyle: 'generic',
           polishId: 'qwenimage_local',
+          freeTier: false,
+        },
+      }),
+      M({
+        // 与本机 Qwen 同模型、不同算力：魔搭 API-Inference 云端异步任务。
+        // model_code 用 ModelScope 的 repo id（带斜杠），adapter-match 据此走云端而非本机。
+        id: 'qwenimage_modelscope',
+        name: 'Qwen-Image 2.1 Turbo（魔搭）',
+        model_code: 'Qwen/Qwen-Image-2.1-Turbo',
+        provider: 'modelscope',
+        providerName: '魔搭社区',
+        badge: '云端 · 可垫图',
+        capabilities: 'image,image_edit',
+        dbId: 'qwenimage_modelscope',
+        params: { ratio: true, size: ['1K', '2K'], refs: 3 },
+        caps: {
+          output: 'image',
+          input: { images: 3, videos: 0, audios: 0 },
+          region: R_DESCRIBE_ONLY,
+          multiRef: true,
+          ratioFromImage1: false,
+          refStyle: 'generic',
+          polishId: 'qwenimage_modelscope',
           freeTier: false,
         },
       }),
@@ -579,6 +608,7 @@ function providerGroupOf(providerId) {
   if (p === 'volcengine') return '字节跳动';
   if (p === 'agnes') return 'Agnes';
   if (p === 'local') return '本机';
+  if (p === 'modelscope') return '魔搭社区';
   if (p === 'litellm') return 'LiteLLM';
   return p || '其他';
 }

@@ -12,13 +12,14 @@
  */
 const sharp = require('sharp');
 const {
-  pastebackComposite,
+  pastebackToTarget,
   selectionBounds,
   cropNeighborhood,
   floodFillCutout,
   affineCompositeToScene,
 } = require('./image-ops');
 const { findImageAdapter, readAdapterOutput } = require('./adapter-io');
+const { resolveEditSize } = require('./edit-size');
 const { regionClause, regionNoteOf, routeFor, reconcilePrompt, stripCoordSyntax } = require('./region-route');
 const { describeRegion, needsVlm } = require('./region-vlm');
 
@@ -71,6 +72,21 @@ function buildStyleExtraPrompt(stylePrompt, extraPrompt) {
   const extra = String(extraPrompt || '').trim();
   if (extra) blocks.push(`【用户特别要求】${extra}。`);
   return blocks.join('\n');
+}
+
+/** 出图参数回显给客户端的形状：选了什么都照实说，包括有没有真的贴回。 */
+function publicOutSize(spec, pastedBack) {
+  return {
+    declared: spec.declared,
+    tier: spec.tier,
+    ratio: spec.ratio,
+    sizeField: spec.sizeField,
+    outW: spec.outW || null,
+    outH: spec.outH || null,
+    exact: spec.exact,
+    followsSource: spec.followsSource,
+    pasteback: !!pastedBack,
+  };
 }
 
 function apiBoxFromBounds(minX, minY, maxX, maxY, sw, sh) {
@@ -176,6 +192,9 @@ async function runAdapter(services, imageBuffers, prompt, preferredModel, extra)
     model: preferredModel || undefined,
     // mask 出口：栅格化蒙版由 executeAdapter 追加为最后一张参考图
     maskPath: (extra && extra.maskPath) || undefined,
+    // 出图参数由调用方经 edit-size 换算后才进来，本文件不再兜任何默认档
+    size: (extra && extra.size) || undefined,
+    ratio: (extra && extra.ratio) || undefined,
   });
   const out = readAdapterOutput(res);
   if (!out) throw new Error('图像适配器未返回结果');
@@ -194,6 +213,7 @@ async function handleAdd(services, {
   maskPath,
   avoidBBox,
   gapPct,
+  outSpec = null,
   pasteback = false,
 }) {
   const meta = await sharp(sceneImageBuffer).metadata();
@@ -257,9 +277,17 @@ async function handleAdd(services, {
   }
 
   const images = refImageBuffer ? [sceneImageBuffer, refImageBuffer] : [sceneImageBuffer];
-  const generated = await runAdapter(services, images, finalPrompt, model, { maskPath });
+  const generated = await runAdapter(services, images, finalPrompt, model, {
+    maskPath,
+    size: outSpec && outSpec.sizeField,
+    ratio: outSpec && outSpec.ratioField,
+  });
   const finalBuf = pasteback
-    ? await pastebackComposite(sceneImageBuffer, generated, { left: 0, top: 0, width: sw, height: sh }, selection)
+    ? await pastebackToTarget(sceneImageBuffer, generated, {
+        selection,
+        outW: outSpec ? outSpec.outW : sw,
+        outH: outSpec ? outSpec.outH : sh,
+      })
     : generated;
 
   return {
@@ -271,7 +299,7 @@ async function handleAdd(services, {
 }
 
 /** 留白：单图推开两侧，不贴回 */
-async function handleSpace(services, { sceneImageBuffer, selection, prompt, sideDesc, model, clauseText, maskPath }) {
+async function handleSpace(services, { sceneImageBuffer, selection, prompt, sideDesc, model, clauseText, maskPath, outSpec = null }) {
   const meta = await sharp(sceneImageBuffer).metadata();
   const sw = meta.width;
   const sh = meta.height;
@@ -307,7 +335,11 @@ async function handleSpace(services, { sceneImageBuffer, selection, prompt, side
     prompt ||
     compiledSpacePrompt ||
     `【任务】${boxStr} 是${sideA}物体与${sideB}物体之间的狭窄通道${sideDesc ? `（${sideDesc}）` : ''}：把两侧物体向两边挪开，使框内变成空旷地面。【位移约束】只整体平移不旋转不变形；【地面补全】纹理自然延续；其余像素保持不变。`;
-  const generated = await runAdapter(services, [sceneImageBuffer], finalPrompt, model, { maskPath });
+  const generated = await runAdapter(services, [sceneImageBuffer], finalPrompt, model, {
+    maskPath,
+    size: outSpec && outSpec.sizeField,
+    ratio: outSpec && outSpec.ratioField,
+  });
   // 物体被推到框外，禁止贴回
   return {
     buffer: generated,
@@ -333,6 +365,41 @@ async function handleEditRun(services, opts) {
   const sw = meta.width;
   const sh = meta.height;
 
+  // 出图参数（清晰度 / 画幅）：档位与换算表都取自模型契约，解析结果原样回给客户端，
+  // 让「界面上选的值」和「真正发出去的 size」是同一个数。
+  const outSpecBase = resolveEditSize({
+    db: services && services.db,
+    model: opts.model,
+    size: opts.size,
+    ratio: opts.ratio,
+    baseW: sw,
+    baseH: sh,
+  });
+  let outSpec = outSpecBase;
+  let sizeNote = '';
+  // 画幅一旦偏离原图，框外逐像素保留就不可能了：自动不贴回，并如实写进 regionNote。
+  // 「增」是例外——它的贴回不可关闭（见 quick-insert 规范第 6 条），若按所选画幅出图，
+  // 贴回前得先把场景 cover 裁一刀，框外像素照样保不住。所以安装只认清晰度、画幅强制
+  // 跟随原图，并把「你选的画幅没生效」直说，而不是悄悄地按原图办。
+  if (op === 'insert') {
+    if (!outSpecBase.followsSource) {
+      outSpec = resolveEditSize({
+        db: services && services.db,
+        model: opts.model,
+        size: opts.size,
+        ratio: null,
+        baseW: sw,
+        baseH: sh,
+      });
+      sizeNote = `安装必须贴回原图，画幅固定跟随原图（你选的 ${outSpecBase.ratio} 未生效，实际按 ${outSpec.ratio} 出图）；清晰度 ${outSpec.tier} 照常生效`;
+    }
+  } else {
+    sizeNote = outSpecBase.followsSource
+      ? ''
+      : `画幅 ${outSpec.ratio} 与原图不符，已改为整幅重绘，框外像素不再逐像素保留`;
+  }
+  const pastebackAllowed = op === 'insert' ? true : outSpecBase.followsSource;
+
   // expand：默认走即梦/veImageX（画幅外扩专用通道）；用户显式指定了官方生图模型时改走该模型
   if (op === 'expand') {
     const { expandWithJimeng, jimengReady } = require('./jimeng-expand');
@@ -350,17 +417,35 @@ async function handleEditRun(services, opts) {
     if (pickedImageModel && opts.useAdapterExpand !== false) {
       const extra = stripCoordSyntax(opts.prompt || '');
       const expandPrompt = `【画幅外扩】以图1为基准向四周延展画幅，补全被裁掉的墙面、地面、天花与相邻空间，透视与光影必须与原图无缝延续。${extra ? '补充要求：' + extra : ''}`;
-      const generated = await runAdapter(services, [sceneImageBuffer], expandPrompt, pickedImageModel);
+      // 扩图的画幅由「目标画幅」决定，不能拿原图比例去换算，否则外扩方向会被方图吃掉
+      const expandSpec = resolveEditSize({
+        db: services && services.db,
+        model: pickedImageModel,
+        size: opts.size,
+        ratio: opts.expandRatio || opts.ratio,
+        baseW: sw,
+        baseH: sh,
+      });
+      const generated = await runAdapter(services, [sceneImageBuffer], expandPrompt, pickedImageModel, {
+        size: expandSpec.sizeField,
+        ratio: expandSpec.ratioField,
+      });
       const m2 = await sharp(generated).metadata();
       await persistEditDerivative(services, opts.assetFid, 'ai_expand', generated, {
         op: 'expand',
         model: pickedImageModel,
+        size: expandSpec.sizeField || null,
+        ratio: expandSpec.ratioField || null,
       });
+      const expandOut = publicOutSize(expandSpec, false);
+      expandOut.outW = m2.width;
+      expandOut.outH = m2.height;
       return {
         buffer: generated,
         apiBox: { x1: 0, y1: 0, x2: 999, y2: 999 },
         untouchedDiff: { unchangedRatio: null, method: `adapter:${pickedImageModel}` },
         meta: { width: m2.width, height: m2.height },
+        outSize: expandOut,
       };
     }
 
@@ -438,7 +523,10 @@ ${promptExtra ? `${promptExtra}\n` : ''}
     }
 
     // ★ 用户在客户端选的模型必须透传给适配器，否则「前端能选、服务端忽略」=选了个摆设
-    const generated = await runAdapter(services, [sceneImageBuffer], finalPrompt, opts.model);
+    const generated = await runAdapter(services, [sceneImageBuffer], finalPrompt, opts.model, {
+      size: outSpec.sizeField,
+      ratio: outSpec.ratioField,
+    });
 
     if (opts.assetFid && services && services.db) {
       try {
@@ -475,6 +563,7 @@ ${promptExtra ? `${promptExtra}\n` : ''}
       apiBox: { x1: 0, y1: 0, x2: 999, y2: 999 },
       untouchedDiff: { unchangedRatio: null, note: '全局风格转换不贴回' },
       prompt: finalPrompt,
+      outSize: publicOutSize(outSpec, false),
     };
   }
 
@@ -498,7 +587,10 @@ ${promptExtra ? `${promptExtra}\n` : ''}
       finalPrompt = OFFICIAL_PROMPT_TEMPLATES.upscale_enhance.template;
     }
 
-    const generated = await runAdapter(services, [sceneImageBuffer], finalPrompt, opts.model);
+    const generated = await runAdapter(services, [sceneImageBuffer], finalPrompt, opts.model, {
+      size: outSpec.sizeField,
+      ratio: outSpec.ratioField,
+    });
     let finalBuffer = generated;
     // targetClarity: 2K / 4K / 8K —— 按目标长边做 Lanczos 重采样，真正落实档位
     const clarMap = { '2K': 2048, '4K': 3840, '8K': 7680 };
@@ -522,11 +614,20 @@ ${promptExtra ? `${promptExtra}\n` : ''}
       targetClarity: opts.targetClarity || null,
       model: opts.model || null,
     });
+    // 超分的最终尺寸由 targetClarity 决定，回显以真实出图为准，而不是模型那一档
+    const clarSize = publicOutSize(outSpec, false);
+    const fm = await sharp(finalBuffer).metadata().catch(() => null);
+    if (fm && fm.width && fm.height) {
+      clarSize.outW = fm.width;
+      clarSize.outH = fm.height;
+      clarSize.tier = String(opts.targetClarity || clarSize.tier || '').toUpperCase() || clarSize.tier;
+    }
     return {
       buffer: finalBuffer,
       apiBox: { x1: 0, y1: 0, x2: 999, y2: 999 },
       untouchedDiff: { unchangedRatio: 1, note: '超分增强全图保真' },
       prompt: finalPrompt,
+      outSize: clarSize,
     };
   }
 
@@ -580,9 +681,10 @@ ${promptExtra ? `${promptExtra}\n` : ''}
   //   并不支持的坐标句法（或缺少坐标）。这一步统一对齐，是防幻觉的最后闸门。
   const rec = reconcilePrompt(opts.prompt, clause);
   const safePrompt = rec.prompt || opts.prompt;
-  const combinedNote = [regionNote, rec.sanitized ? `提示词处理：${rec.note}` : ''].filter(Boolean).join('；');
+  const combinedNote = [regionNote, rec.sanitized ? `提示词处理：${rec.note}` : '', sizeNote].filter(Boolean).join('；');
 
   let result;
+  const wantPasteback = pastebackAllowed && opts.pasteback !== false;
 
   if (op === 'insert') {
     const productBuffer = opts.productImageBuffer;
@@ -597,6 +699,7 @@ ${promptExtra ? `${promptExtra}\n` : ''}
       regionClauseText: clause.areaPhrase,
       maskPath: clause.mask ? clause.mask.destPath : null,
       model: opts.model,
+      outSpec,
     });
     const bounds = selectionBounds(selection, sw, sh);
     result = {
@@ -616,10 +719,11 @@ ${promptExtra ? `${promptExtra}\n` : ''}
       yaw: opts.yaw != null ? opts.yaw : 45,
       productName: opts.productName || '该单品',
       quadOrBbox: selection,
-      pasteback: opts.pasteback !== false,
+      pasteback: wantPasteback,
       model: opts.model,
       regionClauseText: clause.areaPhrase,
       maskPath: clause.mask ? clause.mask.destPath : null,
+      outSpec,
     });
     const bounds = selectionBounds(selection, sw, sh);
     result = {
@@ -634,10 +738,11 @@ ${promptExtra ? `${promptExtra}\n` : ''}
       imageBuffer: sceneImageBuffer,
       actionType: 'remove',
       quadOrBbox: selection,
-      pasteback: opts.pasteback !== false,
+      pasteback: wantPasteback,
       model: opts.model,
       regionClauseText: clause.areaPhrase,
       maskPath: clause.mask ? clause.mask.destPath : null,
+      outSpec,
     });
     const bounds = selectionBounds(selection, sw, sh);
     result = {
@@ -658,7 +763,8 @@ ${promptExtra ? `${promptExtra}\n` : ''}
       maskPath: clause.mask ? clause.mask.destPath : null,
       avoidBBox: opts.avoidBBox,
       gapPct: opts.gapPct,
-      pasteback: opts.pasteback,
+      outSpec,
+      pasteback: wantPasteback,
     });
   } else if (op === 'space') {
     result = await handleSpace(services, {
@@ -669,6 +775,7 @@ ${promptExtra ? `${promptExtra}\n` : ''}
       model: opts.model,
       clauseText: clause.text,
       maskPath: clause.mask ? clause.mask.destPath : null,
+      outSpec,
     });
   }
 
@@ -680,6 +787,8 @@ ${promptExtra ? `${promptExtra}\n` : ''}
     op,
     model: opts.model || null,
     prompt: result.prompt || null,
+    size: outSpec.sizeField || null,
+    ratio: outSpec.ratioField || null,
     installMode: op === 'insert' ? (opts.installMode || null) : undefined,
   });
 
@@ -688,6 +797,8 @@ ${promptExtra ? `${promptExtra}\n` : ''}
     apiBox: result.apiBox,
     untouchedDiff: diff,
     prompt: result.prompt,
+    // ★ 真正发出去的出图参数与预期尺寸，客户端原样展示，不再让用户猜
+    outSize: publicOutSize(outSpec, pastebackAllowed && !result.skipPasteback),
     // ★ 选区走向与降级告知（客户端直接展示 regionNote，非空即为已降级）
     region: {
       exit: clause.exit,

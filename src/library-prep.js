@@ -71,6 +71,7 @@ async function generateWith(services, asset, prompt, adapter, model, ratio) {
   const res = await executeAdapter(services, adapter, {
     kind: 'image',
     mode: 'ref',
+    gpuPriority: 'low',
     prompt,
     model,
     ratio: ratio || undefined,

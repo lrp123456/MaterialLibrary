@@ -42,6 +42,8 @@ function isQueueFullError(err) {
   return /HTTP 503|HTTP 429|queue is full|image queue/i.test(m);
 }
 
+const MAX_RESTAGE_ATTEMPTS = 12;
+
 function nextRestageBackoff(prevError) {
   const s = String(prevError || '');
   const m = s.match(/attempt=(\d+)/);
@@ -50,7 +52,7 @@ function nextRestageBackoff(prevError) {
   const rateLimited = /429|rate.?limit|queue is full|image queue/i.test(s);
   const base = rateLimited ? 20000 : 8000;
   const ms = Math.min(180000, base * (2 ** Math.min(n - 1, 4)));
-  return { attempt: n, ms };
+  return { attempt: n, ms, exhausted: n >= MAX_RESTAGE_ATTEMPTS };
 }
 
 function restageQueueRow(db, fid) {

@@ -24,6 +24,7 @@ function ensureUltimateSchema(db) {
   addColIfMissing('assets', 'sharpness', 'REAL');
   addColIfMissing('assets', 'favorited_at', 'INTEGER');
   addColIfMissing('assets', 'source_type', 'TEXT');
+  addColIfMissing('assets', 'source_note', 'TEXT');
   addColIfMissing('derivatives', 'sha256', 'TEXT');
   addColIfMissing('derivatives', 'md5', 'TEXT');
   addColIfMissing('derivatives', 'phash', 'TEXT');
@@ -67,6 +68,8 @@ function ensureUltimateSchema(db) {
   tryExec('CREATE INDEX IF NOT EXISTS idx_assets_preview_sha ON assets(preview_sha256);', 'idx_assets_preview_sha');
   tryExec('CREATE INDEX IF NOT EXISTS idx_assets_thumb_sha ON assets(thumb_sha256);', 'idx_assets_thumb_sha');
   tryExec('CREATE INDEX IF NOT EXISTS idx_node_runs_fid_node_id ON node_runs(asset_fid, node_id, id DESC);', 'idx_node_runs_fid_node_id');
+  // 批次结算按 run_id 聚合 node_runs；缺索引时每次聚合都要全表扫（实测 15 万行 × 84 个活跃批次 ≈ 5.4s 同步阻塞）
+  tryExec('CREATE INDEX IF NOT EXISTS idx_node_runs_run_id_status ON node_runs(run_id, status);', 'idx_node_runs_run_id_status');
   tryExec('CREATE INDEX IF NOT EXISTS idx_asset_tags_tag_fid ON asset_tags(tag_id, asset_fid);', 'idx_asset_tags_tag_fid');
 
   tryExec(`
@@ -88,6 +91,15 @@ function openDb(dataDir) {
 
   // 保证 Batch A & F 必备字段、索引与查重表
   ensureUltimateSchema(db);
+
+  // export_registry 历史遗留两套列集，回填缺失的时间列
+  try {
+    const { backfillLegacyTimestamps } = require('./export-registry');
+    const n = backfillLegacyTimestamps(db);
+    if (n) console.log(`[db] export_registry 回填 created_at ${n} 行`);
+  } catch (e) {
+    console.warn('[db] export_registry 回填跳过:', e.message);
+  }
 
   // 常用预编译语句挂载
   db.getTag = db.prepare('SELECT * FROM tag_dict WHERE dimension=? AND dir=?');

@@ -31,6 +31,7 @@ const DIMENSIONS = [
   { dimKey: 'clothing_style',     label: '穿搭风格',     multi: true,  isPrimary: true, isClothing: true },
   { dimKey: 'season',             label: '季节',         multi: false, isPrimary: true, isClothing: true },
   { dimKey: 'mood',               label: '情绪',         multi: false, isPrimary: true },
+  { dimKey: 'video_purpose',      label: '成片用途',     multi: false, isPrimary: true },
 
   { dimKey: 'color_style',        label: '色系',         multi: true,  deprecated: true },
   { dimKey: 'flags',              label: '标记',         multi: true,  deprecated: true },
@@ -168,6 +169,13 @@ const VALUES = [
   ['tense','紧张','mood'],
   ['warm','温暖','mood'],
   ['retro','复古','mood'],
+
+  ['walkthrough','空间漫游','video_purpose', null, ['漫游','空间走查']],
+  ['product','单品展示','video_purpose', null, ['环绕','产品展示']],
+  ['detail','细节特写','video_purpose', null, ['特写','微距']],
+  ['ad','商业短片','video_purpose', null, ['广告','宣传片']],
+  ['portrait','人像动态','video_purpose', null, ['人物动态']],
+  ['other','其他','video_purpose'],
 
   // 旧值（deprecated，仅迁移/兼容）
   ['european_light_luxury','欧式轻奢','style_atom', null, ['法式轻奢','意式极简','意式轻奢']],

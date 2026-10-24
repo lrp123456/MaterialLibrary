@@ -117,14 +117,22 @@ function registerVisibleImageHashes(db, { filePath, buffer, sourceFid, variant =
     const sha256 = crypto.createHash('sha256').update(buf).digest('hex');
     const md5 = crypto.createHash('md5').update(buf).digest('hex');
     const now = Date.now();
+    const variantVal = String(variant || 'origin');
+    const byVal = String(exportedBy || 'system');
     db.prepare(`
-      INSERT INTO export_registry (sha256, md5, source_fid, variant, file_size, exported_by, exported_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO export_registry (sha256, md5, source_fid, kind, marker, created_at, variant, file_size, exported_by, exported_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(sha256) DO UPDATE SET
         md5 = COALESCE(excluded.md5, export_registry.md5),
         source_fid = COALESCE(export_registry.source_fid, excluded.source_fid),
-        variant = COALESCE(export_registry.variant, excluded.variant)
-    `).run(sha256, md5, String(sourceFid), String(variant || 'origin'), buf.length, exportedBy, now);
+        kind = COALESCE(export_registry.kind, excluded.kind),
+        marker = COALESCE(export_registry.marker, excluded.marker),
+        created_at = COALESCE(export_registry.created_at, excluded.created_at),
+        variant = COALESCE(export_registry.variant, excluded.variant),
+        file_size = COALESCE(export_registry.file_size, excluded.file_size),
+        exported_by = COALESCE(export_registry.exported_by, excluded.exported_by),
+        exported_at = COALESCE(export_registry.exported_at, excluded.exported_at)
+    `).run(sha256, md5, String(sourceFid), variantVal, byVal, now, variantVal, buf.length, byVal, now);
     return { sha256, md5, size: buf.length };
   } catch (_) {
     return null;

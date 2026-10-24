@@ -40,7 +40,8 @@ const DIM_META = {
   era: { label: '时代感', group: 'legacy', multi: false, deprecatedGroup: true },
   temperature: { label: '温度', group: 'legacy', multi: false, deprecatedGroup: true },
   functional: { label: '功能性', group: 'legacy', multi: false, deprecatedGroup: true },
-  quality: { label: '质量档', group: 'legacy', multi: false, deprecatedGroup: true }
+  quality: { label: '质量档', group: 'legacy', multi: false, deprecatedGroup: true },
+  video_purpose: { label: '成片用途', group: 'video', multi: false, primary: true },
 };
 
 const CRITERIA_DRAFTS = {

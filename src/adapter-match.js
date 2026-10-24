@@ -11,6 +11,18 @@ function pickAdapterId(kind, modelCode, adapters) {
     return hit ? hit.id : null;
   };
 
+  // 魔搭云端 Qwen：repo id 形如 Qwen/Qwen-Image-2.1-Turbo（带斜杠），或显式带 modelscope。
+  // 必须排在下面 /qwen/ 的本机规则之前，否则云端模型会被路由到局域网 ncnn 适配器。
+  const isModelScopeRepo = /^[a-z0-9_.-]+\/[a-z0-9_.-]+$/i.test(code);
+  if (/qwen/i.test(code) && (code.includes('modelscope') || isModelScopeRepo)) {
+    return findId((a) => a.id === 'qwenimage_modelscope' || String(a.protocol || '') === 'qwenimage_modelscope')
+      || findId((a) => String(a.id).includes('modelscope'));
+  }
+  if (code.includes('modelscope') || isModelScopeRepo) {
+    // 魔搭其它（非 Qwen）模型仍走通用 modelscope 适配器，别被云端 Qwen 抢走
+    return findId((a) => a.id !== 'qwenimage_modelscope' && String(a.id).includes('modelscope'));
+  }
+
   // 目录 model_code 是 qwen2.1-image，必须在 /-image$/ 的 Gemini 规则之前命中。
   if (code.includes('qwen')) {
     return findId((a) => a.id === 'qwenimage_local' || String(a.protocol || '') === 'qwenimage_local' || String(a.id).includes('qwenimage'));
@@ -70,7 +82,8 @@ function pickAdapterId(kind, modelCode, adapters) {
     return findId((a) => a.id === 'ark_seedream' || String(a.id).includes('seedream') || String(a.id).includes('ark_seedream'));
   }
   if (code.includes('modelscope') || code.startsWith('damo/')) {
-    return findId((a) => String(a.id).includes('modelscope'));
+    // 非 Qwen 的魔搭历史模型：不要回落到云端 Qwen 适配器
+    return findId((a) => a.id !== 'qwenimage_modelscope' && String(a.id).includes('modelscope'));
   }
   if (code.includes('openai') || code.includes('dall-e')) {
     if (kind === 'video') return findId((a) => a.id === 'openai_videos');

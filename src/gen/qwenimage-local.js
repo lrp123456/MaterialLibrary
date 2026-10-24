@@ -119,7 +119,9 @@ async function submitJob({ baseUrl, prompt, negative, width, height, steps, cfg,
   const res = await lanFetch(url, {
     method: 'POST',
     body: form,
-    signal: AbortSignal.timeout(Math.min(timeoutMs || 60000, 120000)),
+    // 面板统一排队后，提交可能要等前面的任务跑完（单卡串行），
+    // 超时给足 30 分钟；真正开始生成后由任务轮询兜底。
+    signal: AbortSignal.timeout(30 * 60 * 1000),
   });
   if (!res.ok) {
     const txt = await res.text().catch(() => '');

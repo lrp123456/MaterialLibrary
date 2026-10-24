@@ -22,6 +22,7 @@ const PROVIDER_ENV_VARS = {
   litellm: ['LITELLM_API_KEY', 'LITELLM_API_KEYS'],
   kilo: ['KILO_API_KEY', 'KILO_API_KEYS'],
   modelscope: ['MODELSCOPE_API_KEY', 'MODELSCOPE_API_KEYS'],
+  newapi: ['NEWAPI_API_KEY', 'NEWAPI_API_KEYS'],
   local: ['UMBRA_TOKEN', 'CREATION_PUBLIC_TOKEN'],
 };
 
@@ -47,6 +48,11 @@ const STANDARD_ENV_KEY_SPECS = [
   { key: 'GROQ_API_KEY', label: 'Groq 推理平台 API Key', provider_id: 'groq', endpoint_id: 'groq', kind: 'bearer', description: 'Groq 高速推理密钥' },
   { key: 'KILO_API_KEY', label: 'Kilo AI Gateway Key', provider_id: 'kilo', endpoint_id: 'kilo', kind: 'bearer', description: 'Kilo 网关密钥' },
   { key: 'MODELSCOPE_API_KEY', label: '魔搭社区 ModelScope Key', provider_id: 'modelscope', endpoint_id: 'modelscope', kind: 'bearer', description: 'ModelScope 推理密钥' },
+  { key: 'NEWAPI_API_KEY', label: 'New API 聚合网关主密钥', provider_id: 'newapi', endpoint_id: 'newapi', kind: 'bearer', description: 'newapi.naite.cc 聚合网关，gemini-4-argon 等模型走这条通道' },
+  { key: 'NEWAPI_API_KEYS', label: 'New API 轮换密钥池 (逗号分隔)', provider_id: 'newapi', endpoint_id: 'newapi', kind: 'bearer_pool', description: '多 Key 轮询，降低单 Key 限流概率' },
+  { key: 'BA_RESOURCE_BASE', label: 'Ba 资源库地址', provider_id: 'ba', endpoint_id: 'ba_resource', kind: 'bearer', description: 'Ba 资源接口根地址，不含路径。例如 http://host:port' },
+  { key: 'BA_RESOURCE_USER', label: 'Ba 资源库账号', provider_id: 'ba', endpoint_id: 'ba_resource', kind: 'bearer', description: '登录用户名。验证码开启时自动拉取会停止' },
+  { key: 'BA_RESOURCE_PASSWORD', label: 'Ba 资源库密码', provider_id: 'ba', endpoint_id: 'ba_resource', kind: 'bearer', description: '登录密码，只写入 .env' },
 ];
 
 function fingerprintKey(val) {

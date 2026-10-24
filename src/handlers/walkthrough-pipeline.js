@@ -651,6 +651,7 @@ async function scheduleSeedanceRender(services, { sequenceData, sourceFids = [] 
 
   return executeAdapter(services, adapter, {
     model,
+    gpuPriority: 'low',
     prompt: fullPrompt,
     imageUrls,
     ratio: aspect,

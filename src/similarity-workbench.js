@@ -110,6 +110,19 @@ class UnionFind {
 }
 
 /**
+ * 规整排序参数
+ * - similarity（默认）：保持原有聚类顺序
+ * - time_desc：按素材时间从新到旧（簇按最新一张，簇内按单张）
+ * - time_asc：按素材时间从旧到新
+ */
+function normalizeWorkbenchSort(sort) {
+  const value = String(sort || '').trim().toLowerCase();
+  if (value === 'time_desc' || value === 'time-desc' || value === 'newest') return 'time_desc';
+  if (value === 'time_asc' || value === 'time-asc' || value === 'oldest') return 'time_asc';
+  return 'similarity';
+}
+
+/**
  * 判断两个素材是否属于豁免保护对
  */
 function shouldExemptPair(a, b, lineageMap, ignoredPairsSet) {
@@ -320,9 +333,12 @@ async function scanSimilarityWorkbench(services, options = {}) {
   // 6. 整理聚类簇并计算 9 维质量分
   const rawClusters = uf.getClusters();
   const assetMap = new Map(rows.map((r) => [r.fid, r]));
+  const sort = normalizeWorkbenchSort(options.sort);
+  const scanStamp = Date.now();
 
-  const similarClusters = rawClusters.map((fids, idx) => {
-    const members = fids
+  const similarClusters = rawClusters.map((fids) => {
+    // 先按质量分排名，确定「推荐保留」项（与后续展示顺序解耦）
+    const ranked = fids
       .map((fid) => {
         const item = assetMap.get(fid);
         if (!item) return null;
@@ -338,27 +354,47 @@ async function scanSimilarityWorkbench(services, options = {}) {
       .sort((m1, m2) => m2.qualityScore - m1.qualityScore); // 降序排列
 
     // 推荐保留得分最高项
-    members.forEach((m, mIdx) => {
-      m.recommendedKeep = mIdx === 0;
+    const recommendedFid = ranked[0]?.fid || null;
+    ranked.forEach((m) => {
+      m.recommendedKeep = m.fid === recommendedFid;
     });
+
+    // 簇内时间跨度（毫秒；缺失时间戳的素材不参与统计）
+    const times = ranked.map((m) => Number(m.created_at) || 0).filter((t) => t > 0);
+    const timeStart = times.length ? Math.min(...times) : null;
+    const timeEnd = times.length ? Math.max(...times) : null;
+
+    // 展示顺序：默认按质量分；按时间排序时簇内也同步改为时间序
+    let displayMembers = ranked;
+    if (sort === 'time_desc') {
+      displayMembers = ranked
+        .slice()
+        .sort((a, b) => (Number(b.created_at) || 0) - (Number(a.created_at) || 0));
+    } else if (sort === 'time_asc') {
+      displayMembers = ranked
+        .slice()
+        .sort((a, b) => (Number(a.created_at) || 0) - (Number(b.created_at) || 0));
+    }
 
     // 计算簇内平均或最小距离
     let minClusterDist = 99;
-    for (let i = 0; i < members.length; i++) {
-      for (let j = i + 1; j < members.length; j++) {
-        const pKey = pairKey(members[i].fid, members[j].fid);
+    for (let i = 0; i < ranked.length; i++) {
+      for (let j = i + 1; j < ranked.length; j++) {
+        const pKey = pairKey(ranked[i].fid, ranked[j].fid);
         const d = pairDistances.get(pKey);
         if (d !== undefined && d < minClusterDist) minClusterDist = d;
       }
     }
 
     return {
-      clusterId: `cluster_${idx + 1}_${Date.now()}`,
-      category: members[0]?.category || 'interior',
+      clusterId: '',
+      category: ranked[0]?.category || 'interior',
       minDist: minClusterDist === 99 ? 1 : minClusterDist,
-      count: members.length,
-      recommendedFid: members[0]?.fid,
-      members: members.map((m) => ({
+      count: ranked.length,
+      recommendedFid,
+      timeStart,
+      timeEnd,
+      members: displayMembers.map((m) => ({
         fid: m.fid,
         fileName: m.file_name,
         width: m.width,
@@ -376,9 +412,27 @@ async function scanSimilarityWorkbench(services, options = {}) {
     };
   });
 
+  // 7. 簇级排序（相似度默认保持原有聚类顺序，避免改变既有行为）
+  // 两个方向统一用「簇内最新一张」作主键，保证切换方向后列表严格反向。
+  if (sort === 'time_desc') {
+    similarClusters.sort(
+      (a, b) => (b.timeEnd || 0) - (a.timeEnd || 0) || (b.timeStart || 0) - (a.timeStart || 0)
+    );
+  } else if (sort === 'time_asc') {
+    similarClusters.sort(
+      (a, b) => (a.timeEnd || 0) - (b.timeEnd || 0) || (a.timeStart || 0) - (b.timeStart || 0)
+    );
+  }
+
+  // 排序确定后再编号，保证「簇 #N」与展示顺序一致
+  similarClusters.forEach((cluster, idx) => {
+    cluster.clusterId = `cluster_${idx + 1}_${scanStamp}`;
+  });
+
   return {
     mode,
     maxDist,
+    sort,
     category: categoryFilter || 'all',
     summary: {
       totalScanned: rows.length,

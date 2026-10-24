@@ -35,7 +35,7 @@ const LIBRARIES = {
   },
   video: {
     storedCategories: [],
-    primary: ['video_source', 'orientation'],
+    primary: ['video_source', 'video_purpose', 'space', 'style_atom', 'orientation'],
     more: [],
   },
   music: {

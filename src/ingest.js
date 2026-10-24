@@ -129,7 +129,8 @@ async function ingestBuffer(services, {
   takenAt = null,
   category = null,
   manualTags = null,
-  shelf = null
+  shelf = null,
+  sourceNote = null
 }) {
   const { db, config, interpreter } = services;
   if (!buffer || !buffer.length) throw new Error('空文件');
@@ -327,6 +328,13 @@ async function ingestBuffer(services, {
     console.warn('[ingest] save fingerprints failed:', e.message);
   }
 
+  // 像素级质量分析：把真实锐度写回 assets.sharpness，并落 9 维分（只读评估）
+  try {
+    await require('./quality-score').analyzeAndPersist(services, fid, absPath);
+  } catch (e) {
+    console.warn('[ingest] 质量分析失败:', e.message);
+  }
+
   // 手动标签录入（若有）
   if (manualTags && !isFinished) {
     try {
@@ -352,6 +360,16 @@ async function ingestBuffer(services, {
     }
   }
 
+  if (sourceNote) {
+    try {
+      const cols = db.prepare('PRAGMA table_info(assets)').all().map((col) => col.name);
+      if (!cols.includes('source_note')) db.exec('ALTER TABLE assets ADD COLUMN source_note TEXT');
+      db.prepare('UPDATE assets SET source_note=? WHERE fid=?').run(String(sourceNote), fid);
+    } catch (e) {
+      console.warn('[ingest] source_note:', e.message);
+    }
+  }
+
   let queued = null;
   if (interpreter && !isFinished) {
     queued = await interpreter.triggerRun({
@@ -367,6 +385,15 @@ async function ingestBuffer(services, {
     backup = await backupAsset(services, row);
   } catch (e) {
     backup = { skipped: false, quarkError: e.message };
+  }
+
+  // 推给 App：新素材已入库，客户端据此按分层策略预取缩略图
+  try {
+    require('./ws-server').broadcast('asset.ingested', {
+      fid, kind: 'image', width, height, status: initialStatus,
+    });
+  } catch (e) {
+    console.warn('[ws] 素材入库事件广播失败:', e.message);
   }
 
   return { fid, deduped: false, derivativeId: deriv.id, queued, originalPath: absPath, backup };

@@ -13,9 +13,10 @@ const {
   floodFillCutout,
   affineCompositeToScene,
   cropNeighborhood,
-  pastebackComposite,
+  pastebackToTarget,
 } = require('./image-ops');
 const { findImageAdapter, readAdapterOutput } = require('./adapter-io');
+const { resolveEditSize } = require('./edit-size');
 
 const INSERT_PROMPT = `这是一张室内实拍照片。照片中贴着一张从产品照片抠出的单品图案——它只是设计占位图，用来标明安装位置、大小与透视角度，不是照片原有的物体。
 【任务】把贴入的占位图案替换为真实安装在场景中的该单品，并让它完全融入室内光影：
@@ -72,6 +73,7 @@ async function handleInsert(services, {
   regionClauseText = null,
   maskPath = null,
   model = null,
+  outSpec = null,
 }) {
   if (!productImageBuffer) {
     throw new Error('增（软装安装）必须提供二维产品图');
@@ -106,6 +108,18 @@ async function handleInsert(services, {
   if (!adapter) {
     throw new Error('未配置图像适配器（ark_seedream 或 agnes_image），安装已停止');
   }
+  // 送模型的是邻域裁剪而不是整张场景，画幅必须按裁剪自己的比例挑档；
+  // 场景那一层的 outW/outH 只用于最终贴回后的画布尺寸。
+  const cropSpec = outSpec
+    ? resolveEditSize({
+        db: services && services.db,
+        model,
+        size: outSpec.tier,
+        ratio: null,
+        baseW: cropRect.width,
+        baseH: cropRect.height,
+      })
+    : null;
   const { executeAdapter } = require('../gen');
   const cropBase64 = `data:image/jpeg;base64,${cropped.croppedBuffer.toString('base64')}`;
   // 位置、大小、透视已由仿射合成锁死在像素里；regionClauseText 只作语义补充，
@@ -118,18 +132,18 @@ async function handleInsert(services, {
     kind: 'image',
     model: model || undefined,
     maskPath: maskPath || undefined,
+    size: cropSpec && cropSpec.sizeField ? cropSpec.sizeField : undefined,
+    ratio: cropSpec && cropSpec.ratioField ? cropSpec.ratioField : undefined,
   });
   const genCropBuffer = readAdapterOutput(res);
   if (!genCropBuffer) throw new Error('图像适配器未返回安装结果');
 
-  const finalImageBuffer = await pastebackComposite(
-    sceneImageBuffer,
-    genCropBuffer,
+  return pastebackToTarget(sceneImageBuffer, genCropBuffer, {
+    selection,
     cropRect,
-    selection
-  );
-
-  return finalImageBuffer;
+    outW: outSpec ? outSpec.outW : 0,
+    outH: outSpec ? outSpec.outH : 0,
+  });
 }
 
 module.exports = {

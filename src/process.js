@@ -190,6 +190,7 @@ async function executeProcessJob(services, jobRow) {
     };
     const res = await executeAdapter(services, adapter, {
       kind: asset.kind === 'video' || String(action).startsWith('video') ? 'video' : 'image',
+      gpuPriority: 'low',
       imageLocalPaths: originPath ? [originPath] : [],
       prompt: params.prompt || '',
       extras: {

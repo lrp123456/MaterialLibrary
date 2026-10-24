@@ -546,7 +546,9 @@ function enqueueAiTask(db, {
     createdBy, now, now
   );
 
-  return getAiTask(db, tid);
+  const task = getAiTask(db, tid);
+  broadcastTaskEvent(db, tid, 'ai.task.created');
+  return task;
 }
 
 function defaultTitle(type, n = 1) {
@@ -567,23 +569,37 @@ function updateTask(db, taskId, fields) {
     .run(...keys.map(k => fields[k]), Date.now(), taskId);
 }
 
+/** 任务状态变化时推送到长连接客户端（App 无需再等轮询） */
+function broadcastTaskEvent(db, taskId, event) {
+  try {
+    const row = db.prepare('SELECT * FROM ai_tasks WHERE task_id=?').get(taskId);
+    if (!row) return;
+    require('./ws-server').broadcast(event, toPublicTask(row));
+  } catch (e) {
+    console.warn('[ws] 任务事件广播失败:', e.message);
+  }
+}
+
 function failTask(db, taskId, error) {
   updateTask(db, taskId, {
     status: 'failed',
     error: String(error || '未知错误'),
     completed_at: Date.now()
   });
+  broadcastTaskEvent(db, taskId, 'ai.task.failed');
 }
 
-function completeTask(db, taskId, { outputFid, outputKind }) {
+function completeTask(db, taskId, { outputFid, outputKind, outputDerivativeId }) {
   updateTask(db, taskId, {
     status: 'success',
     progress: 100,
     output_fid: outputFid || null,
     output_kind: outputKind || null,
+    output_derivative_id: outputDerivativeId == null ? null : String(outputDerivativeId),
     error: null,
     completed_at: Date.now()
   });
+  broadcastTaskEvent(db, taskId, 'ai.task.completed');
 }
 
 /** 客户端/管理端可见的公开字段 */
@@ -601,6 +617,8 @@ function toPublicTask(t) {
     output_fid: t.output_fid,
     outputFid: t.output_fid,
     output_kind: t.output_kind,
+    output_derivative_id: t.output_derivative_id,
+    outputDerivativeId: t.output_derivative_id,
     error: t.error,
     engine_run_id: t.engine_run_id,
     created_at: t.created_at,
@@ -760,9 +778,14 @@ async function startAiTask(services, task) {
       }
     });
 
-    completeTask(db, t.taskId, { outputFid: String(deriv.id), outputKind: 'derivative' });
-    logger?.info?.(`[ai-tasks] ${t.taskId} 本地流水线执行成功 derivative #${deriv.id}`);
-    return { success: true, task: getAiTask(db, t.taskId), derivativeId: deriv.id };
+    // output_fid 统一为素材 fid（客户端按素材 id 取图），衍生图行号另存 output_derivative_id
+    completeTask(db, t.taskId, {
+      outputFid: String(deriv.asset_fid || t.fid || ''),
+      outputKind: 'derivative',
+      outputDerivativeId: String(deriv.id),
+    });
+    logger?.info?.(`[ai-tasks] ${t.taskId} 本地流水线执行成功 derivative #${deriv.id} (asset ${deriv.asset_fid || t.fid})`);
+    return { success: true, task: getAiTask(db, t.taskId), derivativeId: deriv.id, outputFid: deriv.asset_fid || t.fid };
   } catch (e) {
     failTask(db, t.taskId, e.message);
     logger?.warn?.(`[ai-tasks] ${t.taskId} 任务执行失败: ${e.message}`);

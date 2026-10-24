@@ -423,6 +423,15 @@ async function registerMediaAsset(services, {
     logger?.warn?.(`[stream-upload] save fingerprints failed: ${e.message}`);
   }
 
+  // 像素级质量分析：把真实锐度写回 assets.sharpness，并落 9 维分（只读评估）
+  if (!isVideo) {
+    try {
+      await require('./quality-score').analyzeAndPersist(services, fid, nasInfo.fullPath);
+    } catch (e) {
+      logger?.warn?.(`[stream-upload] 质量分析失败: ${e.message}`);
+    }
+  }
+
   // 记录主别名及原始文件名映射
   try {
     const mainKey = `${nasInfo.fileName}|${size}`;
@@ -497,6 +506,15 @@ async function registerMediaAsset(services, {
     } catch (e) {
       logger?.warn?.(`[stream-upload] 触发打标工作流跳过: ${e.message}`);
     }
+  }
+
+  // 推给 App：新素材已入库，客户端据此按分层策略预取缩略图
+  try {
+    require('./ws-server').broadcast('asset.ingested', {
+      fid, kind: mediaKind, width, height, status: initialStatus,
+    });
+  } catch (e) {
+    logger?.warn?.(`[ws] 素材入库事件广播失败: ${e.message}`);
   }
 
   return {

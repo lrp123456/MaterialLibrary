@@ -528,11 +528,18 @@ async function executeTagSpace(services, nodeConfig, asset, runCtx = {}) {
 
   // 6. VLM 打标（通过 compileNodePrompt 实时展开 {{@dict.xxx}} 动态标签词典芯片）
   const { compileNodePrompt, expandDictMacros } = require('../prompt-compiler');
-  const onlyDims = runCtx.dictRetag?.dimensions || nodeConfig.onlyDimensions || require('../library-schema').dimensionsFor('interior_design', 'primary');
+  const videoTags = require('../video-tags');
+  const videoAsset = isVideoAsset(asset, origPath);
+  const keepParentScene = videoAsset && videoTags.parentHasSceneTags(db, asset.parent_fid);
+  let onlyDims = runCtx.dictRetag?.dimensions || nodeConfig.onlyDimensions || require('../library-schema').dimensionsFor('interior_design', 'primary');
+  if (videoAsset && !runCtx.dictRetag?.dimensions && !nodeConfig.onlyDimensions) {
+    onlyDims = keepParentScene ? [] : videoTags.sceneDimsForCategory(asset.category);
+  }
+  const noteLine = videoTags.sourceNoteLine(db, asset.fid);
   let resolvedSpacePrompt = '';
   if (runCtx.dictRetag?.dimensions) {
     resolvedSpacePrompt = tagSpacePrompt(db, onlyDims);
-  } else {
+  } else if (!videoAsset || onlyDims.length) {
     const compiledTag = compileNodePrompt(db, {
       mountPointId: 'ingest_post_process',
       nodeType: 'tag',
@@ -542,18 +549,63 @@ async function executeTagSpace(services, nodeConfig, asset, runCtx = {}) {
       modelId: nodeConfig.model,
     });
     // 若自定义模板未包含枚举词典且长度过短（历史残缺模板），自动回退至完整动态词典拼装
-    if (compiledTag.prompt && (compiledTag.prompt.includes('living_room') || compiledTag.prompt.length > 400 || nodeConfig.forceCustomPrompt)) {
+    if (!videoAsset && compiledTag.prompt && (compiledTag.prompt.includes('living_room') || compiledTag.prompt.length > 400 || nodeConfig.forceCustomPrompt)) {
       resolvedSpacePrompt = compiledTag.prompt;
     } else {
       resolvedSpacePrompt = tagSpacePrompt(db, onlyDims);
     }
   }
+  if (noteLine) resolvedSpacePrompt += noteLine;
   const vlmCfg = resolveActiveVlmConfig(db, config, nodeConfig.model);
-  const tags = await chatVisionWithRetry({
-    ...vlmCfg,
-    prompt: resolvedSpacePrompt,
-    images: tagImages
-  }, nodeConfig, logger);
+  let tags = {};
+  if (videoAsset && !keepParentScene && onlyDims.length) {
+    const frameTags = [];
+    for (const img of tagImages) {
+      try {
+        frameTags.push(await chatVisionWithRetry({
+          ...vlmCfg,
+          prompt: resolvedSpacePrompt,
+          images: [img],
+        }, nodeConfig, logger));
+      } catch (err) {
+        logger?.warn?.(`[tag] 视频帧打标失败 ${asset.fid}: ${err.message}`);
+      }
+    }
+    const voted = videoTags.voteSceneTags(frameTags);
+    tags = {
+      space: voted.space,
+      style_main: voted.style_main.length ? voted.style_main : ['other'],
+      style_confidence: frameTags.length ? 0.7 : 0.4,
+    };
+    if (onlyDims.includes('material_kind')) {
+      const hard = [];
+      const soft = [];
+      for (const frame of frameTags) {
+        for (const item of frame?.materials_hard || []) if (!hard.includes(item)) hard.push(item);
+        for (const item of frame?.materials_soft || []) if (!soft.includes(item)) soft.push(item);
+      }
+      tags.materials_hard = hard.slice(0, 2);
+      tags.materials_soft = soft.slice(0, 2);
+    }
+  } else if (!videoAsset) {
+    tags = await chatVisionWithRetry({
+      ...vlmCfg,
+      prompt: resolvedSpacePrompt,
+      images: tagImages
+    }, nodeConfig, logger);
+  }
+  if (videoAsset && !videoTags.purposeLocked(db, asset.fid)) {
+    try {
+      const purpose = await chatVisionWithRetry({
+        ...vlmCfg,
+        prompt: videoTags.purposePrompt(),
+        images: tagImages.slice(0, 4),
+      }, nodeConfig, logger);
+      if (purpose?.video_purpose) videoTags.applyVideoPurpose(db, asset.fid, purpose.video_purpose, 'ai');
+    } catch (err) {
+      logger?.warn?.(`[tag] 视频用途打标失败 ${asset.fid}: ${err.message}`);
+    }
+  }
 
   // 7. 写入 asset_tags (遵守 source=human 保护 + 维度范围替换)
   const { logAssetTagHistory } = require('../tag-governance');
@@ -1296,6 +1348,7 @@ async function executeClean(services, nodeConfig, asset, runCtx) {
 
     const res = await executeAdapter(services, adapter, {
       kind: 'image',
+      gpuPriority: 'low',
       imageLocalPaths: [localCached],
       prompt: 'remove watermark from interior design photo',
       extras: adapter.protocol === 'unified_gateway'
@@ -1364,25 +1417,32 @@ async function executeRestage9x16(services, nodeConfig, asset, runCtx) {
   }
 
   // 2. 检查适配器 (若指定适配器未启用或未配置，安全跳过构图回退原图)
+  //    ★ 多模型挂载：优先按挂载点里勾选的模型链反查适配器（每条自带自己的模型）
   const adapterId = nodeConfig.adapterId;
-  if (!adapterId || adapterId === 'builtin_none') {
-    return {
-      success: true,
-      nonFatal: true,
-      flags: ['restage_skipped_no_adapter'],
-      output: { restaged: false, fallback: 'origin' }
-    };
-  }
-  let adapter = db.prepare('SELECT * FROM gen_adapters WHERE id=? AND enabled=1').get(adapterId);
-  if (!adapter) {
-    logger?.info?.(`[restage_9_16] 指定的生图适配器 (${adapterId}) 未启用，跳过重构图回退原图`);
-    return {
-      success: true,
-      nonFatal: true,
-      flags: ['restage_adapter_disabled'],
-      error: `生图适配器 ${adapterId} 未启用`,
-      output: { restaged: false, fallback: 'origin' }
-    };
+  const imageAdapters = db.prepare("SELECT * FROM gen_adapters WHERE kind='image' AND enabled=1").all();
+  const modelChain = buildModelChain(nodeModelIds(nodeConfig), imageAdapters);
+  let chain = modelChain.map((c) => ({ adapter: c.adapter, model: c.model }));
+  if (!chain.length) {
+    if (!adapterId || adapterId === 'builtin_none') {
+      return {
+        success: true,
+        nonFatal: true,
+        flags: ['restage_skipped_no_adapter'],
+        output: { restaged: false, fallback: 'origin' }
+      };
+    }
+    const adapter = db.prepare('SELECT * FROM gen_adapters WHERE id=? AND enabled=1').get(adapterId);
+    if (!adapter) {
+      logger?.info?.(`[restage_9_16] 指定的生图适配器 (${adapterId}) 未启用，跳过重构图回退原图`);
+      return {
+        success: true,
+        nonFatal: true,
+        flags: ['restage_adapter_disabled'],
+        error: `生图适配器 ${adapterId} 未启用`,
+        output: { restaged: false, fallback: 'origin' }
+      };
+    }
+    chain = [{ adapter, model: cfgDefaultModel(adapter) }];
   }
 
   const refPath = await resolveRestageRef(services, asset, runCtx);
@@ -1404,19 +1464,39 @@ async function executeRestage9x16(services, nodeConfig, asset, runCtx) {
   const negativePrompt = buildRestageNegative(nodeConfig);
 
   try {
-    const res = await executeAdapter(services, adapter, {
-      kind: 'image',
-      mode: 'ref',
-      prompt,
-      negativePrompt,
-      model: nodeConfig.model,
-      ratio: '9:16',
-      size: agnesSizeForPreset(nodeConfig.sizePreset || '1080p'),
-      imageLocalPaths: [refPath]
-    });
+    // 多模型挂载：逐条通道尝试，主通道失败自动切下一条（每条带自己的模型）
+    let genFile = null;
+    let usedAdapterId = chain[0] ? chain[0].adapter.id : '';
+    let lastErr = null;
+    for (const cand of chain) {
+      if (!cand || !cand.adapter) continue;
+      try {
+        const res = await executeAdapter(services, cand.adapter, {
+          kind: 'image',
+          mode: 'ref',
+          gpuPriority: 'low',
+          prompt,
+          negativePrompt,
+          model: cand.model || nodeConfig.model,
+          ratio: '9:16',
+          size: agnesSizeForPreset(nodeConfig.sizePreset || '1080p'),
+          imageLocalPaths: [refPath]
+        });
+        if (res.ok && res.files?.[0]?.localPath) {
+          genFile = res.files[0];
+          usedAdapterId = cand.adapter.id;
+          break;
+        }
+        lastErr = new Error((res && res.error) || '生图服务未返回产物文件');
+      } catch (e) {
+        lastErr = e;
+      }
+      logger?.info?.(`[restage_9_16] 资产 ${asset.fid} 通道 ${cand.adapter.id} 未能产出，切换下一通道`);
+    }
+    if (!genFile) throw lastErr || new Error('生图服务未返回产物文件');
 
-    if (res.ok && res.files?.[0]?.localPath) {
-      const file = res.files[0];
+    {
+      const file = genFile;
       const sizePreset = nodeConfig.sizePreset || '1080p';
       // ★ 出图后直接复制字节落盘，禁止旋转重编码、禁止缩放、禁止裁切
       let outMeta = { width: null, height: null };
@@ -1429,7 +1509,7 @@ async function executeRestage9x16(services, nodeConfig, asset, runCtx) {
         width: outMeta.width,
         height: outMeta.height,
         mime: 'image/jpeg',
-        params: { adapterId, model: nodeConfig.model, prompt, generated: true, calibrated: false, strategy: 'raw_byte_copy', ratio: '9:16', sizePreset }
+        params: { adapterId: usedAdapterId, model: nodeConfig.model, prompt, generated: true, calibrated: false, strategy: 'raw_byte_copy', ratio: '9:16', sizePreset }
       });
 
       // 设为主图
@@ -1441,7 +1521,6 @@ async function executeRestage9x16(services, nodeConfig, asset, runCtx) {
         output: { restaged: true, derivativeId: deriv.id }
       };
     }
-    throw new Error('生图服务未返回产物文件');
   } catch (e) {
     logger?.warn?.(`[restage_9_16] 资产 ${asset.fid} 生图失败，降级回退原图: ${e.message}`);
     return {
@@ -1577,10 +1656,61 @@ function cfgDefaultModel(adapter) {
   }
 }
 
+/**
+ * ★ 多模型挂载 → 生图通道候选链
+ *
+ * 挂载点里可以一次挂多个模型（主模型 + 降级备选）。这里把每个模型**反查**到自己的适配器，
+ * 组成「主 → 备1 → 备2」的候选链；某条通道失败（确定性错误）就切下一条。
+ *
+ * 铁律：每条候选必须携带**自己的** model，绝不拿 A 模型的请求打到 B 适配器上
+ * （Qwen 的 model_code 打到 Agnes 端点必 404）。
+ *
+ * @param {Array} modelIds 有序模型 id 列表（契约 id 或 model_code 均可）
+ * @param {Array} imageAdapters 已启用的生图适配器行
+ * @returns {Array<{adapter:object, model:string}>}
+ */
+function buildModelChain(modelIds, imageAdapters) {
+  const out = [];
+  const seen = new Set();
+  let pickAdapterId = null;
+  let resolveModelCode = null;
+  try { ({ pickAdapterId } = require('../adapter-match')); } catch (_) {}
+  try { ({ resolveModelCode } = require('../studio-catalog')); } catch (_) {}
+  if (!pickAdapterId) return out;
+
+  const adapters = Array.isArray(imageAdapters) ? imageAdapters : [];
+  for (const raw of modelIds || []) {
+    const modelId = String(raw || '').trim();
+    if (!modelId) continue;
+    const code = (resolveModelCode && resolveModelCode(modelId)) || modelId;
+    const adapterId = pickAdapterId('image', code, adapters);
+    if (!adapterId) continue;
+    const adapter = adapters.find((a) => a && a.id === adapterId);
+    if (!adapter) continue;
+    const key = `${adapterId}::${code}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ adapter, model: code });
+  }
+  return out;
+}
+
+/** 从 nodeConfig 里取出挂载的模型链（多选；老配置只有单值 model） */
+function nodeModelIds(nodeConfig) {
+  const ids = Array.isArray(nodeConfig?.modelIds) ? nodeConfig.modelIds : [];
+  const out = ids.map((x) => String(x || '').trim()).filter(Boolean);
+  if (!out.length && nodeConfig?.model) out.push(String(nodeConfig.model).trim());
+  return out;
+}
+
 async function executeRestageDual(services, nodeConfig, asset, runCtx) {
   const { db, config, logger } = services;
   const { shouldAutoRestage } = require('../gate-route');
-  if (!shouldAutoRestage(asset.category || runCtx?.lastOutput?.category)) {
+  // 自动灌入仍然只处理室内/室外，避免给服装、人像、家具库平白增加生图成本。
+  // 但素材选择器里点「9:16 待生成」属于用户显式单次请求，这类请求必须放行到任何类目，
+  // 否则插槽点了只会拿到 409（manual_library）。api.js 的 POST /assets/:fid/restage 会写死 forceMember=true。
+  const manualRequest = nodeConfig?.forceMember === true;
+  if (!manualRequest && !shouldAutoRestage(asset.category || runCtx?.lastOutput?.category)) {
     return {
       success: true,
       skipped: true,
@@ -1666,15 +1796,28 @@ async function executeRestageDual(services, nodeConfig, asset, runCtx) {
   const adapterId = nodeConfig.adapterId || 'agnes_image';
   const primary = db.prepare('SELECT * FROM gen_adapters WHERE id=? AND enabled=1').get(adapterId);
   const fallback = db.prepare("SELECT * FROM gen_adapters WHERE id=? AND enabled=1").get('qwenimage_local');
-  // 降级顺序：主通道 → 本地 QwenImage。批量灌入时可配 fallbackFirst 让本机先消化。
+
+  // ★ 多模型挂载：挂载点里勾选的模型链优先（每条自带自己的模型 + 适配器），
+  //   用户没勾（或模型反查不到适配器）时才回落到既有的「主通道 → 本地 Qwen」链。
+  const imageAdapters = db.prepare("SELECT * FROM gen_adapters WHERE kind='image' AND enabled=1").all();
+  const modelChain = buildModelChain(nodeModelIds(nodeConfig), imageAdapters);
+
   const chain = [];
-  if (nodeConfig.fallbackFirst && fallback) chain.push(fallback);
-  if (primary) chain.push(primary);
-  if (!nodeConfig.fallbackFirst && fallback) chain.push(fallback);
-  if (!chain.length) {
-    chain.push(db.prepare("SELECT * FROM gen_adapters WHERE kind='image' AND enabled=1 ORDER BY builtin DESC LIMIT 1").get());
+  if (modelChain.length) {
+    chain.push(...modelChain);
+    // 显式挂载后仍保留本机 Qwen 作为最后兜底（除非已经在链里）
+    if (fallback && !chain.some((c) => c.adapter.id === fallback.id)) chain.push({ adapter: fallback, model: cfgDefaultModel(fallback) });
+  } else {
+    // 降级顺序：主通道 → 本地 QwenImage。批量灌入时可配 fallbackFirst 让本机先消化。
+    if (nodeConfig.fallbackFirst && fallback) chain.push({ adapter: fallback, model: cfgDefaultModel(fallback) });
+    if (primary) chain.push({ adapter: primary, model: cfgDefaultModel(primary) });
+    if (!nodeConfig.fallbackFirst && fallback) chain.push({ adapter: fallback, model: cfgDefaultModel(fallback) });
+    if (!chain.length) {
+      const anyAdapter = db.prepare("SELECT * FROM gen_adapters WHERE kind='image' AND enabled=1 ORDER BY builtin DESC LIMIT 1").get();
+      if (anyAdapter) chain.push({ adapter: anyAdapter, model: cfgDefaultModel(anyAdapter) });
+    }
   }
-  const adapter = chain.find(Boolean);
+  const adapter = chain.find(Boolean) ? chain[0].adapter : null;
   if (!adapter) {
     logger?.info?.(`[restage_dual] 无可用生图适配器，跳过重构回退原图`);
     return {
@@ -1685,7 +1828,7 @@ async function executeRestageDual(services, nodeConfig, asset, runCtx) {
     };
   }
   if (chain.length > 1) {
-    logger?.info?.(`[restage_dual] 资产 ${asset.fid} 生图通道链: ${chain.map(a => a.id).join(' → ')}`);
+    logger?.info?.(`[restage_dual] 资产 ${asset.fid} 生图通道链: ${chain.map(c => `${c.adapter.id}(${c.model || '默认模型'})`).join(' → ')}`);
   }
 
   const refPath = await resolveRestageRef(services, asset, runCtx);
@@ -1760,23 +1903,31 @@ async function executeRestageDual(services, nodeConfig, asset, runCtx) {
     const composedPath = refPath;
     let genPath = null;
     let usedAdapterId = adapter.id;
+    // 实际产出用的模型：候选通道自带 model 优先，其次节点配置，最后适配器默认。
+    // 手动请求要把「到底走了哪条通道」回显给用户，否则降级了也看不出来。
+    let usedModel = '';
     let lastErrText = '';
     try {
       // 逐个通道尝试；每个通道内部对偶发错误做有限次退避重试。
       // 偶发性故障（TLS 断连 / 超时 / 429 / 503）不应该把任务留在异常态，
       // 退避后重试即可恢复；只有确定性错误才立即换下一条通道。
       for (const cand of chain) {
-        if (!cand) continue;
-        const maxTry = isTransientAdapterError(cand.id) ? (Number(nodeConfig.retryTimes) || 3) : 1;
+        if (!cand || !cand.adapter) continue;
+        const candAdapter = cand.adapter;
+        // 每条候选用自己的模型（多选挂载时主/备模型各自对应自己的适配器）
+        const candModel = cand.model || nodeConfig.model || cfgDefaultModel(candAdapter);
+        const maxTry = isTransientAdapterError(candAdapter.id) ? (Number(nodeConfig.retryTimes) || 3) : 1;
         for (let attempt = 1; attempt <= maxTry; attempt++) {
           if (genPath) break;
           try {
-            const res = await executeAdapter(services, cand, {
+            const res = await executeAdapter(services, candAdapter, {
               kind: 'image',
               mode: 'ref',
+              // 批量灌入默认 low 让出队头；用户手动点的图由 api.js 显式传 high
+              gpuPriority: nodeConfig.gpuPriority || 'low',
               prompt,
               negativePrompt,
-              model: nodeConfig.model || cfgDefaultModel(cand),
+              model: candModel,
               ratio,
               width: pixelSizeFor(ratio, sizePreset).width,
               height: pixelSizeFor(ratio, sizePreset).height,
@@ -1785,19 +1936,20 @@ async function executeRestageDual(services, nodeConfig, asset, runCtx) {
             });
             if (res.ok && res.files?.[0]?.localPath) {
               genPath = res.files[0].localPath;
-              usedAdapterId = cand.id;
-              if (attempt > 1) logger?.info?.(`[restage_dual] 资产 ${asset.fid} ${ratio} 经 ${cand.id} 第 ${attempt} 次重试恢复`);
+              usedAdapterId = candAdapter.id;
+              usedModel = candModel;
+              if (attempt > 1) logger?.info?.(`[restage_dual] 资产 ${asset.fid} ${ratio} 经 ${candAdapter.id} 第 ${attempt} 次重试恢复`);
               break;
             }
             const errText = (res && res.error) || '生图服务未返回产物';
             lastErrText = errText;
             if (isTransientErrorText(errText) && attempt < maxTry) {
               const waitMs = transientBackoffMs(attempt);
-              logger?.warn?.(`[restage_dual] 资产 ${asset.fid} ${ratio} ${cand.id} 偶发失败(${attempt}/${maxTry})，${waitMs}ms 后重试: ${errText}`);
+              logger?.warn?.(`[restage_dual] 资产 ${asset.fid} ${ratio} ${candAdapter.id} 偶发失败(${attempt}/${maxTry})，${waitMs}ms 后重试: ${errText}`);
               await sleep(waitMs);
               continue;
             }
-            genErrors.push(`${ratio}@${cand.id}:${errText}`);
+            genErrors.push(`${ratio}@${candAdapter.id}:${errText}`);
             break;
           } catch (e) {
             lastErrText = e.message;
@@ -1808,17 +1960,17 @@ async function executeRestageDual(services, nodeConfig, asset, runCtx) {
             }
             if (isTransientErrorText(e.message) && attempt < maxTry) {
               const waitMs = transientBackoffMs(attempt);
-              logger?.warn?.(`[restage_dual] 资产 ${asset.fid} ${ratio} ${cand.id} 偶发异常(${attempt}/${maxTry})，${waitMs}ms 后重试: ${e.message}`);
+              logger?.warn?.(`[restage_dual] 资产 ${asset.fid} ${ratio} ${candAdapter.id} 偶发异常(${attempt}/${maxTry})，${waitMs}ms 后重试: ${e.message}`);
               await sleep(waitMs);
               continue;
             }
-            logger?.warn?.(`[restage_dual] 资产 ${asset.fid} 生成 ${ratio} 失败(${cand.id}): ${e.message}`);
-            genErrors.push(`${ratio}@${cand.id}:${e.message}`);
+            logger?.warn?.(`[restage_dual] 资产 ${asset.fid} 生成 ${ratio} 失败(${candAdapter.id}): ${e.message}`);
+            genErrors.push(`${ratio}@${candAdapter.id}:${e.message}`);
             break;
           }
         }
         if (genPath || requeue) break;
-        logger?.info?.(`[restage_dual] 资产 ${asset.fid} ${ratio} 通道 ${cand.id} 未能产出，切换下一通道`);
+        logger?.info?.(`[restage_dual] 资产 ${asset.fid} ${ratio} 通道 ${candAdapter.id} 未能产出，切换下一通道`);
       }
     } catch (e) {
       logger?.warn?.(`[restage_dual] 资产 ${asset.fid} 生成 ${ratio} 异常: ${e.message}`);
@@ -1847,7 +1999,8 @@ async function executeRestageDual(services, nodeConfig, asset, runCtx) {
         mime: 'image/jpeg',
         params: {
           adapterId: usedAdapterId,
-          model: nodeConfig.model || '',
+          // 记实际用的模型而不是节点配置：多模型挂载时两者可能不同
+          model: usedModel || nodeConfig.model || '',
           prompt,
           negativePrompt,
           ratio,
@@ -1862,7 +2015,15 @@ async function executeRestageDual(services, nodeConfig, asset, runCtx) {
       if (replaceExisting) {
         try { markKindRecast(db, asset.fid, kind, deriv.id); } catch (_) {}
       }
-      results[kind] = { id: deriv.id, width: deriv.width, height: deriv.height, ratio, kind };
+      results[kind] = {
+        id: deriv.id,
+        width: deriv.width,
+        height: deriv.height,
+        ratio,
+        kind,
+        adapterId: usedAdapterId,
+        model: usedModel || '',
+      };
       existing.push(deriv);
     } catch (e) {
       logger?.warn?.(`[restage_dual] 资产 ${asset.fid} 写入 ${ratio} 衍生图失败: ${e.message}`);
@@ -1882,7 +2043,14 @@ async function executeRestageDual(services, nodeConfig, asset, runCtx) {
   }
 
   if (requeue) {
-    const { attempt, ms } = nextRestageBackoff(prevErr);
+    const { attempt, ms, exhausted } = nextRestageBackoff(prevErr);
+    if (exhausted) {
+      return {
+        success: false,
+        error: `自动重试 ${attempt} 次仍失败，已停止排队：${requeueError || '生图队列持续不可用'}`.slice(0, 300),
+        output: { restaged: Object.keys(results).some(k => !results[k].reused), derivatives: results, skipped, exhausted: true }
+      };
+    }
     return {
       success: false,
       requeue: true,
@@ -1902,6 +2070,14 @@ async function executeRestageDual(services, nodeConfig, asset, runCtx) {
     };
   }
 
+  const channels = {};
+  for (const [kind, r] of Object.entries(results)) {
+    if (r?.adapterId) channels[kind] = { adapterId: r.adapterId, model: r.model || '' };
+  }
+  if (!Object.keys(channels).length && usedAdapterId) {
+    channels.default = { adapterId: usedAdapterId, model: usedModel || '' };
+  }
+
   return {
     success: true,
     derivative: d916 && !d916.reused ? { id: d916.id } : null,
@@ -1912,6 +2088,8 @@ async function executeRestageDual(services, nodeConfig, asset, runCtx) {
       skipped,
       sizePreset,
       ratios,
+      // 每一档实际走的通道与模型：手动请求要靠它确认没被降级到本机免费模型
+      channels,
       refPath
     }
   };
@@ -2342,6 +2520,9 @@ async function previewGateCategory(services, dataUrl) {
 module.exports = {
   NODE_REGISTRY,
   previewGateCategory,
+  // 多模型挂载：模型 → 适配器候选链（供回归测试与外部复用）
+  buildModelChain,
+  nodeModelIds,
   executeGate,
   executeDefect,
   executeTag,

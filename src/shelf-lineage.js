@@ -216,6 +216,7 @@ async function registerGenerated(services, input = {}) {
   record.thumbFid = fid;
   let width = null;
   let height = null;
+  let duration = null;
   if (kind === 'image') {
     try {
       const sharp = require('sharp');
@@ -223,14 +224,24 @@ async function registerGenerated(services, input = {}) {
       width = meta.width || null;
       height = meta.height || null;
     } catch { /* 尺寸缺失不影响入库 */ }
+  } else if (kind === 'video') {
+    try {
+      const meta = await require('./umbra').extractVideoMeta(src);
+      width = Number(meta.width) || null;
+      height = Number(meta.height) || null;
+      duration = Number(meta.duration) || null;
+    } catch { /* 尺寸缺失不影响入库 */ }
   }
   const category = parent?.category || (kind === 'audio' ? 'music' : kind === 'video' ? 'video' : 'interior');
+  const orientation = width && height
+    ? (height > width * 1.05 ? 'portrait' : (width > height * 1.05 ? 'landscape' : 'square'))
+    : null;
   db.prepare(`
     INSERT INTO assets (
-      fid, kind, category, file_name, size, width, height, orientation,
+      fid, kind, category, file_name, size, width, height, orientation, duration_s,
       status, is_ai, source, source_asset_id, parent_fid,
       sha256, library_shelf, lineage_json, created_at, discovered_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ready', 1, 'ai', ?, ?, ?, 'retouched', ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', 1, 'ai', ?, ?, ?, 'retouched', ?, ?, ?, ?)
   `).run(
     fid,
     kind,
@@ -239,7 +250,8 @@ async function registerGenerated(services, input = {}) {
     buf.length,
     width,
     height,
-    width && height ? (height > width * 1.05 ? 'portrait' : (width > height * 1.05 ? 'landscape' : 'square')) : null,
+    orientation,
+    duration,
     parentFid || null,
     parentFid || null,
     sha,
@@ -264,6 +276,20 @@ async function registerGenerated(services, input = {}) {
     if (kind === 'image') fs.copyFileSync(src, path.join(thumbDir, `${fid}.jpg`));
   } catch { /* 缩略图失败仍保留原文件 */ }
   inheritTags(db, parentFid, fid);
+  if (kind === 'video') {
+    const videoTags = require('./video-tags');
+    const purpose = videoTags.purposeFromText(input.prompt || '');
+    if (purpose) videoTags.applyVideoPurpose(db, fid, purpose, 'job');
+    try { await videoTags.ensureVideoPoster(config, fid, src); } catch { /* 海报缺失不挡住成片 */ }
+    const parentHasScene = parentFid && videoTags.parentHasSceneTags(db, parentFid);
+    if (!parentHasScene && services.interpreter) {
+      try {
+        await services.interpreter.triggerRun({ assetFids: [fid], trigger: 'video_scene' });
+      } catch (err) {
+        services.logger?.warn?.(`[lineage] 视频画面打标未入队 ${fid}: ${err.message}`);
+      }
+    }
+  }
   return { fid, deduped: false };
 }
 
@@ -314,7 +340,7 @@ function requeueRetag(db, fid) {
   }
   db.prepare(`
     DELETE FROM asset_tags
-    WHERE asset_fid=? AND (source IS NULL OR source NOT IN ('human', 'manual'))
+    WHERE asset_fid=? AND (source IS NULL OR source NOT IN ('human', 'manual', 'job'))
   `).run(fid);
   db.prepare("UPDATE assets SET status='discovered', updated_at=? WHERE fid=?").run(Date.now(), fid);
   return { fid, categoryLocked: !!hit.category_locked };
@@ -324,6 +350,7 @@ module.exports = {
   ensureColumns,
   lineageTree,
   registerGenerated,
+  inheritTags,
   setManualSpace,
   setManualTag,
   requeueRetag

@@ -785,25 +785,32 @@ class WorkflowInterpreter {
   }
 
   settleFinishedRuns() {
-    const runningRuns = this.db.prepare("SELECT * FROM runs WHERE status IN ('running', 'queued')").all();
-    for (const r of runningRuns) {
-      const stats = this.db.prepare(`
-        SELECT
-          SUM(CASE WHEN status='done' THEN 1 ELSE 0 END) as s,
-          SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as f,
-          SUM(CASE WHEN status IN ('queued','running') THEN 1 ELSE 0 END) as pending
-        FROM node_runs WHERE run_id=?
-      `).get(r.id);
+    // 一次分组聚合取代「逐活跃批次各扫一遍 node_runs」：后者在没有 run_id 索引时
+    // 是 O(活跃批次 × 全表)，实测 84 × 15.5 万行 ≈ 5.4s 同步阻塞，会把事件循环占死
+    // （表现：HTTP 全部超时，生成好的视频既预览不了也下载不了）。
+    const stats = this.db.prepare(`
+      SELECT r.id,
+        COALESCE(SUM(CASE WHEN nr.status='done' THEN 1 ELSE 0 END), 0) AS s,
+        COALESCE(SUM(CASE WHEN nr.status='failed' THEN 1 ELSE 0 END), 0) AS f,
+        COALESCE(SUM(CASE WHEN nr.status IN ('queued','running') THEN 1 ELSE 0 END), 0) AS pending
+      FROM runs r
+      LEFT JOIN node_runs nr ON nr.run_id = r.id
+      WHERE r.status IN ('running', 'queued')
+      GROUP BY r.id
+    `).all();
 
-      if ((stats.pending || 0) === 0) {
-        const status = (stats.f || 0) > 0 ? 'partial_failed' : 'done';
-        this.db.prepare(`
-          UPDATE runs SET status=?, success_count=?, failed_count=?, finished_at=?, updated_at=? WHERE id=?
-        `).run(status, stats.s || 0, stats.f || 0, Date.now(), Date.now(), r.id);
+    const finish = this.db.prepare(`
+      UPDATE runs SET status=?, success_count=?, failed_count=?, finished_at=?, updated_at=? WHERE id=?
+    `);
+    const touch = this.db.prepare(`
+      UPDATE runs SET success_count=?, failed_count=?, updated_at=? WHERE id=?
+    `);
+    const now = Date.now();
+    for (const r of stats) {
+      if (r.pending === 0) {
+        finish.run(r.f > 0 ? 'partial_failed' : 'done', r.s, r.f, now, now, r.id);
       } else {
-        this.db.prepare(`
-          UPDATE runs SET success_count=?, failed_count=?, updated_at=? WHERE id=?
-        `).run(stats.s || 0, stats.f || 0, Date.now(), r.id);
+        touch.run(r.s, r.f, now, r.id);
       }
     }
   }

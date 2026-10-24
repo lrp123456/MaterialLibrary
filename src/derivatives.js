@@ -194,22 +194,64 @@ async function ensurePreviewJpeg(services, fid, derivative, filePath) {
   }
 
   if (dest && fs.existsSync(dest) && services?.db) {
-    try {
-      const { registerVisibleImageHashes } = require('./export-tag');
-      const h = registerVisibleImageHashes(services.db, {
-        filePath: dest,
-        sourceFid: fid,
-        variant: derivative?.id ? `preview_${derivative.id}` : 'preview_origin',
-        exportedBy: 'preview_cache',
-      });
-      if (h) {
-        services.db.prepare('UPDATE assets SET preview_sha256 = COALESCE(preview_sha256, ?), preview_md5 = COALESCE(preview_md5, ?) WHERE fid = ?')
-          .run(h.sha256, h.md5, fid);
-      }
-    } catch (_) {}
+    // 预览图哈希登记放后台：不影响首字节返回
+    setImmediate(() => {
+      try {
+        const { registerVisibleImageHashes } = require('./export-tag');
+        const h = registerVisibleImageHashes(services.db, {
+          filePath: dest,
+          sourceFid: fid,
+          variant: derivative?.id ? `preview_${derivative.id}` : 'preview_origin',
+          exportedBy: 'preview_cache',
+        });
+        if (h) {
+          services.db.prepare('UPDATE assets SET preview_sha256 = COALESCE(preview_sha256, ?), preview_md5 = COALESCE(preview_md5, ?) WHERE fid = ?')
+            .run(h.sha256, h.md5, fid);
+        }
+      } catch (_) {}
+    });
   }
 
   return dest;
+}
+
+/**
+ * 网格档缩略图 (256px)：App 列表专用。
+ * 相比 1280px 预览图体积约小 30 倍，列表滚动不再拉大图。
+ */
+async function ensureGridJpeg(services, fid, filePath) {
+  const { config } = services;
+  if (!fid || !filePath || !fs.existsSync(filePath)) return null;
+  const gridDir = path.join(config.dataDir, 'cache', 'grid');
+  fs.mkdirSync(gridDir, { recursive: true });
+  const dest = path.join(gridDir, `${fid}.jpg`);
+  if (!fs.existsSync(dest)) {
+    const sharp = require('sharp');
+    await sharp(filePath, { failOn: 'none' })
+      .rotate()
+      .resize(256, 256, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 72 })
+      .toFile(dest);
+  }
+  return dest;
+}
+
+/** 从已有 512px thumb 派生出 256px 网格图，避免为同一素材再解一次原图 */
+async function ensureGridFromThumb(thumbPath, gridPath) {
+  if (!thumbPath || !fs.existsSync(thumbPath)) return null;
+  if (gridPath && fs.existsSync(gridPath)) return gridPath;
+  try {
+    if (gridPath) fs.mkdirSync(path.dirname(gridPath), { recursive: true });
+    const sharp = require('sharp');
+    await sharp(thumbPath, { failOn: 'none' })
+      .resize(256, 256, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 72 })
+      .toFile(gridPath);
+    return gridPath;
+  } catch (e) {
+    console.warn('[derivatives] 网格档派生失败:', e && e.message);
+    return null;
+  }
 }
 
 async function resolveDerivativeFile(services, derivative) {
@@ -300,5 +342,7 @@ module.exports = {
   markKindRecast,
   createDerivative,
   resolveDerivativeFile,
-  ensurePreviewJpeg
+  ensurePreviewJpeg,
+  ensureGridJpeg,
+  ensureGridFromThumb
 };

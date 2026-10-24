@@ -361,7 +361,26 @@ const DEFAULT_ENDPOINTS = [
     capabilities: [
       { id: 'modelscope_chat', name: '魔搭对话/打标', kind: 'chat', type: 'path', path: '/chat/completions', method: 'POST' },
       { id: 'modelscope_image', name: '魔搭文生图', kind: 'image', type: 'path', path: '/images/generations', method: 'POST' },
+      // 云端 Qwen-Image 2.1：异步任务，提交后要带 task-type 头轮询 /v1/tasks
+      { id: 'qwenimage_modelscope', name: '魔搭 Qwen-Image 2.1（云端 Turbo）', kind: 'image', type: 'path', path: '/images/generations', poll_path: '/v1/tasks/{{taskId}}', method: 'POST' },
       { id: 'modelscope_video', name: '魔搭文生视频', kind: 'video', type: 'path', path: '/videos/generations', method: 'POST' },
+    ]
+  },
+  {
+    // New API 自建聚合网关：OpenAI 兼容，一个 Key 可切换多家上游。
+    // 对话模型 gemini-4-argon 挂在这里，密钥只从 .env 的 NEWAPI_API_KEY 读。
+    id: 'newapi',
+    provider_id: 'newapi',
+    provider_name: 'New API',
+    name: 'New API 聚合网关',
+    base_url: process.env.NEWAPI_BASE_URL || 'https://newapi.naite.cc/v1',
+    auth_type: 'bearer',
+    sign_service: null,
+    sign_version: null,
+    credentials: ['NEWAPI_API_KEY', 'NEWAPI_API_KEYS'],
+    enabled: 1,
+    capabilities: [
+      { id: 'newapi_chat', name: '对话与视觉', kind: 'chat', type: 'path', path: '/chat/completions', method: 'POST' },
     ]
   }
 ];
@@ -931,6 +950,59 @@ const DEFAULT_MODEL_CONTRACTS = [
     }
   },
   {
+    // 与 qwenimage_local 同模型、不同算力：魔搭云端 API-Inference 异步任务。
+    // vendor_model_id 是 ModelScope 的 repo id（带斜杠），不是自造 code。
+    id: 'qwenimage_modelscope',
+    name: 'Qwen-Image 2.1 Turbo（魔搭云端）',
+    vendor_model_id: 'Qwen/Qwen-Image-2.1-Turbo',
+    capability_id: 'qwenimage_modelscope',
+    enabled: 1,
+    params: [
+      {
+        key: 'size',
+        label: '尺寸档',
+        type: 'enum',
+        default: '1K',
+        options: ['1K', '2K'],
+        visibility: 'public',
+        location: 'table',
+      },
+      {
+        key: 'ratio',
+        label: '宽高比',
+        type: 'enum',
+        default: '1:1',
+        options: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
+        visibility: 'public',
+        location: 'table',
+      },
+      {
+        key: 'negative_prompt',
+        label: '负向提示词',
+        type: 'text',
+        default: '',
+        visibility: 'advanced',
+        location: 'body',
+        body_field: 'negative_prompt',
+      },
+    ],
+    modes: [
+      { id: 'text_to_image', label: '文生图' },
+      { id: 'image_to_image', label: '图像编辑' },
+    ],
+    // Qwen-Image-Edit 官方给的是 1~3 张参考图
+    slots: { images: 3, videos: 0, audios: 0 },
+    table_mappings: {
+      size_ratio: QWEN_SIZE_TABLE
+    },
+    conditional_rules: [],
+    mutex_groups: [],
+    optimizer: {
+      optimizer_model_id: 'agnes3_0flash',
+      prompt: ''
+    }
+  },
+  {
     id: 'indextts_local',
     name: 'IndexTTS 2.5',
     vendor_model_id: 'index-tts-2.5',
@@ -1009,6 +1081,19 @@ const DEFAULT_MODEL_CONTRACTS = [
     optimizer: { optimizer_model_id: 'agnes3_0flash', prompt: '' }
   },
   ...LITELLM_TEXT_CONTRACTS,
+  // New API 直连通道的对话模型（不走本地 LiteLLM 网关）
+  {
+    id: 'newapi_gemini_4_argon',
+    name: 'Gemini 4 Argon (New API)',
+    vendor_model_id: 'gemini-4-argon',
+    capability_id: 'newapi_chat',
+    enabled: 1,
+    params: [],
+    table_mappings: {},
+    conditional_rules: [],
+    mutex_groups: [],
+    optimizer: { optimizer_model_id: 'agnes-3.0-flash', prompt: '' },
+  },
 ];
 
 // ================= 官方提示词基线中心定义 =================
@@ -1808,6 +1893,7 @@ function initModelRegistryTables(db) {
       name TEXT NOT NULL,
       node_type TEXT NOT NULL,
       model_id TEXT,
+      model_ids_json TEXT DEFAULT '[]',
       prompt_id TEXT,
       prompt_override TEXT,
       condition_expr TEXT DEFAULT '',
@@ -2283,7 +2369,13 @@ function resolveModelExecution(db, modelIdOrCode) {
     else if (/agnes.*video/i.test(canonicalId) || /agnes-video/i.test(modelCode)) capId = 'agnes_video';
     else if (/indextts|index-tts/i.test(canonicalId) || /indextts|index-tts/i.test(modelCode)) capId = 'indextts_local';
     else if (/acestep|ace-step/i.test(canonicalId) || /acestep|ace-step/i.test(modelCode)) capId = 'acestep_local';
-    else if (/qwen/i.test(canonicalId) || /qwen/i.test(modelCode)) capId = 'qwenimage_local';
+    else if (/modelscope/i.test(canonicalId) || /modelscope/i.test(modelCode)) capId = 'qwenimage_modelscope';
+    else if (/qwen/i.test(canonicalId) || /qwen/i.test(modelCode)) {
+      // 魔搭的 repo id 形如 Qwen/Qwen-Image-2.1-Turbo（带斜杠），归云端；其余归本机 ncnn
+      capId = /^[a-z0-9_.-]+\/[a-z0-9_.-]+$/i.test(String(modelCode || canonicalId).trim())
+        ? 'qwenimage_modelscope'
+        : 'qwenimage_local';
+    }
     else if (/portrait/i.test(canonicalId)) capId = 'portrait_group';
     else {
       // 现有对话和识图模型先挂在本地网关上
@@ -2495,17 +2587,28 @@ function assembleModelPayload({
     prompt: promptText,
   };
 
-  if (contract.id === 'qwenimage_local') {
+  if (contract.id === 'qwenimage_local' || contract.id === 'qwenimage_modelscope') {
     const sizePreset = mergedValues.size || '1K';
     const ratio = mergedValues.ratio || '1:1';
-    const tableKey = `${sizePreset}_${ratio}`;
-    const qwenTable = (tableMappings && tableMappings.size_ratio) || QWEN_SIZE_TABLE;
-    const mapped = qwenTable[tableKey];
-    if (!mapped) {
-      throw new Error(`[本地 Qwen] 不支持的尺寸与宽高比组合: ${sizePreset} ${ratio}`);
+    // 调用方直接给像素（如 "1024x1024"）时不再查档位表
+    const directPx = /^\d{3,5}\s*[xX×]\s*\d{3,5}$/.test(String(sizePreset).trim());
+    if (directPx) {
+      body.size = String(sizePreset).trim().replace(/[×xX]/, 'x');
+    } else {
+      const tableKey = `${sizePreset}_${ratio}`;
+      const qwenTable = (tableMappings && tableMappings.size_ratio) || QWEN_SIZE_TABLE;
+      const mapped = qwenTable[tableKey];
+      if (!mapped) {
+        throw new Error(`[${contract.name || 'Qwen-Image'}] 不支持的尺寸与宽高比组合: ${sizePreset} ${ratio}`);
+      }
+      // 本机 ncnn 版吃 width/height，魔搭云端吃 "WxH" 字符串
+      if (contract.id === 'qwenimage_modelscope') {
+        body.size = `${mapped.width}x${mapped.height}`;
+      } else {
+        body.width = mapped.width;
+        body.height = mapped.height;
+      }
     }
-    body.width = mapped.width;
-    body.height = mapped.height;
   }
 
   // 写入直接请求体字段
@@ -2839,7 +2942,17 @@ function buildSchemaForContract(c) {
   };
 }
 
-function getUnifiedSchemasMap(db) {
+const _schemaMapCache = new Map();
+const _NULL_DB_KEY = '__default_contracts__';
+const SCHEMA_MAP_TTL_MS = 30 * 1000;
+
+function getUnifiedSchemasMap(db, opts = {}) {
+  const key = db || _NULL_DB_KEY;
+  const ttl = opts.ttlMs != null ? Number(opts.ttlMs) : SCHEMA_MAP_TTL_MS;
+  const now = Date.now();
+  const hit = _schemaMapCache.get(key);
+  if (hit && (ttl <= 0 || now - hit.at < ttl)) return hit.map;
+
   const map = {};
   let contracts = DEFAULT_MODEL_CONTRACTS;
   if (db) {
@@ -2856,7 +2969,13 @@ function getUnifiedSchemasMap(db) {
   }
   if (map.seedream5flash) map.seedream_portrait = map.seedream5flash;
   if (map.agnes_image_2_5_flash) map.agnes_portrait_2_5 = map.agnes_image_2_5_flash;
+  _schemaMapCache.set(key, { at: now, map });
   return map;
+}
+
+/** 契约被改写后必须丢弃缓存，否则 30s 内仍返回旧 schema */
+function invalidateUnifiedSchemasMap(db) {
+  _schemaMapCache.delete(db || _NULL_DB_KEY);
 }
 
 const MODEL_SCHEMAS = new Proxy({}, {
@@ -3663,6 +3782,7 @@ function saveModelContractData(db, data) {
     } catch (_) {}
   }
 
+  invalidateUnifiedSchemasMap(db);
   return getModelContractsList(db).models.find(m => m.id === id);
 }
 
@@ -3940,11 +4060,19 @@ function getMountModules(db, mountPointId) {
     if (!snippetIds.length && spec?.defaultSnippets?.length && m.snippet_ids_json == null) {
       snippetIds = spec.defaultSnippets;
     }
+    // ★ 多模型挂载：有序数组（1=主模型，其余=失败自动降级）；老行回退到单值 model_id
+    let modelIds = [];
+    try { modelIds = m.model_ids_json ? JSON.parse(m.model_ids_json) : []; } catch { modelIds = []; }
+    if (!Array.isArray(modelIds)) modelIds = [];
+    modelIds = modelIds.map((x) => String(x || '').trim()).filter(Boolean);
+    if (!modelIds.length && m.model_id) modelIds = [String(m.model_id).trim()];
     return {
       ...m,
       condition_expr: m.condition_expr || '',
       branch_group: m.branch_group || '',
       snippet_ids: snippetIds,
+      model_id: modelIds.length ? modelIds[0] : (m.model_id || null),
+      model_ids: modelIds,
       operator_spec: spec ? {
         code: spec.code,
         name: spec.name,
@@ -4039,7 +4167,14 @@ function syncMountPointsToWorkflowGraph(db) {
       const targetNode = nodes.find(n => matchTypes.includes(n.id) || matchTypes.includes(n.type));
       if (targetNode) {
         if (!targetNode.config) targetNode.config = {};
-        if (mod.model_id) targetNode.config.model = mod.model_id;
+        // ★ 多模型挂载：config.model = 主模型（兼容旧字段），config.modelIds = 完整降级链
+        if (Array.isArray(mod.model_ids) && mod.model_ids.length) {
+          targetNode.config.model = mod.model_ids[0];
+          targetNode.config.modelIds = mod.model_ids.slice();
+        } else if (mod.model_id) {
+          targetNode.config.model = mod.model_id;
+          targetNode.config.modelIds = [mod.model_id];
+        }
         if (mod.prompt_id) targetNode.config.promptId = mod.prompt_id;
         if (Array.isArray(mod.snippet_ids)) targetNode.config.snippetIds = mod.snippet_ids;
 
@@ -4075,7 +4210,23 @@ function saveMountModule(db, data) {
   const nodeType = String(data.node_type || 'gate').trim();
   const spec = getOperatorSpec(nodeType);
   const name = String(data.name || spec?.name || id).trim();
-  const modelId = data.model_id !== undefined ? (data.model_id ? String(data.model_id).trim() : null) : (spec?.defaultModelId || null);
+  // ★ 多模型挂载：model_ids 是**有序**数组 —— 第 1 个是主模型，其余是失败自动降级通道。
+  // model_id 保留为兼容字段（永远等于数组首项），老前端单选行为不受影响。
+  const parsedModelIds = (() => {
+    if (Array.isArray(data.model_ids)) return data.model_ids;
+    if (typeof data.model_ids_json === 'string' && data.model_ids_json.trim()) {
+      try {
+        const v = JSON.parse(data.model_ids_json);
+        return Array.isArray(v) ? v : [];
+      } catch { return []; }
+    }
+    return [];
+  })();
+  let modelIds = parsedModelIds.map((m) => String(m || '').trim()).filter(Boolean);
+  if (!modelIds.length && data.model_id) modelIds = [String(data.model_id).trim()];
+  if (!modelIds.length && data.model_id === undefined && spec?.defaultModelId) modelIds = [String(spec.defaultModelId).trim()];
+  const modelId = modelIds.length ? modelIds[0] : null;
+  const modelIdsJson = JSON.stringify(modelIds);
   const promptId = data.prompt_id !== undefined ? (data.prompt_id ? String(data.prompt_id).trim() : null) : (spec?.defaultPromptId || null);
   const promptOverride = data.prompt_override != null ? String(data.prompt_override) : null;
   const conditionExpr = data.condition_expr != null ? String(data.condition_expr).trim() : '';
@@ -4097,15 +4248,18 @@ function saveMountModule(db, data) {
   try { db.exec("ALTER TABLE workflow_modules ADD COLUMN condition_expr TEXT DEFAULT ''"); } catch (_) {}
   try { db.exec("ALTER TABLE workflow_modules ADD COLUMN branch_group TEXT DEFAULT ''"); } catch (_) {}
   try { db.exec("ALTER TABLE workflow_modules ADD COLUMN snippet_ids_json TEXT DEFAULT '[]'"); } catch (_) {}
+  // ★ 多模型挂载：有序数组，第 1 个是主模型，其余为失败自动降级通道
+  try { db.exec("ALTER TABLE workflow_modules ADD COLUMN model_ids_json TEXT DEFAULT '[]'"); } catch (_) {}
 
   db.prepare(`
-    INSERT INTO workflow_modules (id, mount_point_id, name, node_type, model_id, prompt_id, prompt_override, condition_expr, branch_group, snippet_ids_json, input_mappings_json, params_json, order_num, enabled, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO workflow_modules (id, mount_point_id, name, node_type, model_id, model_ids_json, prompt_id, prompt_override, condition_expr, branch_group, snippet_ids_json, input_mappings_json, params_json, order_num, enabled, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       mount_point_id=excluded.mount_point_id,
       name=excluded.name,
       node_type=excluded.node_type,
       model_id=excluded.model_id,
+      model_ids_json=excluded.model_ids_json,
       prompt_id=excluded.prompt_id,
       prompt_override=excluded.prompt_override,
       condition_expr=excluded.condition_expr,
@@ -4116,7 +4270,7 @@ function saveMountModule(db, data) {
       order_num=excluded.order_num,
       enabled=excluded.enabled,
       updated_at=excluded.updated_at
-  `).run(id, mountPointId, name, nodeType, modelId, promptId, promptOverride, conditionExpr, branchGroup, snippetIds, inputMappings, params, orderNum, enabled, now, now);
+  `).run(id, mountPointId, name, nodeType, modelId, modelIdsJson, promptId, promptOverride, conditionExpr, branchGroup, snippetIds, inputMappings, params, orderNum, enabled, now, now);
 
   syncMountPointsToWorkflowGraph(db);
   return getMountModules(db, mountPointId).find(m => m.id === id);
@@ -4297,6 +4451,7 @@ module.exports = {
   syncMountPointsToWorkflowGraph,
   buildSchemaForContract,
   getUnifiedSchemasMap,
+  invalidateUnifiedSchemasMap,
   MODEL_SCHEMAS,
   schemaFor,
   optionLabel,

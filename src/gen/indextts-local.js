@@ -14,6 +14,16 @@ function panelBase(adapter) {
   return String(cfg.apiBase || adapter.base_url || 'http://192.168.1.107:9000').replace(/\/$/, '');
 }
 
+function describeVoiceFailure(e) {
+  const msg = String(e?.message || e || '');
+  if (/CUDA out of memory|OutOfMemoryError/i.test(msg)) return 'GPU 显存不足：本地生图任务占满了显存，请等生图队列清空后重试';
+  if (e?.name === 'TimeoutError' || /aborted due to timeout/i.test(msg)) {
+    return 'IndexTTS 响应超时（可能正在加载模型或排队），请稍后重试';
+  }
+  if (/fetch failed|ECONNREFUSED|ENOTFOUND|EAI_AGAIN/i.test(msg)) return '连不上本机 IndexTTS';
+  return `IndexTTS 提交失败: ${msg}`;
+}
+
 function audioName(raw) {
   const s = String(raw || '');
   const file = s.match(/\/api\/voice\/file\/([^/?#]+)/);
@@ -99,14 +109,14 @@ async function runVoiceJob(services, adapter, input) {
     const res = await lanFetch(`${base}/api/voice/tts`, {
       method: 'POST',
       body: form,
-      signal: AbortSignal.timeout(120000),
+      // 面板统一排队：提交可能等待前面的任务，给足 30 分钟
+      signal: AbortSignal.timeout(30 * 60 * 1000),
     });
     const txt = await res.text();
     if (!res.ok) return { ok: false, success: false, error: `IndexTTS 提交失败 HTTP ${res.status}: ${txt.slice(0, 300)}`, files: [] };
     submitted = txt ? JSON.parse(txt) : {};
   } catch (e) {
-    const unreachable = e?.name === 'AbortError' || /fetch failed|ECONNREFUSED|ENOTFOUND/i.test(String(e.message || ''));
-    return { ok: false, success: false, error: unreachable ? '连不上本机 IndexTTS' : `IndexTTS 提交失败: ${e.message}`, files: [] };
+    return { ok: false, success: false, error: describeVoiceFailure(e), files: [] };
   }
 
   const taskId = submitted.task_id || submitted.id || submitted.data?.task_id;
@@ -131,8 +141,11 @@ async function runVoiceJob(services, adapter, input) {
     if (st === 'done' || st === 'failed') break;
   }
   if (!task || taskStatus(task) !== 'done') {
-    const msg = (task && (task.message || task.error)) || '未在超时内完成';
-    return { ok: false, success: false, error: `IndexTTS ${task ? taskStatus(task) : 'timeout'}: ${msg}`, files: [] };
+    const msg = String((task && (task.message || task.error)) || '未在超时内完成');
+    if (/CUDA out of memory|OutOfMemoryError/i.test(msg)) {
+      return { ok: false, success: false, error: 'GPU 显存不足：本地生图任务占满了显存，请等生图队列清空后重试', files: [] };
+    }
+    return { ok: false, success: false, error: `IndexTTS ${task ? taskStatus(task) : 'timeout'}: ${msg.slice(0, 300)}`, files: [] };
   }
 
   const destDir = path.join(config.dataDir, 'cache', 'temp');

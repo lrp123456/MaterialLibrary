@@ -4,7 +4,7 @@
  * 只有在调用方没给子句时，才退回本文件自己拼的 bbox 文案。
  */
 const sharp = require('sharp');
-const { pastebackComposite, selectionBounds } = require('./image-ops');
+const { pastebackToTarget, selectionBounds } = require('./image-ops');
 const { findImageAdapter, readAdapterOutput } = require('./adapter-io');
 
 function buildPrompt(actionType, bboxNormStr, areaPhrase) {
@@ -23,6 +23,7 @@ async function handleWatermarkOrRemove(services, {
   model = null,
   regionClauseText = null,
   maskPath = null,
+  outSpec = null,
 }) {
   const meta = await sharp(imageBuffer).metadata();
   const sw = meta.width;
@@ -68,13 +69,19 @@ async function handleWatermarkOrRemove(services, {
     kind: 'image',
     model: model || undefined,
     maskPath: maskPath || undefined,
+    // 出图档位/画幅由 handlers/edit-size 从模型契约算出，这里只负责原样透传
+    size: outSpec && outSpec.sizeField ? outSpec.sizeField : undefined,
+    ratio: outSpec && outSpec.ratioField ? outSpec.ratioField : undefined,
   });
   const generatedBuffer = readAdapterOutput(result);
   if (!generatedBuffer) throw new Error('图像适配器未返回消除结果');
 
   if (pasteback !== false && String(pasteback) !== 'false') {
-    const cropRect = { left: 0, top: 0, width: sw, height: sh };
-    return pastebackComposite(imageBuffer, generatedBuffer, cropRect, quadOrBbox);
+    return pastebackToTarget(imageBuffer, generatedBuffer, {
+      selection: quadOrBbox,
+      outW: outSpec ? outSpec.outW : sw,
+      outH: outSpec ? outSpec.outH : sh,
+    });
   }
   return generatedBuffer;
 }

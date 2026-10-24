@@ -14,6 +14,45 @@ function panelBase(adapter) {
   return String(cfg.apiBase || adapter.base_url || 'http://192.168.1.107:9000').replace(/\/$/, '');
 }
 
+// ACE-Step 常驻显存 4~5GB，和本地生图（ncnn 峰值近 10GB）在同一张 16GB 卡上，
+// 生图高峰并发时必然 OOM。原始报错是一整页 PyTorch 堆栈，必须收成一句能指导操作的话。
+function isOom(text) {
+  return /CUDA out of memory|OutOfMemoryError|HIP out of memory/i.test(String(text || ''));
+}
+function describeMusicFailure(e) {
+  const msg = String(e?.message || e || '');
+  if (isOom(msg)) return 'GPU 显存不足：本地生图任务占满了显存，请等生图队列清空后重试';
+  if (e?.name === 'TimeoutError' || /aborted due to timeout/i.test(msg)) {
+    return 'ACE-Step 响应超时（可能正在加载模型或排队），请稍后重试';
+  }
+  if (/fetch failed|ECONNREFUSED|ENOTFOUND|EAI_AGAIN/i.test(msg)) return '连不上本机 ACE-Step';
+  return `ACE-Step 提交失败: ${msg}`;
+}
+function taskErrorText(item) {
+  if (!item) return '';
+  if (item.error) return String(item.error);
+  if (item.message) return String(item.message);
+  if (typeof item.result === 'string' && item.result.trim().startsWith('[')) {
+    try {
+      const arr = JSON.parse(item.result);
+      const first = Array.isArray(arr) ? arr[0] : null;
+      if (first?.error) return String(first.error);
+    } catch (_) {}
+  }
+  return '';
+}
+async function loadState(base) {
+  try {
+    const res = await lanFetch(`${base}/api/music/health`, { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return { reachable: true, state: null };
+    const body = await res.json().catch(() => null);
+    return { reachable: true, state: body?.data || body || null };
+  } catch (e) {
+    const timeout = e?.name === 'TimeoutError' || /aborted due to timeout/i.test(String(e?.message || ''));
+    return { reachable: false, state: null, timeout };
+  }
+}
+
 function splitPrompt(text, mode) {
   const raw = String(text || '').trim();
   const marked = raw.match(/【歌词】\s*([\s\S]*)$/);
@@ -101,20 +140,30 @@ async function runMusicJob(services, adapter, input) {
   if (Number.isFinite(batch)) body.batch_size = Math.max(1, Math.min(4, Math.round(batch)));
 
   const timeoutMs = Number(input.timeoutMs || 600000);
+  const health = await loadState(base);
+  if (!health.reachable) {
+    // 面板按需挂载：服务被闲置回收后 /api/music/health 必然连不上，
+    // 不能据此拒绝——直接提交，面板会在排队放行时把服务拉起来。
+    logger?.info?.('[acestep] 健康检查不可达，仍提交（面板会按需拉起并排队）');
+  }
+  // models_initialized=false 只表示当前空闲未驻留；首次 release_task 才会加载模型（面板提示 1~3 分钟）。
+  // 因此不能据此拒绝请求，只能放宽提交超时，避免把"冷启动"误判成"不可用"。
+  const coldStart = !health.reachable || health.state?.models_initialized === false;
+  if (coldStart) logger?.info?.('[acestep] 模型未驻留，提交后将冷启动加载（预计 1~3 分钟）');
   let submitted;
   try {
     const res = await lanFetch(`${base}/api/music/release_task`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(120000),
+      // 面板统一排队：提交可能等待前面的任务跑完，给足 30 分钟
+      signal: AbortSignal.timeout(30 * 60 * 1000),
     });
     const txt = await res.text();
     if (!res.ok) return { ok: false, success: false, error: `ACE-Step 提交失败 HTTP ${res.status}: ${txt.slice(0, 300)}`, files: [] };
     submitted = txt ? JSON.parse(txt) : {};
   } catch (e) {
-    const unreachable = e?.name === 'AbortError' || /fetch failed|ECONNREFUSED|ENOTFOUND/i.test(String(e.message || ''));
-    return { ok: false, success: false, error: unreachable ? '连不上本机 ACE-Step' : `ACE-Step 提交失败: ${e.message}`, files: [] };
+    return { ok: false, success: false, error: describeMusicFailure(e), files: [] };
   }
   if (submitted.code && Number(submitted.code) !== 200 && !taskIdOf(submitted)) {
     return { ok: false, success: false, error: submitted.error || `ACE-Step 提交失败: ${JSON.stringify(submitted).slice(0, 200)}`, files: [] };
@@ -146,8 +195,12 @@ async function runMusicJob(services, adapter, input) {
     if (st === 'done' || st === 'failed') break;
   }
   if (!item || aceStatus(item) !== 'done') {
-    const msg = (item && (item.error || item.message)) || '未在超时内完成';
-    return { ok: false, success: false, error: `ACE-Step ${item ? aceStatus(item) : 'timeout'}: ${msg}`, files: [] };
+    const detail = taskErrorText(item);
+    if (isOom(detail)) {
+      return { ok: false, success: false, error: 'GPU 显存不足：本地生图任务占满了显存，请等生图队列清空后重试', files: [] };
+    }
+    const msg = detail || '未在超时内完成';
+    return { ok: false, success: false, error: `ACE-Step ${item ? aceStatus(item) : 'timeout'}: ${msg.slice(0, 300)}`, files: [] };
   }
 
   const destDir = path.join(config.dataDir, 'cache', 'temp');

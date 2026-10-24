@@ -17,11 +17,20 @@ const { WorkflowInterpreter } = require('./src/interpreter');
 const PORT = process.env.ML_PORT || 30001;
 const dataDir = process.env.ML_DATA_DIR || path.join(os.homedir(), '.dsh-material-library');
 
+// ── 双通道（A/B）──────────────────────────────────────────────────────────────
+// 正式：30001 + 30002（WSL，watchdog 守护）；灰测：30000 + 30003（Windows）。
+// 灰测实例只做「读写 API + 前端联调」，不跑后台 worker：否则同一个正式库快照会被
+// 两个进程重复消费 AI 任务/治理定时器，灰测机器白烧 CPU 还会互相抢写。
+const APP_CHANNEL = String(process.env.APP_CHANNEL || '').toLowerCase() === 'gray' ? 'gray' : 'prod';
+const IS_GRAY = APP_CHANNEL === 'gray';
+const DISABLE_WORKERS = IS_GRAY || String(process.env.ML_DISABLE_WORKERS || '') === '1';
+
 const config = {
   cliPath: resolveQuarkCli(process.env.QUARK_CLI_PATH),
   rootFid: process.env.QUARK_ROOT_FID || '225f01205b7942b1a75bb0c2d7a0565a',
   systemFid: process.env.QUARK_SYSTEM_FID || 'a082098178f74add99cbf6de2c4caa8a',
   dataDir,
+  channel: APP_CHANNEL,
   // NAS 素材库：\\<NAS_HOST>\文件服务\ai_video\material → WSL /mnt/synology/material
   nasDir: process.env.ML_NAS_DIR || '/mnt/synology/material',
   litellmBaseUrl: process.env.LITELLM_BASE_URL || 'http://127.0.0.1:4000',
@@ -35,11 +44,25 @@ const db = openDb(dataDir);
 const services = { db, config, logger: console };
 const interpreter = new WorkflowInterpreter(services);
 services.interpreter = interpreter;
-interpreter.startWorkerLoop(2000);
-setTimeout(() => {
+if (!DISABLE_WORKERS) interpreter.startWorkerLoop(2000);
+// 重启不能无条件重跑补缺：一次批次是几十张图生图，反复重启会把本地生图服务打满显存，
+// 连带把常驻 GPU 的音频模型挤到 OOM。默认 6 小时内只自动补一次，可用
+// ML_RESTAGE_BACKFILL_ON_START=0 关掉，或调 ML_RESTAGE_BACKFILL_COOLDOWN_MS。
+const RESTAGE_BACKFILL_COOLDOWN_MS = Number(process.env.ML_RESTAGE_BACKFILL_COOLDOWN_MS) || 6 * 3600 * 1000;
+function maybeQueueRestageBackfill() {
+  if (process.env.ML_RESTAGE_BACKFILL_ON_START === '0') return;
+  const last = Number(db.prepare("SELECT value FROM kv WHERE key='restage_backfill_auto_at'").get()?.value || 0);
+  if (last && Date.now() - last < RESTAGE_BACKFILL_COOLDOWN_MS) {
+    console.log(`[restage] 跳过启动补跑：${Math.round((Date.now() - last) / 60000)} 分钟前刚跑过`);
+    return;
+  }
+  db.prepare("INSERT OR REPLACE INTO kv(key,value) VALUES('restage_backfill_auto_at',?)").run(String(Date.now()));
   interpreter.queueMissingRestage({ limit: 2000 }).then(r => {
     if (r.count) console.log(`[restage] 已入队 ${r.count} 张缺合格 AI 重构的代表图 (${r.runId})`);
   }).catch(e => console.warn('[restage] 补跑入队失败:', e.message));
+}
+setTimeout(() => {
+  if (!DISABLE_WORKERS) maybeQueueRestageBackfill();
 }, 1500);
 
 const { applyGovernance } = require('./src/governance');
@@ -47,13 +70,18 @@ const { ProcessWorker, unfreezeVideos } = require('./src/process');
 const { AiTaskWorker } = require('./src/ai-tasks');
 applyGovernance(db);
 console.log('[governance] 启动时首次治理完成');
-const processWorker = new ProcessWorker(services);
-processWorker.start(2000);
-console.log('[process] 快捷处理 worker 已启动');
-const aiTaskWorker = new AiTaskWorker(services);
-aiTaskWorker.start(2000);
-console.log('[ai-tasks] AI 任务 worker 已启动');
+if (!DISABLE_WORKERS) {
+  const processWorker = new ProcessWorker(services);
+  processWorker.start(2000);
+  console.log('[process] 快捷处理 worker 已启动');
+  const aiTaskWorker = new AiTaskWorker(services);
+  aiTaskWorker.start(2000);
+  console.log('[ai-tasks] AI 任务 worker 已启动');
+} else {
+  console.log(`[workers] 后台 worker 已停用（channel=${APP_CHANNEL}）：灰测实例只做读写 API，不消费任务队列`);
+}
 
+if (!DISABLE_WORKERS) {
 try {
   const tagGov = require('./src/tag-governance');
   tagGov.ensureGovernanceSchema(db);
@@ -73,6 +101,7 @@ try {
   console.log('[trash-clean] 回收站 3 天自动清理定时器已启动');
 } catch (e) {
   console.warn('[trash-clean] 回收站清理定时器启动失败:', e.message);
+}
 }
 
 // 内置轻量 NAS 异步归档，避免外部独立 shell 循环造成多进程写锁冲突
@@ -104,25 +133,27 @@ function syncOriginalsToNas(limit = 100) {
 }
 
 // 启动时先解冻一批视频进管线并执行一次轻量 NAS 归档
-try {
-  const n = unfreezeVideos(db, 50);
-  if (n) console.log(`[process] 启动解冻视频 ${n} 个`);
-} catch (e) {
-  console.warn('[process] 视频解冻失败:', e.message);
-}
-setTimeout(() => syncOriginalsToNas(100), 5000);
-
-setInterval(() => {
-  const r = applyGovernance(db);
-  if (r.live || r.revoked || r.frozen || r.frozenRevoked || r.revived) {
-    console.log(`[governance] 定时治理: live=${r.live} revoked=${r.revoked} frozen=${r.frozen} frozen_revoked=${r.frozenRevoked} revived=${r.revived}`);
-  }
+if (!DISABLE_WORKERS) {
   try {
     const n = unfreezeVideos(db, 50);
-    if (n) console.log(`[process] 定时解冻视频 ${n} 个`);
-  } catch (e) {}
-  syncOriginalsToNas(100);
-}, 3600_000);
+    if (n) console.log(`[process] 启动解冻视频 ${n} 个`);
+  } catch (e) {
+    console.warn('[process] 视频解冻失败:', e.message);
+  }
+  setTimeout(() => syncOriginalsToNas(100), 5000);
+
+  setInterval(() => {
+    const r = applyGovernance(db);
+    if (r.live || r.revoked || r.frozen || r.frozenRevoked || r.revived) {
+      console.log(`[governance] 定时治理: live=${r.live} revoked=${r.revoked} frozen=${r.frozen} frozen_revoked=${r.frozenRevoked} revived=${r.revived}`);
+    }
+    try {
+      const n = unfreezeVideos(db, 50);
+      if (n) console.log(`[process] 定时解冻视频 ${n} 个`);
+    } catch (e) {}
+    syncOriginalsToNas(100);
+  }, 3600_000);
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -267,14 +298,58 @@ function startGatewayPurgeTimer() {
 
 try {
   require('./src/gateway').ensureGatewayTables(db);
-  startGatewayPurgeTimer();
+  if (!DISABLE_WORKERS) startGatewayPurgeTimer();
 } catch (e) {
   console.warn('[gateway] 初始化失败:', e.message);
 }
 
+// WebSocket 推送通道（App 长连接）：/api/push?token=...
+try {
+  require('./src/ws-server').attachWebSocketServer(server, services);
+} catch (e) {
+  console.warn('[ws] 推送通道启动失败:', e.message);
+}
+
+// 语音输入流式通道：/api/asr/stream?token=...（转发到本机 FunASR/sherpa-onnx 服务）
+try {
+  require('./src/asr').attachAsrWebSocket(server, services);
+} catch (e) {
+  console.warn('[asr] 语音通道启动失败:', e.message);
+}
+
+// ---- 发布自重启：只用文件标记兜底，HTTP 重启走 /api/system/restart ----
+// 为什么需要它：Windows 侧被安全策略禁止调用 wsl.exe，没法从灰测通道重启正式服务。
+// 正式端自己盯着数据目录里的 restart.request，一旦发现比进程启动时间新就退出，
+// 由 scripts/watchdog.sh 在 3 秒内重新拉起，从而加载到最新代码。
+const SELF_START_AT = Date.now();
+if (String(process.env.ML_WATCH_RESTART || '1') !== '0' && !IS_GRAY) {
+  const restartFlag = path.join(dataDir, 'restart.request');
+  const wdPidFile = path.join(dataDir, 'watchdog.pid');
+  let handled = false;
+  const watcher = setInterval(() => {
+    if (handled) return;
+    try {
+      const st = fs.statSync(restartFlag);
+      if (st.mtimeMs <= SELF_START_AT) return;
+      handled = true;
+      fs.unlinkSync(restartFlag);
+      let wdAlive = false;
+      try {
+        const wdPid = Number(fs.readFileSync(wdPidFile, 'utf8').trim());
+        if (wdPid) { process.kill(wdPid, 0); wdAlive = true; }
+      } catch (_) {}
+      console.log(`[restart] 收到发布重启标记（watchdog ${wdAlive ? '在线' : '未检测到'}），退出以加载新代码`);
+      setTimeout(() => {
+        try { db.close(); } catch (_) {}
+        process.exit(0);
+      }, 300);
+    } catch (_) {}
+  }, 3000);
+  if (watcher.unref) watcher.unref();
+}
+
 server.listen(PORT, () => {
-  console.log(`[material-library] 室内设计素材库服务已就绪: http://127.0.0.1:${PORT} (数据目录: ${dataDir})`);
-  try {
+  console.log(`[material-library] 室内设计素材库服务已就绪: http://127.0.0.1:${PORT} (数据目录: ${dataDir})`);  try {
     const { nasAvailable, nasMaterialDir } = require('./src/nasstore');
     const nas = nasMaterialDir(config);
     console.log(`[nas] 素材库目录: ${nas} 可写=${nasAvailable()}`);
@@ -342,6 +417,9 @@ const webProServer = http.createServer(async (req, res) => {
     }
   }
 });
+
+// 内嵌模式下 30002 也提供同一条推送通道
+require('./src/ws-server').attachWebSocketServer(webProServer, services);
 
 webProServer.listen(WEB_PRO_PORT, '0.0.0.0', () => {
   console.log(`[web-pro] Material Studio Pro 桌面工作台常驻服务已就绪: http://127.0.0.1:${WEB_PRO_PORT}`);

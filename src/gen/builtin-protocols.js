@@ -63,6 +63,22 @@ const BUILTIN_PROTOCOLS_MANIFEST = {
     },
     note: '管理台挂载 http://192.168.1.107:9000 的 /api/qw。model 为 base 或 turbo。不传 refs 是文生图，尺寸对齐 16；传 1～10 张 refs 是图像编辑，尺寸对齐 32。Turbo 固定 8 步。产物从面板 /product/qw 取。',
   },
+  qwenimage_modelscope: {
+    protocol: 'qwenimage_modelscope',
+    name: '魔搭云端 Qwen-Image 2.1（API-Inference）',
+    method: 'POST (提交) / GET (轮询)',
+    urlTemplate: '提交 {{baseUrl}}/v1/images/generations，轮询 {{baseUrl}}/v1/tasks/{{taskId}}',
+    paramLocations: {
+      prompt: 'body.prompt',
+      model: 'body.model（如 Qwen/Qwen-Image-2.1-Turbo）',
+      negative_prompt: 'body.negative_prompt',
+      refs: 'body.image_url[]（公网 URL 或 data URI，1～3 张）',
+      size: 'body.size（WxH，512～2048，对齐 16）',
+      seed: 'body.seed',
+      apiKey: 'headers.Authorization (Bearer ***)',
+    },
+    note: '异步任务：提交必须带 X-ModelScope-Async-Mode: true，轮询必须带 X-ModelScope-Task-Type: image_generation；task_status 为 SUCCEED 时取 output_images。不传 image_url 是文生图，传 1～3 张是多图编辑。',
+  },
   indextts_local: {
     protocol: 'indextts_local',
     name: 'IndexTTS 2.5 零样本语音克隆',

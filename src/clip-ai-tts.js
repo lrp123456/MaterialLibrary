@@ -75,8 +75,40 @@ function pickAdapter(db) {
   }
 }
 
-function ttsReady(db) {
-  return !!pickAdapter(db);
+/**
+ * TTS 就绪态。只查 gen_adapters 里有没有这一行是不够的：GPU 机停机 / 服务没起时
+ * 卡片照样显示「就绪」，用户点了才看到失败。所以这里真的探一次 /api/voice/system。
+ * 结果（含失败）缓存 30 秒，超时压到 3.5 秒，避免面板打开时被一台死机器拖住。
+ */
+let ttsProbeCache = null;
+
+async function ttsStatus(db) {
+  const adapter = pickAdapter(db);
+  if (!adapter) return { ready: false, error: '未启用 IndexTTS 适配器（gen_adapters 里 indextts_local 不存在或已禁用）' };
+  if (ttsProbeCache && Date.now() - ttsProbeCache.at < 30 * 1000) return ttsProbeCache.value;
+  let cfg = {};
+  try { cfg = JSON.parse(adapter.config_json || '{}'); } catch { cfg = {}; }
+  const base = String(cfg.apiBase || adapter.base_url || 'http://192.168.1.107:9000').replace(/\/$/, '');
+  let value;
+  try {
+    const { lanFetch } = require('./gen/lan-fetch');
+    const res = await lanFetch(`${base}/api/voice/system`, {
+      signal: AbortSignal.timeout(3500),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json().catch(() => ({}));
+    value = {
+      ready: true,
+      detail: `IndexTTS 2.5 就绪（${base.replace(/^https?:\/\//, '')}，排队 ${json.queue ?? 0}）`,
+    };
+  } catch (e) {
+    value = {
+      ready: false,
+      error: `连不上 IndexTTS 服务（${base}/api/voice/system）：${String(e.message || e).slice(0, 120)}`,
+    };
+  }
+  ttsProbeCache = { at: Date.now(), value };
+  return value;
 }
 
 function normalizeLang(raw) {
@@ -233,9 +265,10 @@ async function runTtsJob({ services, params, onProgress }) {
 
   // 懒加载：测试可整体替换这个模块，且避免创作板块的依赖在启动时就拉起来。
   const { runVoiceJob } = require('./gen/indextts-local');
+  const { withGpuPriority } = require('./gen/lan-fetch');
 
   onProgress?.(20, '提交合成任务');
-  const out = await runVoiceJob(services, adapter, {
+  const out = await withGpuPriority('high', () => runVoiceJob(services, adapter, {
     prompt: text,
     extras: {
       text,
@@ -244,7 +277,7 @@ async function runTtsJob({ services, params, onProgress }) {
     },
     audioLocalPaths,
     timeoutMs: DEFAULT_TIMEOUT_MS,
-  });
+  }));
   if (!out || out.ok !== true || !Array.isArray(out.files) || !out.files.length) {
     throw new Error((out && out.error) || 'IndexTTS 没有返回产物');
   }
@@ -263,7 +296,7 @@ module.exports = {
   listVoices,
   voicesDir,
   pickAdapter,
-  ttsReady,
+  ttsStatus,
   prepareTtsParams,
   runTtsJob,
   probeDurationMs,
