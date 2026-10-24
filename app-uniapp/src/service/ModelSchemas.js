@@ -1,90 +1,49 @@
 /**
- * 生成参数字段 schema（独立交付模式的最小可用定义）。
- * 提供 home.vue 参数面板所需的：字段定义、档位映射、槽位限制、约束应用。
- * 真实参数以服务端 /gen/options 与各模型官方为准，这里给通用默认。
+ * 参数 schema 读取层。
+ *
+ * 这里不再自带任何字段表/档位表——唯一真相源是服务端 /lab/capabilities 里
+ * 每个模型对象上的 `schema`（与 web-pro 同源，均由 src/models-contract.js 生成）。
+ * 条件联动规则统一走 utils/model-protocol.js 的 evaluateClientModelRules，
+ * 那份文件与 web-pro/src/utils/model-protocol.js 必须逐字节一致。
  */
 
-const SCHEMAS = {
-  image: {
-    polishHint: '按 Seedream 结构：主体/环境/构图/光线/质感 + 负向约束',
-    modes: [
-      { id: 'text_to_image', label: '文生图' },
-      { id: 'image_to_image', label: '图生图' }
-    ],
-    common: [
-      { key: 'size', type: 'select', label: '画幅', options: ['1:1', '3:4', '9:16', '16:9'] }
-    ],
-    advanced: [],
-    submitMap: { size: 'ratio' }
-  },
-  video: {
-    polishHint: '按 Seedance 七段式：主体/动作/环境/镜头运动/光线/风格/声音（简短）',
-    modes: [
-      { id: 'text_to_video', label: '文生视频' },
-      { id: 'image_to_video', label: '图生视频' }
-    ],
-    common: [
-      { key: 'duration', type: 'select', label: '时长(s)', options: [5, 8, 10], min: 0 }
-    ],
-    advanced: [{ key: 'resolution', type: 'select', label: '清晰度', options: ['480p', '720p'], hint: '调测最低清' }],
-    submitMap: { duration: 'durationSec', size: 'ratio' }
-  },
-  music: {
-    polishHint: 'GenSong/GenBGM：风格+氛围+短时长，歌词用主输入',
-    modes: [
-      { id: 'text_to_song', label: '生成歌曲' },
-      { id: 'text_to_bgm', label: '生成BGM' }
-    ],
-    common: [
-      { key: 'duration', type: 'select', label: '时长(s)', options: [15, 30, 60], min: 0 },
-      { key: 'style', type: 'text', label: '风格', default: '轻音乐' }
-    ],
-    advanced: [],
-    submitMap: { size: 'ratio' }
-  }
-}
-
-/** 按模型/模式返回 schema（兜底通用图像 schema）。 */
+/** 服务端下发的模型 schema；缺失返回 null，由界面提示「参数表还没接入」。 */
 export function schemaFor(model) {
-  if (!model) return null
-  const id = `${model.id || ''} ${model.model_code || ''}`
-  if (/seedance|video/i.test(id)) return SCHEMAS.video
-  if (/imagination|music|song|bgm/i.test(id)) return SCHEMAS.music
-  return SCHEMAS.image
+  return (model && model.schema) || null
 }
 
-/** 字段选项标签（select 档位直接显示）。 */
-export function optionLabel(field, opt) {
-  if (opt == null) return ''
-  if (opt === -1) return '智能'
-  if (typeof opt === 'number') return String(opt)
-  return String(opt)
+/** 字段选项标签（与 web-pro 的 optionLabel 同语义）。 */
+export function optionLabel(field, value) {
+  if (value == null) return ''
+  if (field && field.labels && field.labels[String(value)] != null) return field.labels[String(value)]
+  if (value === -1 || value === '-1') return '智能'
+  if (value === 'auto') return '自动'
+  return String(value)
 }
 
-/** 槽位限制（参考图等）。 */
-export function slotLimit(schema, key) {
-  if (!schema) return 9
+/**
+ * 参考图槽位上限，语义与 web-pro 的 refCap() 对齐：
+ * slots.images 先被 free.maxRefs 收紧，再按模式封顶。
+ * 返回 null 表示服务端没给这一档（调用方自行决定兜底）。
+ */
+export function slotLimit(schema, key = 'images', mode = '') {
+  const raw = schema && schema.slots ? schema.slots[key] : null
+  if (raw == null || raw === '') return null
+  const slots = Number(raw)
+  if (!Number.isFinite(slots)) return null
+  const free = schema.free && schema.free.maxRefs
+  let cap = free != null ? Math.min(slots, Number(free)) : slots
   if (key === 'images') {
-    if (/video/i.test(schema.polishHint)) return 3
-    if (/agnes/i.test(JSON.stringify(schema))) return 3
-    return 9
+    if (mode === 'first_last_frame') cap = Math.min(cap, 2)
+    if (mode === 'image_edit' || mode === 'expand_fill') cap = Math.min(cap, 1)
   }
-  return 9
+  return cap
 }
 
-/** 应用约束：按 mode 过滤参数（视频清最低档、音乐短时长）。 */
-export function applyConstraints(schema, mode, params = {}) {
-  const out = { ...(params || {}) }
-  if (/video/i.test(mode || '') || /seedance/i.test(JSON.stringify(schema))) {
-    out.resolution = '480p'
-    out.duration = out.duration || 5
-  }
-  if (/music|song|bgm/i.test(mode || '')) {
-    out.duration = Math.min(out.duration || 15, 30)
-    out.style = out.style || '轻音乐'
-  }
-  if (/image/i.test(mode || '')) {
-    out.ratio = out.ratio || out.size || '9:16'
-  }
-  return { params: out, mode: mode || 'text_to_image' }
+/** 纯音频模型（只能挂音频、不能挂图），用于切文件选择类型。 */
+export function isAudioOnlySchema(schema) {
+  return (
+    Number((schema && schema.slots && schema.slots.audios) || 0) > 0 &&
+    Number((schema && schema.slots && schema.slots.images) || 0) === 0
+  )
 }

@@ -33,6 +33,7 @@
 <script>
 import { login, sessionValid } from '../../service/ViewerApi'
 import { store } from '../../service/SyncStateStore'
+import { pushClient } from '../../service/PushClient'
 
 export default {
   data() {
@@ -47,7 +48,7 @@ export default {
   },
   onLoad(query) {
     if (sessionValid()) {
-      uni.reLaunch({ url: '/pages/home/home' })
+      uni.switchTab({ url: '/pages/home/home' })
       return
     }
 
@@ -68,9 +69,10 @@ export default {
       this.loading = true
       try {
         await login(this.username.trim(), this.password)
+        pushClient.start()
         uni.showToast({ title: '登录成功', icon: 'success' })
         setTimeout(() => {
-          uni.reLaunch({ url: '/pages/home/home' })
+          uni.switchTab({ url: '/pages/home/home' })
         }, 400)
       } catch (e) {
         this.errMsg = e.message || '登录失败，请检查账号与密码'

@@ -5,6 +5,7 @@
  */
 import { submitAiTask, queryAiTask, queryAiTaskById } from './ViewerApi'
 import { viewerCache } from './ViewerCache'
+import { pushClient } from './PushClient'
 
 const STORAGE_KEY = 'ai_active_tasks'
 const POLL_INTERVAL_MS = 3000
@@ -26,9 +27,17 @@ class AiTaskManager {
     } catch (e) {
       this.tasks = []
     }
-    // 若存在未完成任务，启动后台轮询
+    // 推送通道连通后由事件驱动状态更新；未连通时才回落到轮询
+    pushClient.subscribe((evt) => this.onPushEvent(evt))
+    pushClient.onState((connected) => {
+      if (connected) {
+        this.stopPolling()
+      } else if (this.getActiveTasks().length > 0) {
+        this.startPolling()
+      }
+    })
     if (this.getActiveTasks().length > 0) {
-      this.startPolling()
+      this.ensureFallbackPolling()
     }
   }
 
@@ -102,7 +111,7 @@ class AiTaskManager {
     this.tasks.unshift(task)
     this.save()
     this.notify()
-    this.startPolling()
+    this.ensureFallbackPolling()
 
     try {
       const res = await submitAiTask(fid, {
@@ -141,6 +150,15 @@ class AiTaskManager {
     this.pollTimer = setInterval(() => {
       this.pollCycle()
     }, POLL_INTERVAL_MS)
+  }
+
+  /** 轮询只是推送通道不通时的兜底 */
+  ensureFallbackPolling() {
+    if (pushClient.isConnected()) {
+      this.stopPolling()
+      return
+    }
+    this.startPolling()
   }
 
   stopPolling() {
@@ -202,6 +220,51 @@ class AiTaskManager {
       this.save()
       this.notify()
     }
+  }
+
+  /**
+   * 服务端推送的 AI 任务事件（ai.task.created / completed / failed）
+   */
+  onPushEvent(evt) {
+    const name = evt && evt.event
+    const p = (evt && evt.payload) || {}
+    if (!name || String(name).indexOf('ai.task.') !== 0) return
+
+    const remoteId = p.task_id || p.taskId || ''
+    const fid = p.fid || ''
+    let task = null
+    if (remoteId) {
+      task = this.tasks.find((t) => t.remoteTaskId === remoteId || t.taskId === remoteId) || null
+    }
+    if (!task && fid) {
+      task = this.tasks.find((t) => t.fid === fid && t.status !== 'success' && t.status !== 'failed') || null
+    }
+    if (!task) return
+    // 终态任务不再被推送改写，避免与轮询重复弹 toast
+    if (task.status === 'success' || task.status === 'failed') return
+
+    if (remoteId && !task.remoteTaskId) task.remoteTaskId = remoteId
+
+    const status = p.status || ''
+    if (status === 'success' || status === 'completed' || status === 'done') {
+      task.status = 'success'
+      task.progress = 100
+      task.outputFid = p.output_fid || p.outputFid || p.fid || task.fid
+      task.outputKind = p.output_kind || p.outputKind || (task.type === 'walkthrough' ? 'video' : 'derivative')
+      this.onTaskSuccess(task)
+    } else if (status === 'failed' || status === 'error') {
+      task.status = 'failed'
+      task.error = p.error || '渲染任务失败'
+      this.onTaskFailed(task)
+    } else {
+      if (p.progress != null) {
+        task.progress = Math.min(99, Math.max(task.progress || 0, Math.round(p.progress)))
+      }
+      task.status = status === 'pending' ? 'running' : (status || 'running')
+    }
+
+    this.save()
+    this.notify()
   }
 
   onTaskSuccess(task) {

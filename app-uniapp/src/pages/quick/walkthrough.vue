@@ -46,18 +46,20 @@
 
 <script>
 import { aiTaskManager } from '../../service/AiTaskManager'
+import { fieldOf } from '../../service/QuickParams'
 
 export default {
   data() {
     return {
       statusBarHeight: 20, fids: [],
-      style: 'smooth_walk', aspect: '16:9',
+      style: 'smooth_walk', aspect: '',
       styles: [
         { key: 'smooth_walk', label: '平稳推进' },
         { key: 'push_in', label: '穿入下一空间' },
         { key: 'panoramic_orbit', label: '广角环视' },
       ],
-      aspects: ['16:9', '9:16', '1:1'],
+      // 画幅档位来自服务端视频模型契约，客户端不写死
+      aspects: [],
       submitting: false,
     }
   },
@@ -69,6 +71,11 @@ export default {
       this.fids = Array.isArray(arr) ? arr.filter(Boolean) : []
     } catch (e) { this.fids = [] }
     if (opts.aspect) this.aspect = decodeURIComponent(opts.aspect)
+    fieldOf('video', 'ratio').then((f) => {
+      if (!f) return
+      this.aspects = Array.isArray(f.options) ? f.options : []
+      if (!this.aspect) this.aspect = f.default || this.aspects[0] || ''
+    })
     if (opts.style) {
       const s = decodeURIComponent(opts.style)
       const found = this.styles.find(x => x.label === s || x.key === s)
@@ -91,7 +98,7 @@ export default {
           sourceAssets: this.fids.map(fid => ({ fid })),
           payload: {
             mode: 'spatial_walkthrough', fids: this.fids,
-            aspect: this.aspect, style: styleMap[this.style] || '平稳向前推进',
+            aspect: this.aspect || undefined, style: styleMap[this.style] || '平稳向前推进',
           },
         })
         uni.showToast({ title: '已提交漫游生成任务', icon: 'success' })

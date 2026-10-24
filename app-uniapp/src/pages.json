@@ -5,9 +5,23 @@
   },
   "pages": [
     {
-      "path": "pages/permission/permission",
+      "path": "pages/browse/browse",
       "style": {
-        "navigationBarTitleText": "相册权限",
+        "navigationBarTitleText": "素材库",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/home/home",
+      "style": {
+        "navigationBarTitleText": "创作",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/settings/settings",
+      "style": {
+        "navigationBarTitleText": "我的",
         "navigationStyle": "custom"
       }
     },
@@ -19,16 +33,30 @@
       }
     },
     {
-      "path": "pages/home/home",
+      "path": "pages/permission/permission",
       "style": {
-        "navigationBarTitleText": "素材库",
+        "navigationBarTitleText": "相册权限",
         "navigationStyle": "custom"
       }
     },
     {
-      "path": "pages/browse/browse",
+      "path": "pages/detail/detail",
       "style": {
-        "navigationBarTitleText": "浏览素材",
+        "navigationBarTitleText": "素材详情",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/studio/studio",
+      "style": {
+        "navigationBarTitleText": "工作台",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/editor/editor",
+      "style": {
+        "navigationBarTitleText": "剪辑",
         "navigationStyle": "custom"
       }
     },
@@ -47,13 +75,84 @@
       }
     },
     {
-      "path": "pages/settings/settings",
+      "path": "pages/quick/enhance",
       "style": {
-        "navigationBarTitleText": "设置",
+        "navigationBarTitleText": "画质增强",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/quick/expand",
+      "style": {
+        "navigationBarTitleText": "扩图",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/quick/insert",
+      "style": {
+        "navigationBarTitleText": "入画",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/quick/remove",
+      "style": {
+        "navigationBarTitleText": "消除",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/quick/replace",
+      "style": {
+        "navigationBarTitleText": "替换",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/quick/walkthrough",
+      "style": {
+        "navigationBarTitleText": "漫游",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/quick/watermark",
+      "style": {
+        "navigationBarTitleText": "去水印",
         "navigationStyle": "custom"
       }
     }
   ],
+  "tabBar": {
+    "color": "#94A3B8",
+    "selectedColor": "#0F172A",
+    "backgroundColor": "#FFFFFF",
+    "borderStyle": "white",
+    "fontSize": "11px",
+    "iconWidth": "21px",
+    "spacing": "3px",
+    "list": [
+      {
+        "pagePath": "pages/browse/browse",
+        "text": "素材库",
+        "iconPath": "static/tabbar/home.png",
+        "selectedIconPath": "static/tabbar/home_active.png"
+      },
+      {
+        "pagePath": "pages/home/home",
+        "text": "创作",
+        "iconPath": "static/tabbar/studio.png",
+        "selectedIconPath": "static/tabbar/studio_active.png"
+      },
+      {
+        "pagePath": "pages/settings/settings",
+        "text": "我的",
+        "iconPath": "static/tabbar/mine.png",
+        "selectedIconPath": "static/tabbar/mine_active.png"
+      }
+    ]
+  },
   "globalStyle": {
     "navigationBarTextStyle": "black",
     "navigationBarTitleText": "素材库",

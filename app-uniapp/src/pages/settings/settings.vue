@@ -36,6 +36,42 @@
         </button>
       </view>
 
+      <!-- 服务器地址 -->
+      <view class="card">
+        <text class="section">服务器地址</text>
+        <text class="hint">
+          手机与电脑不在同一网络时，请填写电脑在局域网中的地址（形如 http://192.168.1.59:30001）。
+          留空则自动按「手动地址 → 上次成功 → 本机 → 局域网」顺序探测。
+        </text>
+        <input class="input" v-model="serverUrlInput" placeholder="http://192.168.1.59:30001" />
+        <view class="row-between mt-sm">
+          <text class="label">当前连接</text>
+          <text class="perm" :class="{ ok: serverStatus === 'ok' }">{{ serverStatusText }}</text>
+        </view>
+        <view class="btn-row">
+          <button class="btn-line half" :disabled="serverTesting" @click="testServer">
+            {{ serverTesting ? '测试中…' : '测试连接' }}
+          </button>
+          <button class="btn-primary-sm half" @click="saveServerUrl">保存地址</button>
+        </view>
+        <text v-if="serverCandidatesText" class="hint mt">候选地址：{{ serverCandidatesText }}</text>
+      </view>
+
+      <!-- 后台保活 -->
+      <view class="card">
+        <text class="section">后台保活</text>
+        <text class="hint">
+          息屏后系统可能掐断长连接，AI 任务进度就会停住。把本 App 加入「电池优化白名单」可避免。
+        </text>
+        <view class="row-between mt-sm">
+          <text class="label">电池优化白名单</text>
+          <text class="perm" :class="{ ok: batteryWhitelisted }">{{ batteryWhitelistText }}</text>
+        </view>
+        <view class="btn-row">
+          <button class="btn-primary-sm half" @click="openBatteryWhitelist">去设置</button>
+        </view>
+      </view>
+
       <!-- 同步通道（AlbumSync 原能力） -->
       <view class="card">
         <text class="section">同步通道</text>
@@ -157,6 +193,9 @@ import { viewerCache } from '../../service/ViewerCache'
 import { localMediaIndex } from '../../service/LocalMediaIndex'
 import { WINDOW_DAY_OPTIONS, RESULT_SUCCESS, RESULT_PENDING_UPLOAD } from '../../common/Constants'
 import { checkAppUpdate, currentAppVersionLabel } from '../../service/AppUpdater'
+import { currentServerUrl, buildCandidates, setManualServerUrl } from '../../service/ServerResolve'
+import { pushClient } from '../../service/PushClient'
+import { isIgnoringBatteryOptimizations, requestIgnoreBatteryOptimizations } from '../../service/KeepAlive'
 
 export default {
   data() {
@@ -166,6 +205,10 @@ export default {
       username: '',
       role: '',
       serverToken: '',
+      serverUrlInput: '',
+      serverStatus: 'unknown',
+      serverTesting: false,
+      batteryWhitelisted: false,
       autoSync: true,
       wifiOnly: true,
       windowDays: 3,
@@ -198,6 +241,18 @@ export default {
       if (this.role === 'viewer') return '普通查看者'
       return this.role ? `角色: ${this.role}` : '已登录'
     },
+    serverStatusText() {
+      if (this.serverStatus === 'ok') return '已连接'
+      if (this.serverStatus === 'fail') return '连接失败'
+      return '未检测'
+    },
+    serverCandidatesText() {
+      return buildCandidates().map((u) => u.replace(/^https?:\/\//, '')).join(' / ')
+    },
+    batteryWhitelistText() {
+      if (this.batteryWhitelisted) return '已加入'
+      return '未加入'
+    },
   },
   onLoad() {
     this.refresh()
@@ -210,8 +265,21 @@ export default {
   },
   onShow() {
     this.refresh()
+    this.refreshBatteryWhitelist()
   },
   methods: {
+    refreshBatteryWhitelist() {
+      const r = isIgnoringBatteryOptimizations()
+      this.batteryWhitelisted = r === true
+    },
+    openBatteryWhitelist() {
+      const ok = requestIgnoreBatteryOptimizations()
+      if (!ok) {
+        uni.showToast({ title: '当前环境不支持，请到系统设置手动放行', icon: 'none' })
+        return
+      }
+      setTimeout(() => this.refreshBatteryWhitelist(), 1500)
+    },
     async manualCheckUpdate() {
       if (this.checkingUpdate) return
       this.checkingUpdate = true
@@ -222,6 +290,51 @@ export default {
         this.checkingUpdate = false
       }
     },
+    /** 测试指定地址能否连通（不写入配置） */
+    testServer() {
+      if (this.serverTesting) return
+      const url = String(this.serverUrlInput || '').trim().replace(/\/+$/, '')
+      if (!url) {
+        uni.showToast({ title: '请先填写地址', icon: 'none' })
+        return
+      }
+      this.serverTesting = true
+      uni.request({
+        url: url + '/api/health',
+        method: 'GET',
+        timeout: 3000,
+        success: (res) => {
+          this.serverTesting = false
+          if ((res.statusCode || 0) < 500) {
+            this.serverStatus = 'ok'
+            uni.showToast({ title: '连接成功', icon: 'success' })
+          } else {
+            this.serverStatus = 'fail'
+            uni.showToast({ title: `服务返回 ${res.statusCode}`, icon: 'none' })
+          }
+        },
+        fail: () => {
+          this.serverTesting = false
+          this.serverStatus = 'fail'
+          uni.showToast({ title: '无法连接', icon: 'none' })
+        },
+      })
+    },
+    /** 保存手动地址并立即重新探活 */
+    async saveServerUrl() {
+      const url = String(this.serverUrlInput || '').trim().replace(/\/+$/, '')
+      store.setManualServerUrl(url)
+      const picked = await setManualServerUrl(url)
+      this.serverUrlInput = store.getManualServerUrl() || picked
+      this.serverStatus = picked && picked === url ? 'ok' : 'fail'
+      // 地址变了，推送长连接要跟着换端点
+      pushClient.stop()
+      pushClient.start()
+      uni.showToast({
+        title: this.serverStatus === 'ok' ? '已保存并连接' : `已保存，当前使用 ${picked || '未知'}`,
+        icon: 'none',
+      })
+    },
     refresh() {
       const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
       this.canGoBack = pages.length > 1
@@ -230,6 +343,7 @@ export default {
       this.username = store.getUsername()
       this.role = store.getRole()
       this.serverToken = store.getServerToken()
+      this.serverUrlInput = store.getManualServerUrl() || currentServerUrl()
       this.autoSync = store.isAutoSyncEnabled()
       this.wifiOnly = store.isWifiOnlyEnabled()
       this.queueStats = store.getMediaQueueStatus()
@@ -290,6 +404,7 @@ export default {
         content: '确定要退出当前账号吗？',
         success: async (r) => {
           if (r.confirm) {
+            pushClient.stop()
             await apiLogout()
             uni.reLaunch({
               url: '/pages/login/login?tip=' + encodeURIComponent('已退出登录'),

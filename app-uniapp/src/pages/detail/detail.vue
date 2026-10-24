@@ -50,6 +50,42 @@
           </view>
         </view>
 
+        <!-- 质量评估（9 维）：只读展示，没有任何淘汰/删除动作 -->
+        <view v-if="qualityDims && qualityDims.length" class="quality-card">
+          <view class="quality-head">
+            <text class="sec-title">质量评估</text>
+            <text class="quality-total">{{ qualityTotal }} / {{ qualityMax }}</text>
+          </view>
+          <view class="quality-bar">
+            <view class="quality-bar-fill" :style="{ width: qualityPercent + '%' }" />
+          </view>
+          <view v-for="d in qualityDims" :key="d.key" class="quality-row">
+            <text class="quality-label">{{ d.label }}</text>
+            <view class="quality-track">
+              <view class="quality-fill" :style="{ width: dimPercent(d) + '%' }" />
+            </view>
+            <text class="quality-score">{{ d.score }}/{{ d.max }}</text>
+            <text v-if="d.detail" class="quality-detail">{{ d.detail }}</text>
+          </view>
+        </view>
+
+        <!-- 相似组提示：只读展示，点击进入该素材详情 -->
+        <view v-if="similarGroups && similarGroups.length" class="similar-card">
+          <text class="sec-title">相似组提示</text>
+          <text class="similar-hint">共 {{ similarCount }} 个近似素材（仅提示，不做批量淘汰）</text>
+          <view v-for="(g, gi) in similarGroups" :key="gi" class="similar-group">
+            <text class="group-title">相似组 {{ gi + 1 }}（{{ g.size }} 张）</text>
+            <scroll-view scroll-x class="similar-scroll">
+              <view class="similar-row">
+                <view v-for="s in g.members" :key="s.fid" class="similar-item" @click="openSimilar(s)">
+                  <image class="similar-img" :src="gridUrl(s.fid)" mode="aspectFill" />
+                  <text class="similar-dist">d{{ s.distance }}</text>
+                </view>
+              </view>
+            </scroll-view>
+          </view>
+        </view>
+
         <view v-if="similar && similar.length" class="similar-card">
           <text class="sec-title">相似推荐</text>
           <scroll-view scroll-x class="similar-scroll">
@@ -66,7 +102,7 @@
 </template>
 
 <script>
-import { fetchDetail, deleteAsset, mediaUrl, videoUrl, posterUrl, downloadAndSaveToAlbum } from '../../service/ViewerApi'
+import { fetchDetail, fetchQuality, deleteAsset, mediaUrl, videoUrl, posterUrl, gridUrl, downloadAndSaveToAlbum } from '../../service/ViewerApi'
 import { mapServerDetail } from '../../common/assetMap'
 
 export default {
@@ -79,6 +115,11 @@ export default {
       errorText: '',
       derivatives: [],
       similar: [],
+      qualityDims: [],
+      qualityTotal: 0,
+      qualityMax: 0,
+      similarGroups: [],
+      similarCount: 0,
     }
   },
   computed: {
@@ -90,6 +131,10 @@ export default {
       const s = this.item && this.item.size
       if (!s) return ''
       return (s / 1024 / 1024).toFixed(1) + ' MB'
+    },
+    qualityPercent() {
+      if (!this.qualityMax) return 0
+      return Math.max(0, Math.min(100, Math.round((this.qualityTotal / this.qualityMax) * 100)))
     },
   },
   onLoad(opts) {
@@ -114,6 +159,26 @@ export default {
       } finally {
         this.loading = false
       }
+      // 评估是附加信息，失败不影响详情主体
+      this.loadQuality()
+    },
+    async loadQuality() {
+      try {
+        const q = await fetchQuality(this.fid)
+        if (!q) return
+        this.qualityDims = Array.isArray(q.dims) ? q.dims : []
+        this.qualityTotal = Number(q.total) || 0
+        this.qualityMax = Number(q.max) || 0
+        const sim = q.similar || {}
+        this.similarGroups = Array.isArray(sim.groups) ? sim.groups : []
+        this.similarCount = Number(sim.count) || 0
+      } catch (e) {
+        console.warn('[detail] 质量评估加载失败', e)
+      }
+    },
+    dimPercent(d) {
+      if (!d || !d.max) return 0
+      return Math.max(0, Math.min(100, Math.round((d.score / d.max) * 100)))
     },
     onImgError() {
       if (this.item && this.item.serverUrl && this.item.imgUrl !== this.item.serverUrl) {
@@ -188,6 +253,21 @@ export default {
 .action-t { font-size: 26rpx; font-weight: 600; color: #0f172a; }
 .action-btn.primary .action-t { color: #fff; }
 .deriv-card, .similar-card { background: #fff; border-radius: 20rpx; padding: 24rpx; margin-top: 20rpx; border: 1rpx solid #e2e8f0; }
+.quality-card { background: #fff; border-radius: 20rpx; padding: 24rpx; margin-top: 20rpx; border: 1rpx solid #e2e8f0; }
+.quality-head { display: flex; align-items: baseline; justify-content: space-between; }
+.quality-total { font-size: 22rpx; color: #2563eb; font-weight: 700; }
+.quality-bar { height: 10rpx; background: #e2e8f0; border-radius: 6rpx; margin: 8rpx 0 18rpx; overflow: hidden; }
+.quality-bar-fill { height: 100%; background: #2563eb; border-radius: 6rpx; }
+.quality-row { display: flex; align-items: center; flex-wrap: wrap; padding: 10rpx 0; border-bottom: 1rpx solid #f1f5f9; }
+.quality-label { width: 150rpx; font-size: 22rpx; color: #0f172a; }
+.quality-track { flex: 1; height: 8rpx; background: #eef2f7; border-radius: 4rpx; overflow: hidden; margin-right: 12rpx; }
+.quality-fill { height: 100%; background: #38bdf8; border-radius: 4rpx; }
+.quality-score { width: 110rpx; text-align: right; font-size: 20rpx; color: #334155; }
+.quality-detail { width: 100%; font-size: 18rpx; color: #94a3b8; margin-top: 2rpx; }
+.similar-hint { display: block; font-size: 20rpx; color: #94a3b8; margin-bottom: 8rpx; }
+.similar-group { margin-top: 14rpx; }
+.group-title { display: block; font-size: 20rpx; color: #475569; margin-bottom: 8rpx; }
+.similar-dist { position: absolute; right: 4rpx; bottom: 4rpx; font-size: 16rpx; color: #fff; background: rgba(15,23,42,0.6); border-radius: 6rpx; padding: 0 6rpx; }
 .sec-title { display: block; font-size: 24rpx; font-weight: 700; color: #0f172a; margin-bottom: 12rpx; }
 .deriv-row { display: flex; justify-content: space-between; padding: 12rpx 0; border-bottom: 1rpx solid #f1f5f9; }
 .deriv-kind { font-size: 22rpx; color: #0f172a; }

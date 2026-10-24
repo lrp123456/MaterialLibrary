@@ -28,12 +28,13 @@
 
 <script>
 import { aiTaskManager } from '../../service/AiTaskManager'
+import { fieldOf } from '../../service/QuickParams'
 
 export default {
   data() {
     return {
-      statusBarHeight: 20, fid: '', imgUrl: '', ratio: '1:1',
-      ratios: ['1:1', '4:3', '3:4', '16:9', '9:16'],
+      statusBarHeight: 20, fid: '', imgUrl: '', ratio: '',
+      ratios: [],
       submitting: false,
     }
   },
@@ -41,6 +42,11 @@ export default {
     try { this.statusBarHeight = uni.getSystemInfoSync().statusBarHeight || 20 } catch (e) {}
     this.fid = opts.fid || ''
     this.imgUrl = opts.imgUrl ? decodeURIComponent(opts.imgUrl) : ''
+    fieldOf('image', 'ratio').then((f) => {
+      if (!f) return
+      this.ratios = Array.isArray(f.options) ? f.options : []
+      this.ratio = opts.ratio || f.default || this.ratios[0] || ''
+    })
   },
   methods: {
     goBack() { uni.navigateBack() },
@@ -50,7 +56,7 @@ export default {
       try {
         await aiTaskManager.createTask({
           fid: this.fid, type: 'expand', title: '扩图',
-          payload: { mode: 'expand', ratio: this.ratio, image: this.imgUrl },
+          payload: { mode: 'expand', ratio: this.ratio || undefined, image: this.imgUrl },
         })
         uni.showToast({ title: '已提交扩图任务', icon: 'success' })
         setTimeout(() => this.goBack(), 1200)

@@ -290,6 +290,14 @@ export async function fetchDetail(fid) {
 }
 
 /**
+ * 素材质量评估（9 维）+ pHash 相似组。
+ * 只读接口：服务端不提供任何淘汰/删除动作，这里只做展示。
+ */
+export async function fetchQuality(fid) {
+  return request('/assets/' + encodeURIComponent(fid) + '/quality')
+}
+
+/**
  * 列表缩略图 URL。
  * 注意：assets.thumb_url 常是失效的 /api/thumbs/*.jpg，禁止直接使用；
  * 一律走 /assets/{fid}/image，并用 local=1 避免 302 到坏外链。
@@ -300,12 +308,17 @@ export function thumbFetchUrl(fid, thumbPath = '', derivativeId = 0) {
 }
 
 /** 媒体缩略/原图 URL（token 查询参数鉴权；local=1 强制服务端读本地产物） */
-export function mediaUrl(fid, derivativeId = 0, dl = false) {
+/**
+ * 素材图片地址。
+ * tier='grid' 走服务端 256px 网格档（App 列表专用，体积约为预览图的 1/30）
+ */
+export function mediaUrl(fid, derivativeId = 0, dl = false, tier = '') {
   const server = currentServerUrl()
   const token = store.getToken()
   const q = [`token=${encodeURIComponent(token)}`, 'local=1']
   if (derivativeId > 0) q.push(`derivative=${derivativeId}`)
   if (dl) q.push('dl=1')
+  if (tier) q.push(`tier=${encodeURIComponent(tier)}`)
   return (
     server +
     API_BASE +
@@ -314,6 +327,11 @@ export function mediaUrl(fid, derivativeId = 0, dl = false) {
     '/image?' +
     q.join('&')
   )
+}
+
+/** 网格档缩略图地址（App 列表用） */
+export function gridUrl(fid) {
+  return mediaUrl(fid, 0, false, 'grid')
 }
 
 /** 视频媒体流地址 */
@@ -340,7 +358,7 @@ export async function submitAiTask(fid, payload = {}) {
 /** 精修贴图/遮罩临时上传，返回引擎可拉的 url */
 export function uploadAiFile(filePath, filename = 'upload.png') {
   return new Promise((resolve, reject) => {
-    const server = store.getServerUrl()
+    const server = currentServerUrl()
     const token = store.getToken()
     uni.uploadFile({
       url: server + API_BASE + '/ai/upload',
@@ -431,7 +449,7 @@ export function deletePortraitGroup(id) {
 
 export function uploadPortraitAsset(groupId, filePath, filename = 'portrait.jpg') {
   return new Promise((resolve, reject) => {
-    const server = store.getServerUrl()
+    const server = currentServerUrl()
     const token = store.getToken()
     uni.uploadFile({
       url: server + API_BASE + '/portrait-library/groups/' + encodeURIComponent(groupId) + '/assets',
@@ -522,43 +540,12 @@ export async function chatComplete(payload = {}) {
 /** ch01 对话别名（与 Web 端 sendChat 同名） */
 export const sendChat = chatComplete
 
-/** ch02 生成选项（分模型提示词结构目录） */
-export async function fetchGenOptions() {
-  return request('/gen/options', { method: 'GET' })
-}
-
-/** ch02 提交异步生成任务（image/video/music） */
-export async function genTaskSubmit(payload = {}) {
-  return request('/gen/tasks', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-    timeout: 60000,
-  })
-}
-
-/** ch02 查询生成任务状态 */
-export async function genTaskStatus(taskId) {
-  return request('/gen/tasks/' + encodeURIComponent(taskId), {
-    method: 'GET',
-    timeout: 15000,
-  })
-}
-
 /** ch03 精准编辑：选区 + 操作 + 提示词 → 贴回 */
 export async function aiEdit(payload = {}) {
   return request('/edit/run', {
     method: 'POST',
     body: JSON.stringify(payload),
     timeout: 180000,
-  })
-}
-
-/** ch03 贴回校验：未选区像素保持 */
-export async function verifyPasteback(payload = {}) {
-  return request('/ai/edit/verify-pasteback', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-    timeout: 60000,
   })
 }
 
@@ -606,7 +593,7 @@ export async function clearChatMessages(sessionId = 'default_session') {
  */
 export function uploadRefImage(filePath, name = 'ref.jpg') {
   return new Promise((resolve, reject) => {
-    const server = store.getServerUrl()
+    const server = currentServerUrl()
     if (!server || !filePath) {
       reject(new Error('缺少服务器或本地文件'))
       return

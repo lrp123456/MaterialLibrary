@@ -37,6 +37,8 @@
 </template>
 
 <script>
+import { switchTabTo } from '../../common/nav'
+
 export default {
   data() {
     return {
@@ -66,7 +68,7 @@ export default {
   methods: {
     goBack() { uni.navigateBack() },
     enterDomain(domain) {
-      uni.reLaunch({ url: '/pages/home/home?view=operate&domain=' + encodeURIComponent(domain || 'image') })
+      switchTabTo('/pages/home/home', { view: 'operate', domain: domain || 'image' })
     },
     goTool(t) { if (t.path) uni.navigateTo({ url: t.path }) },
   },

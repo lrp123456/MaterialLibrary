@@ -124,6 +124,7 @@ import {
   fetchAssets,
   mediaUrl,
   fetchStudioSchema,
+  fetchLabCapabilities,
   optimizePromptApi
 } from '../../service/ViewerApi'
 
@@ -142,25 +143,13 @@ export default {
       scrollTo: '',
       seq: 0,
       
-      // Server-Driven UI 工作台模型与控制项
-      studioSchema: {
-        models: [
-          { id: 'doubao-seed-2-0', name: 'Seedream 5.0 Flash', badge: '极速 2K', isDefault: true },
-          { id: 'seedream-5.0-pro', name: 'Seedream 5.0 Pro', badge: '极致 4K', isDefault: false },
-          { id: 'seedance-2-0', name: 'Seedance 2.0', badge: '运镜视频', isDefault: false }
-        ],
-        inputControls: {
-          quick: [
-            { key: 'aspectRatio', label: '画幅', defaultValue: '16:9', options: [{ value: '16:9', label: '16:9' }, { value: '9:16', label: '9:16' }, { value: '1:1', label: '1:1' }] },
-            { key: 'quality', label: '画质', defaultValue: 'hd', options: [{ value: 'standard', label: '2K标准' }, { value: 'hd', label: '4K超清' }] }
-          ]
-        }
-      },
+      // Server-Driven UI：对话模型来自 /lab/capabilities 的 studio.chat（与 Web 同源）。
+      // /studio/schema 下发的是生图/生视频模型，喂给 /chat/completions 会被网关拒（Invalid model name）。
+      chatModels: [],
       selectedModelIndex: 0,
-      activeParams: {
-        aspectRatio: '16:9',
-        quality: 'hd'
-      }
+      // 快捷控制项仍来自 /studio/schema
+      studioSchema: { inputControls: {} },
+      activeParams: {}
     }
   },
   computed: {
@@ -171,15 +160,16 @@ export default {
       return this.chips.length ? '继续输入画面要求…' : '输入描述，或点左侧 @ 引用素材'
     },
     modelLabels() {
-      return (this.studioSchema.models || []).map(m => `${m.name} (${m.badge || ''})`)
+      return this.chatModels.map(m => `${m.name}${m.badge ? ' · ' + m.badge : ''}`)
     },
     currentModelLabel() {
-      const m = (this.studioSchema.models || [])[this.selectedModelIndex]
-      return m ? m.name : 'Seedream 5.0'
+      const m = this.chatModels[this.selectedModelIndex]
+      return m ? m.name : '服务端默认'
     },
     currentModelId() {
-      const m = (this.studioSchema.models || [])[this.selectedModelIndex]
-      return m ? m.id : 'doubao-seed-2-0'
+      const m = this.chatModels[this.selectedModelIndex]
+      // 服务端没下发就留空，交给 /gen/chat 用它自己的默认模型，客户端不编造 id
+      return m ? m.id : ''
     },
     quickControls() {
       return (this.studioSchema.inputControls && this.studioSchema.inputControls.quick) || []
@@ -192,17 +182,27 @@ export default {
   },
   methods: {
     goBack() {
-      uni.navigateBack({ fail: () => uni.reLaunch({ url: '/pages/home/home' }) })
+      uni.navigateBack({ fail: () => uni.switchTab({ url: '/pages/home/home' }) })
     },
     async loadSchema() {
       try {
         const schema = await fetchStudioSchema()
-        if (schema && schema.models && schema.models.length) {
-          this.studioSchema = schema
+        if (schema && schema.inputControls) this.studioSchema = schema
+      } catch (e) {}
+      try {
+        const caps = await fetchLabCapabilities()
+        const chat = (caps && caps.studio && caps.studio.chat) || {}
+        const seen = {}
+        const list = []
+        for (const m of chat.models || []) {
+          if (!m || !m.id || seen[m.id]) continue
+          seen[m.id] = 1
+          list.push(m)
         }
-      } catch (e) {
-        // 使用兜底 Schema
-      }
+        this.chatModels = list
+        const di = list.findIndex((m) => m.id === chat.defaultModel)
+        this.selectedModelIndex = di >= 0 ? di : 0
+      } catch (e) {}
     },
     onModelChange(e) {
       this.selectedModelIndex = Number(e.detail.value)
@@ -277,15 +277,19 @@ export default {
       this.replying = true
       this.scrollToMsg()
       try {
-        const refs = refChips.map((c) => ({ fid: c.fid, name: c.name }))
-        const data = await chatComplete({ text, refs, model: this.currentModelId })
-        const replyChips = (data.refs || []).map((r) => {
-          const src = refChips.find((c) => c.fid === r.fid)
-          return { fid: r.fid, name: r.name, imgUrl: src && src.imgUrl, sub: r.tagsText || '' }
+        // 与 Web 端 ChatStudio 同款载荷：messages 含刚推进去的这一轮，prompt 是本轮原文
+        const history = this.messages
+          .filter((m) => !m.err && m.text)
+          .slice(-20)
+          .map((m) => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.text }))
+        const data = await chatComplete({
+          model: this.currentModelId || undefined,
+          prompt: text,
+          messages: history,
         })
-        let err = ''
-        if (data.missingRefs && data.missingRefs.length) err = '部分引用素材已失效：' + data.missingRefs.map((m) => m.name).join('、')
-        this.messages.push({ id: ++this.seq, role: 'ai', text: data.reply, chips: replyChips, err })
+        const reply = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content)
+          || data.reply || data.text || ''
+        this.messages.push({ id: ++this.seq, role: 'ai', text: reply, chips: [] })
       } catch (e) {
         this.messages.push({ id: ++this.seq, role: 'ai', text: '', err: e.message || '对话失败，请重试' })
       } finally {

@@ -5,6 +5,9 @@ import { localMediaIndex } from './service/LocalMediaIndex'
 import { checkAppUpdate } from './service/AppUpdater'
 import { setNativeInfer } from './service/LocalModelRuntime'
 import { createAndroidLocalInfer } from './service/AndroidLocalInfer'
+import { ensureServerUrl } from './service/ServerResolve'
+import { pushClient } from './service/PushClient'
+import { prefetch } from './service/Prefetch'
 
 /** 注入端侧 NCNN。标准 HBuilder 调试基座不含原生插件，此时静默走 YOLO/涂抹。 */
 function bootstrapLocalInfer() {
@@ -40,9 +43,19 @@ async function maybeAutoSync(tag) {
 export default {
   onLaunch() {
     console.log('[AlbumSync] App Launch')
+    // 首屏关键路径：立刻并发探活，首个列表请求就不必等探活超时
+    ensureServerUrl().catch(() => {})
+    // 推送长连接：已登录则立刻连上（未登录时会在登录页再触发一次）
+    pushClient.start().catch(() => {})
+    // 分层预取：订阅「素材入库」推送 + 冷启动预热（都推迟，别跟首屏抢资源）
+    prefetch.start()
+    prefetch.scheduleLaunchWarm()
     // #ifndef H5
     bootstrapLocalInfer()
-    localMediaIndex.initAsync()
+    // 相册索引较重，推迟一点启动，避免与首屏渲染抢资源
+    setTimeout(() => {
+      localMediaIndex.initAsync()
+    }, 1500)
     setTimeout(() => {
       checkAppUpdate({ silent: true }).catch(() => {})
     }, 3000)

@@ -4,7 +4,7 @@
  * 含 AlbumSync 同步状态 + MaterialViewer 会话字段。
  */
 import {
-  PREF_STORE_NAME, KEY_DEVICE_ID, KEY_SERVER_URL, KEY_SERVER_TOKEN,
+  PREF_STORE_NAME, KEY_DEVICE_ID, KEY_SERVER_URL, KEY_MANUAL_SERVER_URL, KEY_SERVER_TOKEN,
   KEY_AUTO_SYNC_ENABLED, KEY_LAST_SYNC_TIME, KEY_LAST_SYNC_RESULT,
   KEY_LAST_SYNC_COUNT, KEY_LAST_SYNC_COST, KEY_PENDING_COUNT,
   KEY_FALLBACK_DIR, KEY_WINDOW_DAYS, KEY_PHOTO_PERM,
@@ -105,6 +105,17 @@ export const store = {
   },
   setServerUrl(url) {
     set(KEY_SERVER_URL, String(url || '').trim().replace(/\/+$/, ''))
+  },
+
+  /** 用户手动配置的服务器地址：探活不会覆盖，未配置时返回空串 */
+  getManualServerUrl() {
+    return String(get(KEY_MANUAL_SERVER_URL, '') || '').replace(/\/+$/, '')
+  },
+  setManualServerUrl(url) {
+    set(KEY_MANUAL_SERVER_URL, String(url || '').trim().replace(/\/+$/, ''))
+  },
+  clearManualServerUrl() {
+    set(KEY_MANUAL_SERVER_URL, '')
   },
 
   /** 快照上传用 Bearer Token（AlbumSync） */

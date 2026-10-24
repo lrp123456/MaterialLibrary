@@ -274,6 +274,7 @@
       <view v-else-if="errorText" class="state-box" @click="reload">
         <text class="state-text err">{{ errorText }}</text>
         <text class="state-sub">点击重试</text>
+        <text v-if="isConnectError" class="state-link" @click.stop="openSettings">设置服务器地址 ›</text>
       </view>
       <view v-else-if="groups.length === 0" class="state-box">
         <text class="state-text">没有符合条件的素材</text>
@@ -393,10 +394,12 @@
 </template>
 
 <script>
-import { fetchAssets, fetchMe, sessionValid, mediaUrl, videoUrl, posterUrl, deleteAsset, fetchMenuTree } from '../../service/ViewerApi'
+import { fetchAssets, fetchMe, sessionValid, mediaUrl, gridUrl, videoUrl, posterUrl, deleteAsset, fetchMenuTree } from '../../service/ViewerApi'
+import { switchTabTo } from '../../common/nav'
 import { store } from '../../service/SyncStateStore'
 import { viewerCache } from '../../service/ViewerCache'
 import { localMediaIndex } from '../../service/LocalMediaIndex'
+import { prefetch } from '../../service/Prefetch'
 import WalkthroughDrawer from '../../components/WalkthroughDrawer.vue'
 import AiTaskPill from '../../components/AiTaskPill.vue'
 
@@ -405,31 +408,6 @@ function goLogin(tip) {
     url: '/pages/login/login?tip=' + encodeURIComponent(tip || '请先登录服务器'),
   })
 }
-
-const DEFAULT_SPACES = ['客厅', '卧室', '餐厅', '厨房', '卫生间', '书房', '玄关', '阳台', '衣帽间', '儿童房', '商业空间']
-const DEFAULT_STYLES = ['现代简约', '极简主义', '奶油风', '原木风', '新中式', '轻奢风', '侘寂风', '法式复古', '工业风', '北欧风']
-const DEFAULT_FURNITURE = [
-  '三人/组合沙发', '单人沙发', '休闲椅/扶手椅', '茶几', '餐桌', '餐椅',
-  '电视柜', '餐边柜', '书架/展示柜', '书桌/工作台', '床/床架', '床头柜',
-  '衣柜', '地毯', '吊灯', '落地灯', '台灯', '壁灯', '花器/花瓶', '摆件/雕塑', '浴缸'
-]
-const DEFAULT_MATERIALS = ['木质/实木', '大理石/岩板', '拉丝金属', '布艺/绒面', '皮革', '玻璃/长虹玻', '石材/原石', '微水泥', '瓷砖/地砖', '黄铜']
-
-// 与打标系统 100% 统一的 12 色标准板
-const DEFAULT_COLORS = [
-  { key: '纯白', label: '纯白', hex: '#FFFFFF', value: '#FFFFFF' },
-  { key: '暗黑', label: '暗黑', hex: '#111827', value: '#111827' },
-  { key: '中灰', label: '中灰', hex: '#6B7280', value: '#6B7280' },
-  { key: '烈红', label: '烈红', hex: '#EF4444', value: '#EF4444' },
-  { key: '亮橙', label: '亮橙', hex: '#F97316', value: '#F97316' },
-  { key: '暖黄', label: '暖黄', hex: '#EAB308', value: '#EAB308' },
-  { key: '翠绿', label: '翠绿', hex: '#10B981', value: '#10B981' },
-  { key: '青蓝', label: '青蓝', hex: '#06B6D4', value: '#06B6D4' },
-  { key: '科技蓝', label: '科技蓝', hex: '#3B82F6', value: '#3B82F6' },
-  { key: '典雅紫', label: '典雅紫', hex: '#8B5CF6', value: '#8B5CF6' },
-  { key: '柔粉', label: '柔粉', hex: '#EC4899', value: '#EC4899' },
-  { key: '胡桃棕', label: '胡桃棕', hex: '#78350F', value: '#78350F' }
-]
 
 export default {
   components: {
@@ -472,24 +450,19 @@ export default {
       selectedPoses: [],
       selectedCharacters: [],
 
-      // 维度选项池（动态结合服务端与本地种子）
-      spaceList: [...DEFAULT_SPACES],
-      styleList: [...DEFAULT_STYLES],
-      furnitureList: [...DEFAULT_FURNITURE],
-      materialList: [...DEFAULT_MATERIALS],
-      colorList: [...DEFAULT_COLORS],
-      moodList: ['治愈/温暖', '现代轻奢', '空灵/静谧', '明快/活力', '电影感/史诗', '爵士复古', '科技未来'],
-      poseList: ['站姿', '坐姿', '行走', '倚靠', '交谈/互动'],
-      characterList: ['商务精英', '居家男女', '亲子家庭', '青年学生', '休闲独处'],
-      orientationList: [
-        { key: 'landscape', label: '横版 (16:9 / 4:3)' },
-        { key: 'portrait', label: '竖版 (9:16 / 3:4)' },
-        { key: 'square', label: '方版 (1:1)' },
-      ],
-      videoSourceList: [
-        { key: 'sync', label: '📱 手机实拍' },
-        { key: 'ai', label: '✨ AI 创作' },
-      ],
+      // 维度选项池：全部来自服务端 filterOptions，客户端不自带词表
+      spaceList: [],
+      styleList: [],
+      furnitureList: [],
+      materialList: [],
+      colorList: [],
+      moodList: [],
+      poseList: [],
+      characterList: [],
+      orientationList: [],
+      videoSourceList: [],
+      // 菜单树里的 12 色标准板：filterOptions 没数据时兜底
+      paletteList: [],
 
       currentlyPlayingFid: '',
       audioCtx: null,
@@ -506,6 +479,9 @@ export default {
     }
   },
   computed: {
+    isConnectError() {
+      return /无法连接|连接超时|网络错误|HTTP 明文|响应异常/.test(this.errorText || '')
+    },
     currentMediaTabInfo() {
       return (
         this.mediaTypeList.find((m) => m.key === this.activeMediaTab) || {
@@ -742,6 +718,7 @@ export default {
     this.loadMenuTree()
     this.reload()
     this.verifySessionInBackground()
+    this.maybeAskPhotoPermission()
   },
   onReady() {
     this.$nextTick(() => {
@@ -959,15 +936,15 @@ export default {
             facets: item.facets || []
           }))
 
-          // 统一同步 12 色标准板
+          // 12 色标准板（菜单树下发的兜底；filterOptions 有数据时优先用它）
           const allCat = list.find(c => c.key === 'all')
           const colorFacet = allCat?.facets?.find(f => f.key === 'dominant_color')
           if (colorFacet && colorFacet.options) {
-            this.colorList = colorFacet.options.map(o => ({
-              key: o.label,
+            this.paletteList = colorFacet.options.map(o => ({
+              key: o.value || o.label,
               label: o.label,
-              hex: o.hex,
-              value: o.value
+              hex: o.hex || '',
+              count: 0
             }))
           }
         }
@@ -1003,6 +980,18 @@ export default {
       if (this._redirecting) return
       this._redirecting = true
       goLogin(tip)
+    },
+    // 权限页不再是启动页：首屏先渲染素材库，授权引导延后到首帧之后
+    maybeAskPhotoPermission() {
+      if (store.isPhotoPermissionGranted()) return
+      if (uni.getStorageSync('photo_perm_prompted') === '1') return
+      uni.setStorageSync('photo_perm_prompted', '1')
+      setTimeout(() => {
+        uni.navigateTo({
+          url: '/pages/permission/permission',
+          fail: () => {},
+        })
+      }, 1200)
     },
     dateKey(ts) {
       if (!ts) return 'unknown'
@@ -1116,46 +1105,37 @@ export default {
     },
     applyServerFilters(data) {
       const facets = data.filterOptions || data.facets || data.filters || {}
-      const extractLabels = (arr) => {
-        if (!Array.isArray(arr) || !arr.length) return []
+      const dims = Array.isArray(facets.dimensions) ? facets.dimensions : []
+      const toOptions = (arr) => {
+        if (!Array.isArray(arr)) return []
         return arr
-          .map((x) => (typeof x === 'object' ? (x.label || x.dir) : x))
+          .map((x) => {
+            if (x && typeof x === 'object') {
+              const key = x.dir || x.value || x.key || x.label
+              if (!key) return null
+              return {
+                key,
+                label: x.label || x.dir || key,
+                hex: x.hex || '',
+                count: Number(x.count) || 0,
+              }
+            }
+            if (!x) return null
+            return { key: x, label: x, hex: '', count: 0 }
+          })
           .filter(Boolean)
       }
 
-      const sSpaces = extractLabels(facets.space || facets.spaces)
-      if (sSpaces.length) {
-        this.spaceList = Array.from(new Set([...sSpaces, ...DEFAULT_SPACES]))
-      }
-      const sStyles = extractLabels(facets.style_atom || facets.styles)
-      if (sStyles.length) {
-        this.styleList = Array.from(new Set([...sStyles, ...DEFAULT_STYLES]))
-      }
-      const sFurn = extractLabels(
-        facets.furniture_item || facets.furniture_items || facets.furniture_category
-      )
-      if (sFurn.length) {
-        this.furnitureList = Array.from(new Set([...sFurn, ...DEFAULT_FURNITURE]))
-      }
-      const sMat = extractLabels(facets.material_kind || facets.materials)
-      if (sMat.length) {
-        this.materialList = Array.from(new Set([...sMat, ...DEFAULT_MATERIALS]))
-      }
-      const sColors = extractLabels(facets.colors || facets.color)
-      if (sColors.length) {
-        this.colorList = Array.from(new Set([...sColors, ...DEFAULT_COLORS]))
-      }
-      const sMoods = extractLabels(facets.mood || facets.moods)
-      if (sMoods.length) {
-        this.moodList = Array.from(new Set([...sMoods, ...this.moodList]))
-      }
-      const sPoses = extractLabels(facets.pose || facets.poses)
-      if (sPoses.length) {
-        this.poseList = Array.from(new Set([...sPoses, ...this.poseList]))
-      }
-      const sChars = extractLabels(facets.character || facets.characters)
-      if (sChars.length) {
-        this.characterList = Array.from(new Set([...sChars, ...this.characterList]))
+      for (const dim of dims) {
+        const listKey = `${dim.key}List`
+        if (!this[listKey]) continue
+        const sources = Array.isArray(dim.source) ? dim.source : [dim.source]
+        let opts = []
+        for (const s of sources) opts = opts.concat(toOptions(facets[s]))
+        const seen = new Set()
+        opts = opts.filter((o) => (seen.has(o.key) ? false : (seen.add(o.key), true)))
+        if (dim.key === 'color' && !opts.length) opts = this.paletteList
+        this[listKey] = opts
       }
     },
     placeholderExt(name) {
@@ -1208,6 +1188,16 @@ export default {
         item.imgUrl = item.serverUrl
         return
       }
+      if (item.prefetchPath && item.imgUrl === item.prefetchPath) {
+        // 预取的本地网格图可能已被系统清理，退回网络网格档
+        item.prefetchPath = ''
+        item.imgUrl = item.gridImgUrl || item.serverUrl
+        return
+      }
+      if (item.gridImgUrl && item.imgUrl === item.gridImgUrl) {
+        item.imgUrl = item.serverUrl
+        return
+      }
       if (item.thumbUrl && item.imgUrl !== item.thumbUrl) {
         item.imgUrl = item.thumbUrl
       } else {
@@ -1243,13 +1233,19 @@ export default {
         !isVid && !isMus && !isPort && !isFurn && !!(mainDeriv.kind && String(mainDeriv.kind).startsWith('restage_'))
 
       const serverUrl = isVid ? videoUrl(r.fid) : mediaUrl(r.fid, derivId)
+      const gridImgUrl = isVid ? '' : gridUrl(r.fid)
       const poster = isVid ? ((r.poster_url && r.poster_url.startsWith('http')) ? r.poster_url : posterUrl(r.fid)) : ''
 
       let localPath = ''
       if (!isRestage && !isAiVid && !isMus && fileName) {
         localPath = localMediaIndex.getLocalPath(fileName, r.size || 0)
       }
-      const imgUrl = isVid ? (poster || localPath || serverUrl) : (localPath || serverUrl)
+      // 预取落盘的网格图优先于网络网格档（省一次往返）
+      const prefetchPath = isVid ? '' : prefetch.getLocalPath(r.fid)
+      // 列表走 256px 网格档；加载失败时 onImgError 逐级回落到预览图
+      const imgUrl = isVid
+        ? (poster || localPath || serverUrl)
+        : (localPath || prefetchPath || gridImgUrl || serverUrl)
 
       const tags = r.tags || []
       const space = tags.find((t) => t.dimension === 'space')?.label || ''
@@ -1320,6 +1316,8 @@ export default {
         ratio,
         imgUrl,
         serverUrl,
+        gridImgUrl,
+        prefetchPath,
         localPath,
         posterUrl: poster,
         thumbUrl: r.thumb_url || '',
@@ -1400,7 +1398,7 @@ export default {
     openSettings() {
       if (this._navigating) return
       this._navigating = true
-      uni.navigateTo({
+      uni.switchTab({
         url: '/pages/settings/settings',
         complete: () => {
           setTimeout(() => {
@@ -1412,14 +1410,10 @@ export default {
     openStudio() {
       if (this._navigating) return
       this._navigating = true
-      uni.reLaunch({
-        url: '/pages/home/home?view=operate',
-        complete: () => {
-          setTimeout(() => {
-            this._navigating = false
-          }, 500)
-        },
-      })
+      switchTabTo('/pages/home/home', { view: 'operate' })
+      setTimeout(() => {
+        this._navigating = false
+      }, 500)
     },
     toggleSelectMode() {
       this.isSelectMode = !this.isSelectMode
@@ -2060,6 +2054,13 @@ export default {
   display: block;
   margin-top: 14rpx;
   font-size: 24rpx;
+  color: #2563eb;
+  font-weight: 600;
+}
+.state-link {
+  display: block;
+  margin-top: 18rpx;
+  font-size: 26rpx;
   color: #2563eb;
   font-weight: 600;
 }

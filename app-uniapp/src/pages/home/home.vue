@@ -71,7 +71,13 @@
     </view>
 
     <!-- 素材库 -->
-    <home-library v-show="mainView === 'library'" :active="mainView === 'library'" />
+    <home-library
+      v-show="mainView === 'library'"
+      :active="mainView === 'library'"
+      @quick="onHomeLibraryQuick"
+      @use="onHomeLibraryUse"
+      @open-picker="openSlotAssetPicker"
+    />
 
     <!-- 操作页 -->
     <view v-show="mainView === 'operate'" class="operate" :style="{ background: inStudioDesk ? '#F8FAFC' : domainSoftBg }">
@@ -130,9 +136,9 @@
               <view class="bubble user">
                 <view class="user-meta">
                   <text class="mode-tag">{{ domainLabelOf(msg.mode) }}</text>
-                  <text v-if="msg.params && msg.params.ratio" class="param-tag">{{ msg.params.ratio }}</text>
-                  <text v-if="msg.params && msg.params.duration" class="param-tag">{{ msg.params.duration }}s</text>
-                  <text v-if="msg.params && msg.params.clarity" class="param-tag">{{ msg.params.clarity === 'hd' ? '高清' : '标清' }}</text>
+                  <template v-for="(pv, pk) in msg.params" :key="'pt' + pk">
+                    <text v-if="paramTagText(pk, pv)" class="param-tag">{{ paramTagText(pk, pv) }}</text>
+                  </template>
                 </view>
                 <view class="user-prompt-rich">
                   <template v-for="(seg, sI) in promptSegments(msg.prompt, msg.images)">
@@ -361,7 +367,7 @@
                 </view>
 
                 <!-- 末尾追加卡片 (+) 按钮（图 10 规范） -->
-                <view v-if="slotImages.length < slotMaxImages" class="desk-card-add" @click="chooseSlotMedia">
+                <view v-if="slotImages.length < slotPickMax" class="desk-card-add" @click="chooseSlotMedia">
                   <view class="add-circle">
                     <text class="add-plus">+</text>
                   </view>
@@ -615,10 +621,10 @@
               </view>
 
               <view v-for="f in schemaCommonFields" :key="f.key" class="sheet-sec">
-                <text class="sec-label">{{ f.label }}</text>
+                <text class="sec-label">{{ f.label }}<text v-if="isFieldLocked(f.key)" class="lock-tag">{{ lockReason(f.key) }}</text></text>
                 <view v-if="f.type === 'enum'" class="chip-row">
                   <view
-                    v-for="opt in f.options"
+                    v-for="opt in fieldOptions(f)"
                     :key="String(opt)"
                     :class="['sheet-chip', { active: genParams[f.key] === opt, locked: isFieldLocked(f.key) }]"
                     @click="!isFieldLocked(f.key) && setGenParam(f.key, opt)"
@@ -663,19 +669,19 @@
                 </view>
                 <view v-if="showAdvancedParams" class="advanced-body">
                   <view v-for="f in schemaAdvancedFields" :key="'adv-' + f.key" class="adv-field">
-                    <text class="adv-field-label">{{ f.label }}</text>
+                    <text class="adv-field-label">{{ f.label }}<text v-if="isFieldLocked(f.key)" class="lock-tag">{{ lockReason(f.key) }}</text></text>
                     <view v-if="f.type === 'enum'" class="chip-row">
                       <view
-                        v-for="opt in f.options"
+                        v-for="opt in fieldOptions(f)"
                         :key="String(opt)"
-                        :class="['sheet-chip', { active: genParams[f.key] === opt }]"
-                        @click="setGenParam(f.key, opt)"
+                        :class="['sheet-chip', { active: genParams[f.key] === opt, locked: isFieldLocked(f.key) }]"
+                        @click="!isFieldLocked(f.key) && setGenParam(f.key, opt)"
                       >
                         <text class="chip-t">{{ optionLabel(f, opt) }}</text>
                       </view>
                     </view>
                     <view v-else-if="f.type === 'bool'" class="chip-row">
-                      <view :class="['sheet-chip', { active: !!genParams[f.key] }]" @click="setGenParam(f.key, !genParams[f.key])">
+                      <view :class="['sheet-chip', { active: !!genParams[f.key], locked: isFieldLocked(f.key) }]" @click="!isFieldLocked(f.key) && setGenParam(f.key, !genParams[f.key])">
                         <text class="chip-t">{{ genParams[f.key] ? '开' : '关' }}</text>
                       </view>
                     </view>
@@ -683,6 +689,10 @@
                     <input v-else class="adv-input" type="number" :value="genParams[f.key]" @input="setGenParam(f.key, $event.detail.value)" />
                   </view>
                 </view>
+              </view>
+
+              <view v-if="ruleEval.warnings && ruleEval.warnings.length" class="rule-warn">
+                <text v-for="(w, wi) in ruleEval.warnings" :key="'w' + wi" class="rule-warn-t">{{ w }}</text>
               </view>
 
               <view class="sheet-pad" />
@@ -992,6 +1002,7 @@ import {
   sessionValid,
   fetchAssets,
   mediaUrl,
+  gridUrl,
   fetchPortraitLibrary,
   acceptPortraitConsent,
   createPortraitGroup,
@@ -1000,11 +1011,13 @@ import {
   uploadPortraitAsset,
 } from '../../service/ViewerApi'
 import { store } from '../../service/SyncStateStore'
+import { consumeTabParams } from '../../common/nav'
 import HomeLibrary from '../../components/HomeLibrary.vue'
 import AiTaskPill from '../../components/AiTaskPill.vue'
-import MODEL_CATALOG, { assertAgnesFreeTier, mergeStudioCatalog } from '../../service/ModelCatalog'
+import MODEL_CATALOG, { mergeStudioCatalog } from '../../service/ModelCatalog'
 import { convertAtRefs, refStyleFor } from '../../service/PromptStudio'
-import { schemaFor, optionLabel, slotLimit, applyConstraints } from '../../service/ModelSchemas'
+import { schemaFor, optionLabel, slotLimit } from '../../service/ModelSchemas'
+import { evaluateClientModelRules } from '../../utils/model-protocol'
 
 function goLogin() {
   uni.reLaunch({
@@ -1108,22 +1121,6 @@ export default {
       slotImages: [],
       promptDrawerOpen: false,
       lastSentPrompt: '',
-      selectedRatio: '9:16',
-      selectedDuration: 5,
-      selectedClarity: 'hd',
-      selectedMood: 'calm',
-      ratios: ['9:16', '16:9', '3:4', '1:1'],
-      clarities: [
-        { value: 'sd', label: '标清' },
-        { value: 'hd', label: '高清' },
-      ],
-      moods: [
-        { value: 'calm', label: '治愈' },
-        { value: 'upbeat', label: '明快' },
-        { value: 'epic', label: '史诗' },
-        { value: 'warm', label: '温暖' },
-        { value: 'dark', label: '暗调' },
-      ],
 
       capabilities: null,
       studioCatalog: null,
@@ -1252,21 +1249,47 @@ export default {
       return this.chatPresets
     },
     currentSchema() {
-      return schemaFor(this.currentModelInfo) || null
+      return schemaFor(this.currentModelInfo)
+    },
+    // 规则引擎求值：与 web-pro 走同一份 evaluateClientModelRules
+    ruleEval() {
+      return evaluateClientModelRules(this.currentSchema, this.currentMode, this.genParams, this.refCounts)
+    },
+    refCounts() {
+      return { images: (this.slotImages || []).length, videos: 0, audios: 0 }
     },
     schemaCommonFields() {
-      return (this.currentSchema && this.currentSchema.common) || []
+      const schema = this.currentSchema
+      if (!schema) return []
+      const suppressed = new Set(this.ruleEval.suppressedKeys || [])
+      const fields = [...(schema.common || [])].filter((f) => !suppressed.has(f.key))
+      if (this.currentMode === 'image_edit') {
+        for (const key of ['bbox', 'point']) {
+          const field = (schema.advanced || []).find((item) => item.key === key)
+          if (field && !fields.some((item) => item.key === key)) fields.push(field)
+        }
+      }
+      return fields
     },
     schemaAdvancedFields() {
-      return (this.currentSchema && this.currentSchema.advanced) || []
+      const schema = this.currentSchema
+      if (!schema) return []
+      const suppressed = new Set(this.ruleEval.suppressedKeys || [])
+      return (schema.advanced || []).filter(
+        (field) =>
+          !suppressed.has(field.key) &&
+          !(this.currentMode === 'image_edit' && (field.key === 'bbox' || field.key === 'point')),
+      )
     },
     slotMaxImages() {
-      const n = slotLimit(this.currentSchema, 'images')
-      return n > 0 ? n : 5
+      // null = 服务端没声明这一档，按「不封顶」处理（与 web-pro 的 refCap() 语义一致）
+      return slotLimit(this.currentSchema, 'images', this.currentMode)
+    },
+    slotPickMax() {
+      return this.slotMaxImages == null ? 9 : this.slotMaxImages
     },
     fieldLocks() {
-      const r = applyConstraints(this.currentSchema, this.currentMode, this.genParams)
-      return r.lock || []
+      return this.ruleEval.lockedKeys || []
     },
     domainSubModes() {
       if (this.domain === 'music') {
@@ -1491,18 +1514,6 @@ export default {
     showModel() {
       return true
     },
-    showClarity() {
-      return false
-    },
-    showRatio() {
-      return false
-    },
-    showDuration() {
-      return false
-    },
-    showMood() {
-      return false
-    },
     domainModels() {
       const cat = this.studioCatalog || {}
       if (this.domain === 'video') {
@@ -1530,13 +1541,6 @@ export default {
       const hit = this.domainModels.find((m) => m.id === this.currentModelId)
       if (hit) return hit
       return this.domainModels[0] || { id: this.currentModelId || '', name: '默认', providerName: '-' }
-    },
-    availableDurations() {
-      if (this.currentModelInfo && this.currentModelInfo.durations) {
-        return this.currentModelInfo.durations
-      }
-      if (this.domain === 'music') return [15, 30, 60]
-      return [5, 8, 10]
     },
     currentMode() {
       if (this.domain === 'video') return this.videoMode
@@ -1603,12 +1607,11 @@ export default {
     },
     collapseSummary() {
       const parts = [this.currentModelInfo.name || '模型']
-      if (this.showRatio) parts.push(this.selectedRatio)
-      if (this.showDuration) parts.push(this.selectedDuration + 's')
-      if (this.showClarity) parts.push(this.selectedClarity === 'hd' ? '高清' : '标清')
-      if (this.showMood) {
-        const m = this.moods.find((x) => x.value === this.selectedMood)
-        parts.push(m ? m.label : this.selectedMood)
+      // 摘要直接铺服务端 schema 里已生效的常用档位，不再维护本地一套 ratio/duration 状态
+      for (const f of this.schemaCommonFields) {
+        const v = this.genParams[f.key]
+        if (v === undefined || v === '' || v === null || v === false) continue
+        parts.push(v === true ? f.label : `${f.label} ${optionLabel(f, v)}`)
       }
       return parts.join(' · ')
     },
@@ -1660,6 +1663,11 @@ export default {
       this.slotImages = [pending]
       this.expanded = false
     }
+    const tabParams = consumeTabParams('/pages/home/home')
+    if (tabParams) {
+      if (tabParams.view === 'operate') this.mainView = 'operate'
+      if (tabParams.domain && this.domains.some((d) => d.id === tabParams.domain)) this.domain = tabParams.domain
+    }
   },
   onUnload() {
     this.stopPortraitRefresh()
@@ -1678,7 +1686,7 @@ export default {
     },
     openSettings() {
       this.drawerOpen = false
-      uni.navigateTo({ url: '/pages/settings/settings' })
+      uni.switchTab({ url: '/pages/settings/settings' })
     },
     applyPreset(p) {
       this.inputPrompt = p
@@ -1784,14 +1792,26 @@ export default {
       this.applySchemaDefaults(this.currentModelInfo)
     },
     optionLabel,
+    paramTagText(key, val) {
+      if (val === undefined || val === null || val === '' || val === false) return ''
+      if (typeof val === 'object') return ''
+      return val === true ? key : `${key}=${val}`
+    },
     isFieldLocked(key) {
       return (this.fieldLocks || []).indexOf(key) >= 0
     },
+    /** 规则引擎给出的档位覆盖（如图层拆分把 size 换成 1K/1.5K/2K/auto）。 */
+    fieldOptions(f) {
+      const ov = this.ruleEval.fieldOverrides && this.ruleEval.fieldOverrides[f.key]
+      if (ov && Array.isArray(ov.options)) return ov.options
+      return (f && f.options) || []
+    },
+    lockReason(key) {
+      return (this.ruleEval.lockReasons || {})[key] || ''
+    },
     applyLiveConstraints() {
-      const r = applyConstraints(this.currentSchema, this.currentMode, this.genParams)
+      const r = evaluateClientModelRules(this.currentSchema, this.currentMode, this.genParams, this.refCounts)
       this.genParams = r.params
-      if (r.params.duration != null) this.selectedDuration = r.params.duration
-      if (r.params.ratio) this.selectedRatio = r.params.ratio
     },
     onRangeChange(f, ev) {
       const v = ev && ev.detail ? ev.detail.value : ev
@@ -1800,19 +1820,16 @@ export default {
     setGenParam(key, val) {
       if (this.isFieldLocked(key)) return
       this.$set ? this.$set(this.genParams, key, val) : (this.genParams = { ...this.genParams, [key]: val })
-      if (key === 'duration') this.selectedDuration = val
-      if (key === 'ratio') this.selectedRatio = val
-      if (key === 'size' || key === 'resolution') this.selectedClarity = val
       this.applyLiveConstraints()
     },
     applySchemaDefaults(model) {
       const sch = schemaFor(model)
       const next = {}
-      const fill = (f) => {
-        if (!f) return
-        next[f.key] = f.default
-      }
       if (sch) {
+        // common + advanced 都要铺默认值：透明底 / 图层拆分这类联动规则读的就是 advanced 里的键
+        const fill = (f) => {
+          if (f && f.key) next[f.key] = f.default
+        }
         ;(sch.common || []).forEach(fill)
         ;(sch.advanced || []).forEach(fill)
         const modes = sch.modes || []
@@ -1822,10 +1839,6 @@ export default {
         }
       }
       this.genParams = next
-      if (next.duration != null) this.selectedDuration = next.duration
-      if (next.ratio) this.selectedRatio = next.ratio
-      if (next.size) this.selectedClarity = next.size
-      else if (next.resolution) this.selectedClarity = next.resolution
       this.applyLiveConstraints()
     },
     selectDomainModel(m) {
@@ -1864,7 +1877,7 @@ export default {
       else if (this.domain === 'music') this.musicMode = modeId
       else if (this.domain === 'portrait') this.portraitMode = modeId
       const multi = modeId === 'omni_reference' || modeId === 'image_reference'
-      const max = this.slotMaxImages
+      const max = this.slotPickMax
       if (modeId === 'first_last_frame') this.slotImages = this.slotImages.slice(0, Math.min(2, max))
       else if (multi) this.slotImages = this.slotImages.slice(0, max)
       else if (
@@ -2104,7 +2117,7 @@ export default {
       this.slotImages = copy
     },
     addMultiSlotImage() {
-      const max = this.slotMaxImages - this.slotImages.length
+      const max = this.slotPickMax - this.slotImages.length
       if (max <= 0) return
       uni.chooseImage({
         count: max,
@@ -2525,7 +2538,7 @@ export default {
       })
     },
     pickImageLocal(sourceType) {
-      const max = this.slotMaxImages - this.slotImages.length
+      const max = this.slotPickMax - this.slotImages.length
       if (max <= 0) return
       uni.chooseImage({
         count: max,
@@ -2555,6 +2568,32 @@ export default {
       this.currentQuickItem = { mode: 'slot_picker', label: '选择参考素材' }
       this.quickPickerOpen = true
       this.loadRecentLibraryImages()
+    },
+    onHomeLibraryQuick(key) {
+      if (key === 'chat') {
+        this.enterDesk('chat')
+        return
+      }
+      if (key === 'edit') {
+        this.enterDesk('image')
+        return
+      }
+      if (key === 'pick') {
+        this.openSlotAssetPicker()
+        return
+      }
+      if (key === 'roam') {
+        this.currentQuickItem = { mode: 'roam', label: '室内空间漫游' }
+        this.quickPickerOpen = true
+        this.loadRecentLibraryImages()
+      }
+    },
+    onHomeLibraryUse(item) {
+      if (!item || !item.imgUrl) return
+      this.currentQuickItem = { mode: 'slot_picker', label: '选择参考素材' }
+      this.slotImages = [...this.slotImages, item.imgUrl].slice(0, this.slotPickMax)
+      this.ensureImageModeOnMediaAdded()
+      this.mainView = 'operate'
     },
 
     copyToDomain(target, url) {
@@ -2615,7 +2654,8 @@ export default {
           opts.mediaType = 'image'
         } else {
           // 'all': 全量图片类素材（不排斥家具单品与模特人像）
-          opts.all = 1
+          // 注意：all=1 在服务端已是空操作且要求 admin，viewer 会收到 403，故不下发
+          opts.mediaType = 'image'
         }
         const res = await fetchAssets(opts)
         const list = Array.isArray(res) ? res : ((res && (res.items || res.data || res.assets)) || [])
@@ -2624,8 +2664,9 @@ export default {
           const tags = [a.space, a.style, a.furniture_item, a.material].filter(Boolean).slice(0, 2).join(' · ')
           return {
             fid: a.fid,
-            imgUrl: a.thumbUrl || a.imgUrl || mediaUrl(a.fid, 0),
-            fileName: a.fileName || a.file_name || a.fid,
+            // 服务端返回的 thumb_url 是无鉴权的裸路径，必须用带 token 的 grid 档地址
+            imgUrl: gridUrl(a.fid),
+            fileName: a.file_name || a.fileName || a.fid,
             category: cat,
             tagsText: tags,
             width: a.width,
@@ -2669,7 +2710,7 @@ export default {
           if (res.tempFilePaths && res.tempFilePaths[0]) {
             if (this.currentQuickItem && this.currentQuickItem.mode === 'slot_picker') {
               this.quickPickerOpen = false
-              this.slotImages = [...this.slotImages, res.tempFilePaths[0]].slice(0, this.slotMaxImages)
+              this.slotImages = [...this.slotImages, res.tempFilePaths[0]].slice(0, this.slotPickMax)
               this.ensureImageModeOnMediaAdded()
             } else {
               this.goToEditorWithImage(res.tempFilePaths[0], '')
@@ -2681,7 +2722,7 @@ export default {
     confirmQuickWithAsset(item) {
       if (this.currentQuickItem && this.currentQuickItem.mode === 'slot_picker') {
         this.quickPickerOpen = false
-        this.slotImages = [...this.slotImages, item.imgUrl].slice(0, this.slotMaxImages)
+        this.slotImages = [...this.slotImages, item.imgUrl].slice(0, this.slotPickMax)
         this.ensureImageModeOnMediaAdded()
       } else {
         this.goToEditorWithImage(item.imgUrl, item.fid)
@@ -2782,12 +2823,7 @@ export default {
       const mode = this.currentMode
       const userMsgId = 'u_' + Date.now()
       const aiMsgId = 'a_' + (Date.now() + 1)
-      const params = {
-        ratio: this.showRatio ? this.selectedRatio : undefined,
-        duration: this.showDuration ? this.selectedDuration : undefined,
-        clarity: this.showClarity ? this.selectedClarity : undefined,
-        mood: this.showMood ? this.selectedMood : undefined,
-      }
+      const params = { ...(this.genParams || {}) }
       const attachedImages = this.slotImages.map((u, i) => ({
         url: u,
         label:
@@ -2912,12 +2948,10 @@ export default {
 
           const modelInfo = this.currentModelInfo
           const gp = this.genParams || {}
-          const gate = assertAgnesFreeTier(modelInfo, {
-            imageCount: (imageUrls && imageUrls.length) || this.slotImages.length || 0,
-            size: gp.size || gp.resolution || this.selectedClarity || '',
-          })
-          if (!gate.ok) {
-            throw new Error(gate.message)
+          // 参考图上限来自服务端 schema.slots（slotLimit 已按 free.maxRefs 与模式收紧）
+          const refCount = (imageUrls && imageUrls.length) || this.slotImages.length || 0
+          if (this.slotMaxImages != null && refCount > this.slotMaxImages) {
+            throw new Error(`当前 ${refCount} 张参考图，这个模型最多 ${this.slotMaxImages} 张`)
           }
           let finalPrompt = convertAtRefs(promptText, refStyleFor(modelInfo.id))
           const sch = schemaFor(modelInfo)
@@ -4995,6 +5029,9 @@ export default {
 .range-slider { flex: 1; }
 .range-val { font-size: 22rpx; color: #64748b; min-width: 64rpx; }
 .sheet-chip.locked { opacity: 0.45; }
+.lock-tag { font-size: 20rpx; color: #f59e0b; margin-left: 10rpx; }
+.rule-warn { margin: 16rpx 0 0; padding: 16rpx 20rpx; border-radius: 14rpx; background: #fef3c7; }
+.rule-warn-t { display: block; font-size: 22rpx; color: #92400e; line-height: 1.5; }
 .desk-input {
   width: 100%;
   height: 160rpx;

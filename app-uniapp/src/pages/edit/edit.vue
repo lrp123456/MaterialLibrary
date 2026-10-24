@@ -60,13 +60,8 @@
       <view class="card">
         <view class="action-row">
           <button class="btn-primary" :loading="editing" @click="runEdit">生成并贴回</button>
-          <button v-if="resultUrl" class="btn-ghost" @click="verifyPasteback">校验未选区</button>
         </view>
         <view v-if="editErr" class="err">{{ editErr }}</view>
-        <view v-if="verifyResult" class="verify">
-          未选区改动像素比例：{{ (verifyResult.outsideChangedRatio * 100).toFixed(2) }}%
-          （{{ verifyResult.unselectedUntouched ? '未选区保持 ✓' : '存在改动 ✗' }}）
-        </view>
       </view>
 
       <!-- 结果 -->
@@ -83,7 +78,7 @@
 <script>
 import TouchSelector from '../../components/TouchSelector.vue'
 import GlbAdjuster from '../../components/GlbAdjuster.vue'
-import { aiEdit, aiSegment, verifyPasteback, mediaUrl, genTaskSubmit } from '../../service/ViewerApi'
+import { aiEdit, aiSegment, mediaUrl } from '../../service/ViewerApi'
 
 const OPS = [
   { id: 'replace', name: '替换', icon: '🔁' },
@@ -113,7 +108,6 @@ export default {
       editErr: '',
       resultUrl: '',
       engine: '',
-      verifyResult: null,
       segNote: '',
       glbOpen: false,
       glbUrl: '',
@@ -132,7 +126,7 @@ export default {
   },
   methods: {
     goBack() {
-      uni.navigateBack({ fail: () => uni.reLaunch({ url: '/pages/home/home' }) })
+      uni.navigateBack({ fail: () => uni.switchTab({ url: '/pages/home/home' }) })
     },
     onImgLoad(e) {
       this.naturalW = (e.detail && e.detail.width) || 0
@@ -206,18 +200,6 @@ export default {
         this.editing = false
       }
     },
-    async verifyPasteback() {
-      if (!this.resultUrl) return
-      try {
-        const data = await verifyPasteback({
-          originalUrl: this.srcImage,
-          editedUrl: this.resultUrl
-        })
-        this.verifyResult = data
-      } catch (e) {
-        this.editErr = '校验失败：' + e.message
-      }
-    },
     async absUrl(u) {
       if (!u) return ''
       if (/^https?:\/\//.test(u)) return u
@@ -256,7 +238,6 @@ export default {
 .ph { color: #94A3B8; font-size: 24rpx; }
 .note { font-size: 24rpx; color: #64748B; margin-top: 16rpx; }
 .err { font-size: 24rpx; color: #DC2626; margin-top: 16rpx; }
-.verify { font-size: 24rpx; color: #059669; margin-top: 16rpx; }
 .action-row { display: flex; gap: 20rpx; margin-top: 20rpx; }
 .action-row button { flex: 1; margin: 0; font-size: 28rpx; }
 .btn-primary { background: #2563EB; color: #fff; border-radius: 999rpx; }
