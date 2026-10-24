@@ -37,6 +37,12 @@ SERVER_PID_FILE="$DATA_DIR/server.pid"
 WEBPRO_PID_FILE="$DATA_DIR/webpro.pid"
 STOP_FLAG="$DATA_DIR/watchdog.stop"
 RESTART_DELAY="${ML_RESTART_DELAY:-3}"
+# 预热节奏：新素材入库后 grid/preview 衍生图要现算，吃 CPU 且拖慢 App 首图。
+# 预热必须在 WSL 侧跑（真实 dataDir 在 ext4），所以由本 watchdog 调度。
+PREWARM_INTERVAL="${ML_PREWARM_INTERVAL:-1800}"
+PREWARM_FIRST_DELAY="${ML_PREWARM_FIRST_DELAY:-60}"
+PREWARM_LOG="$LOG_DIR/prewarm.log"
+PREWARM_PID=""
 # 连续快速崩溃保护：10 分钟内超过 8 次则冷却 60s
 CRASH_WINDOW=600
 CRASH_LIMIT=8
@@ -57,6 +63,9 @@ wlog() { echo "[$(ts)] [watchdog] $1" >&2; }
 cleanup() {
   wlog "收到退出信号，正在停止子进程..."
   rm -f "$STOP_FLAG"
+  if [ -n "$PREWARM_PID" ] && kill -0 "$PREWARM_PID" 2>/dev/null; then
+    kill "$PREWARM_PID" 2>/dev/null || true
+  fi
   for name in main webpro; do
     local pid="${child_pid[$name]:-}"
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
@@ -116,8 +125,23 @@ start_service() {
   wlog "$name 已拉起 (PID $pid)"
 }
 
+# 预热循环：独立后台子进程，watchdog 退出时一起收掉
+start_prewarm_loop() {
+  [ "${ML_PREWARM_ENABLED:-1}" = "0" ] && return 0
+  (
+    sleep "$PREWARM_FIRST_DELAY"
+    while [ ! -f "$STOP_FLAG" ]; do
+      bash "$PROJECT_DIR/scripts/prewarm.sh" --limit=200 --concurrency=6 >> "$PREWARM_LOG" 2>&1 || true
+      sleep "$PREWARM_INTERVAL"
+    done
+  ) &
+  PREWARM_PID=$!
+  wlog "预热循环已启动 (PID $PREWARM_PID，间隔 ${PREWARM_INTERVAL}s，日志 $PREWARM_LOG)"
+}
+
 echo $$ > "$WATCHDOG_PID_FILE"
 wlog "watchdog 已启动 (PID $$，主服务端口 $PORT，web-pro 端口 $WEB_PRO_PORT，守护webpro=$WATCH_WEBPRO，数据目录 $DATA_DIR)"
+start_prewarm_loop
 
 # 主服务与 web-pro 网关各自独立崩溃计数、独立重启，互不影响。
 while true; do

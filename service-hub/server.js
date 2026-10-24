@@ -143,6 +143,69 @@ const SERVICES = [
     },
     cwd: path.join(ROOT, 'editor'),
   },
+  // ── 灰测通道（A/B）：30000 API + 30003 Web ────────────────────────────────
+  // 两者与正式通道（30001/30002）共用同一份源码，但数据目录独立、端口独立。
+  // 日常改动先发布到灰测验证，验证通过后在灰测页面「设置 → 发布到正式版」再更新正式。
+  {
+    id: 'ml-server-gray',
+    name: '灰测服务端 (30000)',
+    desc: '灰度 API · 独立数据目录 ~/.dsh-material-library-gray · 不跑后台 worker',
+    port: 30000,
+    url: 'http://127.0.0.1:30000',
+    kind: 'node',
+    get startCmd() {
+      const exe = findNode22() || pickNodeFor(ROOT).exe;
+      if (!exe) throw new Error('灰测后端需要 Node 22（ABI 127）来加载 Windows 版 better-sqlite3');
+      return exe;
+    },
+    startArgs: [path.join(ROOT, 'server.js')],
+    cwd: ROOT,
+    get env() {
+      const grayData = process.env.ML_GRAY_DATA_DIR || path.join(os.homedir(), '.dsh-material-library-gray');
+      const shim = path.join(ROOT, 'scripts', 'shims', 'better-sqlite3-win.js').replace(/\\/g, '/');
+      return {
+        ML_PORT: String(this.port || 30000),
+        ML_DATA_DIR: grayData,
+        ML_GRAY_DATA_DIR: grayData,
+        APP_CHANNEL: 'gray',
+        ML_WATCH_RESTART: '0',
+        NODE_OPTIONS: `--require "${shim}"`,
+      };
+    },
+  },
+  {
+    id: 'web-h5-gray',
+    name: '灰测 Web 端 (30003)',
+    desc: '灰度前端 · dist-gray 产物 · API 指向灰测 30000',
+    port: 30003,
+    url: 'http://127.0.0.1:30003',
+    kind: 'node',
+    get startCmd() {
+      return process.execPath || 'node';
+    },
+    get startArgs() {
+      return [path.join(ROOT, 'web-pro', 'server.cjs'), String(this.port || 30003)];
+    },
+    cwd: path.join(ROOT, 'web-pro'),
+    env: {
+      APP_CHANNEL: 'gray',
+      WEB_PRO_DIST: 'dist-gray',
+      API_TARGET: 'http://127.0.0.1:30000',
+    },
+  },
+  {
+    id: 'asr-server',
+    name: '语音识别 (FunASR)',
+    desc: '本地 SenseVoice 流式识别 · HTTP 10095 / WS 10096',
+    port: 10095,
+    url: 'http://127.0.0.1:10095/health',
+    kind: 'python',
+    startCmd:
+      process.env.ASR_PYTHON ||
+      'C:\\Users\\lrp\\.workbuddy\\binaries\\python\\envs\\default\\Scripts\\python.exe',
+    startArgs: ['-u', path.join(ROOT, 'scripts', 'asr', 'asr_server.py')],
+    cwd: ROOT,
+  },
 ];
 
 const children = new Map(); // id -> ChildProcess
@@ -189,6 +252,24 @@ function nodeCandidates() {
 }
 
 let _pickCache = null; // { exe, reason } | { exe: null, reason }
+
+/** 灰测后端专用：PE 版 better-sqlite3 是 ABI 127（Node 22），优先找 22.x */
+function findNode22() {
+  const wbBin = path.join(os.homedir(), '.workbuddy', 'binaries', 'node', 'versions');
+  try {
+    for (const v of fs.readdirSync(wbBin)) {
+      if (!/^22\./.test(v)) continue;
+      const p = path.join(wbBin, v, 'node.exe');
+      if (fs.existsSync(p)) return p;
+    }
+  } catch (_) {}
+  try {
+    const sys = 'C:\\Program Files\\nodejs\\node.exe';
+    const major = execFileSync(sys, ['-p', 'process.versions.modules'], { encoding: 'utf8' }).trim();
+    if (major === '127') return sys;
+  } catch (_) {}
+  return '';
+}
 
 function pickNodeFor(root) {
   if (_pickCache) return _pickCache;
@@ -293,6 +374,8 @@ function startService(svc) {
         windowsHide: true,
         detached: true,
         stdio: ['ignore', 'pipe', 'pipe'],
+        // 灰测通道需要 ML_PORT / APP_CHANNEL / WEB_PRO_DIST 这类通道级环境变量
+        env: { ...process.env, ...(svc.env || {}) },
       };
       if (needsShell) spawnOpts.shell = true;
 

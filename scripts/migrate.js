@@ -742,6 +742,7 @@ function migrate(dataDir, { doBackup = true } = {}) {
           template_id TEXT,
           output_fid TEXT,
           output_kind TEXT,
+          output_derivative_id TEXT,
           error TEXT,
           created_by TEXT,
           created_at INTEGER,
@@ -753,6 +754,7 @@ function migrate(dataDir, { doBackup = true } = {}) {
         CREATE INDEX IF NOT EXISTS idx_ai_tasks_created ON ai_tasks(created_at);
       `);
     } catch (e) {}
+    try { db.exec('ALTER TABLE ai_tasks ADD COLUMN output_derivative_id TEXT;'); } catch (e) {}
     try { db.exec('ALTER TABLE assets ADD COLUMN is_ai INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
     try { db.exec('ALTER TABLE assets ADD COLUMN source_asset_id TEXT;'); } catch (e) {}
     try { db.exec('ALTER TABLE assets ADD COLUMN poster_path TEXT;'); } catch (e) {}

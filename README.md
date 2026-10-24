@@ -59,6 +59,29 @@ POST /api/viewer/auth/login <账号>/<口令>
 POST /api/auth/login <账号>/<口令>
 ```
 
+## 双通道灰测（30003 → 30002）
+
+| 通道 | API | 前端 | 产物 | 数据 |
+| --- | --- | --- | --- | --- |
+| 正式 | 30001 | http://127.0.0.1:30002/ | `web-pro/dist` | WSL `~/.dsh-material-library` |
+| 灰测 | 30000 | http://127.0.0.1:30003/ | `web-pro/dist-gray` | `%USERPROFILE%\.dsh-material-library-gray` |
+
+```text
+改代码 → 启动灰测通道.bat（或 node scripts/gray-release.js）
+       → 30003 上验证
+       → 设置 → 双通道灰度发布 → 发布到正式版
+```
+
+首次使用发布功能需要手动「停止素材库.bat → 启动素材库.bat」一次，
+让正式端加载到自重启接口。完整流程、故障排查见
+**`docs/双通道灰度发布与语音输入.md`**。
+
+## 语音输入（FunASR / SenseVoice）
+
+双击 **`启动语音识别.bat`**（HTTP 10095 / WS 10096）。
+工作台右侧会出现悬浮麦克风，识别结果自动写回当前聚焦的输入框，
+对话、提示词、搜索、设置里的所有输入框都通用。
+
 ## 停止
 
 双击 `停止素材库.bat`，或：

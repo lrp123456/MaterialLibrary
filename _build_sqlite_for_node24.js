@@ -16,9 +16,25 @@
  *   node-gyp 默认去 ~/.cache/node-gyp 下找对应版本的头文件，
  *   这里事先把 node-v24.14.0-headers.tar.gz 解到该目录并整理成
  *   <devdir>/24.14.0/include/node 布局。
+ *
+ * ⚠️ 危险：本脚本会把 Windows 版 better_sqlite3.node 写进共享的
+ *   node_modules\better-sqlite3\build\Release\。而 30001 服务端跑在 WSL 里
+ *   （node v20 / ABI 115），需要的是 Linux-ELF 版本；被换掉后服务端会以
+ *   「invalid ELF header」崩溃并被 watchdog 反复拉起。
+ *   2026-10-22 21:04 就这么炸过一次，只能从 .tmp-better-sqlite3-linux.node 恢复。
+ *   所以默认拒绝执行，必须显式设置 ML_BUILD_WIN_SQLITE=1 才会跑。
  */
 const { spawnSync } = require('child_process');
 const path = require('path');
+
+if (process.env.ML_BUILD_WIN_SQLITE !== '1') {
+  console.error(
+    '[build24] 已拒绝执行：会把 Windows 版 better_sqlite3.node 写进 /mnt/c 共享目录，\n' +
+    '         30001 服务端跑在 WSL（需要 Linux-ELF），会被搞挂并崩溃重启。\n' +
+    '         确认要覆盖共享模块时，显式设置 ML_BUILD_WIN_SQLITE=1 重跑。'
+  );
+  process.exit(1);
+}
 
 const VC = 'C:\\Program Files (x86)\\Microsoft Visual Studio\\18\\BuildTools\\VC\\Auxiliary\\Build\\vcvars64.bat';
 const ComSpec = process.env.ComSpec || 'cmd.exe';
