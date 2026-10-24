@@ -130,3 +130,10 @@ web-pro/dist-*/
 
 # 三模型评估的素材包（含 init.zip 24MB，只作本地评测依据）
 test01/
+
+# 管理台构建产物（esbuild 输出，hash 文件名每次构建都变，不随仓库走）
+# 重建：node web/build.mjs
+web/dist/
+
+# OSS 临时调试脚本（历史上写过明文凭据，禁止入库；现改为读 OSS_AK / OSS_SK）
+scripts/test_oss.js
