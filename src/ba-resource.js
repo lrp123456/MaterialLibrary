@@ -41,7 +41,9 @@ function ensureLedger(db) {
 }
 
 function joinUrl(base, pathname) {
-  return new URL(pathname, base.endsWith('/') ? base : `${base}/`).toString();
+  const root = base.endsWith('/') ? base : `${base}/`;
+  const rel = String(pathname || '').replace(/^\/+/, '');
+  return new URL(rel, root).toString();
 }
 
 function assertHttpUrl(raw) {
