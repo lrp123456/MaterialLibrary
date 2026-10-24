@@ -81,7 +81,6 @@ export const zh = {
 	"assets.transitions": "转场过渡",
 	"assets.captions": "AI 字幕",
 	"assets.ai": "AI 智剪",
-	"assets.adjustment": "调色层",
 	"assets.settings": "工程参数",
 	"assets.search": "搜索素材...",
 	"assets.import": "导入本地文件",
@@ -94,7 +93,7 @@ export const zh = {
 	"assets.sort.type": "按类型排序",
 	"assets.sort.duration": "按时长排序",
 	"assets.sort.size": "按大小排序",
-	"assets.context.exportClip": "导出片段",
+	"assets.context.exportClip": "导出素材文件",
 	"assets.context.delete": "从媒体池移除",
 	"assets.opfsOccupied": "本地高速缓存占用：{size}",
 	"assets.clearOpfs": "一键清理缓存",
@@ -132,22 +131,13 @@ export const zh = {
 	"assets.sub.fps": "帧率",
 	"assets.sub.background": "背景",
 
-	// 二级占位空态（入口已就位、渲染通道未接）
-	"assets.placeholder.transition.title": "转场引擎接入中",
-	"assets.placeholder.transition.desc":
-		"转场走合成器的独立混合通道，渲染与拖拽落点完成后即可拖到剪辑点。",
-	"assets.placeholder.filter.title": "滤镜库接入中",
-	"assets.placeholder.filter.desc":
-		"LUT 需要 shader 侧支持，资源包已就位，渲染通道接入后自动出现在这里。",
-	"assets.placeholder.adjust.title": "调节面板接入中",
-	"assets.placeholder.adjust.desc":
-		"亮度/对比度/饱和度等基础调节正在接入调色 shader，暂请在属性面板调整。",
+	// 二级占位空态（入口已就位、功能未接）。滤镜/调节/转场已接渲染通道，空态文案随之删除。
 	"assets.placeholder.record.title": "录音功能接入中",
 	"assets.placeholder.record.desc":
 		"麦克风录制通道尚未接入，当前可先用「导入本地文件」把录音成品加进素材池。",
 	"assets.placeholder.extract.title": "音频提取接入中",
 	"assets.placeholder.extract.desc":
-		"从视频抽音轨依赖人声分离 runner，接入后可从时间轴片段直接提取。",
+		"人声分离 runner 已就绪（把「人声分离」拖到片段上即可），但这个入口还没接上它。",
 
 	// 已装资源包状态
 	"assets.packs.title": "已装资源包",
@@ -257,6 +247,14 @@ export const zh = {
 	"timeline.menu.show": "显示此片段",
 	"timeline.menu.separateAudio": "分离音频轨道",
 	"timeline.menu.delete": "删除片段",
+	"timeline.menu.deleteClip": "删除片段",
+	"timeline.menu.deleteText": "删除文字",
+	"timeline.menu.deleteCount": "删除所选 {count} 个元素",
+	"timeline.menu.exportMedia": "导出此媒体文件",
+	"timeline.menu.expandKeyframes": "展开关键帧",
+	"timeline.menu.collapseKeyframes": "折叠关键帧",
+	"timeline.menu.revealMedia": "在素材中定位",
+	"timeline.menu.replaceMedia": "替换素材（即将支持）",
 
 	// AI 智剪面板
 	"ai.title": "AI 空间智剪引擎",

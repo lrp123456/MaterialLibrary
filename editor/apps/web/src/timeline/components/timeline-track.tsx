@@ -5,6 +5,7 @@ import { TimelineElement } from "./timeline-element";
 import type { TimelineTrack } from "@/timeline";
 import type { TimelineElement as TimelineElementType } from "@/timeline";
 import { TIMELINE_LAYERS } from "./layers";
+import { TransitionOverlay } from "./transition-overlay";
 import type { ElementDragView } from "@/timeline";
 
 interface TimelineTrackContentProps {
@@ -108,6 +109,7 @@ export function TimelineTrackContent({
 						);
 					})
 				)}
+				<TransitionOverlay track={track} zoomLevel={zoomLevel} />
 			</div>
 		</div>
 	);

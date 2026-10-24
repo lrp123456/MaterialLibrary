@@ -19,6 +19,8 @@ export type BackdropSource = {
 	source: CanvasImageSource;
 	width: number;
 	height: number;
+	/** 视频帧时间戳，用于判断画面是否真的变了（canvas 对象会被复用）。 */
+	revision?: number;
 };
 
 export interface ResolvedBlurBackgroundNodeState {

@@ -14,12 +14,15 @@ import { DraggableItem } from "@/components/editor/panels/assets/draggable-item"
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import {
+	authHeaders,
 	cloudRowSelectionId,
 	downloadCloudAssetToLocal,
 	mergeMediaRows,
 	useCloudMediaList,
 	type MergedMediaRow,
 } from "@/components/editor/panels/assets/views/media-merged";
+import { snapshotDownloadPath } from "@/services/cloud-snapshots/fid-ref";
+import { downloadMediaAsset, downloadMediaUrl } from "@/media/download-asset";
 import {
 	ContextMenu,
 	ContextMenuContent,
@@ -44,6 +47,7 @@ import { useEditor } from "@/editor/use-editor";
 import { useFileUpload } from "@/media/use-file-upload";
 import { invokeAction } from "@/actions";
 import { processMediaAssets } from "@/media/processing";
+import { getMediaStorageIssue, getVideoDecodeIssue } from "@/media/runtime-capabilities";
 import { showMediaUploadToast } from "@/media/upload-toast";
 import {
 	SelectableItem,
@@ -108,26 +112,50 @@ export function MediaView({ filter = "all" }: { filter?: MediaTypeFilter }) {
 			return;
 		}
 
+		const storageIssue = getMediaStorageIssue();
+		if (storageIssue) {
+			toast.error(storageIssue.title, {
+				description: storageIssue.description,
+				duration: 12000,
+			});
+			return;
+		}
+
+		const videos = files.filter((file) => file.type.startsWith("video/"));
+		const videoIssue = videos.length > 0 ? getVideoDecodeIssue() : null;
+		if (videoIssue) {
+			toast.warning(`${videoIssue.title}（已跳过 ${videos.length} 个视频）`, {
+				description: videoIssue.description,
+				duration: 12000,
+			});
+		}
+		const importable = videoIssue
+			? files.filter((file) => !file.type.startsWith("video/"))
+			: files;
+		if (importable.length === 0) return;
+
 		setIsProcessing(true);
 		setProgress(0);
 		try {
 			await showMediaUploadToast({
-				filesCount: files.length,
+				filesCount: importable.length,
 				promise: async () => {
 					const processedAssets = await processMediaAssets({
-						files,
+						files: importable,
 						onProgress: (progress: { progress: number }) =>
 							setProgress(progress.progress),
 					});
+					const createdAssets: typeof processedAssets = [];
 					for (const asset of processedAssets) {
-						await editor.media.addMediaAsset({
+						const created = await editor.media.addMediaAsset({
 							projectId: activeProject.metadata.id,
 							asset,
 						});
+						if (created) createdAssets.push(asset);
 					}
 					return {
-						uploadedCount: processedAssets.length,
-						assetNames: processedAssets.map((asset) => asset.name),
+						uploadedCount: createdAssets.length,
+						assetNames: createdAssets.map((asset) => asset.name),
 					};
 				},
 			});
@@ -479,15 +507,31 @@ function MediaItemWithContextMenu({
 	}) => void;
 }) {
 	const { isSelected, selectedIds } = useSelection();
+	const assets = useEditor((e) => e.media.getAssets());
 	const idsToDelete = isSelected(item.id) ? selectedIds : [item.id];
 	const deleteLabel =
 		idsToDelete.length > 1 ? `移除选中的 ${idsToDelete.length} 项素材` : t("assets.context.delete", "从媒体池移除");
+	const exportLabel =
+		idsToDelete.length > 1
+			? `导出所选 ${idsToDelete.length} 项素材`
+			: t("assets.context.exportClip", "导出素材文件");
+
+	const handleExport = (event: React.MouseEvent) => {
+		event.stopPropagation();
+		const targets = assets.filter((asset) => idsToDelete.includes(asset.id));
+		const exported = targets.filter((asset) => downloadMediaAsset(asset)).length;
+		if (!exported) {
+			toast.error("找不到原始文件，无法导出");
+			return;
+		}
+		toast.success(exported > 1 ? `已开始导出 ${exported} 个文件` : "已开始导出");
+	};
 
 	return (
 		<ContextMenu>
 			<ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
 			<ContextMenuContent>
-				<ContextMenuItem>{t("assets.context.exportClip", "导出片段")}</ContextMenuItem>
+				<ContextMenuItem onClick={handleExport}>{exportLabel}</ContextMenuItem>
 				<ContextMenuItem
 					variant="destructive"
 					onClick={(event: React.MouseEvent<HTMLDivElement>) =>
@@ -627,55 +671,78 @@ function CloudMediaRow({
 			.finally(() => setIsImporting(false));
 	};
 
+	const handleExport = async (event: React.MouseEvent) => {
+		event.stopPropagation();
+		try {
+			await downloadMediaUrl(snapshotDownloadPath(item.fid), item.file_name, {
+				headers: authHeaders(),
+			});
+			toast.success(`已开始导出「${item.file_name}」`);
+		} catch (error) {
+			toast.error(
+				`导出「${item.file_name}」失败：${error instanceof Error ? error.message : "未知错误"}`,
+			);
+		}
+	};
+
 	return (
-		<SelectableItem
-			className={cn(!isGrid && "w-full")}
-			id={cloudRowSelectionId({ fid: item.fid })}
-		>
-			<div className={cn("relative", !isGrid && "w-full")}>
-				<DraggableItem
-					name={item.file_name}
-					preview={
-						<CloudPreview item={item} variant={isGrid ? "grid" : "compact"} />
-					}
-					dragData={{
-						id: cloudRowSelectionId({ fid: item.fid }),
-						type: "media",
-						mediaType: item.kind,
-						name: item.file_name,
-						targetElementTypes: [...MASKABLE_ELEMENT_TYPES],
-					}}
-					// 关键：不可拖拽，只能导入
-					isDraggable={false}
-					variant={isGrid ? "card" : "compact"}
-					isRounded={isGrid ? false : undefined}
-					trailing={
-						isGrid ? undefined : (
-							<MediaRowMeta duration={item.duration} origin="cloud" />
-						)
-					}
-				/>
-				{isImporting ? (
-					<div className="bg-background/75 text-foreground pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-sm text-[10px] font-bold">
-						导入中…
-					</div>
-				) : (
-					<button
-						type="button"
-						onClick={handleImport}
-						title="下载到本次素材，之后才能拖到时间线"
-						className={cn(
-							"absolute z-10 cursor-pointer rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-bold text-white transition-colors hover:bg-black/85",
-							isGrid
-								? "bottom-1 left-1 right-1 text-center"
-								: "right-1 top-1/2 -translate-y-1/2",
+		<ContextMenu>
+			<ContextMenuTrigger asChild>
+				<SelectableItem
+					className={cn(!isGrid && "w-full")}
+					id={cloudRowSelectionId({ fid: item.fid })}
+				>
+					<div className={cn("relative", !isGrid && "w-full")}>
+						<DraggableItem
+							name={item.file_name}
+							preview={
+								<CloudPreview item={item} variant={isGrid ? "grid" : "compact"} />
+							}
+							dragData={{
+								id: cloudRowSelectionId({ fid: item.fid }),
+								type: "media",
+								mediaType: item.kind,
+								name: item.file_name,
+								targetElementTypes: [...MASKABLE_ELEMENT_TYPES],
+							}}
+							// 关键：不可拖拽，只能导入
+							isDraggable={false}
+							variant={isGrid ? "card" : "compact"}
+							isRounded={isGrid ? false : undefined}
+							trailing={
+								isGrid ? undefined : (
+									<MediaRowMeta duration={item.duration} origin="cloud" />
+								)
+							}
+						/>
+						{isImporting ? (
+							<div className="bg-background/75 text-foreground pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-sm text-[10px] font-bold">
+								导入中…
+							</div>
+						) : (
+							<button
+								type="button"
+								onClick={handleImport}
+								title="下载到本次素材，之后才能拖到时间线"
+								className={cn(
+									"absolute z-10 cursor-pointer rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-bold text-white transition-colors hover:bg-black/85",
+									isGrid
+										? "bottom-1 left-1 right-1 text-center"
+										: "right-1 top-1/2 -translate-y-1/2",
+								)}
+							>
+								导入到本次
+							</button>
 						)}
-					>
-						导入到本次
-					</button>
-				)}
-			</div>
-		</SelectableItem>
+					</div>
+				</SelectableItem>
+			</ContextMenuTrigger>
+			<ContextMenuContent>
+				<ContextMenuItem onClick={handleExport}>
+					{t("assets.context.exportClip", "导出素材文件")}
+				</ContextMenuItem>
+			</ContextMenuContent>
+		</ContextMenu>
 	);
 }
 

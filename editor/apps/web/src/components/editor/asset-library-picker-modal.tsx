@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useEditor } from "@/editor/use-editor";
 import { processMediaAssets } from "@/media/processing";
+import { getMediaStorageIssue, getVideoDecodeIssue } from "@/media/runtime-capabilities";
 import { registerMediaFid } from "@/services/cloud-snapshots";
 import { buildElementFromMedia } from "@/timeline/element-utils";
 import { DEFAULT_NEW_ELEMENT_DURATION } from "@/timeline/creation";
@@ -35,11 +36,17 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { cn } from "@/utils/ui";
 import {
 	isSelected as isVersionSelected,
+	missingSlotPresets,
+	onDerivativeSlotPrefsChange,
+	readDerivativeSlotPrefs,
+	slotStatusFromDetail,
 	toggleSelection,
 	versionsOf,
 	type AssetLike,
 	type AssetVersion,
 	type DerivativeLike,
+	type DerivativeSlotPrefs,
+	type DerivativeSlotPreset,
 } from "../../../../../../shared/ml-asset-core/index";
 import { AssetLibraryFilterPanel } from "./asset-library-filter-panel";
 import { AssetLibraryPreviewLightbox } from "./asset-library-preview-lightbox";
@@ -244,6 +251,13 @@ export function AssetLibraryPickerModal({
 	const [derivativeCache, setDerivativeCache] = useState<Record<string, DerivativeLike[]>>({});
 	const [derivativeLoading, setDerivativeLoading] = useState<Record<string, boolean>>({});
 	const [derivativeError, setDerivativeError] = useState<Record<string, string>>({});
+	// 默认衍生图插槽：缺哪档补哪档；设置页可整体关闭或按类目改规格
+	const [slotPrefs, setSlotPrefs] = useState<DerivativeSlotPrefs>(() => readDerivativeSlotPrefs());
+	const [restageStatusByFid, setRestageStatusByFid] = useState<
+		Record<string, Record<string, unknown>>
+	>({});
+	const [slotBusyFid, setSlotBusyFid] = useState("");
+	const [slotErrorByFid, setSlotErrorByFid] = useState<Record<string, string>>({});
 	// 在途 fid：避免重复点击时并发拉同一份衍生详情
 	const derivativeInFlight = useRef<Set<string>>(new Set());
 	const [selectionNotice, setSelectionNotice] = useState("");
@@ -297,6 +311,9 @@ export function AssetLibraryPickerModal({
 		}
 	}, [filters, keyword, sort, page, pageSize, reloadToken]);
 
+	// 设置页改了「默认衍生图预置」后，弹窗不用重开也能跟着变
+	useEffect(() => onDerivativeSlotPrefsChange(setSlotPrefs), []);
+
 	// 每次打开只清空「选择态」，保留上次的筛选条件（素材库习惯：再次打开接着上次的位置）
 	useEffect(() => {
 		if (!isOpen) return;
@@ -304,6 +321,7 @@ export function AssetLibraryPickerModal({
 		setExpandedFid("");
 		setSelectionNotice("");
 		setPreviewFid("");
+		setSlotErrorByFid({});
 		setPage(1);
 	}, [isOpen]);
 
@@ -371,10 +389,10 @@ export function AssetLibraryPickerModal({
 	};
 
 	const ensureDerivatives = useCallback(
-		async (item: MaterialAssetItem) => {
+		async (item: MaterialAssetItem, options: { force?: boolean } = {}) => {
 			if (!item.fid || item.kind !== "image") return;
 			if (derivativeInFlight.current.has(item.fid)) return;
-			if (Object.prototype.hasOwnProperty.call(derivativeCache, item.fid)) return;
+			if (!options.force && Object.prototype.hasOwnProperty.call(derivativeCache, item.fid)) return;
 			derivativeInFlight.current.add(item.fid);
 			setDerivativeError((prev) => {
 				const next = { ...prev };
@@ -395,6 +413,11 @@ export function AssetLibraryPickerModal({
 				const list = Array.isArray(detail?.derivatives) ? detail.derivatives : [];
 				// 只有成功拿到详情才写缓存，失败不能被永久缓存成 []
 				setDerivativeCache((prev) => ({ ...prev, [item.fid]: list }));
+				// 插槽要显示「排队中 / 生成中 / 失败」而不是一律「待生成」
+				setRestageStatusByFid((prev) => ({
+					...prev,
+					[item.fid]: detail?.restageStatus || {},
+				}));
 				setDerivativeError((prev) => {
 					const next = { ...prev };
 					delete next[item.fid];
@@ -439,6 +462,78 @@ export function AssetLibraryPickerModal({
 	const expandedVersions = expandedItem
 		? versionsOf(toAssetLike(expandedItem), derivativeCache[expandedItem.fid], buildVersionUrls())
 		: [];
+	/** 这类图片默认还缺哪几档画幅；详情没读到之前不显示插槽，避免误报。 */
+	const expandedSlots =
+		expandedItem && expandedItem.kind === "image" && derivativeCache[expandedItem.fid]
+			? missingSlotPresets(expandedItem.category, derivativeCache[expandedItem.fid], slotPrefs)
+			: [];
+
+	const slotStatus = (slot: DerivativeSlotPreset) => {
+		if (!expandedItem) return "missing" as const;
+		if (slotBusyFid === expandedItem.fid) return "running" as const;
+		return slotStatusFromDetail(slot.kind, restageStatusByFid[expandedItem.fid]);
+	};
+
+	const slotHeadline = (slot: DerivativeSlotPreset) => {
+		const status = slotStatus(slot);
+		if (status === "running") return "生成中…";
+		if (status === "queued") return "排队中";
+		if (status === "failed") return `${slot.shortLabel} 待重试`;
+		return `${slot.shortLabel} 待生成`;
+	};
+
+	const slotActionText = (slot: DerivativeSlotPreset) => {
+		const status = slotStatus(slot);
+		if (status === "running") return "生成中…";
+		if (status === "queued") return "排队中";
+		if (status === "failed") return "重试生成";
+		return "点击生成";
+	};
+
+	/**
+	 * 触发生成。后端 restage 是同步长请求，多档缺失时合并成一次调用，
+	 * 同一时刻只允许一张图在跑，避免把生图通道打爆。
+	 *
+	 * model 显式传 Seedream 5.0 Flash：default 工作流的 restage_dual 可能为省成本挂到
+	 * 本机免费模型，手动点的人是盯着插槽等出图的，不能跟着排进本机 GPU 长队。
+	 */
+	const generateSlots = async (slots: DerivativeSlotPreset[]) => {
+		if (!expandedItem || !expandedItem.fid || slots.length === 0) return;
+		if (slotBusyFid) return;
+		const fid = expandedItem.fid;
+		setSlotBusyFid(fid);
+		setSlotErrorByFid((prev) => ({ ...prev, [fid]: "" }));
+		try {
+			const res = await fetch(`/api/viewer/assets/${encodeURIComponent(fid)}/restage`, {
+				method: "POST",
+				headers: { ...authHeaders(), "Content-Type": "application/json" },
+				body: JSON.stringify({
+					ratios: slots.map((slot) => slot.ratio),
+					model: "seedream5flash",
+					gpuPriority: "high",
+					forceMember: true,
+				}),
+			});
+			const json = await res.json().catch(() => ({}));
+			if (!res.ok) throw new Error(json?.error || `生成失败 (HTTP ${res.status})`);
+			const channels = (json?.data?.channels || {}) as Record<string, { adapterId?: string; model?: string }>;
+			const models = Object.values(channels)
+				.map((entry) => entry?.model || entry?.adapterId || "")
+				.filter(Boolean);
+			if (models.length) {
+				toast.success(`已生成 · 走 ${[...new Set(models)].join(" / ")}`);
+			}
+			// 缓存里那份是生成前的快照，必须强制重读，否则插槽会一直停在「待生成」
+			await ensureDerivatives(expandedItem, { force: true });
+		} catch (e: any) {
+			setSlotErrorByFid((prev) => ({
+				...prev,
+				[fid]: String(e?.message || "生成失败，请稍后重试"),
+			}));
+		} finally {
+			setSlotBusyFid("");
+		}
+	};
 
 	const previewItem = items.find((it) => it.fid === previewFid) || null;
 	const previewVersions = useMemo(
@@ -526,11 +621,43 @@ export function AssetLibraryPickerModal({
 		const toastId = toast.loading(`正在从素材库提取 ${chosen.length} 个版本...`);
 
 		try {
+			// 非安全上下文会同时禁用 OPFS 与 WebCodecs，先在入口说清楚，
+			// 否则只会得到「没有素材成功入库」这种看不出原因的结果。
+			const storageIssue = getMediaStorageIssue();
+			if (storageIssue) {
+				toast.error(storageIssue.title, {
+					id: toastId,
+					description: storageIssue.description,
+					duration: 12000,
+				});
+				return;
+			}
+
+			const videoVersions = chosen.filter((version) => version.kind === "video");
+			const videoIssue = videoVersions.length > 0 ? getVideoDecodeIssue() : null;
+			if (videoIssue && videoVersions.length === chosen.length) {
+				toast.error(videoIssue.title, {
+					id: toastId,
+					description: videoIssue.description,
+					duration: 12000,
+				});
+				return;
+			}
+			if (videoIssue) {
+				toast.warning(`${videoIssue.title}（已跳过 ${videoVersions.length} 个视频）`, {
+					description: videoIssue.description,
+					duration: 12000,
+				});
+			}
+			const importable = videoIssue
+				? chosen.filter((version) => version.kind !== "video")
+				: chosen;
+
 			const filesToProcess: { file: File; version: AssetVersion }[] = [];
 			const failedNames: string[] = [];
 
 			// 完全不依赖 items：切换筛选/翻页/搜索后，选中项仍可按版本自身信息下载
-			for (const version of chosen) {
+			for (const version of importable) {
 				const resp = await fetch(buildDownloadPath(version.fid, version.derivativeId), {
 					headers: authHeaders(),
 				});
@@ -546,7 +673,13 @@ export function AssetLibraryPickerModal({
 			}
 
 			if (filesToProcess.length === 0) {
-				toast.error("导入素材失败：没有素材成功入库", { id: toastId });
+				const names = failedNames.slice(0, 3).join("、");
+				toast.error(
+					failedNames.length > 0
+						? `导入素材失败：${names}${failedNames.length > 3 ? " 等" : ""} 下载失败`
+						: "导入素材失败：所选版本没有可导入的文件",
+					{ id: toastId },
+				);
 				return;
 			}
 
@@ -604,7 +737,9 @@ export function AssetLibraryPickerModal({
 			}
 
 			if (createdCount === 0) {
-				toast.error("导入素材失败：没有素材成功入库", { id: toastId });
+				toast.error("导入素材失败：文件已下载，但没有素材成功入库（详见上方错误提示）", {
+					id: toastId,
+				});
 				return;
 			}
 
@@ -986,7 +1121,7 @@ export function AssetLibraryPickerModal({
 
 				{/* 版本选择面板：原图 + 全部衍生版 */}
 				{expandedItem ? (
-					<div className="max-h-56 shrink-0 overflow-y-auto border-t border-border/50 px-5 py-2 scrollbar-thin">
+					<div className="max-h-72 shrink-0 overflow-y-auto border-t border-border/50 px-5 py-2 scrollbar-thin">
 						<div className="mb-2 flex items-center justify-between gap-3">
 							<span className="truncate text-xs font-bold">
 								选择版本 · {expandedItem.file_name}
@@ -1061,8 +1196,70 @@ export function AssetLibraryPickerModal({
 										</button>
 									</div>
 								))}
+
+								{/* 缺失画幅插槽：这类图片默认就该有这一档，缺的就地补出来 */}
+								{expandedSlots.map((slot) => (
+									<button
+										key={`slot-${slot.kind}`}
+										type="button"
+										disabled={Boolean(slotBusyFid) || slotStatus(slot) === "queued"}
+										onClick={() => void generateSlots([slot])}
+										title={`${slot.label} 是这张图的默认规格，点一下现场生成（Seedream 5.0 Flash）`}
+										className={cn(
+											"flex w-32 flex-col gap-1 rounded-lg border-2 border-dashed p-1.5 text-left cursor-pointer",
+											slotStatus(slot) === "failed"
+												? "border-rose-400/70 bg-rose-500/5"
+												: "border-sky-400/60 bg-sky-400/5",
+											(Boolean(slotBusyFid) || slotStatus(slot) === "queued") &&
+												"opacity-70 cursor-wait",
+										)}
+									>
+										<div className="flex aspect-video w-full flex-col items-center justify-center gap-1 rounded bg-sky-400/5">
+											{slotStatus(slot) === "running" || slotStatus(slot) === "queued" ? (
+												<HugeiconsIcon
+													icon={Loading03Icon}
+													className="size-5 animate-spin text-sky-500"
+												/>
+											) : (
+												<span
+													className={cn(
+														"text-[13px] font-black",
+														slotStatus(slot) === "failed" ? "text-rose-500" : "text-sky-600",
+													)}
+												>
+													{slotHeadline(slot)}
+												</span>
+											)}
+											<span className="rounded border border-sky-400/40 px-1.5 py-0.5 font-mono text-[9px] font-bold text-sky-600">
+												{slot.ratio}
+											</span>
+										</div>
+										<span className="w-full truncate text-[11px] font-semibold">{slot.label}</span>
+										<span className="text-[10px] text-muted-foreground">
+											{slotActionText(slot)}
+										</span>
+									</button>
+								))}
 							</div>
 						)}
+						{expandedSlots.length > 1 ? (
+							<div className="mt-2 flex justify-end">
+								<Button
+									size="sm"
+									variant="ghost"
+									className="h-7 cursor-pointer px-2 text-[11px] font-bold text-sky-600"
+									disabled={Boolean(slotBusyFid)}
+									onClick={() => void generateSlots(expandedSlots)}
+								>
+									补齐 {expandedSlots.length} 档缺失画幅
+								</Button>
+							</div>
+						) : null}
+						{slotErrorByFid[expandedItem.fid] ? (
+							<div className="mt-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[11px] font-semibold text-destructive">
+								{slotErrorByFid[expandedItem.fid]}
+							</div>
+						) : null}
 					</div>
 				) : null}
 

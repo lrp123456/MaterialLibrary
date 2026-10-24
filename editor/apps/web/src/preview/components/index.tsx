@@ -12,6 +12,7 @@ import { DEFAULT_FPS } from "@/fps/defaults";
 import { DEFAULT_CANVAS_SIZE } from "@/canvas/sizes";
 import type { RootNode } from "@/services/renderer/nodes/root-node";
 import { buildScene } from "@/services/renderer/scene-builder";
+import { subscribeClipPacks } from "@/services/clip-packs";
 import { PreviewOverlayLayer } from "./overlay-layer";
 import { PreviewInteractionOverlay } from "./preview-interaction-overlay";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
@@ -144,6 +145,9 @@ function PreviewCanvas({
 	const lastFrameRef = useRef(-1);
 	const lastSceneRef = useRef<RootNode | null>(null);
 	const renderingRef = useRef(false);
+	const lastRenderErrorRef = useRef<{ message: string; at: number } | null>(null);
+	// 资源包是异步注册的：加载完成后强制重画当前帧，否则新特效要等下一次场景变化才出现。
+	const [packsVersion, setPacksVersion] = useState(0);
 	const { width: nativeWidth, height: nativeHeight } = usePreviewSize();
 	const viewportSize = useContainerSize({ containerRef: viewportRef });
 	const editor = useEditor();
@@ -210,8 +214,28 @@ function PreviewCanvas({
 			.render({ node: renderTree, time: renderTime })
 			.then(() => {
 				renderingRef.current = false;
+			})
+			.catch((error: unknown) => {
+				// 关键：失败也必须复位，否则 renderingRef 永久为 true，整条预览定格。
+				renderingRef.current = false;
+				const message = error instanceof Error ? error.message : String(error);
+				const now = performance.now();
+				const last = lastRenderErrorRef.current;
+				if (!last || last.message !== message || now - last.at > 5000) {
+					lastRenderErrorRef.current = { message, at: now };
+					console.error("[preview] 渲染失败：", error);
+				}
 			});
-	}, [renderer, renderTree, editor.playback, editor.timeline]);
+	}, [renderer, renderTree, editor.playback, editor.timeline, packsVersion]);
+
+	useEffect(
+		() =>
+			subscribeClipPacks(() => {
+				lastFrameRef.current = -1;
+				setPacksVersion((version) => version + 1);
+			}),
+		[],
+	);
 
 	useRafLoop(render);
 

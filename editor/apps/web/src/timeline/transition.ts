@@ -16,7 +16,12 @@
  */
 import type { ParamValues } from "@/params";
 import { mediaTime, TICKS_PER_SECOND, type MediaTime, roundMediaTime } from "@/wasm";
-import type { SceneTracks, TimelineElement, TimelineTrack, VideoElement } from "./types";
+import type {
+	SceneTracks,
+	TimelineElement,
+	TimelineTrack,
+	TransitionableElement,
+} from "./types";
 
 /**
  * 剪辑点判定的容差：1 帧（按 60fps 计）。
@@ -28,7 +33,7 @@ export const TRANSITION_CUT_EPSILON = mediaTime({
 
 export interface TransitionPair {
 	track: TimelineTrack;
-	element: VideoElement;
+	element: TransitionableElement;
 	next: TimelineElement;
 	/** 剪辑点 C：A 的结尾，也是窗口 [C-d, C] 的右端 */
 	clipPoint: MediaTime;
@@ -69,6 +74,13 @@ export function findTrackOfElement({
 	return null;
 }
 
+/** 视频与图片都可以作为转场的两端（静态图靠时间线时长参与混合）。 */
+export function canElementHaveTransition(
+	element: TimelineElement,
+): element is TransitionableElement {
+	return element.type === "video" || element.type === "image";
+}
+
 /**
  * 应用转场前用：找 A 后面**紧邻**的 B。
  * 判定为同轨且 `B.startTime === A.startTime + A.duration`（允许 1 帧误差）。
@@ -79,12 +91,12 @@ export function findAdjacentSuccessor({
 }: {
 	tracks: SceneTracks;
 	elementId: string;
-}): { track: TimelineTrack; element: VideoElement; next: TimelineElement } | null {
+}): { track: TimelineTrack; element: TransitionableElement; next: TimelineElement } | null {
 	const track = findTrackOfElement({ tracks, elementId });
 	if (!track) return null;
 
 	const element = track.elements.find((item) => item.id === elementId);
-	if (!element || element.type !== "video") return null;
+	if (!element || !canElementHaveTransition(element)) return null;
 
 	const expectedStart = elementEndTime({ element });
 	const next = track.elements.find(
@@ -117,7 +129,7 @@ export function resolveTransitionPair({
 	if (!track) return null;
 
 	const element = track.elements.find((item) => item.id === elementId);
-	if (!element || element.type !== "video") return null;
+	if (!element || !canElementHaveTransition(element)) return null;
 
 	const transition = element.transitionOut;
 	if (!transition || transition.duration <= 0) return null;
@@ -171,7 +183,7 @@ export interface ApplyTransitionOptions {
  * - A：只写入 transitionOut，**时长与 trim 都不动**（因此不需要素材余量）
  * - B：startTime -= d（trimStart / duration 都不动）
  * - 同轨后续元素整体前移 d（波纹），总时长减 d
- * - d 上限为 A 的时长，避免 B 越过 A 的起点
+ * - d 上限为两段中较短的那段，避免窗口越过 A 的起点或吃掉 B 的开头
  */
 export function applyTransitionToTracks({
 	tracks,
@@ -179,14 +191,14 @@ export function applyTransitionToTracks({
 	options,
 }: {
 	tracks: SceneTracks;
-	pair: { track: TimelineTrack; element: VideoElement; next: TimelineElement };
+	pair: { track: TimelineTrack; element: TransitionableElement; next: TimelineElement };
 	options: ApplyTransitionOptions;
 }): SceneTracks {
 	const { track, element, next } = pair;
 
-	// 转场不能比 A 本身还长，否则窗口会越过 A 的起点
+	// 窗口 [A.end-d, A.end] 要同时容得下 A 的尾部和 B 的开头
 	const duration = roundMediaTime({
-		time: Math.min(options.duration, element.duration),
+		time: Math.min(options.duration, element.duration, next.duration),
 	});
 	if (duration <= 0) return tracks;
 
@@ -307,7 +319,7 @@ export function collectClipPoints({
 	const points: ClipPointCandidate[] = [];
 	for (const track of [tracks.main, ...tracks.overlay]) {
 		for (const element of track.elements) {
-			if (element.type !== "video") continue;
+			if (!canElementHaveTransition(element)) continue;
 
 			if (element.transitionOut && element.transitionOut.duration > 0) {
 				const pair = resolveTransitionPair({ tracks, elementId: element.id });
@@ -371,4 +383,127 @@ export function pickTransitionTarget({
 		}
 	}
 	return best ? { elementId: best.elementId } : null;
+}
+
+/**
+ * 修改已有转场的时长 / 预设 / 参数。
+ *
+ * 与 apply/remove 用同一套几何：A.end 不动，B.start = A.end - d，
+ * 后续元素跟着平移 (旧 d - 新 d)。因此只需要一次整轨快照就能撤销。
+ */
+export function updateTransitionInTracks({
+	tracks,
+	pair,
+	type,
+	duration,
+	params,
+}: {
+	tracks: SceneTracks;
+	pair: TransitionPair;
+	type?: string;
+	duration: MediaTime;
+	params?: ParamValues;
+}): SceneTracks {
+	const { track, element, next } = pair;
+	const previous = element.transitionOut;
+	if (!previous || previous.duration <= 0) return tracks;
+
+	// 不能超过任一端片段的时长，否则 B 会跑到 A 起点之前 / 转场窗口越过素材
+	const maxDuration = Math.min(element.duration, next.duration);
+	const nextDuration = roundMediaTime({
+		time: Math.max(1, Math.min(duration, maxDuration)),
+	});
+	const delta = roundMediaTime({ time: previous.duration - nextDuration });
+	const nextEndTime = elementEndTime({ element: next });
+
+	const updatedElements = track.elements.map((item) => {
+		if (item.id === element.id) {
+			return {
+				...item,
+				transitionOut: {
+					type: type ?? previous.type,
+					duration: nextDuration,
+					params: { ...(params ?? previous.params) },
+				},
+			} as TimelineElement;
+		}
+		if (item.id === next.id) {
+			return {
+				...item,
+				startTime: roundMediaTime({ time: item.startTime + delta }),
+			} as TimelineElement;
+		}
+		if (item.startTime >= nextEndTime - TRANSITION_CUT_EPSILON) {
+			return {
+				...item,
+				startTime: roundMediaTime({ time: item.startTime + delta }),
+			} as TimelineElement;
+		}
+		return item;
+	});
+
+	return replaceTrack({
+		tracks,
+		trackId: track.id,
+		nextTrack: { ...track, elements: updatedElements } as TimelineTrack,
+	});
+}
+
+/** 找出离给定时间最近的剪辑点；拖拽落点用，超出容差返回 null。 */
+export function findNearestCutPoint({
+	tracks,
+	time,
+	tolerance = TICKS_PER_SECOND * 0.75,
+}: {
+	tracks: SceneTracks;
+	time: MediaTime;
+	tolerance?: number;
+}): ClipPointCandidate | null {
+	let best: ClipPointCandidate | null = null;
+	for (const candidate of collectClipPoints({ tracks })) {
+		const distance = Math.abs(candidate.time - time);
+		if (distance > tolerance) continue;
+		if (!best || distance < Math.abs(best.time - time)) best = candidate;
+	}
+	return best;
+}
+
+/**
+ * 清理失效转场：B 被删除 / 被移走后，A 上的 transitionOut 会成为永远不生效的脏数据。
+ * 每次 updateTracks 时做一次（只读扫描，没有失效项时原样返回）。
+ */
+export function sanitizeTransitionGeometry({
+	tracks,
+}: {
+	tracks: SceneTracks;
+}): SceneTracks {
+	const invalid = new Set<string>();
+	for (const track of [tracks.main, ...tracks.overlay]) {
+		for (const element of track.elements) {
+			if (!canElementHaveTransition(element) || !element.transitionOut) continue;
+			if (!resolveTransitionPair({ tracks, elementId: element.id })) {
+				invalid.add(element.id);
+			}
+		}
+	}
+	if (invalid.size === 0) return tracks;
+
+	const clean = <TTrack extends TimelineTrack>(track: TTrack): TTrack => {
+		if (!track.elements.some((element) => invalid.has(element.id))) return track;
+		return {
+			...track,
+			elements: track.elements.map((element) =>
+				invalid.has(element.id)
+					? withoutTransitionFields({ element })
+					: element,
+			),
+		} as TTrack;
+	};
+
+	return {
+		...tracks,
+		main: clean(tracks.main),
+		overlay: tracks.overlay.map(clean),
+		audio: tracks.audio.map(clean),
+	};
 }

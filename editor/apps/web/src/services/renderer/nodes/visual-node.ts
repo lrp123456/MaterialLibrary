@@ -29,6 +29,11 @@ export interface ResolvedVisualSourceNodeState extends ResolvedVisualNodeState {
 	source: CanvasImageSource;
 	sourceWidth: number;
 	sourceHeight: number;
+	/**
+	 * 视频帧的时间戳（秒）。CanvasSink 的 poolSize 会循环复用同一批 canvas，
+	 * 光靠对象标识判断「这帧有没有变」会误判成没变，画面就定格了。
+	 */
+	sourceRevision?: number;
 }
 
 export abstract class VisualNode<

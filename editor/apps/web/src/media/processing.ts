@@ -5,6 +5,7 @@ import { storageService } from "@/services/storage/service";
 import type { MediaAsset } from "@/media/types";
 import { readVideoFile } from "./mediabunny";
 import type { VideoFileData } from "./mediabunny";
+import { getVideoDecodeIssue } from "./runtime-capabilities";
 import { renderThumbnailDataUrl } from "./thumbnail";
 
 export interface ProcessedMediaAsset extends Omit<MediaAsset, "id"> {}
@@ -14,7 +15,15 @@ const getUnsupportedVideoDescription = ({
 }: {
 	codec: VideoFileData["codec"];
 }): string => {
+	const decodeIssue = getVideoDecodeIssue();
+	if (decodeIssue) return decodeIssue.description;
+
 	const codecLabel = codec ? codec.toUpperCase() : "this video codec";
+
+	if (codec === "avc") {
+		// AVC 就是 H.264，再说"转成 H.264"只会误导：这里是这个流的 profile/level 不被解码器接受
+		return `${codecLabel} is already H.264, but this stream's profile/level is not supported by the browser decoder. Re-export it as H.264 Baseline/Main with yuv420p and reimport.`;
+	}
 
 	return codec === "hevc"
 		? `${codecLabel} cannot be decoded in this browser, so this clip may not preview correctly. Convert it to H.264 MP4 or try importing it in Safari.`

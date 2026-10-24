@@ -68,6 +68,8 @@ export interface ClipPack {
 	manifest: {
 		id: string;
 		type: ClipPackType;
+		/** effect 包可声明归入「特效 / 滤镜 / 调节」哪一栏，缺省为特效 */
+		category?: "effect" | "filter" | "adjust";
 		name: { zh: string; en?: string };
 		description?: { zh: string; en?: string };
 		version: string;
@@ -171,6 +173,21 @@ const transitionUniformExprs = new Map<
 	string,
 	Record<string, string>
 >();
+
+/** 上一轮通过资源包注册进 effectsRegistry 的 id，重载时先摘掉，避免改包不生效。 */
+const packEffectIds = new Set<string>();
+
+const listeners = new Set<() => void>();
+
+/** 资源包加载/重载完成后通知订阅者（特效面板、预览树都靠它感知新定义）。 */
+export function subscribeClipPacks(listener: () => void): () => void {
+	listeners.add(listener);
+	return () => listeners.delete(listener);
+}
+
+function notifyClipPacks(): void {
+	for (const listener of listeners) listener();
+}
 
 let inflight: Promise<void> | null = null;
 
@@ -287,6 +304,19 @@ function toEffectDefinition(pack: ClipPack): {
 		};
 	}
 
+	// GPU 侧只认这几个 uniform，拼错会在渲染期抛错并冻结预览，必须在加载期拦住。
+	const badUniforms = passes.flatMap((pass) =>
+		Object.keys(pass.uniforms || {}).filter(
+			(key) => !/^(u_sigma|u_step|u_direction|u_scalar[0-3])$/.test(key),
+		),
+	);
+	if (badUniforms.length) {
+		return {
+			definition: null,
+			reason: `uniform 不受支持：${[...new Set(badUniforms)].join(", ")}（只允许 u_sigma/u_step/u_direction/u_scalar0..3）`,
+		};
+	}
+
 	const { params, skipped } = toParamDefinitions(pack.manifest.params);
 	if (skipped.length) {
 		// 只记录，不阻断：跳过的参数不影响已有参数的渲染。
@@ -300,6 +330,7 @@ function toEffectDefinition(pack: ClipPack): {
 		type: pack.id,
 		name: pack.manifest.name.zh,
 		keywords: [pack.manifest.name.zh, ...(pack.manifest.tags || [])],
+		category: pack.manifest.category ?? "effect",
 		params,
 		renderer: {
 			passes: passes.map((pass) => ({
@@ -490,8 +521,15 @@ async function load(): Promise<void> {
 	} catch (e) {
 		status.loaded = false;
 		status.error = e instanceof Error ? e.message : String(e);
+		notifyClipPacks();
 		return;
 	}
+
+	// 新快照就绪后再摘旧定义：请求失败时保持上一轮可用状态。
+	for (const effectId of packEffectIds) {
+		effectsRegistry.unregister(effectId);
+	}
+	packEffectIds.clear();
 
 	for (const pack of items) {
 		status.byType[pack.type] = (status.byType[pack.type] || 0) + 1;
@@ -516,9 +554,9 @@ async function load(): Promise<void> {
 				block(reason || "无法注册");
 				continue;
 			}
-			if (!effectsRegistry.has(definition.type)) {
-				effectsRegistry.register({ key: definition.type, definition });
-			}
+			// 同一轮重载里直接覆盖：包改了参数/默认值要能热更新。
+			effectsRegistry.register({ key: definition.type, definition });
+			packEffectIds.add(definition.type);
 			status.registered.push(pack.id);
 			entry.usable = true;
 			status.packs.push(entry);
@@ -567,6 +605,7 @@ async function load(): Promise<void> {
 	}
 
 	status.loaded = true;
+	notifyClipPacks();
 }
 
 /** 幂等：编辑器启动时调用一次即可，失败不抛错（不阻断编辑）。 */

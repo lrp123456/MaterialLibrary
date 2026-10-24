@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type DragEvent } from "react";
 import { toast } from "sonner";
 import { PanelView } from "./base-panel";
 import { useEditor } from "@/editor/use-editor";
@@ -14,6 +14,7 @@ import {
 } from "@/services/clip-packs";
 import { mediaTimeFromSeconds } from "@/wasm";
 import { pickTransitionTarget, resolveTransitionPair } from "@/timeline/transition";
+import { usePropertiesStore } from "@/components/editor/panels/properties/stores/properties-store";
 
 /**
  * 转场面板。
@@ -93,6 +94,23 @@ export function TransitionView() {
 					params: preset.defaultParams,
 				}),
 			});
+
+			// 应用后直接选中 A 并打开「转场」属性页，用户不用再找一次入口
+			const applied = resolveTransitionPair({
+				tracks: editor.scenes.getActiveScene().tracks,
+				elementId: target.elementId,
+			});
+			if (applied) {
+				editor.selection.setSelectedElements({
+					elements: [
+						{ trackId: applied.track.id, elementId: applied.element.id },
+					],
+				});
+				usePropertiesStore.getState().setActiveTab({
+					elementType: applied.element.type,
+					tabId: "transition",
+				});
+			}
 			toast.success(`已应用转场：${preset.nameZh}`);
 		},
 		[editor, tracks, target, currentTransition],
@@ -130,7 +148,11 @@ export function TransitionView() {
 				<p className="text-muted-foreground px-1 pb-2 text-xs">
 					{t("assets.transition.current", "当前剪辑点已有转场，再次点选会替换")}
 				</p>
-			) : null}
+			) : (
+				<p className="text-muted-foreground px-1 pb-2 text-[11px] leading-relaxed">
+					点击卡片应用到选中片段 / 播放头旁的剪辑点；也可以直接拖到时间线两段素材的接缝上。
+				</p>
+			)}
 
 			{presets.length === 0 ? (
 				<div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
@@ -159,6 +181,20 @@ export function TransitionView() {
 							preset={preset}
 							active={currentTransition?.type === preset.id}
 							onSelect={handleApply}
+							onDragStart={(event) => {
+								editor.timeline.dragSource.begin({
+									dataTransfer: event.dataTransfer,
+									dragData: {
+										type: "transition",
+										id: preset.id,
+										name: preset.nameZh,
+										transitionType: preset.id,
+										defaultDuration: preset.defaultDuration,
+										params: preset.defaultParams,
+									},
+								});
+							}}
+							onDragEnd={() => editor.timeline.dragSource.end()}
 						/>
 					))}
 				</div>
@@ -171,16 +207,23 @@ function TransitionCard({
 	preset,
 	active,
 	onSelect,
+	onDragStart,
+	onDragEnd,
 }: {
 	preset: TransitionPreset;
 	active: boolean;
 	onSelect: (preset: TransitionPreset) => void;
+	onDragStart: (event: DragEvent<HTMLButtonElement>) => void;
+	onDragEnd: () => void;
 }) {
 	return (
 		<button
 			type="button"
 			onClick={() => onSelect(preset)}
-			title={preset.descriptionZh || preset.nameZh}
+			draggable
+			onDragStart={onDragStart}
+			onDragEnd={onDragEnd}
+			title={`${preset.descriptionZh || preset.nameZh}（可拖到时间线接缝）`}
 			className={cn(
 				"group flex flex-col gap-1 rounded-sm border p-1 text-left transition-colors",
 				active

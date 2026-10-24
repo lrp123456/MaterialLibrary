@@ -116,7 +116,7 @@ interface BaseTimelineElement {
 
 /**
  * 片段尾部的转场。`duration` 是转场总时长 d：
- * A 尾部与 B 头部各让出 d/2，渲染窗口为 [C - d/2, C + d/2]。
+ * A 尾部不动，B 整体前移 d，渲染窗口为 [C - d, C]（C = A 的结尾）。
  */
 export interface VideoTransition {
 	/** 资源包 id，如 com.mls.transition.dissolve */
@@ -124,6 +124,9 @@ export interface VideoTransition {
 	duration: MediaTime;
 	params: ParamValues;
 }
+
+/** 可以挂转场的画面元素：视频与静态图片（图片时长由时间线决定）。 */
+export type TransitionableElement = VideoElement | ImageElement;
 
 export interface VideoElement extends BaseTimelineElement {
 	type: "video";
@@ -145,6 +148,8 @@ export interface ImageElement extends BaseTimelineElement {
 	hidden?: boolean;
 	effects?: Effect[];
 	masks?: Mask[];
+	/** 绑定在本片段尾部的转场（静态图同样可以参与叠化/推移） */
+	transitionOut?: VideoTransition;
 }
 
 export interface TextElement extends BaseTimelineElement {

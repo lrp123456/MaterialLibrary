@@ -245,7 +245,12 @@ function EffectSection({
 	onToggle?: () => void;
 	onRemove?: () => void;
 }) {
-	const definition = effectsRegistry.get(effect.type);
+	// 资源包未加载时不能 get()：那会在 React 渲染期抛错并白屏。
+	const definition = effectsRegistry.has(effect.type)
+		? effectsRegistry.get(effect.type)
+		: null;
+	const title = definition?.name ?? `${effect.type}（资源包未加载）`;
+	const params = definition?.params ?? [];
 
 	return (
 		<Section
@@ -260,7 +265,7 @@ function EffectSection({
 							<Button
 								variant={effect.enabled ? "secondary" : "ghost"}
 								size="icon"
-								aria-label={`Toggle ${definition.name}`}
+								aria-label={`Toggle ${title}`}
 								onClick={onToggle}
 							>
 								<HugeiconsIcon
@@ -270,7 +275,7 @@ function EffectSection({
 							<Button
 								variant="ghost"
 								size="icon"
-								aria-label={`Remove ${definition.name}`}
+								aria-label={`Remove ${title}`}
 								onClick={onRemove}
 							>
 								<HugeiconsIcon icon={Delete02Icon} />
@@ -282,14 +287,14 @@ function EffectSection({
 				<SectionTitle
 					className={cn(onToggle && !effect.enabled && "text-muted-foreground")}
 				>
-					{definition.name}
+					{title}
 				</SectionTitle>
 			</SectionHeader>
 			<SectionContent
 				className={cn("p-0", onToggle && !effect.enabled && "opacity-50")}
 			>
 				<SectionFields>
-					{definition.params.map((param) => (
+					{params.map((param) => (
 						<div key={param.key} className="flex flex-col gap-3.5">
 							<div className="px-4">
 								<PropertyParamField

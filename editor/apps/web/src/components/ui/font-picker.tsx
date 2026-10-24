@@ -13,6 +13,7 @@ import { loadFullFont } from "@/fonts/google-fonts";
 import { SYSTEM_FONTS } from "@/fonts/system-fonts";
 import type { FontAtlas, FontAtlasEntry } from "@/fonts/types";
 import { useFontAtlas } from "@/fonts/use-font-atlas";
+import { publicAssetUrl } from "@/utils/public-asset";
 import { cn } from "@/utils/ui";
 import { ChevronDown, Search } from "lucide-react";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -187,6 +188,7 @@ export function FontPicker({
 }
 
 function FontSpritePreview({ entry }: { entry: FontAtlasEntry }) {
+	const spriteUrl = publicAssetUrl(`/fonts/font-chunk-${entry.ch}.avif`);
 	return (
 		<div
 			className="shrink-0"
@@ -194,10 +196,10 @@ function FontSpritePreview({ entry }: { entry: FontAtlasEntry }) {
 				width: entry.w,
 				height: ROW_HEIGHT,
 				backgroundColor: "currentColor",
-				WebkitMaskImage: `url(/fonts/font-chunk-${entry.ch}.avif)`,
+				WebkitMaskImage: `url(${spriteUrl})`,
 				WebkitMaskPosition: `-${entry.x}px -${entry.y}px`,
 				WebkitMaskRepeat: "no-repeat",
-				maskImage: `url(/fonts/font-chunk-${entry.ch}.avif)`,
+				maskImage: `url(${spriteUrl})`,
 				maskPosition: `-${entry.x}px -${entry.y}px`,
 				maskRepeat: "no-repeat",
 				transform: `scale(${PREVIEW_SCALE})`,

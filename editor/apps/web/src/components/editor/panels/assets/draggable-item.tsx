@@ -23,6 +23,8 @@ export interface DraggableItemProps {
 	/** 拖拽结束（含松手后落点已处理完），用于清理拖拽期间的临时状态 */
 	onDragEnd?: ({ e }: { e: React.DragEvent }) => void;
 	onAddToTimeline?: ({ currentTime }: { currentTime: MediaTime }) => void;
+	/** 整卡点击即应用（特效、转场这类"作用于已有片段"的卡片用，省去悬停找 + 号） */
+	applyOnClick?: boolean;
 	aspectRatio?: number;
 	className?: string;
 	containerClassName?: string;
@@ -42,6 +44,7 @@ export function DraggableItem({
 	onDragStart,
 	onDragEnd,
 	onAddToTimeline,
+	applyOnClick = false,
 	aspectRatio = 16 / 9,
 	className = "",
 	containerClassName,
@@ -118,7 +121,13 @@ export function DraggableItem({
 								"bg-accent relative overflow-hidden",
 								isRounded && "rounded-sm",
 								isDraggable && "[&::-webkit-drag-ghost]:opacity-0",
+								applyOnClick && onAddToTimeline && "cursor-pointer",
 							)}
+							onClick={
+								applyOnClick && onAddToTimeline
+									? handleAddToTimeline
+									: undefined
+							}
 							draggable={isDraggable}
 							onDragStart={isDraggable ? handleDragStart : undefined}
 							onDragEnd={isDraggable ? handleDragEnd : undefined}

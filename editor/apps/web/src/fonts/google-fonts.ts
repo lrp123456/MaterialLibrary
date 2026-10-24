@@ -1,9 +1,10 @@
 import type { FontAtlas } from "@/fonts/types";
 import { SYSTEM_FONTS } from "@/fonts/system-fonts";
+import { publicAssetUrl } from "@/utils/public-asset";
 
 const GOOGLE_FONTS_CSS = "https://fonts.googleapis.com/css2";
-const FONT_ATLAS_PATH = "/fonts/font-atlas.json";
-const FONT_CHUNK_PATH_PREFIX = "/fonts/font-chunk-";
+const FONT_ATLAS_PATH = publicAssetUrl("/fonts/font-atlas.json");
+const FONT_CHUNK_PATH_PREFIX = publicAssetUrl("/fonts/font-chunk-");
 
 const fullLoaded = new Set<string>();
 

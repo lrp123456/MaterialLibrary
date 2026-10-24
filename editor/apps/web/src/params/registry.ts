@@ -60,6 +60,10 @@ export class DefinitionRegistry<TKey extends string, TDefinition> {
 		return this.definitions.has(key);
 	}
 
+	unregister(key: TKey): void {
+		this.definitions.delete(key);
+	}
+
 	get(key: TKey): TDefinition {
 		const def = this.definitions.get(key);
 		if (!def) {

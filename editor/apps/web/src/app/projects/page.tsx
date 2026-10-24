@@ -1,6 +1,7 @@
 "use client";
 
 import { MlsBridge } from "@/components/mls-bridge";
+import { RuntimeCapabilityBanner } from "@/components/editor/runtime-capability-banner";
 
 import Image from "next/image";
 import Link from "next/link";
@@ -116,6 +117,7 @@ export default function ProjectsPage() {
 
 	return (
 		<div className="bg-background min-h-screen">
+			<RuntimeCapabilityBanner />
 			<MlsBridge />
 			<MigrationDialog />
 			<StoragePersistenceDialog />

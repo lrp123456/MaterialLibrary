@@ -20,7 +20,7 @@ function authHeaders(): Record<string, string> {
 	return h;
 }
 
-/** 每种插件的产出文件 → 自动落轨的轨道命名。 */
+/** 每种插件的产出文件 → 自动落轨的轨道命名。空数组＝产出只在 result 里（字幕/切点）。 */
 const OUTPUT_TRACKS: Record<string, { file: string; trackName: string }[]> = {
 	"vocal-separate": [
 		{ file: "vocals.wav", trackName: "人声" },
@@ -28,7 +28,12 @@ const OUTPUT_TRACKS: Record<string, { file: string; trackName: string }[]> = {
 	],
 	// 镜头切分没有产出文件，产出是 result.cuts（切点秒数），由调用方切元素
 	"scene-split": [],
+	// AI 字幕的产出是 result.segments（源素材时间轴的秒数），由调用方换算后落字幕轨
+	subtitle: [],
 };
+
+/** 只有这两个有专用提交端点，其余类型走通用 POST /editor-api/ai/jobs。 */
+const DEDICATED_SUBMIT = new Set(["scene-split", "vocal-separate"]);
 
 export interface PluginOutput {
 	blob: Blob;
@@ -60,20 +65,26 @@ export async function runPluginOnAsset({
 	pluginName: string;
 	fid: string;
 	params?: Record<string, unknown>;
-	onProgress?: (stage: string) => void;
+	onProgress?: (stage: string, percent: number) => void;
 }): Promise<PluginRunResult> {
 	const tracks = OUTPUT_TRACKS[pluginType];
 	if (!tracks) {
 		throw new Error(`插件「${pluginName}」暂不支持拖拽应用`);
 	}
 
-	// 1) 提交任务（后端 runner 执行，vocal-separate 走 Demucs）
-	onProgress?.("提交任务");
-	const submit = await fetch(`/editor-api/ai/${pluginType}`, {
-		method: "POST",
-		headers: { ...authHeaders(), "Content-Type": "application/json" },
-		body: JSON.stringify({ fid, params }),
-	});
+	// 1) 提交任务（后端 runner 执行，vocal-separate 走 GPU 机上的分离服务，subtitle 走 faster-whisper）
+	onProgress?.("提交任务", 2);
+	const dedicated = DEDICATED_SUBMIT.has(pluginType);
+	const submit = await fetch(
+		dedicated ? `/editor-api/ai/${pluginType}` : "/editor-api/ai/jobs",
+		{
+			method: "POST",
+			headers: { ...authHeaders(), "Content-Type": "application/json" },
+			body: JSON.stringify(
+				dedicated ? { fid, params } : { type: pluginType, fid, params },
+			),
+		},
+	);
 	const submitJson = await submit.json().catch(() => ({}));
 	if (!submit.ok) {
 		throw new Error(submitJson.error || `提交失败 (HTTP ${submit.status})`);
@@ -81,9 +92,17 @@ export async function runPluginOnAsset({
 	const jobId = submitJson.jobId || submitJson.job?.id;
 	if (!jobId) throw new Error("服务端没有返回任务 id");
 
-	// 2) 轮询到结束（3 秒一次，10 分钟上限）
-	onProgress?.("推理中");
-	const deadline = Date.now() + 10 * 60 * 1000;
+	// 2) 轮询到结束（3 秒一次）。GPU 分离是串行队列，前面排着一条整片素材时
+	//    这里要能等到，不能自己先撤；字幕首次运行要下载 ~460MB 权重且 CPU 推理约 1 倍实时。
+	//    runner 侧上限分别是 25 / 30 分钟，这里必须留出余量，否则前端先超时。
+	const timeoutMs =
+		pluginType === "vocal-separate"
+			? 25 * 60 * 1000
+			: pluginType === "subtitle"
+				? 35 * 60 * 1000
+				: 10 * 60 * 1000;
+	const deadline = Date.now() + timeoutMs;
+	onProgress?.("排队中", 5);
 	let job: any = null;
 	while (Date.now() < deadline) {
 		await new Promise((r) => setTimeout(r, 3000));
@@ -93,14 +112,17 @@ export async function runPluginOnAsset({
 		if (!res.ok) continue;
 		const json = await res.json();
 		job = json.job || json;
-		if (job?.stage) onProgress?.(String(job.stage));
+		onProgress?.(
+			String(job?.stage || "推理中"),
+			Math.max(0, Math.min(100, Number(job?.progress) || 0)),
+		);
 		if (job?.status === "done") break;
 		if (job?.status === "failed" || job?.status === "canceled") {
 			throw new Error(job.error || `任务${job.status === "canceled" ? "已取消" : "失败"}`);
 		}
 	}
 	if (job?.status !== "done") {
-		throw new Error("任务超时（10 分钟）");
+		throw new Error(`任务超时（${Math.round(timeoutMs / 60000)} 分钟）`);
 	}
 
 	// 3) 下载产出（?file= 取同目录下的多份产出）

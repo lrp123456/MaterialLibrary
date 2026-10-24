@@ -36,6 +36,7 @@ import {
 } from "@/timeline/bookmarks/index";
 
 import { MlsBridge } from "@/components/mls-bridge";
+import { RuntimeCapabilityBanner } from "@/components/editor/runtime-capability-banner";
 
 export default function Editor() {
 	const params = useParams();
@@ -63,6 +64,7 @@ export default function Editor() {
 			<EditorProvider projectId={projectId}>
 				<MlsBridge />
 				<div className="bg-background flex h-screen w-screen flex-col overflow-hidden">
+					<RuntimeCapabilityBanner />
 					<DegradedRendererBanner />
 					<EditorHeader />
 					<div className="min-h-0 min-w-0 flex-1">

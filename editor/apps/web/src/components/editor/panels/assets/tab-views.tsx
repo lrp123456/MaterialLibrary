@@ -13,13 +13,9 @@ import { SoundsView } from "@/sounds/components/assets-view";
 import { StickersView } from "@/stickers/components/assets-view";
 import { TextView } from "@/text/components/assets-view";
 import { EffectsView } from "@/effects/components/assets-view";
+import { AdjustView } from "./views/adjust";
 import { Captions } from "@/subtitles/components/assets-view";
-import {
-	AudioWave01Icon,
-	FilterIcon,
-	Mic01Icon,
-	SlidersHorizontalIcon,
-} from "@hugeicons/core-free-icons";
+import { AudioWave01Icon, Mic01Icon } from "@hugeicons/core-free-icons";
 
 /**
  * 7 个一级栏的二级 chip 与内容映射。
@@ -155,31 +151,9 @@ export function EffectsTabView() {
 		<SubTabShell
 			items={EFFECTS_SUB_TABS}
 			render={(key) => {
-				if (key === "filter") {
-					return (
-						<SubPlaceholder
-							icon={FilterIcon}
-							title={t("assets.placeholder.filter.title", "滤镜库接入中")}
-							description={t(
-								"assets.placeholder.filter.desc",
-								"LUT 需要 shader 侧支持，资源包已就位，渲染通道接入后自动出现在这里。",
-							)}
-						/>
-					);
-				}
-				if (key === "adjust") {
-					return (
-						<SubPlaceholder
-							icon={SlidersHorizontalIcon}
-							title={t("assets.placeholder.adjust.title", "调节面板接入中")}
-							description={t(
-								"assets.placeholder.adjust.desc",
-								"亮度/对比度/饱和度等基础调节正在接入调色 shader，暂请在属性面板调整。",
-							)}
-						/>
-					);
-				}
-				return <EffectsView />;
+				if (key === "filter") return <EffectsView category="filter" />;
+				if (key === "adjust") return <AdjustView />;
+				return <EffectsView category="effect" />;
 			}}
 		/>
 	);

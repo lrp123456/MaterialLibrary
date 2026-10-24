@@ -37,6 +37,7 @@ type ExternalCacheEntry = {
 	source: CanvasImageSource;
 	width: number;
 	height: number;
+	contentKey?: string;
 };
 
 class WasmCompositor {
@@ -98,9 +99,11 @@ class WasmCompositor {
 
 	private syncExternalTexture(texture: ExternalTextureDescriptor) {
 		const previous = this.cache.get(texture.id);
+		const contentKey = texture.contentKey ?? null;
 		if (
 			previous?.kind === "external" &&
 			previous.source === texture.source &&
+			(previous.contentKey ?? null) === contentKey &&
 			previous.width === texture.width &&
 			previous.height === texture.height
 		) {
@@ -129,6 +132,7 @@ class WasmCompositor {
 			source: texture.source,
 			width: texture.width,
 			height: texture.height,
+			contentKey: texture.contentKey,
 		});
 	}
 

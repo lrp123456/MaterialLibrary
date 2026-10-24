@@ -102,6 +102,21 @@ async function resolveNode({
 	);
 }
 
+const warnedEffectTypes = new Set<string>();
+
+/**
+ * 资源包异步加载，工程里的 effectType 可能暂时不在注册表。
+ * 这里必须降级为"跳过该特效"：get() 抛错会击穿整帧渲染，
+ * 而预览循环的 renderingRef 一旦停在 true，画面会永久定格。
+ */
+function warnUnknownEffectOnce(effectType: string): void {
+	if (warnedEffectTypes.has(effectType)) return;
+	warnedEffectTypes.add(effectType);
+	console.warn(
+		`[renderer] 特效定义未加载，已跳过：${effectType}（资源包加载后会自动恢复）`,
+	);
+}
+
 function resolveEffectPassGroups({
 	effects,
 	animations,
@@ -117,20 +132,25 @@ function resolveEffectPassGroups({
 }): EffectPass[][] {
 	return (effects ?? [])
 		.filter((effect) => effect.enabled)
-		.map((effect) => {
+		.flatMap((effect) => {
+			if (!effectsRegistry.has(effect.type)) {
+				warnUnknownEffectOnce(effect.type);
+				return [];
+			}
 			const resolvedParams = resolveEffectParamsAtTime({
 				effectId: effect.id,
 				params: effect.params,
 				animations,
 				localTime,
 			});
-			const definition = effectsRegistry.get(effect.type);
-			return resolveEffectPasses({
-				definition,
+			const passes = resolveEffectPasses({
+				definition: effectsRegistry.get(effect.type),
 				effectParams: resolvedParams,
 				width,
 				height,
 			});
+			// 空 pass 组会让 Rust 侧抛 MissingEffectPasses 并击穿整帧渲染
+			return passes.length > 0 ? [passes] : [];
 		});
 }
 
@@ -232,6 +252,7 @@ async function resolveVideoNode({
 		source: frame.canvas,
 		sourceWidth: frame.canvas.width,
 		sourceHeight: frame.canvas.height,
+		sourceRevision: frame.timestamp,
 	};
 }
 
@@ -442,6 +463,7 @@ async function resolveBackdropSource({
 			source: frame.canvas,
 			width: frame.canvas.width,
 			height: frame.canvas.height,
+			revision: frame.timestamp,
 		};
 	}
 
@@ -487,6 +509,11 @@ function resolveEffectLayerNode({
 		time < node.params.timeOffset - 1e-6 ||
 		time >= node.params.timeOffset + node.params.duration + 1e-6
 	) {
+		return null;
+	}
+
+	if (!effectsRegistry.has(node.params.effectType)) {
+		warnUnknownEffectOnce(node.params.effectType);
 		return null;
 	}
 

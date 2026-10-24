@@ -44,6 +44,12 @@ export class MediaManager {
 				toast.error("Not enough browser storage", {
 					description: error instanceof Error ? error.message : undefined,
 				});
+			} else {
+				// 非配额错误（OPFS 不可用等）以前是静默失败，调用方只会看到"没有素材成功入库"
+				toast.error("素材入库失败", {
+					description:
+						error instanceof Error ? error.message : "浏览器本地存储写入失败",
+				});
 			}
 
 			return null;

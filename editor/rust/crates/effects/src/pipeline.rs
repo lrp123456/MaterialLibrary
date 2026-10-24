@@ -21,6 +21,25 @@ const WARP_SHADER_ID: &str = "warp";
 const WARP_SHADER_SOURCE: &str = include_str!("shaders/warp.wgsl");
 const CHANNEL_SHADER_ID: &str = "channel";
 const CHANNEL_SHADER_SOURCE: &str = include_str!("shaders/channel.wgsl");
+const VIBRANCE_SHADER_ID: &str = "vibrance";
+const VIBRANCE_SHADER_SOURCE: &str = include_str!("shaders/vibrance.wgsl");
+const HSL_BAND_SHADER_ID: &str = "hsl-band";
+const HSL_BAND_SHADER_SOURCE: &str = include_str!("shaders/hsl_band.wgsl");
+const SHADOWS_HIGHLIGHTS_SHADER_ID: &str = "shadows-highlights";
+const SHADOWS_HIGHLIGHTS_SHADER_SOURCE: &str =
+    include_str!("shaders/shadows_highlights.wgsl");
+const COLOR_WHEEL_SHADER_ID: &str = "color-wheel";
+const COLOR_WHEEL_SHADER_SOURCE: &str = include_str!("shaders/color_wheel.wgsl");
+const CURVE_SHADER_ID: &str = "curve";
+const CURVE_SHADER_SOURCE: &str = include_str!("shaders/curve.wgsl");
+const COLOR_MATCH_SHADER_ID: &str = "color-match";
+const COLOR_MATCH_SHADER_SOURCE: &str = include_str!("shaders/color_match.wgsl");
+
+/// 单个 pass 能携带的标量数量上限（= uniform 块里的 `u_scalar0..N-1`）。
+/// 曲线要把整条 1D LUT 塞进 uniform，4 个槽远远不够，调色类 shader 又普遍需要
+/// 9~16 个参数（三色轮就是 9 个），所以统一开到 64。
+pub const EFFECT_SCALAR_SLOTS: usize = 64;
+pub const EFFECT_SCALAR_GROUPS: usize = EFFECT_SCALAR_SLOTS / 4;
 
 /// 内置 shader 清单。给资源包加载器与文档提供单一事实来源。
 pub fn builtin_shader_ids() -> Vec<&'static str> {
@@ -32,6 +51,12 @@ pub fn builtin_shader_ids() -> Vec<&'static str> {
         GRADE_SHADER_ID,
         WARP_SHADER_ID,
         CHANNEL_SHADER_ID,
+        VIBRANCE_SHADER_ID,
+        HSL_BAND_SHADER_ID,
+        SHADOWS_HIGHLIGHTS_SHADER_ID,
+        COLOR_WHEEL_SHADER_ID,
+        CURVE_SHADER_ID,
+        COLOR_MATCH_SHADER_ID,
     ]
 }
 
@@ -74,7 +99,9 @@ pub enum EffectsError {
 struct EffectUniformBuffer {
     resolution: [f32; 2],
     direction: [f32; 2],
-    scalars: [f32; 4],
+    /// 64 个浮点槽，按 vec4 成组 —— WebGPU 规定 uniform 数组的 stride 必须是 16 的倍数，
+    /// 所以 WGSL 侧写的是 `array<vec4f, 16>`，shader 用 `sc(i)` 取第 i 个浮点。
+    scalars: [[f32; 4]; EFFECT_SCALAR_GROUPS],
 }
 
 impl EffectPipeline {
@@ -116,7 +143,7 @@ impl EffectPipeline {
 
         // 所有特效共用同一套 pipeline layout，只有 fragment shader 不同。
         // 新增 shader 只需在这个清单里加一行，不用复制整段管线代码。
-        let shader_defs: [(&str, &str, &str); 7] = [
+        let shader_defs: [(&str, &str, &str); 13] = [
             (
                 GAUSSIAN_BLUR_SHADER_ID,
                 "effects-gaussian-blur-shader",
@@ -139,6 +166,32 @@ impl EffectPipeline {
                 CHANNEL_SHADER_ID,
                 "effects-channel-shader",
                 CHANNEL_SHADER_SOURCE,
+            ),
+            (
+                VIBRANCE_SHADER_ID,
+                "effects-vibrance-shader",
+                VIBRANCE_SHADER_SOURCE,
+            ),
+            (
+                HSL_BAND_SHADER_ID,
+                "effects-hsl-band-shader",
+                HSL_BAND_SHADER_SOURCE,
+            ),
+            (
+                SHADOWS_HIGHLIGHTS_SHADER_ID,
+                "effects-shadows-highlights-shader",
+                SHADOWS_HIGHLIGHTS_SHADER_SOURCE,
+            ),
+            (
+                COLOR_WHEEL_SHADER_ID,
+                "effects-color-wheel-shader",
+                COLOR_WHEEL_SHADER_SOURCE,
+            ),
+            (CURVE_SHADER_ID, "effects-curve-shader", CURVE_SHADER_SOURCE),
+            (
+                COLOR_MATCH_SHADER_ID,
+                "effects-color-match-shader",
+                COLOR_MATCH_SHADER_SOURCE,
             ),
         ];
 
@@ -325,7 +378,7 @@ fn pack_effect_uniforms(
     let shader = pass.shader.as_str();
 
     // 旧三件套（高斯模糊用）改为可选，缺省即为"不模糊"。
-    let mut scalars = [0.0f32; 4];
+    let mut scalars = [0.0f32; EFFECT_SCALAR_SLOTS];
     let mut direction = [1.0f32, 0.0f32];
 
     if pass.uniforms.contains_key("u_sigma") {
@@ -338,8 +391,8 @@ fn pack_effect_uniforms(
         direction = read_vec2_uniform(pass, "u_direction")?;
     }
 
-    // 通用标量槽：新 shader 用 u_scalar0..3，避免每加一个特效都要改 Rust。
-    for slot in 0..4usize {
+    // 通用标量槽：新 shader 用 u_scalar0..63，避免每加一个特效都要改 Rust。
+    for slot in 0..EFFECT_SCALAR_SLOTS {
         let key = format!("u_scalar{slot}");
         let Some(value) = pass.uniforms.get(&key) else {
             continue;
@@ -360,7 +413,18 @@ fn pack_effect_uniforms(
         if uniform == "u_sigma" || uniform == "u_step" || uniform == "u_direction" {
             continue;
         }
-        if uniform.starts_with("u_scalar") {
+        if let Some(tail) = uniform.strip_prefix("u_scalar") {
+            // u_scalar99 这种越界下标也要报错，否则参数写了却永远不生效。
+            let index: usize = tail.parse().map_err(|_| EffectsError::UnsupportedUniform {
+                shader: shader.to_string(),
+                uniform: uniform.clone(),
+            })?;
+            if index >= EFFECT_SCALAR_SLOTS {
+                return Err(EffectsError::UnsupportedUniform {
+                    shader: shader.to_string(),
+                    uniform: uniform.clone(),
+                });
+            }
             continue;
         }
         return Err(EffectsError::UnsupportedUniform {
@@ -369,10 +433,15 @@ fn pack_effect_uniforms(
         });
     }
 
+    let mut groups = [[0.0f32; 4]; EFFECT_SCALAR_GROUPS];
+    for (group, chunk) in scalars.chunks_exact(4).enumerate() {
+        groups[group].copy_from_slice(chunk);
+    }
+
     Ok(EffectUniformBuffer {
         resolution: [width as f32, height as f32],
         direction,
-        scalars,
+        scalars: groups,
     })
 }
 

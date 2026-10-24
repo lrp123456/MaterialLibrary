@@ -171,10 +171,8 @@ async function collectNode({
 		const textureId = `${path}:blur-background`;
 		const { width, height } = renderer;
 		const { backdropSource, passes } = node.resolved;
-		// Backdrop pixels come from a decoded video/image frame whose identity
-		// already changes when it changes. Hashing the source reference is
-		// enough to let us skip redraws on frozen frames.
-		const contentHash = `blur:${identityKey(backdropSource.source)}:${backdropSource.width}x${backdropSource.height}:${width}x${height}`;
+		// 背景帧同样来自被复用的 canvas，必须带上时间戳才算「内容变了」
+		const contentHash = `blur:${identityKey(backdropSource.source)}:${backdropSource.width}x${backdropSource.height}:${backdropSource.revision ?? "static"}:${width}x${height}`;
 		textures.set(textureId, {
 			kind: "rendered",
 			id: textureId,
@@ -286,12 +284,17 @@ function buildVisualSourceLayer({
 			: (node.resolved as ResolvedVisualSourceNodeState).sourceHeight;
 
 	const textureId = `${path}:source`;
+	const revision =
+		node instanceof GraphicNode ? undefined : node.resolved.sourceRevision;
 	textures.set(textureId, {
 		kind: "external",
 		id: textureId,
 		source,
 		width: sourceWidth,
 		height: sourceHeight,
+		// 解码池会循环复用同一批 canvas，只比对象标识会把「换了帧」误判成「没换」，
+		// 于是画面在带特效（每帧更慢、成功渲染正好落在同一张 canvas 上）时定格。
+		contentKey: `${identityKey(source)}:${sourceWidth}x${sourceHeight}:${revision ?? "static"}`,
 	});
 
 	const transform = computeVisualTransform({

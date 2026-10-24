@@ -1,5 +1,20 @@
 import { describe, expect, test } from "bun:test";
-import { DERIVATIVE_LABELS, derivativeLabel, isGeometryKind, isSelected, stripVersionKey, toggleSelection, versionKey, versionsOf } from "../../../../shared/ml-asset-core/index";
+import {
+	DERIVATIVE_LABELS,
+	defaultSlotPrefs,
+	derivativeLabel,
+	isGeometryKind,
+	isSelected,
+	isSlotBusy,
+	missingSlotPresets,
+	normalizeSlotCategory,
+	slotPresetsFor,
+	slotStatusFromDetail,
+	stripVersionKey,
+	toggleSelection,
+	versionKey,
+	versionsOf,
+} from "../../../../shared/ml-asset-core/index";
 
 describe("derivativeLabel", () => {
 	test("已知类型返回中文标签", () => {
@@ -135,5 +150,97 @@ describe("isSelected", () => {
 		const v = { mediaToken: "", derivativeKind: "origin", label: "原图", url: "/u", kind: "image", name: "n", key: "a", fid: "a", derivativeId: "" };
 		expect(isSelected([v], "a")).toBe(true);
 		expect(isSelected([v], "a::d1")).toBe(false);
+	});
+});
+
+describe("normalizeSlotCategory", () => {
+	test("前端筛选键与后端原始类目归一到同一组", () => {
+		expect(normalizeSlotCategory("interior_exterior")).toBe("interior_exterior");
+		expect(normalizeSlotCategory("interior")).toBe("interior_exterior");
+		expect(normalizeSlotCategory("exterior")).toBe("interior_exterior");
+	});
+
+	test("已知类目原样返回，未知与空值走 default", () => {
+		expect(normalizeSlotCategory("clothing")).toBe("clothing");
+		expect(normalizeSlotCategory("portrait")).toBe("portrait");
+		expect(normalizeSlotCategory("")).toBe("default");
+		expect(normalizeSlotCategory("nonsense")).toBe("default");
+	});
+});
+
+describe("slotPresetsFor", () => {
+	test("出厂预设是 9:16 + 3:4", () => {
+		const slots = slotPresetsFor("interior_exterior", defaultSlotPrefs());
+		expect(slots.map((s) => s.ratio)).toEqual(["9:16", "3:4"]);
+		expect(slots.map((s) => s.kind)).toEqual(["restage_9_16", "restage_3_4"]);
+	});
+
+	test("总开关关闭时不再给任何插槽", () => {
+		const prefs = { ...defaultSlotPrefs(), enabled: false };
+		expect(slotPresetsFor("interior_exterior", prefs)).toEqual([]);
+	});
+
+	test("按类目覆盖只留一个规格", () => {
+		const prefs = defaultSlotPrefs();
+		prefs.ratios.clothing = ["3:4"];
+		expect(slotPresetsFor("clothing", prefs).map((s) => s.kind)).toEqual(["restage_3_4"]);
+	});
+
+	test("类目被显式清空时该类目不补位", () => {
+		const prefs = defaultSlotPrefs();
+		prefs.ratios.furniture = [];
+		expect(slotPresetsFor("furniture", prefs)).toEqual([]);
+	});
+});
+
+describe("missingSlotPresets", () => {
+	const prefs = defaultSlotPrefs();
+
+	test("只有原图时两档全缺", () => {
+		const miss = missingSlotPresets("interior_exterior", [{ kind: "origin" }], prefs);
+		expect(miss.map((s) => s.kind)).toEqual(["restage_9_16", "restage_3_4"]);
+	});
+
+	test("已有的那一档不再出现在缺失里", () => {
+		const miss = missingSlotPresets("interior_exterior", [{ kind: "origin" }, { kind: "restage_9_16" }], prefs);
+		expect(miss.map((s) => s.kind)).toEqual(["restage_3_4"]);
+	});
+
+	test("两档都有就没有插槽", () => {
+		const miss = missingSlotPresets(
+			"interior_exterior",
+			[{ kind: "restage_9_16" }, { kind: "restage_3_4" }],
+			prefs,
+		);
+		expect(miss).toEqual([]);
+	});
+
+	test("衍生数据缺失时全部算缺", () => {
+		expect(missingSlotPresets("portrait", undefined, prefs)).toHaveLength(2);
+	});
+});
+
+describe("slotStatusFromDetail", () => {
+	test("后端状态透传", () => {
+		expect(slotStatusFromDetail("restage_9_16", { restage_9_16: "running" })).toBe("running");
+		expect(slotStatusFromDetail("restage_3_4", { restage_3_4: "failed" })).toBe("failed");
+	});
+
+	test("未知或缺失都按 missing 处理", () => {
+		expect(slotStatusFromDetail("restage_9_16", null)).toBe("missing");
+		expect(slotStatusFromDetail("restage_9_16", { restage_9_16: "weird" })).toBe("missing");
+	});
+});
+
+describe("isSlotBusy", () => {
+	test("排队与生成中视为忙", () => {
+		expect(isSlotBusy("queued")).toBe(true);
+		expect(isSlotBusy("running")).toBe(true);
+	});
+
+	test("缺失/失败/就绪都可以再次操作", () => {
+		expect(isSlotBusy("missing")).toBe(false);
+		expect(isSlotBusy("failed")).toBe(false);
+		expect(isSlotBusy("ready")).toBe(false);
 	});
 });

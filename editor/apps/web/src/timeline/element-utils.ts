@@ -1,4 +1,5 @@
 import { DEFAULT_NEW_ELEMENT_DURATION } from "@/timeline/creation";
+import { effectsRegistry } from "@/effects/registry";
 import {
 	MASKABLE_ELEMENT_TYPES,
 	RETIMABLE_ELEMENT_TYPES,
@@ -131,9 +132,12 @@ export function buildEffectElement({
 	duration?: MediaTime;
 }): CreateEffectElement {
 	const instance = buildDefaultEffectInstance({ effectType });
+	const definition = effectsRegistry.has(effectType)
+		? effectsRegistry.get(effectType)
+		: undefined;
 	return {
 		type: "effect",
-		name: capitalizeFirstLetter({ string: instance.type }),
+		name: definition?.name ?? capitalizeFirstLetter({ string: instance.type }),
 		effectType,
 		params: instance.params,
 		duration: duration ?? DEFAULT_NEW_ELEMENT_DURATION,

@@ -44,10 +44,22 @@ export interface PluginDragData {
 	name: string;
 }
 
+/**
+ * 转场拖拽：落到两段相邻素材的剪辑点上。
+ * 不落新元素，而是给剪辑点左侧片段写入 transitionOut。
+ */
+export interface TransitionDragData extends BaseDragData {
+	type: "transition";
+	transitionType: string;
+	defaultDuration: number;
+	params: ParamValues;
+}
+
 export type TimelineDragData =
 	| MediaDragData
 	| TextDragData
 	| StickerDragData
 	| GraphicDragData
 	| EffectDragData
-	| PluginDragData;
+	| PluginDragData
+	| TransitionDragData;

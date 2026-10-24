@@ -75,6 +75,8 @@ export type ExternalTextureDescriptor = {
 	source: CanvasImageSource;
 	width: number;
 	height: number;
+	/** 内容版本（源标识 + 尺寸 + 帧时间戳）；缺省时退化为只比对象标识。 */
+	contentKey?: string;
 };
 
 /**

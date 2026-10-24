@@ -8,21 +8,27 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { useReducer, useRef, useState } from "react";
-import { extractTimelineAudio } from "@/media/mediabunny";
 import { useEditor } from "@/editor/use-editor";
+import { useElementSelection } from "@/timeline/hooks/element/use-element-selection";
 import { TRANSCRIPTION_DIAGNOSTICS_SCOPE } from "@/transcription/diagnostics";
-import { DEFAULT_TRANSCRIPTION_SAMPLE_RATE } from "@/transcription/audio";
 import { TRANSCRIPTION_LANGUAGES } from "@/transcription/supported-languages";
 import type {
 	CaptionChunk,
 	TranscriptionLanguage,
-	TranscriptionProgress,
+	TranscriptionSegment,
 } from "@/transcription/types";
-import { transcriptionService } from "@/services/transcription/service";
-import { decodeAudioToFloat32 } from "@/media/audio";
 import { buildCaptionChunks } from "@/transcription/caption";
 import { insertCaptionChunksAsTextTrack } from "@/subtitles/insert";
 import { parseSubtitleFile } from "@/subtitles/parse";
+import { runPluginOnAsset } from "@/timeline/plugin-apply";
+import {
+	getMediaFid,
+	registerMediaFid,
+	uploadFileToLibrary,
+} from "@/services/cloud-snapshots";
+import { getClipTimeAtSourceTime } from "@/retime/resolve";
+import { mediaTimeToSeconds } from "@/wasm";
+import type { RetimeConfig } from "@/timeline/types";
 import { Spinner } from "@/components/ui/spinner";
 import {
 	Section,
@@ -90,23 +96,13 @@ export function Captions() {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const editor = useEditor();
+	const { selectedElements } = useElementSelection();
 
 	const isProcessing = processing.status === "processing";
 
 	const activeDiagnostics = useEditor((e) =>
 		e.diagnostics.getActive({ scope: TRANSCRIPTION_DIAGNOSTICS_SCOPE }),
 	);
-
-	const handleProgress = (progress: TranscriptionProgress) => {
-		if (progress.status === "loading-model") {
-			dispatch({
-				type: "update_step",
-				step: `Loading model ${Math.round(progress.progress)}%`,
-			});
-		} else if (progress.status === "transcribing") {
-			dispatch({ type: "update_step", step: "Transcribing..." });
-		}
-	};
 
 	const insertCaptions = ({
 		captions,
@@ -117,31 +113,90 @@ export function Captions() {
 		return trackId !== null;
 	};
 
+	/**
+	 * 识别选中片段（服务端 type=subtitle，runner 走 faster-whisper）。
+	 *
+	 * 浏览器端 Whisper 已移除（上百 MB 模型 + 与合成器抢 GPU），
+	 * 而"整条时间线混音后识别"需要先把混音结果上传换 fid，目前只做单片段。
+	 */
 	const handleGenerateTranscript = async () => {
-		dispatch({ type: "start", step: "Extracting audio..." });
+		const found = editor.timeline
+			.getElementsWithTracks({ elements: selectedElements })[0];
+		const element = found?.element;
+		if (!element || (element.type !== "video" && element.type !== "audio")) {
+			dispatch({
+				type: "fail",
+				error: "请先在时间线上选中一个视频或音频片段",
+			});
+			return;
+		}
+
+		dispatch({ type: "start", step: "准备素材" });
 		try {
-			const audioBlob = await extractTimelineAudio({
-				tracks: editor.scenes.getActiveScene().tracks,
-				mediaAssets: editor.media.getAssets(),
-				totalDuration: editor.timeline.getTotalDuration(),
+			const mediaId = (element as { mediaId?: string }).mediaId ?? null;
+			let fid = mediaId ? getMediaFid(mediaId) : null;
+			// 本地导入的素材没有 fid：服务端按 fid 读字节，先自动入库（与人声分离同一套路）。
+			if (!fid && mediaId) {
+				const localFile = editor.media
+					.getAssets()
+					.find((asset) => asset.id === mediaId)?.file;
+				if (localFile) {
+					dispatch({ type: "update_step", step: "本地素材先入库" });
+					fid = await uploadFileToLibrary(localFile);
+					registerMediaFid(mediaId, fid);
+				}
+			}
+			if (!fid) {
+				throw new Error("这个素材不在素材库里，服务端读不到文件，无法识别");
+			}
+
+			const { result } = await runPluginOnAsset({
+				pluginType: "subtitle",
+				pluginName: "AI 字幕",
+				fid,
+				params: { language: selectedLanguage },
+				onProgress: (stage, percent) =>
+					dispatch({ type: "update_step", step: `${stage} ${percent}%` }),
 			});
 
-			dispatch({ type: "update_step", step: "Preparing audio..." });
-			const { samples } = await decodeAudioToFloat32({
-				audioBlob,
-				sampleRate: DEFAULT_TRANSCRIPTION_SAMPLE_RATE,
-			});
+			const raw = Array.isArray(result?.segments)
+				? (result.segments as Array<{
+						start: number;
+						end: number;
+						text: string;
+					}>)
+				: [];
+			if (raw.length === 0) {
+				dispatch({ type: "fail", error: "没有识别到任何语音" });
+				return;
+			}
 
-			const result = await transcriptionService.transcribe({
-				audioData: samples,
-				language: selectedLanguage === "auto" ? undefined : selectedLanguage,
-				onProgress: handleProgress,
-			});
+			// runner 给的是「源素材时间轴」的秒数：先减 trimStart、再按变速换算，
+			// 最后加上片段在时间线上的起点，才是字幕该落的位置。
+			const trimStart = mediaTimeToSeconds({ time: element.trimStart });
+			const clipStart = mediaTimeToSeconds({ time: element.startTime });
+			const clipDuration = mediaTimeToSeconds({ time: element.duration });
+			const retime = (element as { retime?: RetimeConfig }).retime;
+			const segments: TranscriptionSegment[] = [];
+			for (const item of raw) {
+				const text = String(item?.text ?? "").trim();
+				if (!text || !Number.isFinite(item?.start)) continue;
+				const fromClip = getClipTimeAtSourceTime({
+					sourceTime: item.start - trimStart,
+					retime,
+				});
+				const toClip = getClipTimeAtSourceTime({
+					sourceTime: (Number.isFinite(item?.end) ? item.end : item.start) - trimStart,
+					retime,
+				});
+				if (toClip <= 0 || fromClip >= clipDuration) continue;
+				const start = clipStart + Math.max(0, fromClip);
+				const end = clipStart + Math.min(clipDuration, toClip);
+				segments.push({ text, start, end: Math.max(end, start + 0.2) });
+			}
 
-			dispatch({ type: "update_step", step: "Generating captions..." });
-			const captionChunks = buildCaptionChunks({ segments: result.segments });
-
-			if (!insertCaptions({ captions: captionChunks })) {
+			const captions = buildCaptionChunks({ segments });
+			if (!insertCaptions({ captions })) {
 				dispatch({ type: "fail", error: "没有生成任何字幕" });
 				return;
 			}
@@ -313,10 +368,14 @@ export function Captions() {
 						type="button"
 						className="mt-auto w-full"
 						onClick={handleGenerateTranscript}
-						disabled={isProcessing || activeDiagnostics.length > 0}
+						disabled={
+							isProcessing ||
+							selectedElements.length === 0 ||
+							activeDiagnostics.length > 0
+						}
 					>
 						{isProcessing && <Spinner className="mr-1" />}
-						{isProcessing ? processing.step : "生成字幕稿"}
+						{isProcessing ? processing.step : "识别选中片段生成字幕"}
 					</Button>
 					{error && (
 						<div className="bg-destructive/10 border-destructive/20 rounded-md border p-3">

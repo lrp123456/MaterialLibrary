@@ -8,6 +8,14 @@ export class OPFSAdapter implements StorageAdapter<File> {
 	}
 
 	private async getDirectory(): Promise<FileSystemDirectoryHandle> {
+		// OPFS 只在安全上下文（localhost / HTTPS）开放，局域网 http://IP 下会直接缺 API
+		if (typeof navigator.storage?.getDirectory !== "function") {
+			const origin =
+				typeof window === "undefined" ? "" : window.location.origin;
+			throw new Error(
+				`浏览器本地存储（OPFS）不可用：请通过 http://127.0.0.1 或 HTTPS 打开剪辑器（当前地址 ${origin}）。`,
+			);
+		}
 		const opfsRoot = await navigator.storage.getDirectory();
 		return await opfsRoot.getDirectoryHandle(this.directoryName, {
 			create: true,

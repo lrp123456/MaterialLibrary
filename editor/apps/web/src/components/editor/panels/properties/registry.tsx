@@ -22,12 +22,14 @@ import {
 	MusicNote03Icon,
 	MagicWand05Icon,
 	DashboardSpeed02Icon,
+	Exchange01Icon,
 } from "@hugeicons/core-free-icons";
 import { ElementParamsTab } from "./components/element-params-tab";
 import { ClipEffectsTab, StandaloneEffectTab } from "@/effects/components/effects-tab";
 import { MasksTab } from "@/masks/components/masks-tab";
 import { SpeedTab } from "@/speed/components/speed-tab";
 import { GraphicTab } from "@/graphics/components/graphic-tab";
+import { TransitionTab } from "./components/transition-tab";
 import { OcShapesIcon } from "@/components/icons";
 
 const TRANSFORM_PARAM_KEYS = [
@@ -221,6 +223,21 @@ function buildStandaloneEffectTab({
 	};
 }
 
+function buildTransitionTab({
+	element,
+}: {
+	element: VideoElement | ImageElement;
+}): PropertiesTabDef {
+	return {
+		id: "transition",
+		get label() { return t("inspector.tabs.transition", "转场"); },
+		icon: <HugeiconsIcon icon={Exchange01Icon} size={16} />,
+		content: ({ trackId }) => (
+			<TransitionTab element={element} trackId={trackId} />
+		),
+	};
+}
+
 function getTextConfig({
 	element,
 }: {
@@ -253,6 +270,7 @@ function getVideoConfig({
 			buildBlendingTab({ element }),
 			buildMasksTab({ element }),
 			buildClipEffectsTab({ element }),
+			...(element.transitionOut ? [buildTransitionTab({ element })] : []),
 		],
 	};
 }
@@ -269,6 +287,7 @@ function getImageConfig({
 			buildBlendingTab({ element }),
 			buildMasksTab({ element }),
 			buildClipEffectsTab({ element }),
+			...(element.transitionOut ? [buildTransitionTab({ element })] : []),
 		],
 	};
 }

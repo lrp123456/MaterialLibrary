@@ -32,10 +32,13 @@ export interface EffectRendererConfig {
 	}) => EffectPass[];
 }
 
+export type EffectCategory = "effect" | "filter" | "adjust";
+
 export interface EffectDefinition {
 	type: string;
 	name: string;
 	keywords: string[];
+	category?: EffectCategory;
 	params: ParamDefinition[];
 	renderer: EffectRendererConfig;
 }

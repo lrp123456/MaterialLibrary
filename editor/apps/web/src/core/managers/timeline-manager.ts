@@ -11,6 +11,7 @@ import type {
 import { calculateTotalDuration } from "@/timeline";
 import { TimelineDragSource } from "@/timeline/drag-source";
 import { findTrackInSceneTracks } from "@/timeline/track-element-update";
+import { sanitizeTransitionGeometry } from "@/timeline/transition";
 import { lastFrameMediaTime, type MediaTime, ZERO_MEDIA_TIME } from "@/wasm";
 import {
 	canElementBeHidden,
@@ -935,7 +936,10 @@ export class TimelineManager {
 	updateTracks(newTracks: SceneTracks): void {
 		this.previewOverlay.clear();
 		this.previewTracks = null;
-		this.editor.scenes.updateSceneTracks({ tracks: newTracks });
+		// B 被删除/移走后 A 上的转场会成为永不生效的脏数据，这里统一清理。
+		this.editor.scenes.updateSceneTracks({
+			tracks: sanitizeTransitionGeometry({ tracks: newTracks }),
+		});
 		this.notify();
 	}
 }

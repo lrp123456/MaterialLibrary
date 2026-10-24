@@ -49,7 +49,7 @@ function buildTransitionNodes({
 	const transitionByFromNode = new Map<AnyBaseNode, TransitionNode>();
 
 	for (const element of elements) {
-		if (element.type !== "video") continue;
+		if (element.type !== "video" && element.type !== "image") continue;
 		const transition = element.transitionOut;
 		if (!transition || transition.duration <= 0) continue;
 

@@ -58,6 +58,7 @@ function resolveMediaMime(blobType: string, payload: MlsAssetPayload): string {
 /**
  * Material Studio Pro 通信桥梁：
  * 负责接收父窗口派发的 MLS_IMPORT_ASSET 消息，并完成素材下载、OPFS 写入、FID 绑定与自动上轨。
+ * 支持批量：消息携带 assets 数组时按顺序逐个导入（素材库多选 → 进入剪辑）。
  */
 export function MlsBridge() {
 	const editor = useEditor();
@@ -65,6 +66,73 @@ export function MlsBridge() {
 	const activeProject = useEditor((e) => e.project.getActiveOrNull());
 	const isHandlingRef = useRef(false);
 
+	// 单体导入核心：下载 → 解码 → 入库 → 绑定 FID → 上轨。失败直接抛错，由调用方决定提示方式。
+	const importOneAsset = async (payload: MlsAssetPayload, projectId: string) => {
+		if (!payload?.fid) {
+			throw new Error("素材信息不完整，无法导入");
+		}
+		const derivativeId = String(
+			payload.derivativeId || payload.activeDerivativeId || "",
+		);
+
+		// 1. 获取素材二进制
+		const token = localStorage.getItem("ml_token") || "";
+		const headers: Record<string, string> = {};
+		if (token) headers.Authorization = `Bearer ${token}`;
+
+		const downloadBase = `/api/viewer/assets/${encodeURIComponent(payload.fid)}/file`;
+		const downloadUrl = derivativeId
+			? `${downloadBase}?derivative=${encodeURIComponent(derivativeId)}`
+			: downloadBase;
+		const res = await fetch(downloadUrl, { headers });
+		if (!res.ok) {
+			throw new Error(`下载素材失败 (HTTP ${res.status})`);
+		}
+		const blob = await res.blob();
+		const mime = resolveMediaMime(blob.type, payload);
+		if (!mime) throw new Error("无法识别素材类型");
+		const file = new File([blob], payload.file_name, {
+			type: mime,
+		});
+
+		// 2. 原生解码与 OPFS 写入
+		const processedAssets = await processMediaAssets({ files: [file] });
+		if (!processedAssets.length) {
+			throw new Error("素材解码失败");
+		}
+
+		// processMediaAssets 返回的资产没有 id，必须使用入库后的返回值（带 id），
+		// 否则 mediaId 为 undefined，时间轴渲染会直接抛错导致整页白屏。
+		const created = await editor.media.addMediaAsset({
+			projectId,
+			asset: processedAssets[0],
+		});
+		if (!created) throw new Error("素材写入本地存储失败");
+
+		// 3. 关联云端 FID
+		registerMediaFid(created.id, payload.fid, derivativeId);
+
+		// 4. 自动加入时间轴
+		const duration =
+			created.duration != null
+				? mediaTimeFromSeconds({ seconds: created.duration })
+				: DEFAULT_NEW_ELEMENT_DURATION;
+
+		const element = buildElementFromMedia({
+			mediaId: created.id,
+			mediaType: created.type,
+			name: created.name,
+			duration,
+			startTime: editor.playback.getCurrentTime(),
+		});
+
+		editor.timeline.insertElement({
+			element,
+			placement: { mode: "auto" },
+		});
+	};
+
+	// 单体导入（自带 loading / 成功 / 失败 toast）：单件送入与旧行为完全一致
 	const handleImportPayload = async (payload: MlsAssetPayload, projectId: string) => {
 		if (!payload?.fid) {
 			toast.error("素材信息不完整，无法导入");
@@ -72,68 +140,10 @@ export function MlsBridge() {
 		}
 		if (isHandlingRef.current) return;
 		isHandlingRef.current = true;
-		const derivativeId = String(
-			payload.derivativeId || payload.activeDerivativeId || "",
-		);
 		const toastId = toast.loading(`正在从素材库加载「${payload.file_name}」...`);
 
 		try {
-			// 1. 获取素材二进制
-			const token = localStorage.getItem("ml_token") || "";
-			const headers: Record<string, string> = {};
-			if (token) headers.Authorization = `Bearer ${token}`;
-
-			const downloadBase = `/api/viewer/assets/${encodeURIComponent(payload.fid)}/file`;
-			const downloadUrl = derivativeId
-				? `${downloadBase}?derivative=${encodeURIComponent(derivativeId)}`
-				: downloadBase;
-			const res = await fetch(downloadUrl, { headers });
-			if (!res.ok) {
-				throw new Error(`下载素材失败 (HTTP ${res.status})`);
-			}
-			const blob = await res.blob();
-			const mime = resolveMediaMime(blob.type, payload);
-			if (!mime) throw new Error("无法识别素材类型");
-			const file = new File([blob], payload.file_name, {
-				type: mime,
-			});
-
-			// 2. 原生解码与 OPFS 写入
-			const processedAssets = await processMediaAssets({ files: [file] });
-			if (!processedAssets.length) {
-				throw new Error("素材解码失败");
-			}
-
-			// processMediaAssets 返回的资产没有 id，必须使用入库后的返回值（带 id），
-			// 否则 mediaId 为 undefined，时间轴渲染会直接抛错导致整页白屏。
-			const created = await editor.media.addMediaAsset({
-				projectId,
-				asset: processedAssets[0],
-			});
-			if (!created) throw new Error("素材写入本地存储失败");
-
-			// 3. 关联云端 FID
-			registerMediaFid(created.id, payload.fid, derivativeId);
-
-			// 4. 自动加入时间轴
-			const duration =
-				created.duration != null
-					? mediaTimeFromSeconds({ seconds: created.duration })
-					: DEFAULT_NEW_ELEMENT_DURATION;
-
-			const element = buildElementFromMedia({
-				mediaId: created.id,
-				mediaType: created.type,
-				name: created.name,
-				duration,
-				startTime: editor.playback.getCurrentTime(),
-			});
-
-			editor.timeline.insertElement({
-				element,
-				placement: { mode: "auto" },
-			});
-
+			await importOneAsset(payload, projectId);
 			toast.success(`素材「${payload.file_name}」已自动载入并插入时间轴`, { id: toastId });
 		} catch (err) {
 			console.error("[MlsBridge Error]", err);
@@ -143,15 +153,64 @@ export function MlsBridge() {
 		}
 	};
 
+	// 批量导入（素材库多选）：一个汇总 toast 顺序导入，单个失败不中断整批
+	const importAssetBatch = async (list: MlsAssetPayload[], projectId: string) => {
+		if (isHandlingRef.current) return;
+		isHandlingRef.current = true;
+		const toastId = toast.loading(`正在从素材库批量加载 ${list.length} 个素材…`);
+		let done = 0;
+		const failed: string[] = [];
+		try {
+			for (const payload of list) {
+				if (!payload?.fid) continue;
+				try {
+					await importOneAsset(payload, projectId);
+					done += 1;
+					toast.loading(`正在导入素材…（${done}/${list.length}）`, { id: toastId });
+				} catch (err) {
+					console.error("[MlsBridge Batch Error]", payload.fid, err);
+					failed.push(payload.file_name || String(payload.fid));
+				}
+			}
+			if (failed.length) {
+				toast.error(
+					`${done} 个素材已插入时间轴，${failed.length} 个失败：${failed.slice(0, 3).join("、")}${failed.length > 3 ? " 等" : ""}`,
+					{ id: toastId },
+				);
+			} else {
+				toast.success(`${done} 个素材已全部载入并插入时间轴`, { id: toastId });
+			}
+		} finally {
+			isHandlingRef.current = false;
+		}
+	};
+
+	// 把一条 MLS_IMPORT_ASSET 消息规整为有效资产数组：批量取 assets，单体回退 asset
+	const assetsFromMessage = (data: Record<string, unknown>): MlsAssetPayload[] => {
+		const raw = Array.isArray(data.assets)
+			? (data.assets as MlsAssetPayload[])
+			: data.asset
+				? [data.asset as MlsAssetPayload]
+				: [];
+		return raw.filter((a) => a && typeof a === "object" && a.fid);
+	};
+
 	useEffect(() => {
-		// 1. 检查是否存在待消费的暂存素材（比如从列表页刚跳过来）
+		// 1. 检查是否存在待消费的暂存素材（比如从列表页刚跳过来；批量为数组，逐个导入）
 		if (activeProject) {
 			try {
 				const pending = sessionStorage.getItem(PENDING_STORAGE_KEY);
 				if (pending) {
 					sessionStorage.removeItem(PENDING_STORAGE_KEY);
-					const payload = JSON.parse(pending) as MlsAssetPayload;
-					void handleImportPayload(payload, activeProject.metadata.id);
+					const parsed = JSON.parse(pending);
+					const list = (Array.isArray(parsed) ? parsed : [parsed]).filter(
+						(p: MlsAssetPayload) => p && p.fid,
+					) as MlsAssetPayload[];
+					if (list.length === 1) {
+						void handleImportPayload(list[0], activeProject.metadata.id);
+					} else if (list.length > 1) {
+						void importAssetBatch(list, activeProject.metadata.id);
+					}
 				}
 			} catch {
 				/* ignore */
@@ -161,19 +220,23 @@ export function MlsBridge() {
 		// 2. 监听来自主系统的 postMessage
 		const onMessage = async (event: MessageEvent) => {
 			if (!event.data || typeof event.data !== "object") return;
-			if (event.data.type === "MLS_IMPORT_ASSET" && event.data.asset) {
-				const asset = event.data.asset as MlsAssetPayload;
-				if (!asset.fid) return;
+			if (event.data.type === "MLS_IMPORT_ASSET") {
+				const list = assetsFromMessage(event.data as Record<string, unknown>);
+				if (!list.length) return;
 
 				if (activeProject) {
-					// 已经在工程中，直接入库并上轨
-					void handleImportPayload(asset, activeProject.metadata.id);
+					// 已经在工程中：单体走原路径（保留逐件 toast），批量顺序导入
+					if (list.length === 1) {
+						void handleImportPayload(list[0], activeProject.metadata.id);
+					} else {
+						void importAssetBatch(list, activeProject.metadata.id);
+					}
 				} else {
-					// 当前处于工程列表页，自动创建新工程并跳转
+					// 当前处于工程列表页，自动创建新工程并跳转，整批暂存待消费
 					try {
-						sessionStorage.setItem(PENDING_STORAGE_KEY, JSON.stringify(asset));
+						sessionStorage.setItem(PENDING_STORAGE_KEY, JSON.stringify(list));
 						const newProjectId = await editor.project.createNewProject({
-							name: asset.file_name ? `剪辑 · ${asset.file_name}` : "新建剪辑工程",
+							name: list[0].file_name ? `剪辑 · ${list[0].file_name}` : "新建剪辑工程",
 						});
 						router.push(`/editor/${newProjectId}`);
 					} catch (e) {

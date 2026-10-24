@@ -32,6 +32,7 @@ interface Capability {
 	ready: boolean;
 	error?: string;
 	reason?: string;
+	detail?: string;
 }
 
 interface VoiceItem {
@@ -60,7 +61,7 @@ const PLUGIN_CARDS = [
 	{
 		type: "vocal-separate",
 		name: "人声分离",
-		desc: "拆出人声与伴奏，人声可单独编进音频轨。",
+		desc: "GPU 上的 BS-RoFormer 模型，拆出人声与背景音；拖到片段上只处理这一段。",
 		openable: false,
 	},
 ] as const;
@@ -180,11 +181,18 @@ export function AiToolsView() {
 							});
 						}}
 						onDragEnd={() => editor.timeline.dragSource.end()}
-						onClick={card.openable ? () => setPanel("tts") : undefined}
+						onClick={
+							card.openable
+								? () => setPanel("tts")
+								: () =>
+										toast.info(
+											`把「${card.name}」拖到时间线上的音频/视频片段上执行`,
+										)
+						}
 						className={`flex flex-col gap-1 rounded-md border p-2 text-left ${
 							card.openable
 								? "hover:bg-accent cursor-pointer"
-								: "cursor-default opacity-90"
+								: "hover:bg-accent/50 cursor-grab"
 						}`}
 					>
 						<span className="flex items-center justify-between gap-2">
@@ -209,9 +217,12 @@ export function AiToolsView() {
 								{declaredBy.output} · runner {declaredBy.runner}）
 							</span>
 						)}
+						{ready && cap?.detail && (
+							<span className="text-muted-foreground text-[11px]">{cap.detail}</span>
+						)}
 						{!card.openable && (
 							<span className="text-muted-foreground text-[11px]">
-								提交面板接入中
+								拖到时间线片段上执行
 							</span>
 						)}
 					</button>
@@ -236,7 +247,7 @@ export function AiToolsView() {
 						))}
 					</div>
 					<span className="text-muted-foreground text-[11px]">
-						这些能力暂无面板入口。
+						AI 字幕在「文字 → 字幕」里对选中片段使用；其余能力还没有界面入口。
 					</span>
 				</div>
 			)}

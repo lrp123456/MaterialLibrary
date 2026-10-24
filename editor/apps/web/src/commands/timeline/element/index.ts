@@ -7,6 +7,7 @@ export { ToggleSourceAudioSeparationCommand } from "./toggle-source-audio-separa
 export { MoveElementCommand } from "./move-elements";
 export { ApplyTransitionCommand } from "./apply-transition";
 export { RemoveTransitionCommand } from "./remove-transition";
+export { UpdateTransitionCommand } from "./update-transition";
 
 export * from "./keyframes";
 export * from "./effects";

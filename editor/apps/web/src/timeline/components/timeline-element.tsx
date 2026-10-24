@@ -1,6 +1,8 @@
 "use client";
 
 import { t } from "@/i18n";
+import { toast } from "sonner";
+import { downloadMediaAsset } from "@/media/download-asset";
 
 import { createContext, useContext } from "react";
 import { useEditor } from "@/editor/use-editor";
@@ -76,6 +78,7 @@ import {
 	Exchange01Icon,
 	KeyframeIcon,
 	MagicWand05Icon,
+	CloudDownloadIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { uppercase } from "@/utils/string";
@@ -337,6 +340,13 @@ export function TimelineElement({
 		}
 	};
 
+	const handleExportMedia = (event: React.MouseEvent) => {
+		event.stopPropagation();
+		if (!mediaAsset || !downloadMediaAsset(mediaAsset)) {
+			toast.error("找不到该片段的原始媒体文件");
+		}
+	};
+
 	const isMuted = canElementHaveAudio(element) && isElementMuted({ element });
 	const canToggleCurrentSourceAudio =
 		selectedElements.length === 1 &&
@@ -429,7 +439,7 @@ export function TimelineElement({
 						action="split"
 						icon={<HugeiconsIcon icon={ScissorIcon} />}
 					>
-						Split
+						{t("timeline.menu.split", "在此处分割")}
 					</ActionMenuItem>
 					<CopyMenuItem />
 					{selectedElements.length === 1 && (
@@ -437,7 +447,7 @@ export function TimelineElement({
 							action="duplicate-selected"
 							icon={<HugeiconsIcon icon={Copy01Icon} />}
 						>
-							Duplicate
+							{t("timeline.menu.duplicate", "复制副本")}
 						</ActionMenuItem>
 					)}
 					{canElementHaveAudio(element) && hasAudio && (
@@ -479,10 +489,12 @@ export function TimelineElement({
 								toggleElementExpanded(element.id);
 							}}
 						>
-							{isExpanded ? "折叠关键帧" : "展开关键帧"}
+							{isExpanded
+								? t("timeline.menu.collapseKeyframes", "折叠关键帧")
+								: t("timeline.menu.expandKeyframes", "展开关键帧")}
 						</ContextMenuItem>
 					)}
-					{selectedElements.length === 1 && hasMediaId(element) && (
+					{hasMediaId(element) && (
 						<>
 							<ContextMenuItem
 								icon={<HugeiconsIcon icon={Search01Icon} />}
@@ -490,13 +502,19 @@ export function TimelineElement({
 									handleRevealInMedia({ event })
 								}
 							>
-								Reveal media
+								{t("timeline.menu.revealMedia", "在素材中定位")}
+							</ContextMenuItem>
+							<ContextMenuItem
+								icon={<HugeiconsIcon icon={CloudDownloadIcon} />}
+								onClick={handleExportMedia}
+							>
+								{t("timeline.menu.exportMedia", "导出此媒体文件")}
 							</ContextMenuItem>
 							<ContextMenuItem
 								icon={<HugeiconsIcon icon={Exchange01Icon} />}
 								disabled
 							>
-								Replace media
+								{t("timeline.menu.replaceMedia", "替换素材（即将支持）")}
 							</ContextMenuItem>
 						</>
 					)}
@@ -1189,7 +1207,7 @@ function CopyMenuItem() {
 			action="copy-selected"
 			icon={<HugeiconsIcon icon={Copy01Icon} />}
 		>
-			Copy
+			{t("timeline.menu.copy", "复制")}
 		</ActionMenuItem>
 	);
 }
@@ -1216,7 +1234,9 @@ function MuteMenuItem({
 
 	return (
 		<ActionMenuItem action="toggle-elements-muted-selected" icon={getIcon()}>
-			{isMuted ? "Unmute" : "Mute"}
+			{isMuted
+				? t("timeline.menu.unmute", "取消静音")
+				: t("timeline.menu.mute", "静音片段")}
 		</ActionMenuItem>
 	);
 }
@@ -1248,7 +1268,9 @@ function VisibilityMenuItem({
 			action="toggle-elements-visibility-selected"
 			icon={getIcon()}
 		>
-			{isHidden ? "Show" : "Hide"}
+			{isHidden
+				? t("timeline.menu.show", "显示此片段")
+				: t("timeline.menu.hide", "隐藏此片段")}
 		</ActionMenuItem>
 	);
 }
@@ -1271,8 +1293,16 @@ function DeleteMenuItem({
 			icon={<HugeiconsIcon icon={Delete02Icon} />}
 		>
 			{isMultipleSelected && isCurrentElementSelected
-				? `Delete ${selectedCount} elements`
-				: `Delete ${elementType === "text" ? "text" : "clip"}`}
+				? t("timeline.menu.deleteCount", "删除所选 {count} 个元素").replace(
+						"{count}",
+						String(selectedCount),
+					)
+				: t(
+						elementType === "text"
+							? "timeline.menu.deleteText"
+							: "timeline.menu.deleteClip",
+						elementType === "text" ? "删除文字" : "删除片段",
+					)}
 		</ActionMenuItem>
 	);
 }
