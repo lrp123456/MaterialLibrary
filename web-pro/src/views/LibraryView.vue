@@ -146,6 +146,7 @@
         <button type="button" :class="{ 'is-on': showSidebarTimeline }" @click="showSidebarTimeline = !showSidebarTimeline"><span class="lib-mark"></span>时间轴<span v-if="showSidebarTimeline" class="lib-now">当前</span></button>
         <button type="button" :class="{ 'is-on': layoutMode === 'masonry' }" @click="layoutMode = 'masonry'"><span class="lib-mark"></span>瀑布流<span v-if="layoutMode === 'masonry'" class="lib-now">当前</span></button>
         <button type="button" :class="{ 'is-on': layoutMode === 'grid' }" @click="layoutMode = 'grid'"><span class="lib-mark"></span>网格<span v-if="layoutMode === 'grid'" class="lib-now">当前</span></button>
+        <button type="button" :class="{ 'is-on': selectMode }" @click="toggleSelectMode" title="开启后可勾选多件素材，批量删除 / 送入 AI 对话 / 送入剪辑"><span class="lib-mark"></span>多选<span v-if="selectMode" class="lib-now">当前</span><span v-if="selectMode && selectedFids.length" class="lib-count">{{ selectedFids.length }}</span></button>
         <button type="button" class="theme-btn-workbench bg-studio-accent/20 border border-studio-accent/40 text-studio-cyan font-bold hover:brightness-125" @click="openSimilarityWorkbench">
           <StudioIcon name="scan" :size="14" />
           <span>🔍 相似工作台</span>
@@ -449,9 +450,11 @@
                   :class="[
                     'group relative bg-studio-900 border rounded-xl overflow-hidden transition-all duration-200 cursor-pointer',
                     layoutMode === 'masonry' ? 'break-inside-avoid' : '',
-                    'border-studio-750 hover:border-slate-500 hover:shadow-2xl hover:-translate-y-1'
+                    isSelected(item.fid)
+                      ? 'border-studio-accent ring-2 ring-studio-accent/60 shadow-lg shadow-studio-accent/20 -translate-y-0.5'
+                      : 'border-studio-750 hover:border-slate-500 hover:shadow-2xl hover:-translate-y-1'
                   ]"
-                  @click="openAssetDetailModal(item)"
+                  @click="onCardClick(item)"
                 >
                   <!-- 资产图片容器 (依据自然高宽比自适应大图) -->
                   <div
@@ -476,10 +479,24 @@
                       </div>
                     </div>
 
+                    <!-- 多选勾选框（多选模式下常显，点击卡片任意处亦可勾选） -->
+                    <button
+                      v-if="selectMode"
+                      type="button"
+                      class="absolute top-2 left-2 z-30 w-7 h-7 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-md active:scale-90 border backdrop-blur"
+                      :class="isSelected(item.fid)
+                        ? 'bg-studio-accent border-studio-accent text-white shadow-studio-accent/40'
+                        : 'bg-black/60 border-white/30 text-transparent hover:text-slate-300 hover:bg-black/80'"
+                      :title="isSelected(item.fid) ? '取消勾选' : '勾选此素材'"
+                      @click.stop="toggleSelect(item)"
+                    >
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" /></svg>
+                    </button>
+
                     <!-- 顶部浮层标签：画幅比例徽标与收藏星标 -->
                     <div class="absolute top-2 left-2 right-2 flex items-center justify-between z-20 pointer-events-none">
                       <!-- 画幅标识 -->
-                      <span class="px-2 py-0.5 text-[10px] font-mono font-bold bg-black/60 backdrop-blur text-white rounded border border-white/10 shadow-sm pointer-events-auto">
+                      <span class="px-2 py-0.5 text-[10px] font-mono font-bold bg-black/60 backdrop-blur text-white rounded border border-white/10 shadow-sm pointer-events-auto" :class="selectMode ? 'ml-9' : ''">
                         {{ getItemOrientationLabel(item) }}
                       </span>
 
@@ -506,8 +523,8 @@
                       </span>
                     </div>
 
-                    <!-- 悬停快捷操作遮罩 -->
-                    <div class="absolute inset-0 bg-gradient-to-t from-studio-950/90 via-studio-950/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-3 flex flex-col justify-end z-10 pointer-events-none">
+                    <!-- 悬停快捷操作遮罩（多选模式下隐藏，避免误触） -->
+                    <div v-if="!selectMode" class="absolute inset-0 bg-gradient-to-t from-studio-950/90 via-studio-950/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-3 flex flex-col justify-end z-10 pointer-events-none">
                       <div class="flex items-center justify-center space-x-2 py-2 pointer-events-auto">
                         <button
                           @click.stop="openAssetDetailModal(item)"
@@ -607,6 +624,40 @@
           </div>
         </template>
       </div>
+    </div>
+
+    <!-- 多选批量操作坞（底部悬浮）：删除 / AI 对话 / 进入剪辑 -->
+    <div
+      v-if="selectMode"
+      class="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex flex-wrap items-center justify-center gap-1.5 px-3 py-2.5 rounded-2xl bg-studio-900/95 border border-studio-accent/40 shadow-2xl shadow-studio-accent/20 backdrop-blur-md max-w-[calc(100vw-2rem)]"
+    >
+      <span class="text-sm font-bold text-white px-2 whitespace-nowrap">已选 <span class="text-studio-cyan font-mono text-base">{{ selectedFids.length }}</span> 项</span>
+      <span class="w-px h-6 bg-studio-700 mx-1"></span>
+      <button type="button" class="sel-bar-btn" @click="selectAllVisible" title="勾选当前已加载的全部素材">全选本页</button>
+      <button type="button" class="sel-bar-btn" @click="invertVisibleSelection" title="反转当前已加载素材的勾选状态">反选</button>
+      <button type="button" class="sel-bar-btn" @click="clearSelection">清空勾选</button>
+      <template v-if="activeMainTab !== 'trash'">
+        <span class="w-px h-6 bg-studio-700 mx-1"></span>
+        <button type="button" class="sel-bar-btn sel-bar-btn-primary" :disabled="!selectedFids.length" @click="handleBatchSendToChat" title="把勾选的素材作为多张 @引用 挂进 AI 对话">
+          <StudioIcon name="chat" :size="14" />
+          <span>AI 对话</span>
+        </button>
+        <button type="button" class="sel-bar-btn sel-bar-btn-primary" :disabled="!selectedFids.length" @click="handleBatchSendToClip" title="把勾选的素材批量送入多轨剪辑时间轴">
+          <StudioIcon name="video" :size="14" />
+          <span>进入剪辑</span>
+        </button>
+        <button type="button" class="sel-bar-btn sel-bar-btn-danger" :disabled="!selectedFids.length" @click="handleBatchDelete" title="批量移入回收站（被剪辑工程引用的素材会保留并提示）">
+          <StudioIcon name="trash" :size="14" />
+          <span>删除</span>
+        </button>
+      </template>
+      <template v-else>
+        <span class="w-px h-6 bg-studio-700 mx-1"></span>
+        <button type="button" class="sel-bar-btn sel-bar-btn-success" :disabled="!selectedFids.length" @click="handleRestoreBatch">恢复到素材库</button>
+        <button type="button" class="sel-bar-btn sel-bar-btn-danger" :disabled="!selectedFids.length" @click="handlePurgeBatch">彻底粉碎</button>
+      </template>
+      <span class="w-px h-6 bg-studio-700 mx-1"></span>
+      <button type="button" class="sel-bar-btn" @click="exitSelectMode">退出多选</button>
     </div>
 
     </div>
@@ -1158,6 +1209,7 @@ import {
   restoreFromTrash,
   purgeFromTrash,
   deleteAsset,
+  deleteAssets,
   toggleFavorite,
   getAssetImageUrl,
   getAssetPosterUrl,
@@ -1202,7 +1254,10 @@ const SUB_CATEGORIES_CONFIG = {
   video: [
     { key: 'all', label: '全部视频' },
     { key: 'walkthrough', label: '空间漫游' },
-    { key: 'ad', label: '商业短片' }
+    { key: 'product', label: '单品展示' },
+    { key: 'detail', label: '细节特写' },
+    { key: 'ad', label: '商业短片' },
+    { key: 'portrait', label: '人像动态' }
   ],
   audio: [
     { key: 'all', label: '全部音频' },
@@ -1425,6 +1480,130 @@ const hasMore = ref(true);
 const assetsList = ref([]);
 const trashTotal = ref(0);
 const selectedFids = ref([]);
+
+// =============================================================================
+// 多选（批量操作）：勾选态跨分页保留，退出多选 / 重新加载时清空
+// =============================================================================
+const selectMode = ref(false);
+// fid -> 素材快照：勾选后跨「加载下一页」保留，送 AI 对话 / 剪辑时直接取用
+const selectedAssetCache = {};
+
+function isSelected(fid) {
+  return selectedFids.value.includes(fid);
+}
+
+function toggleSelect(item) {
+  if (!item?.fid) return;
+  const idx = selectedFids.value.indexOf(item.fid);
+  if (idx >= 0) {
+    selectedFids.value.splice(idx, 1);
+    delete selectedAssetCache[item.fid];
+  } else {
+    selectedFids.value.push(item.fid);
+    selectedAssetCache[item.fid] = item;
+  }
+}
+
+// 多选模式下点卡片 = 勾选/取消；普通模式 = 打开详情大弹窗
+function onCardClick(item) {
+  if (selectMode.value) {
+    toggleSelect(item);
+  } else {
+    openAssetDetailModal(item);
+  }
+}
+
+function selectAllVisible() {
+  for (const item of assetsList.value) {
+    if (!item?.fid) continue;
+    if (!selectedAssetCache[item.fid]) {
+      selectedFids.value.push(item.fid);
+      selectedAssetCache[item.fid] = item;
+    }
+  }
+}
+
+function invertVisibleSelection() {
+  for (const item of assetsList.value) {
+    if (item?.fid) toggleSelect(item);
+  }
+}
+
+function clearSelection() {
+  selectedFids.value = [];
+  for (const fid of Object.keys(selectedAssetCache)) delete selectedAssetCache[fid];
+}
+
+function toggleSelectMode() {
+  selectMode.value = !selectMode.value;
+  if (!selectMode.value) clearSelection();
+}
+
+function exitSelectMode() {
+  selectMode.value = false;
+  clearSelection();
+}
+
+function getSelectedAssets() {
+  return selectedFids.value.map((fid) => selectedAssetCache[fid]).filter(Boolean);
+}
+
+// 多选 → 批量移入回收站（逐项容错；被剪辑工程引用的素材保留并提示）
+async function handleBatchDelete() {
+  const fids = selectedFids.value.slice();
+  if (!fids.length) return;
+  if (!confirm(`确认将选中的 ${fids.length} 个素材移入回收站吗？\n之后可从回收站恢复；被剪辑工程引用的素材会被保留。`)) return;
+  let result;
+  try {
+    result = await deleteAssets(fids);
+  } catch (e) {
+    alert('批量删除失败: ' + (e?.message || e));
+    return;
+  }
+  const ok = result?.ok || [];
+  const failed = result?.failed || [];
+  if (ok.length) {
+    const okSet = new Set(ok);
+    assetsList.value = assetsList.value.filter((a) => !okSet.has(a.fid));
+    selectedFids.value = selectedFids.value.filter((fid) => !okSet.has(fid));
+    for (const fid of okSet) delete selectedAssetCache[fid];
+    trashTotal.value += ok.length;
+    totalAssetsCount.value = Math.max(0, (totalAssetsCount.value || 0) - ok.length);
+  }
+  if (failed.length) {
+    const lines = failed.slice(0, 5).map((f) => {
+      const used = Array.isArray(f.usedBy) && f.usedBy.length
+        ? `（被剪辑工程引用：${f.usedBy.slice(0, 2).map((x) => x.name || x).join('、')}${f.usedBy.length > 2 ? ' 等' : ''}）`
+        : '';
+      return `· ${f.fid}${used} ${f.error || ''}`.trim();
+    });
+    alert(`已移入回收站 ${ok.length} 个，失败 ${failed.length} 个：\n${lines.join('\n')}${failed.length > 5 ? `\n…等共 ${failed.length} 个` : ''}`);
+  }
+  if (!selectedFids.value.length && !failed.length) {
+    // 全部处理完且无残留勾选：自动退出多选，回到常规浏览
+    selectMode.value = false;
+  }
+}
+
+// 多选 → 批量送入 AI 对话（挂成 @图1…@图N 多引用）
+function handleBatchSendToChat() {
+  const items = getSelectedAssets();
+  if (!items.length) return;
+  emit('sendToChat', {
+    items: items.map((it) => ({ ...it, url: getThumbnailSrc(it), imgUrl: getThumbnailSrc(it) }))
+  });
+  exitSelectMode();
+}
+
+// 多选 → 批量送入多轨剪辑时间轴
+function handleBatchSendToClip() {
+  const items = getSelectedAssets();
+  if (!items.length) return;
+  emit('sendToClip', {
+    items: items.map((it) => ({ ...it, url: getAssetImageUrl(it.fid, it.mediaToken), imgUrl: getAssetImageUrl(it.fid, it.mediaToken) }))
+  });
+  exitSelectMode();
+}
 
 // Pinterest 模式详情大弹窗状态
 const activeModalAsset = ref(null);
@@ -2022,10 +2201,8 @@ function buildQueryParams(page = 1) {
     }
   } else if (activeMainTab.value === 'video') {
     params.media_type = 'video';
-    if (activeSubCategory.value === 'walkthrough') {
-      params.category = 'video';
-    } else if (activeSubCategory.value === 'ad') {
-      params.category = 'finished';
+    if (activeSubCategory.value && activeSubCategory.value !== 'all') {
+      params.video_purpose = activeSubCategory.value;
     }
   } else if (activeMainTab.value === 'audio') {
     params.media_type = 'music';
@@ -2081,6 +2258,7 @@ async function reloadAssets(reset = true) {
     hasMore.value = true;
     assetsList.value = [];
     selectedFids.value = [];
+    for (const fid of Object.keys(selectedAssetCache)) delete selectedAssetCache[fid];
   }
 
   loading.value = true;
@@ -2803,5 +2981,56 @@ onUnmounted(() => {
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+/* 多选批量操作坞按钮 */
+.sel-bar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.8rem;
+  border-radius: 0.6rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #e2e8f0;
+  background: rgba(30, 41, 59, 0.9);
+  border: 1px solid rgba(51, 65, 85, 0.9);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.sel-bar-btn:hover:not(:disabled) {
+  background: rgba(51, 65, 85, 0.95);
+  color: #fff;
+}
+.sel-bar-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.sel-bar-btn-primary {
+  background: rgba(34, 211, 238, 0.15);
+  border-color: rgba(34, 211, 238, 0.45);
+  color: #67e8f9;
+}
+.sel-bar-btn-primary:hover:not(:disabled) {
+  background: rgba(34, 211, 238, 0.28);
+  color: #fff;
+}
+.sel-bar-btn-danger {
+  background: rgba(244, 63, 94, 0.15);
+  border-color: rgba(244, 63, 94, 0.45);
+  color: #fda4af;
+}
+.sel-bar-btn-danger:hover:not(:disabled) {
+  background: rgba(244, 63, 94, 0.3);
+  color: #fff;
+}
+.sel-bar-btn-success {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.45);
+  color: #6ee7b7;
+}
+.sel-bar-btn-success:hover:not(:disabled) {
+  background: rgba(16, 185, 129, 0.3);
+  color: #fff;
 }
 </style>

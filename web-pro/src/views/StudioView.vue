@@ -79,7 +79,9 @@ watch(() => props.initialPayload, (payload) => {
       else if (typeof payload.item === 'string') editTargetImage.value = payload.item;
     } else if (payload.target === 'chat') {
       activeSub.value = 'chat';
-      chatTargetPayload.value = payload.item;
+      // 多选批量送入时 items 为数组；单件时保持原有对象形态（提示词文案按单件渲染）
+      const items = Array.isArray(payload.items) ? payload.items : (payload.item ? [payload.item] : []);
+      chatTargetPayload.value = items.length === 1 ? items[0] : (items.length ? items : null);
     }
   }
 }, { immediate: true });

@@ -46,8 +46,18 @@ export class AuthRequiredError extends Error {
   }
 }
 
-function notifyAuthRequired() {
-  try { window.dispatchEvent(new CustomEvent('ml_auth_required')); } catch { /* ignore */ }
+function notifyAuthRequired(reason = '') {
+  try { window.dispatchEvent(new CustomEvent('ml_auth_required', { detail: reason })); } catch { /* ignore */ }
+}
+
+/**
+ * 服务端说「未授权」时的统一收口：本地那份 token 已经是死串，
+ * 必须清掉再广播 —— 否则 isLoggedIn() 仍为真，登录框永远弹不出来，
+ * 用户只能对着满屏破图（<img> 不走 authFetch，没人替它清会话）。
+ */
+export function reportUnauthorized() {
+  setSession('', null);
+  notifyAuthRequired('expired');
 }
 
 /**
@@ -82,6 +92,27 @@ export function isLoggedIn() {
 }
 
 /**
+ * 向服务端验一次本地会话。localStorage 里有 token 字符串不等于还活着：
+ * 会话可能被撤销（换密码/被清理），此时页面照常打开、图片全 401 破图。
+ * 进页面和切回页签各验一次，死了就当场要登录，而不是让人对着一屏破图猜。
+ * 网络异常不算掉登录（离线/换源时不该把人踢出去）。
+ */
+export async function verifySession() {
+  if (!getToken()) {
+    notifyAuthRequired();
+    return false;
+  }
+  try {
+    const res = await authFetch('/api/auth/me');
+    return res.status !== 403;
+  } catch (e) {
+    // authFetch 遇到 401 已经清会话 + 广播过了，这里只负责不再往上抛
+    if (e && e.name === 'AuthRequiredError') return false;
+    return true;
+  }
+}
+
+/**
  * 确保具备有效 Token。web-pro 没有（也不应有）内置口令，
  * 本地无会话时抛 AuthRequiredError，由全局登录弹窗承接——
  * 这是局域网新设备之前“空白/未找到素材”的真正原因（localStorage 按源隔离，无 token）。
@@ -106,8 +137,7 @@ export async function authFetch(url, options = {}) {
   const res = await fetch(url, { ...options, headers });
 
   if (res.status === 401) {
-    setSession('', null);
-    notifyAuthRequired();
+    reportUnauthorized();
     throw new AuthRequiredError('登录已过期，请重新登录');
   }
 
@@ -125,6 +155,29 @@ export function getAssetImageUrl(fid, mediaToken = '') {
   if (mediaToken) q.set('media_token', mediaToken);
   const qs = q.toString();
   return resolveApiUrl(`/api/viewer/assets/${encodeURIComponent(fid)}/image${qs ? `?${qs}` : ''}`);
+}
+
+/**
+ * 重新签发素材 URL。创作配方里存下来的 `/api/.../image?token=xxx` 是当前会话的短期凭证，
+ * 换登录/换 token 后原样回填必然 401；这里只换凭证，derivative 等业务参数原样保留。
+ */
+export function resignAssetUrl(storedUrl) {
+  const url = String(storedUrl || '');
+  if (!url.startsWith('/api/') && !/^https?:\/\//i.test(url)) return url;
+  let u;
+  try {
+    u = new URL(url, window.location.origin);
+  } catch {
+    return url;
+  }
+  if (!/^\/api\/(?:viewer\/)?assets\//.test(u.pathname)) return url;
+  // 跨主机的绝对地址不是我们签的，动不了，原样返回。
+  if (!url.startsWith('/') && u.origin !== window.location.origin) return url;
+  u.searchParams.delete('token');
+  u.searchParams.delete('media_token');
+  const token = getToken();
+  if (token) u.searchParams.set('token', token);
+  return `${u.pathname}${u.search}`;
 }
 
 /**
@@ -255,6 +308,61 @@ export async function deleteAsset(fid, reason = 'web_user_deleted') {
 }
 
 /**
+ * 批量将素材移入回收站（素材库多选删除）。
+ * 优先走服务端批量端点 /api/assets/batch-delete（逐项容错，返回 ok/failed 清单）；
+ * 端点不存在或返回结构不符合预期（旧后端 404/400/HTML 兜底页等）时，
+ * 自动回退为小并发逐条删除，保证灰度期兼容。
+ * @returns {Promise<{ok: string[], failed: Array<{fid: string, error: string, code?: string, usedBy?: any[]}>}>}
+ */
+export async function deleteAssets(fids, reason = 'web_user_deleted') {
+  const list = (Array.isArray(fids) ? fids : [fids]).filter(Boolean).map(String);
+  if (!list.length) return { ok: [], failed: [] };
+  try {
+    const res = await authFetch('/api/assets/batch-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fids: list, reason })
+    });
+    let json = null;
+    try { json = await res.json(); } catch (_) { /* 非 JSON 响应（HTML 兜底页等）走回退 */ }
+    const data = json?.data;
+    // 只有结构完整才算批量端点真正生效，否则回退逐条（旧后端不会给出这个结构）
+    if (res.ok && data && Array.isArray(data.ok) && Array.isArray(data.failed)) {
+      return { ok: data.ok, failed: data.failed };
+    }
+  } catch (e) {
+    // 登录过期等真实错误直接抛出，交由全局登录弹窗处理
+    if (e?.name === 'AuthRequiredError') throw e;
+  }
+  // 回退：逐条软删（并发 4，失败项带原因汇总，不中断整批）
+  const ok = [];
+  const failed = [];
+  let cursor = 0;
+  async function worker() {
+    while (cursor < list.length) {
+      const fid = list[cursor++];
+      try {
+        const res = await authFetch(`/api/assets/${encodeURIComponent(fid)}/delete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason })
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          failed.push({ fid, error: json.error || `HTTP ${res.status}`, code: json.code || '', usedBy: json.usedBy || [] });
+        } else {
+          ok.push(fid);
+        }
+      } catch (err) {
+        failed.push({ fid, error: err?.message || String(err) });
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(4, list.length) }, worker));
+  return { ok, failed };
+}
+
+/**
  * 收藏 / 取消收藏素材
  */
 export async function toggleFavorite(fid, on) {
@@ -319,6 +427,27 @@ export function retagAsset(fid) {
 
 export function registerGeneratedAsset(body) {
   return postJson('/api/assets/from-generation', body);
+}
+
+/**
+ * 触发单张素材的画幅重构（默认 9:16 + 3:4）。
+ *
+ * 后端这条链路是同步的：请求会一直挂到生图返回（几十秒到几分钟），
+ * 调用方必须自己显示「生成中」并禁止重复点击，不能靠 loading 骨架屏猜。
+ * ratios 只传实际缺失的那几档，避免把已经有的画幅重新生成一遍。
+ *
+ * model 显式传 Seedream 5.0 Flash：default 工作流的 restage_dual 可能为省成本挂到
+ * 本机免费模型，手动点的人是盯着插槽等出图的，不能跟着排进本机 GPU 长队。
+ * gpuPriority 同理 —— 手动点的图在 GPU 队列里排高位。
+ */
+export function triggerRestageDerivatives(fid, ratios = ['9:16', '3:4'], model = 'seedream5flash') {
+  const list = Array.isArray(ratios) && ratios.length ? ratios : ['9:16', '3:4'];
+  return postJson(`/api/viewer/assets/${encodeURIComponent(fid)}/restage`, {
+    ratios: list,
+    model,
+    gpuPriority: 'high',
+    forceMember: true,
+  });
 }
 
 /**

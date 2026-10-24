@@ -120,7 +120,7 @@
                   class="relative w-32 h-32 rounded-xl overflow-hidden border-2 border-studio-accent bg-studio-950 shrink-0 group shadow-md cursor-pointer"
                   @click="openMediaPreview(referenceTray[0], 'image')"
                 >
-                  <img :src="referenceTray[0].url" class="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                  <img :src="authedMediaUrl(referenceTray[0].url)" class="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                   <div class="absolute inset-0 bg-black/65 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-2 text-xs">
                     <div class="flex items-center justify-between text-white">
                       <span class="font-bold truncate">{{ referenceTray[0].name }}</span>
@@ -197,7 +197,7 @@
                   class="relative w-28 h-28 rounded-xl overflow-hidden border-2 border-studio-accent bg-studio-950 shrink-0 group shadow-lg cursor-pointer"
                   @click="openMediaPreview(refItem, refItem.kind === 'video' ? 'video' : 'image')"
                 >
-                  <img :src="refItem.url" class="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                  <img :src="authedMediaUrl(refItem.url)" class="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                   <!-- 遮罩与权重/移除/大图预览 -->
                   <div class="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-2 text-xs">
                     <div class="flex justify-between items-center text-white">
@@ -290,7 +290,7 @@
                   </div>
                 </div>
 
-                <span class="text-[11px] text-studio-cyan font-mono font-bold">Seedance 2.5 驱动</span>
+                <span class="text-[11px] text-studio-cyan font-mono font-bold">{{ getModelDisplayName(videoModelKey) }} 驱动</span>
               </div>
 
               <!-- 若是首尾帧模式：并列展示两大核心卡槽 -->
@@ -299,7 +299,7 @@
                 <div class="p-3 rounded-xl bg-studio-950 border border-studio-750 flex flex-col items-center justify-center space-y-2 relative group min-h-[140px]">
                   <span class="text-xs font-bold text-white self-start">🎬 起步首帧 (Start Frame):</span>
                   <div v-if="referenceTray[0]" class="relative w-full h-24 rounded-lg overflow-hidden border border-studio-accent group cursor-pointer" @click="openMediaPreview(referenceTray[0], 'image')">
-                    <img :src="referenceTray[0].url" class="w-full h-full object-cover" />
+                    <img :src="authedMediaUrl(referenceTray[0].url)" class="w-full h-full object-cover" />
                     <div class="absolute top-1 right-1 flex items-center space-x-1">
                       <button @click.stop="openMediaPreview(referenceTray[0], 'image')" class="p-1 rounded bg-black/70 text-studio-cyan text-xs cursor-pointer" title="查看大图">🔍</button>
                       <button @click.stop="removeRef(0)" class="p-1 rounded bg-black/70 text-rose-400 text-xs cursor-pointer">✕</button>
@@ -320,7 +320,7 @@
                 <div class="p-3 rounded-xl bg-studio-950 border border-studio-750 flex flex-col items-center justify-center space-y-2 relative group min-h-[140px]">
                   <span class="text-xs font-bold text-white self-start">🏁 落幅尾帧 (End Frame):</span>
                   <div v-if="referenceTray[1]" class="relative w-full h-24 rounded-lg overflow-hidden border border-studio-indigo group cursor-pointer" @click="openMediaPreview(referenceTray[1], 'image')">
-                    <img :src="referenceTray[1].url" class="w-full h-full object-cover" />
+                    <img :src="authedMediaUrl(referenceTray[1].url)" class="w-full h-full object-cover" />
                     <div class="absolute top-1 right-1 flex items-center space-x-1">
                       <button @click.stop="openMediaPreview(referenceTray[1], 'image')" class="p-1 rounded bg-black/70 text-studio-cyan text-xs cursor-pointer" title="查看大图">🔍</button>
                       <button @click.stop="removeRef(1)" class="p-1 rounded bg-black/70 text-rose-400 text-xs cursor-pointer">✕</button>
@@ -346,7 +346,7 @@
                   class="relative w-24 h-24 rounded-xl overflow-hidden border-2 border-studio-indigo bg-studio-950 shrink-0 group shadow-md cursor-pointer"
                   @click="openMediaPreview(refItem, 'image')"
                 >
-                  <img :src="refItem.url" class="w-full h-full object-cover" />
+                  <img :src="authedMediaUrl(refItem.url)" class="w-full h-full object-cover" />
                   <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-1.5 text-xs">
                     <div class="flex items-center justify-between">
                       <span class="truncate font-bold text-white">@图{{ idx + 1 }}</span>
@@ -439,7 +439,7 @@
                       :class="segment.ref && segment.ref.url ? 'cursor-zoom-in' : 'cursor-default'"
                       @click="segment.ref && segment.ref.url && openMediaPreview(segment.ref)"
                     >
-                      <img v-if="segment.thumb" :src="segment.thumb" class="w-4 h-4 rounded-full object-cover border border-white/50" alt="" />
+                      <img v-if="segment.thumb" :src="authedMediaUrl(segment.thumb)" class="w-4 h-4 rounded-full object-cover border border-white/50" alt="" />
                       <span>{{ segment.tag }}: {{ segment.name }}</span>
                     </button>
                   </template>
@@ -452,8 +452,8 @@
                     class="rounded-lg border border-white/40 bg-black/20 overflow-hidden cursor-zoom-in"
                     @click="openMediaPreview(item)"
                   >
-                    <img v-if="mediaKind(item) === 'image'" :src="item.url" :alt="item.name || '图片'" class="h-16 w-16 object-cover" />
-                    <video v-else-if="mediaKind(item) === 'video'" :src="item.url" class="h-16 w-24 object-cover" muted></video>
+                    <img v-if="mediaKind(item) === 'image'" :src="authedMediaUrl(item.url)" :alt="item.name || '图片'" class="h-16 w-16 object-cover" />
+                    <video v-else-if="mediaKind(item) === 'video'" :src="authedMediaUrl(item.url)" class="h-16 w-24 object-cover" muted></video>
                     <span v-else class="flex h-16 w-28 items-center px-2 text-left text-[11px] font-bold text-white">音频 {{ item.name || '附件' }}</span>
                   </button>
                 </div>
@@ -471,7 +471,7 @@
                 </span>
                 <span class="flex items-center gap-2">
                   <span v-if="!msg.isError">
-                    {{ msg.modality === 'video' ? `时长: ${msg.duration || '5s'} · 分辨率: ${msg.resolution || '1080p'}` : (msg.modality === 'music' ? `时长: ${msg.duration || '30s'} · 320kbps` : `耗时: ${msg.duration || ''} · 分辨率: ${msg.resolution || ''}`) }}
+                    {{ msg.modality === 'video' ? `时长: ${msg.duration || '5s'} · 分辨率: ${msg.resolution || '1080p'}` : (msg.modality === 'music' ? `时长: ${msg.duration || '30s'} · 320kbps` : [msg.duration ? `耗时: ${msg.duration}` : '', msg.resolution ? `分辨率: ${msg.resolution}` : ''].filter(Boolean).join(' · ')) }}
                   </span>
                   <button
                     v-if="!msg.isError && msg.content"
@@ -487,11 +487,19 @@
 
               <!-- 情况 A：生图产物展示 (图片大图 + 存入创作库 + 精准重绘) -->
               <div v-if="msg.imageUrl && msg.modality === 'image'" class="relative group rounded-xl overflow-hidden border border-studio-750 bg-studio-950">
-                <img :src="msg.imageUrl" @click="openMediaPreview(msg.imageUrl, 'image')" class="w-full max-h-[460px] object-contain cursor-zoom-in hover:brightness-105 transition-all" title="点击查看高清大图" />
+                <img :src="resultImageSrc(msg)" @error="onResultImgError(msg)" @load="onResultImgLoad(msg)" @click="openMediaPreview(resultImageSrc(msg), 'image')" class="w-full max-h-[460px] object-contain cursor-zoom-in hover:brightness-105 transition-all" title="点击查看高清大图" />
+                <!-- 破图不再只是浏览器那个小图标：把真实失败原因摊开，并给一次重签重试 -->
+                <div v-if="msg.imgFailed" class="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-studio-950/88 px-4 text-center">
+                  <p v-if="msg.imgAuth" class="text-xs text-amber-300 leading-relaxed">登录已过期，服务器不认当前会话。重新登录后这张图会自动出来。</p>
+                  <p v-else class="text-xs text-amber-300 leading-relaxed">这张产物取不到了{{ msg.imgErr ? `：${msg.imgErr}` : '（临时文件被清理，或服务器不可达）' }}。</p>
+                  <p class="text-[10px] font-mono text-slate-500 break-all">{{ resultImageSrc(msg).replace(/token=[^&]*/, 'token=***') }}</p>
+                  <button v-if="msg.imgAuth" type="button" class="text-xs font-bold text-studio-cyan underline cursor-pointer" @click="reportUnauthorized()">重新登录</button>
+                  <button v-else type="button" class="text-xs font-bold text-studio-cyan underline cursor-pointer" @click="retryResultImage(msg)">重新加载</button>
+                </div>
 
                 <!-- 悬浮功能条 -->
                 <div class="absolute bottom-3 right-3 flex items-center space-x-2 bg-studio-950/90 backdrop-blur px-3 py-1.5 rounded-lg border border-studio-700 shadow-xl">
-                  <button @click="openMediaPreview(msg.imageUrl, 'image')" class="flex items-center space-x-1 text-slate-200 hover:text-white text-xs font-bold cursor-pointer">
+                  <button @click="openMediaPreview(resultImageSrc(msg), 'image')" class="flex items-center space-x-1 text-slate-200 hover:text-white text-xs font-bold cursor-pointer">
                     <span>🔍 大图</span>
                   </button>
                   <div class="h-3 w-px bg-studio-750"></div>
@@ -507,7 +515,7 @@
                     <span>精准重绘</span>
                   </button>
                   <div class="h-3 w-px bg-studio-750"></div>
-                  <a :href="msg.imageUrl" target="_blank" download class="flex items-center space-x-1 text-slate-300 hover:text-white text-xs font-bold">
+                  <a :href="resultImageDownloadHref(msg)" target="_blank" download class="flex items-center space-x-1 text-slate-300 hover:text-white text-xs font-bold">
                     <StudioIcon name="download" :size="13" />
                     <span>下载</span>
                   </a>
@@ -536,7 +544,7 @@
                     @click="msg.imageUrl = layer.url"
                   >
                     <div class="h-24 w-full bg-[radial-gradient(#334155_1px,transparent_1px)] [background-size:8px_8px] flex items-center justify-center">
-                      <img :src="layer.url" class="max-h-24 w-full object-contain" />
+                      <img :src="authedMediaUrl(layer.url)" class="max-h-24 w-full object-contain" />
                     </div>
                     <div class="p-1.5 bg-studio-950/90 flex items-center justify-between text-[10px]">
                       <span class="font-bold text-slate-200 truncate">{{ layer.label }}</span>
@@ -558,26 +566,32 @@
 
               <!-- 情况 B：视频产物展示 (完整高保真 HTML5 视频播放器) -->
               <div v-else-if="!msg.isError && (msg.videoUrl || msg.modality === 'video')" class="space-y-3">
-                <div class="rounded-xl overflow-hidden border border-studio-750 bg-black relative group shadow-inner">
+                <!-- 缺产物就直说：原先回落到一个与本次生成无关的 Google 示例视频，用户以为「生成成功但打不开」 -->
+                <div
+                  v-if="!msg.videoUrl"
+                  class="rounded-xl border border-studio-750 bg-studio-950 px-3 py-6 text-center text-xs leading-relaxed text-slate-400"
+                >
+                  这一轮没有可播放的视频产物（生成失败、超时或临时文件已清理），请查看上方失败原因后重试。
+                </div>
+                <div v-else class="rounded-xl overflow-hidden border border-studio-750 bg-black relative group shadow-inner">
                   <video
                     :ref="el => registerVideoEl(i, el)"
-                    :src="msg.videoUrl || sampleVideoUrl"
+                    :src="authedMediaUrl(msg.videoUrl)"
                     class="w-full max-h-[400px] object-contain bg-black"
                     controls
                     playsinline
+                    preload="metadata"
                   ></video>
                 </div>
 
-                <div class="flex items-center justify-between p-2.5 rounded-xl bg-studio-950 border border-studio-750 text-xs">
+                <div v-if="msg.videoUrl" class="flex items-center justify-between p-2.5 rounded-xl bg-studio-950 border border-studio-750 text-xs">
                   <div class="flex items-center space-x-3 text-slate-300">
-                    <span class="flex items-center gap-1 text-studio-indigo font-bold">
+                    <span v-if="msg.model" class="flex items-center gap-1 text-studio-indigo font-bold">
                       <StudioIcon name="film" :size="14" />
-                      <span>运镜: {{ msg.camera || videoCameraMove }}</span>
+                      <span>{{ msg.model }}</span>
                     </span>
-                    <span class="text-slate-500">|</span>
-                    <span class="font-mono text-emerald-400 font-bold">30 FPS</span>
-                    <span class="text-slate-500">|</span>
-                    <span class="text-studio-cyan font-mono font-bold">{{ msg.resolution || '1080P' }}</span>
+                    <span v-if="msg.model && msg.resolution" class="text-slate-500">|</span>
+                    <span v-if="msg.resolution" class="text-studio-cyan font-mono font-bold">{{ msg.resolution }}</span>
                   </div>
 
                   <div class="flex items-center space-x-2">
@@ -605,14 +619,14 @@
                       <span>存入配方</span>
                     </button>
 
-                    <a
-                      :href="msg.videoUrl || sampleVideoUrl"
-                      download="space_cinematic.mp4"
+                    <button
+                      type="button"
+                      @click="downloadGeneratedMedia(msg.videoUrl, videoFileName(msg))"
                       class="px-3 py-1 rounded-lg bg-studio-accent text-white font-bold shadow flex items-center space-x-1 cursor-pointer"
                     >
                       <StudioIcon name="download" :size="13" />
                       <span>下载 MP4</span>
-                    </a>
+                    </button>
                   </div>
                 </div>
               </div>
@@ -627,7 +641,7 @@
                     </span>
                     <span class="text-emerald-400 font-mono text-xs font-bold">{{ msg.duration || '30s' }}</span>
                   </div>
-                  <audio :src="msg.audioUrl" controls class="w-full h-10"></audio>
+                  <audio :src="authedMediaUrl(msg.audioUrl)" controls class="w-full h-10"></audio>
                   <div class="flex items-center justify-end space-x-2 pt-1 border-t border-studio-800/80">
                     <button
                       @click="openSaveToLibraryModal(msg)"
@@ -788,6 +802,14 @@
                 @select-mode="setGenMode"
               />
             </div>
+            <p v-if="catalogError" class="basis-full text-xs text-amber-300">
+              模型目录读取失败（{{ catalogError }}），所以下拉框是空的、参数条也没接上。
+              <button type="button" class="font-bold underline cursor-pointer" @click="loadStudioCatalog">重试</button>
+            </p>
+            <p v-else-if="activeModality !== 'chat' && !currentModelList.length" class="basis-full text-xs text-amber-300">
+              这个模态还没有已启用的模型，去「设置 · 模型」启用后
+              <button type="button" class="font-bold underline cursor-pointer" @click="loadStudioCatalog">重新加载</button>。
+            </p>
             <p v-if="activeModality === 'image' && imageModelKey === 'qwenimage_local'" class="basis-full text-xs text-slate-300 leading-relaxed">
               文生图，或挂最多 10 张参考图做编辑。标准模型和加速 8 步在上面选。
             </p>
@@ -799,6 +821,7 @@
             </p>
             <p v-else-if="!currentSchema" class="basis-full text-xs text-slate-300">这个模型的参数表还没接入，这次只提交提示词。</p>
             <p v-if="oldRecipeNote" class="basis-full text-xs text-slate-300">这是旧配方，模型未记录，已改用 Agnes Image 2.5 Flash。</p>
+            <p v-if="composerNotice" class="basis-full text-xs text-amber-300">{{ composerNotice }}</p>
             <p v-if="composerError" class="basis-full text-xs font-bold text-rose-400">{{ composerError }}</p>
           </template>
         </div>
@@ -809,8 +832,8 @@
             <span class="shrink-0 text-xs font-bold text-slate-300">即将提交 {{ referenceTray.length }} {{ audioOnlyModel() ? '段音频' : '张' }}</span>
             <div v-for="(item, idx) in referenceTray" :key="(item.url || item.name) + idx" class="relative shrink-0">
               <button type="button" class="block text-left" @click="openMediaPreview(item)">
-                <audio v-if="mediaKind(item) === 'audio'" :src="item.url" class="h-10 w-36" controls @click.stop></audio>
-                <img v-else :src="item.url" class="h-10 w-10 rounded-lg object-cover" :alt="item.name" />
+                <audio v-if="mediaKind(item) === 'audio'" :src="authedMediaUrl(item.url)" class="h-10 w-36" controls @click.stop></audio>
+                <img v-else :src="authedMediaUrl(item.url)" class="h-10 w-10 rounded-lg object-cover" :alt="item.name" />
                 <span class="block max-w-16 truncate text-[10px] text-slate-300">{{ activeGenMode === 'first_last_frame' ? (idx === 0 ? '首帧' : '尾帧') : (item.tag || item.name) }}</span>
               </button>
               <button type="button" class="tray-ref-delete" title="移除" @click.stop="removeRef(idx)">×</button>
@@ -1138,7 +1161,8 @@
                 v-model="saveModal.space"
                 class="w-full bg-studio-950 border border-studio-700 rounded-lg p-2.5 text-white outline-none font-bold"
               >
-                <option v-for="sp in SPACE_OPTIONS.filter(s => s !== '全部空间')" :key="sp" :value="sp">{{ sp }}</option>
+                <option value="">不标</option>
+                <option v-for="sp in tagVocab.space" :key="sp.dir" :value="sp.dir">{{ sp.label }}</option>
               </select>
             </div>
             <div>
@@ -1147,9 +1171,20 @@
                 v-model="saveModal.style"
                 class="w-full bg-studio-950 border border-studio-700 rounded-lg p-2.5 text-white outline-none font-bold"
               >
-                <option v-for="st in STYLE_OPTIONS.filter(s => s !== '全部风格')" :key="st" :value="st">{{ st }}</option>
+                <option value="">不标</option>
+                <option v-for="st in tagVocab.style_atom" :key="st.dir" :value="st.dir">{{ st.label }}</option>
               </select>
             </div>
+          </div>
+          <div v-if="saveModal.type === 'video'">
+            <label class="text-slate-300 font-bold block mb-1">成片用途：</label>
+            <select
+              v-model="saveModal.purpose"
+              class="w-full bg-studio-950 border border-studio-700 rounded-lg p-2.5 text-white outline-none font-bold"
+            >
+              <option value="">不标</option>
+              <option v-for="item in tagVocab.video_purpose" :key="item.dir" :value="item.dir">{{ item.label }}</option>
+            </select>
           </div>
 
           <!-- 作品名称 -->
@@ -1233,10 +1268,13 @@
               placeholder="输入作品标题"
             />
             <span v-if="detailModal.tpl.space" class="px-2 py-0.5 rounded bg-studio-900 text-slate-300 border border-studio-800 font-medium">
-              🏠 {{ detailModal.tpl.space }}
+              🏠 {{ tagLabel('space', detailModal.tpl.space) }}
             </span>
             <span v-if="detailModal.tpl.style" class="px-2 py-0.5 rounded bg-studio-900 text-studio-cyan border border-studio-800 font-medium">
-              🎨 {{ detailModal.tpl.style }}
+              🎨 {{ tagLabel('style_atom', detailModal.tpl.style) }}
+            </span>
+            <span v-if="detailModal.tpl.purpose" class="px-2 py-0.5 rounded bg-studio-900 text-slate-300 border border-studio-800 font-medium">
+              {{ tagLabel('video_purpose', detailModal.tpl.purpose) }}
             </span>
             <span v-if="detailModal.tpl.use_count > 0" class="text-amber-400 font-mono font-bold">
               🔥 复用 {{ detailModal.tpl.use_count }} 次
@@ -1389,7 +1427,8 @@
                 v-model="tplSpaceFilter"
                 class="bg-studio-950 border border-studio-750 rounded-lg px-2.5 py-1.5 text-xs text-white outline-none font-medium"
               >
-                <option v-for="sp in SPACE_OPTIONS" :key="sp" :value="sp">{{ sp }}</option>
+                <option value="">全部空间</option>
+                <option v-for="sp in tagVocab.space" :key="sp.dir" :value="sp.dir">{{ sp.label }}</option>
               </select>
             </div>
 
@@ -1400,7 +1439,8 @@
                 v-model="tplStyleFilter"
                 class="bg-studio-950 border border-studio-750 rounded-lg px-2.5 py-1.5 text-xs text-white outline-none font-medium"
               >
-                <option v-for="st in STYLE_OPTIONS" :key="st" :value="st">{{ st }}</option>
+                <option value="">全部风格</option>
+                <option v-for="st in tagVocab.style_atom" :key="st.dir" :value="st.dir">{{ st.label }}</option>
               </select>
             </div>
 
@@ -1561,10 +1601,13 @@
                 <!-- 空间/风格标签行 -->
                 <div class="flex items-center space-x-2 text-[11px]">
                   <span v-if="tpl.space" class="px-2 py-0.5 rounded-md bg-studio-950 text-slate-300 border border-studio-800 font-bold">
-                    🏠 {{ tpl.space }}
+                    🏠 {{ tagLabel('space', tpl.space) }}
                   </span>
                   <span v-if="tpl.style" class="px-2 py-0.5 rounded-md bg-studio-950 text-studio-cyan border border-studio-800 font-bold">
-                    🎨 {{ tpl.style }}
+                    🎨 {{ tagLabel('style_atom', tpl.style) }}
+                  </span>
+                  <span v-if="tpl.purpose" class="px-2 py-0.5 rounded-md bg-studio-950 text-slate-300 border border-studio-800 font-bold">
+                    {{ tagLabel('video_purpose', tpl.purpose) }}
                   </span>
                   <div class="flex-1"></div>
                   <span v-if="tpl.use_count > 0" class="text-[11px] text-amber-400 font-mono font-bold flex items-center space-x-1">
@@ -1672,6 +1715,9 @@ import { STUDIO_SKILLS_REGISTRY, evaluateClientModelRules, normalizeClientLayerS
 import { contextBudgetTokens, trimChatMessages } from '../../../../src/chat-context.mjs';
 import {
   getAssetImageUrl,
+  getAssetDownloadUrl,
+  resignAssetUrl,
+  getToken,
   authFetch,
   generateAiImage,
   generateAiVideo,
@@ -1683,6 +1729,7 @@ import {
   deleteChatSession,
   registerGeneratedAsset,
   moveAssetShelf,
+  reportUnauthorized,
   fetchStudioCatalog
 } from '../../api';
 
@@ -1739,9 +1786,6 @@ const videoSubMode = ref('first_last'); // 'first_last' | 'multi_ref' | 'prompt_
 const videoModelKey = ref('seedance2_5');
 const videoDuration = ref('5');
 const videoResolution = ref('1080p');
-const videoCameraMove = ref('zoom_in');
-const videoSyncAudio = ref(true);
-const sampleVideoUrl = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
 
 // 音乐模式专属参数
 const musicType = ref('doubao_bgm_v5');
@@ -1774,6 +1818,7 @@ const chatModelGroups = computed(() => groupModelsByProvider(studioModels.value.
 const imageModelGroups = computed(() => groupModelsByProvider(studioModels.value.image));
 const videoModelGroups = computed(() => groupModelsByProvider(studioModels.value.video));
 const musicModelGroups = computed(() => groupModelsByProvider(studioModels.value.music));
+const currentModelList = computed(() => studioModels.value[activeModality.value] || []);
 
 const currentChatModel = computed(() => (studioModels.value.chat || []).find((m) => m.id === chatModelKey.value) || null);
 const chatReasoningCaps = computed(() => currentChatModel.value?.reasoning || null);
@@ -2031,6 +2076,7 @@ function toggleStudioSkill(skill) {
 }
 const oldRecipeNote = ref(false);
 const composerError = ref('');
+const composerNotice = ref('');
 const retryDialog = ref({ visible: false, msg: null });
 const retryNotice = ref(false);
 let suppressSchemaReset = false;
@@ -2144,6 +2190,40 @@ function setGenMode(id) {
   else if (id === 'text_to_video' || id === 'text_to_image') videoSubMode.value = 'prompt_only';
   else if (id) videoSubMode.value = 'multi_ref';
 }
+function firstSupportedMode(...ids) {
+  const modes = currentSchema.value?.modes || [];
+  return ids.find((id) => modes.some((mode) => mode.id === id)) || '';
+}
+// 挂上参考素材即切到对应生成模式：图片→图生图/多参考，视频→全能多参考
+function autoSelectRefMode(kinds) {
+  const list = (kinds || []).filter((kind) => kind === 'image' || kind === 'video');
+  if (!list.length) return;
+  const tray = referenceTray.value || [];
+  if (list.includes('video') || tray.some((item) => mediaKind(item) === 'video')) {
+    if (activeModality.value !== 'video') activeModality.value = 'video';
+    nextTick(() => {
+      const target = firstSupportedMode('omni_reference', 'image_to_video', 'first_last_frame');
+      if (target) setGenMode(target);
+    });
+    return;
+  }
+  const imageCount = tray.filter((item) => mediaKind(item) === 'image').length || list.filter((kind) => kind === 'image').length;
+  if (activeModality.value === 'image') {
+    nextTick(() => {
+      const target = imageCount > 1
+        ? firstSupportedMode('image_reference', 'image_to_image')
+        : firstSupportedMode('image_to_image', 'image_reference');
+      if (target) setGenMode(target);
+    });
+  } else if (activeModality.value === 'video') {
+    nextTick(() => {
+      const target = imageCount > 1
+        ? firstSupportedMode('omni_reference', 'image_to_video')
+        : firstSupportedMode('image_to_video', 'omni_reference');
+      if (target) setGenMode(target);
+    });
+  }
+}
 function setSchemaParam(key, value) {
   if (isFieldLocked(key)) return;
   schemaParams.value = { ...schemaParams.value, [key]: value };
@@ -2214,8 +2294,9 @@ const saveModal = ref({
   title: '',
   prompt: '',
   type: 'image',
-  space: '客厅',
-  style: '意式极简',
+  space: '',
+  style: '',
+  purpose: '',
   is_pinned: false,
   msg: null
 });
@@ -2224,8 +2305,9 @@ const savingTpl = ref(false);
 
 // 创作库分类、筛选、放大画廊与重命名状态
 const tplTypeFilter = ref('all'); // 'all', 'image', 'video', 'audio'
-const tplSpaceFilter = ref('全部空间');
-const tplStyleFilter = ref('全部风格');
+const tplSpaceFilter = ref('');
+const tplStyleFilter = ref('');
+const tagVocab = ref({ space: [], style_atom: [], video_purpose: [] });
 const tplPinnedOnly = ref(false);
 const showExpandedLibrary = ref(false);
 const isLibraryFullscreen = ref(false);
@@ -2239,14 +2321,6 @@ function openCreationLibraryModal() {
 function toggleLibraryFullscreen() {
   isLibraryFullscreen.value = !isLibraryFullscreen.value;
 }
-
-const SPACE_OPTIONS = [
-  '全部空间', '客厅', '主卧', '次卧', '餐厅', '厨房', '阳台', '玄关', '卫浴', '书房', '商业展厅', '建筑庭院'
-];
-
-const STYLE_OPTIONS = [
-  '全部风格', '意式极简', '法式轻奢', '现代简约', '侘寂风', '奶油风', '新中式', '美式复古', '工业Loft', '原木风'
-];
 
 const MODALITY_OPTIONS = [
   { id: 'all', label: '全部' },
@@ -2270,8 +2344,8 @@ function sortTemplates() {
 function resetTplFilters() {
   tplSearch.value = '';
   tplTypeFilter.value = 'all';
-  tplSpaceFilter.value = '全部空间';
-  tplStyleFilter.value = '全部风格';
+  tplSpaceFilter.value = '';
+  tplStyleFilter.value = '';
   tplPinnedOnly.value = false;
 }
 
@@ -2289,37 +2363,21 @@ function getTemplateTypeBadgeClass(tpl) {
   return 'bg-studio-950 text-studio-cyan border-studio-800';
 }
 
-function detectSpaceFromText(text) {
-  if (!text) return '客厅';
-  const s = String(text);
-  if (s.includes('主卧')) return '主卧';
-  if (s.includes('次卧') || s.includes('儿童房') || s.includes('客卧')) return '次卧';
-  if (s.includes('卧室') || s.includes('床头')) return '主卧';
-  if (s.includes('客厅') || s.includes('客餐厅') || s.includes('起居室')) return '客厅';
-  if (s.includes('餐厅') || s.includes('餐边') || s.includes('岛台')) return '餐厅';
-  if (s.includes('厨房') || s.includes('橱柜')) return '厨房';
-  if (s.includes('卫浴') || s.includes('卫生间') || s.includes('浴室') || s.includes('洗手台')) return '卫浴';
-  if (s.includes('阳台') || s.includes('露台')) return '阳台';
-  if (s.includes('玄关') || s.includes('入户')) return '玄关';
-  if (s.includes('书房') || s.includes('工作区') || s.includes('茶室')) return '书房';
-  if (s.includes('展厅') || s.includes('商业') || s.includes('店铺') || s.includes('酒店')) return '商业展厅';
-  if (s.includes('庭院') || s.includes('建筑') || s.includes('外立面')) return '建筑庭院';
-  return '客厅';
+function tagLabel(dim, stored) {
+  const value = String(stored || '');
+  if (!value) return '';
+  const list = tagVocab.value[dim] || [];
+  const hit = list.find((item) => item.dir === value || item.label === value);
+  return hit ? hit.label : value;
 }
 
-function detectStyleFromText(text) {
-  if (!text) return '意式极简';
-  const s = String(text);
-  if (s.includes('法式') || s.includes('轻奢') || s.includes('法师')) return '法式轻奢';
-  if (s.includes('意式') || s.includes('极简') || s.includes('极简主义')) return '意式极简';
-  if (s.includes('现代') || s.includes('纯白')) return '现代简约';
-  if (s.includes('侘寂') || s.includes('微水泥')) return '侘寂风';
-  if (s.includes('奶油') || s.includes('法式奶油')) return '奶油风';
-  if (s.includes('中式') || s.includes('新中式') || s.includes('东方')) return '新中式';
-  if (s.includes('美式') || s.includes('复古')) return '美式复古';
-  if (s.includes('工业') || s.includes('Loft') || s.includes('水泥')) return '工业Loft';
-  if (s.includes('原木') || s.includes('日式')) return '原木风';
-  return '意式极简';
+function tagEquals(stored, selected, list) {
+  if (!selected) return true;
+  const value = String(stored || '');
+  if (!value) return false;
+  if (value === selected) return true;
+  const hit = (list || []).find((item) => item.dir === selected);
+  return !!hit && value === hit.label;
 }
 
 function startRenameTemplate(tpl) {
@@ -2439,8 +2497,8 @@ const filteredTemplates = computed(() => {
       const tType = tpl.type || (tpl.params?.genMode === 'music' ? 'audio' : (tpl.params?.genMode === 'video' ? 'video' : 'image'));
       if (tType !== type) return false;
     }
-    if (space !== '全部空间' && tpl.space && tpl.space !== space) return false;
-    if (style !== '全部风格' && tpl.style && tpl.style !== style) return false;
+    if (!tagEquals(tpl.space, space, tagVocab.value.space)) return false;
+    if (!tagEquals(tpl.style, style, tagVocab.value.style_atom)) return false;
     if (q) {
       const matchTitle = (tpl.title || '').toLowerCase().includes(q);
       const matchPrompt = (tpl.prompt || '').toLowerCase().includes(q);
@@ -2453,13 +2511,41 @@ const filteredTemplates = computed(() => {
   });
 });
 
-// 监听从素材库一键送入对话的跨板块联动！
+// 监听从素材库一键/多选批量送入对话的跨板块联动！
+// 单件 = 原对象形态（沿用原有单图提示词文案）；多选 = items 数组，挂成 @图1…@图N 多引用。
 watch(() => props.initialPayload, (payload) => {
   if (!payload) return;
-  mountAssetFromLibrary(payload);
+  if (Array.isArray(payload)) {
+    mountAssetsFromLibrary(payload);
+  } else if (Array.isArray(payload.items)) {
+    mountAssetsFromLibrary(payload.items);
+  } else {
+    mountAssetFromLibrary(payload);
+  }
 }, { immediate: true });
 
-onMounted(async () => {
+const studioDefaults = ref({});
+const catalogError = ref('');
+
+/**
+ * 当前选中的模型 id 不在启用列表里就回退。复用时也必须跑：
+ * 旧配方把「显示名」（如 Seedance 2.0）写进了只认契约 id 的 key，
+ * 先按 name 反查一次 id 做无损恢复，反查不到才退回默认模型。
+ */
+function repairStudioModelKeys() {
+  const pick = (modality, list, current) => {
+    if (!list.length || list.some((m) => m.id === current)) return current;
+    const byName = list.find((m) => m.name === current || `${m.name}${m.badge ? ` · ${m.badge}` : ''}` === current);
+    return byName?.id || studioDefaults.value[modality] || list[0].id;
+  };
+  chatModelKey.value = pick('chat', studioModels.value.chat, chatModelKey.value);
+  imageModelKey.value = pick('image', studioModels.value.image, imageModelKey.value);
+  videoModelKey.value = pick('video', studioModels.value.video, videoModelKey.value);
+  musicType.value = pick('music', studioModels.value.music, musicType.value);
+}
+
+async function loadStudioCatalog() {
+  catalogError.value = '';
   try {
     const catalog = await fetchStudioCatalog();
     studioSchemas.value = catalog.schemas || {};
@@ -2468,26 +2554,27 @@ onMounted(async () => {
       if (catalog.studio.image?.models) studioModels.value.image = catalog.studio.image.models;
       if (catalog.studio.video?.models) studioModels.value.video = catalog.studio.video.models;
       if (catalog.studio.music?.models) studioModels.value.music = catalog.studio.music.models;
-
-      // 如果当前选中的模型不在已启用的列表里，自动回退到默认或首个模型
-      if (studioModels.value.chat.length > 0 && !studioModels.value.chat.some(m => m.id === chatModelKey.value)) {
-        chatModelKey.value = catalog.studio.chat.defaultModel || studioModels.value.chat[0].id;
-      }
-      if (studioModels.value.image.length > 0 && !studioModels.value.image.some(m => m.id === imageModelKey.value)) {
-        imageModelKey.value = catalog.studio.image.defaultModel || studioModels.value.image[0].id;
-      }
-      if (studioModels.value.video.length > 0 && !studioModels.value.video.some(m => m.id === videoModelKey.value)) {
-        videoModelKey.value = catalog.studio.video.defaultModel || studioModels.value.video[0].id;
-      }
-      if (studioModels.value.music.length > 0 && !studioModels.value.music.some(m => m.id === musicType.value)) {
-        musicType.value = catalog.studio.music.defaultModel || studioModels.value.music[0].id;
-      }
+      studioDefaults.value = {
+        chat: catalog.studio.chat?.defaultModel || '',
+        image: catalog.studio.image?.defaultModel || '',
+        video: catalog.studio.video?.defaultModel || '',
+        music: catalog.studio.music?.defaultModel || ''
+      };
+      repairStudioModelKeys();
     }
   } catch (e) {
-    console.warn('模型参数表读取失败', e);
+    // 目录挂了 = 四个模型下拉全空 + 误报「参数表还没接入」，必须让用户看得见并可以重试
+    catalogError.value = e?.message || String(e);
   }
+}
+
+onMounted(async () => {
+  await loadStudioCatalog();
   resetSchemaForModel();
   window.addEventListener('keydown', handleGlobalKeydown);
+  // 换登录 / 掉登录都要重签媒体 URL：token 存在 localStorage，不触发渲染，旧 <img> 会一直 401
+  window.addEventListener('ml_login', bumpMediaAuth);
+  window.addEventListener('ml_auth_required', bumpMediaAuth);
   streamRO = new ResizeObserver(() => {
     if (pinned.value) {
       if (!pinRaf) pinRaf = requestAnimationFrame(() => { pinRaf = 0; stickToBottom(); });
@@ -2506,6 +2593,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleGlobalKeydown);
+  window.removeEventListener('ml_login', bumpMediaAuth);
+  window.removeEventListener('ml_auth_required', bumpMediaAuth);
   if (pinRaf) cancelAnimationFrame(pinRaf);
   pinRaf = 0;
   if (streamRO) streamRO.disconnect();
@@ -2639,8 +2728,10 @@ function mountAssetFromLibrary(item) {
   // 若素材为视频，自动切换到底栏【视频生成】；若为图片，默认切换到【图片生成】或【纯对话】
   if (item.category === 'video' || item.kind === 'video') {
     activeModality.value = 'video';
+    autoSelectRefMode(['video']);
   } else {
     activeModality.value = 'image';
+    autoSelectRefMode(['image']);
   }
 
   nextTick(() => {
@@ -2649,6 +2740,58 @@ function mountAssetFromLibrary(item) {
       appendRichSegmentText('参考 ');
       insertChipToEditor(referenceTray.value[0]);
       appendRichSegmentText(' 的空间结构与采光风格，在中央布置家具并保持温润通透质感。');
+    }
+  });
+}
+
+/**
+ * 素材库多选批量送入 AI 对话：一次挂载多个 @引用。
+ * 受当前模型 refCap 限制（超出部分忽略并提示），其余与单件路径一致。
+ */
+function mountAssetsFromLibrary(items) {
+  const list = (Array.isArray(items) ? items : [items]).filter(Boolean);
+  if (!list.length) return;
+  const cap = refCap();
+  const hardMax = 12; // 兜底上限：避免一次挂太多把输入区撑爆
+  const limit = cap != null ? Math.min(cap, hardMax) : hardMax;
+  const accepted = list.slice(0, limit);
+  const dropped = list.length - accepted.length;
+
+  referenceTray.value = accepted.map((item, idx) => ({
+    name: item.file_name || item.name || `素材${idx + 1}`,
+    url: item.url || getAssetImageUrl(item.fid, item.mediaToken),
+    weight: 90,
+    tag: `@图${idx + 1}`,
+    fid: item.fid,
+    kind: item.kind === 'video' || item.media_type === 'video'
+      ? 'video'
+      : (item.kind === 'audio' || item.kind === 'music' || item.media_type === 'audio' || item.media_type === 'music')
+        ? 'audio'
+        : 'image'
+  }));
+
+  // 混选时以视频为准（视频模式可同时吃图片引用）；纯图片走图片模式
+  const anyVideo = list.some((item) => item.kind === 'video' || item.media_type === 'video');
+  if (anyVideo) {
+    activeModality.value = 'video';
+    autoSelectRefMode(['video']);
+  } else {
+    activeModality.value = 'image';
+    autoSelectRefMode(['image']);
+  }
+
+  nextTick(() => {
+    if (richEditorRef.value) {
+      richEditorRef.value.innerHTML = '';
+      appendRichSegmentText('参考 ');
+      referenceTray.value.forEach((asset, idx) => {
+        insertChipToEditor(asset);
+        if (idx < referenceTray.value.length - 1) appendRichSegmentText('、');
+      });
+      appendRichSegmentText(' 的整体风格与元素，生成一张协调统一的新画面。');
+    }
+    if (dropped > 0) {
+      composerError.value = `当前模型最多挂载 ${limit} 个引用，已忽略多出的 ${dropped} 个素材。`;
     }
   });
 }
@@ -2826,18 +2969,18 @@ function restorePromptContent(text, tray) {
   referenceTray.value = Array.isArray(tray) ? JSON.parse(JSON.stringify(tray)) : [];
   if (!richEditorRef.value) return;
   richEditorRef.value.innerHTML = '';
-  if (!text) {
+  // chip 是参考图托盘的唯一来源：提示词里没点名的引用会被 syncTrayFromEditor 直接抹掉。
+  // AI 优化提示词、以及只有参考图的配方都踩过这个坑，所以先把缺失的 @图N 补回正文。
+  const source = withKeptRefMentions(normalizeRefMentions(text), referenceTray.value);
+  if (!source) {
     syncTrayFromEditor();
     return;
   }
 
-  const source = normalizeRefMentions(text);
   const regex = /@(图片|视频|音频|图)(\d+)(?:\[([^\]]*)\])?/g;
   let lastIdx = 0;
   let match;
-  let found = false;
   while ((match = regex.exec(source)) !== null) {
-    found = true;
     if (match.index > lastIdx) appendRichSegmentText(source.slice(lastIdx, match.index));
     const num = parseInt(match[2], 10);
     const bracketName = match[3] || '';
@@ -2850,8 +2993,7 @@ function restorePromptContent(text, tray) {
     insertChipToEditor(matchedAsset);
     lastIdx = regex.lastIndex;
   }
-  if (!found) appendRichSegmentText(source);
-  else if (lastIdx < source.length) appendRichSegmentText(source.slice(lastIdx));
+  if (lastIdx < source.length) appendRichSegmentText(source.slice(lastIdx));
   syncTrayFromEditor();
 }
 
@@ -2974,6 +3116,144 @@ function mediaKind(item) {
   if (/\.(mp4|mov|webm)(\?|$)/i.test(url)) return 'video';
   if (/\.(mp3|wav|m4a|aac|flac|ogg)(\?|$)/i.test(url)) return 'audio';
   return 'image';
+}
+
+// localStorage 不是响应式源：换登录（token 变了）之后，已经渲染过的 <img>/<video> 仍然带着旧 token，
+// 在手动刷新前一律 401 破图 —— 这就是「图片又看不到了」。tick 把 token 拉进依赖图。
+const mediaAuthTick = ref(0);
+function bumpMediaAuth() { mediaAuthTick.value += 1; }
+
+// <img>/<video> 不会带 Authorization 头，/api 媒体一律补 token 查询串，避免 401 变成破图
+// 绝对地址（切了 base 后的 http://host:30001/api/...）同样要补，否则换源后立刻掉鉴权
+function authedMediaUrl(raw) {
+  void mediaAuthTick.value;
+  const url = String(raw || '');
+  if (!url || url.startsWith('data:') || url.startsWith('blob:')) return url;
+  const isApiPath = url.startsWith('/api/') || /^https?:\/\/[^/]+\/api\//i.test(url);
+  if (!isApiPath || /[?&]token=/.test(url)) return url;
+  const token = getToken();
+  if (!token) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
+}
+
+/**
+ * 产物图取图：素材路由与 temp 直链互为备胎。
+ * 两边都会被清理（衍生图在 cache/derivatives、产物在 cache/temp，实测各有被删的时候），
+ * 谁还活着就用谁；两条都失败才报错，并把真实原因（HTTP 状态 / 混合内容拦截）显示出来。
+ */
+function resultImageCandidates(msg) {
+  const list = [];
+  if (msg.assetFid) list.push(authedMediaUrl(getAssetImageUrl(msg.assetFid)));
+  if (msg.imageUrl) list.push(authedMediaUrl(msg.imageUrl));
+  return list.filter(Boolean);
+}
+
+function resultImageSrc(msg) {
+  const list = resultImageCandidates(msg);
+  const url = list[Math.min(msg.imgSrcIdx || 0, list.length - 1)] || '';
+  // 重试/换路必须换 URL：路径 + token 全一致时浏览器直接吃本地缓存，「重新加载」点了等于没点
+  return url && msg.imgRetry ? `${url}${url.includes('?') ? '&' : '?'}_r=${msg.imgRetry}` : url;
+}
+
+// HTTPS 页面里拼出 http:// 的媒体地址，浏览器会直接拦掉（@error 但不给状态码），先本地判出来
+function mixedContentHint(url) {
+  return window.location.protocol === 'https:' && /^http:\/\//i.test(String(url)) ? 'HTTPS 页面请求 HTTP 资源被浏览器拦截' : '';
+}
+
+async function probeMediaError(msg, url) {
+  const local = mixedContentHint(url);
+  if (local) { msg.imgErr = local; return; }
+  try {
+    const res = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+    msg.imgErr = `HTTP ${res.status}`;
+    // 401/403 不是「这张图没了」，是「你没登录」：两条路由带同一个 token，一起死，
+    // 换备胎只是多破一张图。直接把会话作废并要登录，登录框起来后图片会自动重签重出。
+    if (res.status === 401 || res.status === 403) {
+      msg.imgAuth = true;
+      reportUnauthorized();
+    }
+  } catch (e) {
+    msg.imgErr = '请求没发出去或连接被重置';
+  }
+}
+
+async function onResultImgError(msg) {
+  if (msg.imgAuth) return; // 已经在要登录了，别继续刷破图
+  const list = resultImageCandidates(msg);
+  const idx = msg.imgSrcIdx || 0;
+  if (idx === 0) {
+    // 先花一次 HEAD 判性质：鉴权问题当场提醒，别等用户把两条路都跑完、对着破图猜
+    await probeMediaError(msg, list[0]);
+    if (msg.imgAuth) { msg.imgFailed = true; return; }
+    msg.imgErr = '';
+  }
+  if (idx + 1 < list.length) {
+    msg.imgSrcIdx = idx + 1;   // 先换另一条路，不打扰用户
+    return;
+  }
+  await probeMediaError(msg, list[idx]);
+  msg.imgFailed = true;
+}
+
+// 登录成功后 URL 里换了新 token，图重新加载出来就把失败态清掉，不用人再点一次
+function onResultImgLoad(msg) {
+  if (!msg.imgFailed && !msg.imgErr && !msg.imgAuth) return;
+  msg.imgFailed = false;
+  msg.imgErr = '';
+  msg.imgAuth = false;
+  msg.imgSrcIdx = 0;
+}
+
+function retryResultImage(msg) {
+  msg.imgFailed = false;
+  msg.imgErr = '';
+  msg.imgAuth = false;
+  msg.imgSrcIdx = 0;
+  msg.imgRetry = (msg.imgRetry || 0) + 1;
+  bumpMediaAuth();
+}
+
+// 下载同理：temp 目录里的产物会过期，有 fid 就取原文件
+function resultImageDownloadHref(msg) {
+  return authedMediaUrl(msg.assetFid ? getAssetDownloadUrl(msg.assetFid) : msg.imageUrl);
+}
+
+// 「下载 MP4」原先是裸 <a href> —— 浏览器下载器不带 Authorization，Cookie 又只在登录那台
+// 源上有效，服务端就回 401「需要授权」。改为先用 authFetch（带 Bearer）取 blob 再落盘。
+async function downloadGeneratedMedia(raw, label) {
+  const url = String(raw || '');
+  if (!url) return;
+  const name = label || decodeURIComponent(url.split('/').pop().split('?')[0] || 'generated') ;
+  try {
+    const res = await authFetch(url, { method: 'GET', cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    const objUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objUrl;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(objUrl), 60000);
+  } catch (e) {
+    // 兜底退回带 token 的直链（服务端已允许 GET/HEAD 用 query token 鉴权）
+    const a = document.createElement('a');
+    a.href = authedMediaUrl(url);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    alert(`直接下载失败（${e.message}），已改用带 token 的链接重试；若仍失败请刷新页面重新登录`);
+  }
+}
+
+// 下载文件名：原先硬编码 space_cinematic.mp4，多条视频全同名，落盘后无法对应
+function videoFileName(msg) {
+  const base = decodeURIComponent(String(msg?.videoUrl || '').split('/').pop().split('?')[0] || '');
+  const ext = (base.match(/\.(mp4|webm|mov)$/i) || [, '.mp4'])[1];
+  const slug = String(msg?.prompt || msg?.content || '').replace(/[\\/:*?"<>|\s]+/g, '').slice(0, 18);
+  return `${slug || '视频'}${ext}`;
 }
 
 function messageAttachments(msg) {
@@ -3150,6 +3430,35 @@ async function portableImageUrls(refs, limit) {
   return urls;
 }
 
+/**
+ * 配方要长期存库，而引用 URL 里带的 `?token=` 是当前会话签发的短期凭证：
+ * 原样存进创作库，下次复用必然 401。有 fid 的一律剥掉 token，复用时重新签发。
+ */
+function recipeRefsForStorage(refs) {
+  return (Array.isArray(refs) ? refs : []).map((ref) => {
+    const url = String(ref?.url || '');
+    const fid = ref?.fid || '';
+    let stored = url;
+    if (fid && url.startsWith('/api/')) {
+      try {
+        const u = new URL(url, window.location.origin);
+        u.searchParams.delete('token');
+        stored = `${u.pathname}${u.search}`;
+      } catch {
+        stored = url;
+      }
+    }
+    return {
+      name: ref?.name || '',
+      fid,
+      kind: ref?.kind || 'image',
+      weight: ref?.weight ?? 85,
+      tag: ref?.tag || '',
+      url: stored
+    };
+  });
+}
+
 async function portableAudioUrl(ref) {
   const url = String(ref?.url || '');
   if (!url) return '';
@@ -3176,7 +3485,24 @@ async function portableAudioUrls(refs, limit) {
   return urls;
 }
 
+async function loadTagVocab() {
+  try {
+    const res = await authFetch('/api/tag-vocab');
+    const json = await res.json();
+    if (json.success && json.data) {
+      tagVocab.value = {
+        space: json.data.space || [],
+        style_atom: json.data.style_atom || [],
+        video_purpose: json.data.video_purpose || [],
+      };
+    }
+  } catch (e) {
+    console.warn('加载标签词表失败', e);
+  }
+}
+
 async function loadTemplates() {
+  await loadTagVocab();
   try {
     const res = await authFetch('/api/creation-templates');
     const json = await res.json();
@@ -3219,6 +3545,7 @@ async function loadSessions() {
 async function selectSession(s) {
   if (!s || !s.id) return;
   currentSessionId.value = s.id;
+  resetComposerState();
   messages.value = [];
   pinned.value = true;
   hasNewBelow.value = false;
@@ -3255,7 +3582,14 @@ async function selectSession(s) {
           isError: Boolean(m.result?.isError) || String(m.prompt || m.result?.content || '').startsWith('生成遇到问题'),
           genMode: m.result?.genMode || m.mode,
           assetFid: m.result?.assetFid || '',
-          camera: m.result?.camera
+          camera: m.result?.camera,
+          // 重试元数据必须随消息一起还原，否则刷新后「重试」会按默认对话模式重发
+          retryPrompt: m.result?.retryPrompt || '',
+          retryRefs: Array.isArray(m.result?.retryRefs) ? m.result.retryRefs : [],
+          retryModel: m.result?.retryModel || '',
+          retryModality: m.result?.retryModality || '',
+          retryMode: m.result?.retryMode || '',
+          retryParams: m.result?.retryParams || null
         };
       });
 
@@ -3290,9 +3624,24 @@ async function selectSession(s) {
   scrollToBottom();
 }
 
-async function createNewSession() {
+/**
+ * 切会话 / 新建会话 / 复用配方都要先清空输入区。
+ * 不清的话上一个会话的引用芯片会跟着「@图N」编号泄漏到新会话里，
+ * sessionRefPool 还会跨会话无限累积（reparseEditorChips 拿它按名字反查 URL，会串会话）。
+ */
+function resetComposerState() {
+  if (richEditorRef.value) richEditorRef.value.innerHTML = '';
+  referenceTray.value = [];
+  sessionRefPool.value = [];
+  activeSkillIds.value = [];
+  optimizeUndo.value = null;
+}
+
+async function createNewSession(opts = {}) {
   const newId = `sess_${Date.now()}`;
   const newSess = { id: newId, title: '新创作会话' };
+  // 首条消息才懒建会话：此时输入区、挂载的技能都属于「这次发送」，不能清。
+  if (!opts.keepComposer) resetComposerState();
   sessions.value.unshift(newSess);
   currentSessionId.value = newId;
   messages.value = [];
@@ -3330,8 +3679,9 @@ function openAddTemplateModal() {
     title: '自定义空间美学配方',
     prompt,
     type: defaultType,
-    space: detectSpaceFromText(prompt) || '客厅',
-    style: detectStyleFromText(prompt) || '意式极简',
+    space: '',
+    style: '',
+    purpose: '',
     is_pinned: false,
     msg: null
   };
@@ -3358,19 +3708,30 @@ function applyTemplate(tpl) {
 
   const params = tpl.params || {};
   const refs = Array.isArray(tpl.origin_images) ? tpl.origin_images : [];
-  const prepared = refs.map((item, i) => ({
-    name: labelForRef(item.url, item.name || item.file_name),
-    url: item.url,
-    fid: item.fid,
-    kind: item.kind,
-    weight: item.weight || 85,
-    tag: item.tag || `@图${i + 1}`,
-    origin: 'upload',
-    resolved: !!item.url
-  }));
+  const prepared = refs.map((item, i) => {
+    const fid = item.fid || '';
+    const rawUrl = String(item.url || '');
+    // 配方里存的是当时的短期凭证（甚至是一次性 blob:），能按 fid 重签的一律重签
+    const url = fid
+      ? (rawUrl.startsWith('/api/') ? resignAssetUrl(rawUrl) : getAssetImageUrl(fid))
+      : rawUrl;
+    return {
+      name: labelForRef(url, item.name || item.file_name),
+      url,
+      fid,
+      kind: item.kind || 'image',
+      weight: item.weight || 85,
+      tag: item.tag || `@图${i + 1}`,
+      origin: 'upload',
+      resolved: !!url && !url.startsWith('blob:')
+    };
+  });
   const mode = params.genMode || params.mode || (tpl.type === 'video' ? 'video' : (tpl.type === 'audio' ? 'music' : 'image'));
   const modelKey = params.modelKey || params.model;
   const modality = ['image', 'video', 'music', 'chat'].includes(mode) ? mode : '';
+  // 复用是「拿这条配方开新创作」，不是「在上一条对话里续写」：
+  // 不重置的话旧对话的分析与产物会被 promptWithPriorAnalysis 混进新提示词。
+  if (messages.value.length > 0) createNewSession();
   suppressSchemaReset = true;
   if (recipeIsLegacy(tpl)) {
     activeModality.value = 'image';
@@ -3386,6 +3747,8 @@ function applyTemplate(tpl) {
       else chatModelKey.value = modelKey;
     }
   }
+  // 旧配方的 modelKey 可能是显示名，交给同一套回退逻辑按 name 反查成契约 id
+  repairStudioModelKeys();
   suppressSchemaReset = false;
   resetSchemaForModel();
   if (params.schemaMode) setGenMode(params.schemaMode);
@@ -3401,8 +3764,29 @@ function applyTemplate(tpl) {
   if (params.ratio) selectedRatio.value = params.ratio;
   else if (tpl.aspect_ratio) selectedRatio.value = tpl.aspect_ratio;
   if (params.resolution) selectedResolution.value = params.resolution;
+  // 提交时画幅/分辨率优先取 schemaParams（retryParams → schemaParams → selectedRatio），旧配方只把它们
+  // 存在顶层。只回填 selectedRatio 会被上一个模型残留的 schema 值盖掉（实测：16:9 复用后变成 1:1）。
+  const legacySeed = {};
+  const seedSchema = currentSchema.value;
+  if (params.ratio && !isFieldLocked('ratio') && valueStillFits(seedSchema, 'ratio', params.ratio)) {
+    legacySeed.ratio = params.ratio;
+  }
+  if (params.resolution) {
+    if (valueStillFits(seedSchema, 'resolution', params.resolution)) legacySeed.resolution = params.resolution;
+    else if (valueStillFits(seedSchema, 'size', params.resolution)) legacySeed.size = params.resolution;
+  }
+  if (Object.keys(legacySeed).length) {
+    schemaParams.value = clampParamsToSchema(seedSchema, { ...schemaParams.value, ...legacySeed });
+  }
   restorePromptContent(tpl.prompt || '', prepared);
   syncTrayFromEditor();
+  // 10-22 之前的配方只落提示词、不落引用：正文里的 @图1 会变成没有 URL 的死标签，
+  // 与其让用户以为「图带上了」，不如在复用这一刻就说清楚差了几个。
+  const mentionedRefs = (String(tpl.prompt || '').match(/@(?:图片|视频|音频|图)\d+/g) || []).length;
+  const liveRefs = prepared.filter((p) => p.resolved).length;
+  composerNotice.value = mentionedRefs > liveRefs
+    ? `这条旧配方没能恢复 ${mentionedRefs - liveRefs} 个素材引用（保存时没存下参考图），请重新挂载素材或删掉失效标签。`
+    : '';
   rememberSessionRefs(referenceTray.value, 'upload');
   detailModal.value.visible = false;
   showExpandedLibrary.value = false;
@@ -3448,6 +3832,7 @@ function openAssetSelectorModal() {
 
 // 共享素材选择器确认：把选中的「原图 / 衍生图」版本挂载为 @引用
 function onAssetPickerConfirm(versions) {
+  const kinds = [];
   for (const version of versions || []) {
     if (!version?.url) continue;
     const idx = referenceTray.value.length + 1;
@@ -3462,10 +3847,12 @@ function onAssetPickerConfirm(versions) {
       derivativeKind: version.derivativeKind || ''
     };
     referenceTray.value.push(asset);
+    kinds.push(asset.kind);
     rememberSessionRefs([asset]);
     insertChipToEditor(asset);
   }
   showAssetSelector.value = false;
+  autoSelectRefMode(kinds);
 }
 
 function onAssetPickerUpload(file) {
@@ -3474,10 +3861,12 @@ function onAssetPickerUpload(file) {
   const url = URL.createObjectURL(file);
   localFileByUrl.set(url, file);
   const idx = referenceTray.value.length + 1;
-  const asset = { name, url, weight: 85, tag: `@图${idx}`, kind: file.type.startsWith('video/') ? 'video' : (file.type.startsWith('audio/') ? 'audio' : 'image') };
+  const kind = file.type.startsWith('video/') ? 'video' : (file.type.startsWith('audio/') ? 'audio' : 'image');
+  const asset = { name, url, weight: 85, tag: `@图${idx}`, kind };
   referenceTray.value.push(asset);
   insertChipToEditor(asset);
   showAssetSelector.value = false;
+  autoSelectRefMode([kind]);
 }
 
 // 媒体大图与视频播放预览灯箱
@@ -3498,7 +3887,7 @@ function openMediaPreview(itemOrUrl, defaultType = 'image') {
   if (!url) return;
   previewModal.value = {
     visible: true,
-    url,
+    url: authedMediaUrl(url),
     type,
     title,
     scale: 1.0
@@ -3610,6 +3999,7 @@ function getModelDisplayName(key) {
     seedream5lite: 'Seedream 5.0 Lite',
     agnes_image_2_5_flash: 'Agnes Image 2.5 Flash',
     qwenimage_local: 'Qwen-Image 2.1',
+    qwenimage_modelscope: 'Qwen-Image 2.1 Turbo（魔搭）',
     acestep_local: 'ACE-Step 1.5',
     indextts_local: 'IndexTTS 2.5',
     modelscope_image: 'ModelScope 异步生图',
@@ -3648,6 +4038,15 @@ async function sendMessage() {
   }
   const usedPriorMedia = typedTray.length === 0 && currentTray.length > 0;
   if (currentMod !== 'chat') {
+    // 死标签不能提交：syncTrayFromEditor 会跳过未解析芯片，但正文里的 @图1 还留着，
+    // 供应商只会看到一串指代不存在的占位符，画面自然「没引用图片」。
+    const deadChips = richEditorRef.value
+      ? richEditorRef.value.querySelectorAll('.inline-asset-chip[data-resolved="0"]').length
+      : 0;
+    if (deadChips > 0) {
+      composerError.value = `有 ${deadChips} 个引用素材已失效（没有可提交的图片地址），请重新挂载素材或删掉这些标签。`;
+      return;
+    }
     const refError = modeRefError(currentTray);
     if (refError) {
       composerError.value = refError;
@@ -3655,6 +4054,7 @@ async function sendMessage() {
     }
   }
   composerError.value = '';
+  composerNotice.value = '';
   const retryModel = currentMod === 'chat' ? chatModelKey.value : (currentMod === 'image' ? imageModelKey.value : (currentMod === 'video' ? videoModelKey.value : musicType.value));
   const retryParams = declaredParams();
   const retryMode = activeGenMode.value;
@@ -3663,7 +4063,7 @@ async function sendMessage() {
   pushPromptHistory(rawContent, currentTray);
 
   if (!currentSessionId.value) {
-    await createNewSession();
+    await createNewSession({ keepComposer: true });
   }
   rememberSessionTitle(rawContent);
 
@@ -3785,6 +4185,7 @@ async function sendMessage() {
       // 尺寸/画幅以契约参数条为准（Qwen 本地默认 1K：2K 生成慢 2~3 倍，不再用写死的 2K 兜底）
       const submitImageSize = retryParams.size || retryParams.resolution || schemaParams.value.size || selectedResolution.value;
       const submitImageRatio = retryParams.ratio || schemaParams.value.ratio || selectedRatio.value;
+      const imageStartedAt = Date.now();
       const res = await generateAiImage({
         prompt: promptForModel,
         model: imageModelKey.value,
@@ -3802,7 +4203,8 @@ async function sendMessage() {
       }
 
       const layerStack = normalizeClientLayerStack(res, retryParams);
-      const imageElapsedSec = Math.round((res.elapsedMs || 0) / 1000);
+      // 供应商不回 elapsedMs（Agnes 就没回）时用客户端实际等待时长兜底，别再留一个空的「耗时:」
+      const imageElapsedSec = Math.round((res.elapsedMs || (Date.now() - imageStartedAt)) / 1000);
       const asstMsg = {
         role: 'assistant',
         modality: 'image',
@@ -3818,6 +4220,8 @@ async function sendMessage() {
         ratio: submitImageRatio,
         model: getModelDisplayName(imageModelKey.value),
         modelKey: imageModelKey.value,
+        schemaMode: retryMode,
+        schemaParams: retryParams,
         genMode: 'image'
       };
       try {
@@ -3848,7 +4252,24 @@ async function sendMessage() {
         result: asstMsg
       });
     } else if (currentMod === 'video') {
-      const imageUrls = await portableImageUrls(currentTray, currentTray.length || 1);
+      // 首尾帧按「输入区可见槽位」显式取（槽位就是 referenceTray[0]/[1]），不能靠 imageUrls[0]/[1]：
+      // portableImageUrls 会剔除非图片项和转换失败的项，下标整体前移后尾帧会被塞进首帧位。
+      const cap = refCap();
+      const capped = cap > 0 ? currentTray.slice(0, cap) : currentTray;
+      const slotUrls = [];
+      for (const item of capped) {
+        slotUrls.push(mediaKind(item) === 'image' ? ((await portableImageUrl(item)) || '') : '');
+      }
+      const imageUrls = slotUrls.filter(Boolean);
+      const imageCount = capped.filter((item) => mediaKind(item) === 'image').length;
+      const droppedRefs = imageCount - imageUrls.length;
+      const ignoredRefs = currentTray.length - capped.length;
+      const isKeyframeMode = retryMode === 'first_last_frame';
+      const notices = [];
+      if (droppedRefs > 0) notices.push(`有 ${droppedRefs} 张参考图没能转换成可提交的数据，本次已跳过。`);
+      if (ignoredRefs > 0) notices.push(`该模型最多接受 ${cap} 个引用，超出部分已忽略 ${ignoredRefs} 个。`);
+      if (isKeyframeMode && !slotUrls[1]) notices.push('首尾帧模式只拿到 1 帧：第 2 个槽位是空的或非图片，本次只按首帧生成。');
+      composerNotice.value = notices.join(' ');
       const promptForModel = promptWithPriorAnalysis(rawContent, usedPriorMedia ? currentTray.length : 0);
       // 时长/画幅一律以契约参数条为准（已经过夹取），杜绝旧 videoDuration=60 这类游离默认值
       const submitDuration = retryParams.duration != null && retryParams.duration !== ''
@@ -3862,13 +4283,12 @@ async function sendMessage() {
         duration: submitDuration,
         resolution: submitSize,
         ratio: submitRatio,
-        camera: videoCameraMove.value,
         imageUrls,
         genMode: retryMode,
         extras: retryParams,
         snippetIds: activeSnippetIds(),
-        firstFrame: retryMode === 'first_last_frame' ? imageUrls[0] : undefined,
-        lastFrame: retryMode === 'first_last_frame' ? imageUrls[1] : undefined
+        firstFrame: isKeyframeMode ? (slotUrls[0] || undefined) : undefined,
+        lastFrame: isKeyframeMode ? (slotUrls[1] || undefined) : undefined
       });
 
       const genVideoUrl = res.files?.[0]?.previewUrl || res.files?.[0]?.url || res.videoUrl || res.url || res.data?.videoUrl || '';
@@ -3877,12 +4297,17 @@ async function sendMessage() {
         role: 'assistant',
         modality: 'video',
         content: `影视级空间动态渲染已就绪。运镜平滑连续，空间光影与环境音效自然契合。`,
+        userPrompt: rawContent,
+        refs: currentTray,
         videoUrl: genVideoUrl,
         duration: `${submitDuration === '-1' ? '8' : submitDuration}s`,
         resolution: submitSize,
         ratio: submitRatio,
         model: getModelDisplayName(videoModelKey.value),
-        camera: videoCameraMove.value
+        // 复用配方要靠 id 回填下拉框；model 只是给人看的显示名，两者不能互相替代
+        modelKey: videoModelKey.value,
+        schemaMode: retryMode,
+        schemaParams: retryParams
       };
       try {
         const filed = await registerGeneratedAsset({
@@ -3930,10 +4355,15 @@ async function sendMessage() {
         content: res.files?.length > 1
           ? `音频已生成，共 ${res.files.length} 条。下面先播放第一条。`
           : '音频已生成。',
+        userPrompt: rawContent,
+        refs: currentTray,
         audioTitle: getModelDisplayName(musicType.value),
         duration: `${retryParams.audio_duration || retryParams.duration || musicDuration.value}s`,
         audioUrl: genAudioUrl,
-        model: getModelDisplayName(musicType.value)
+        model: getModelDisplayName(musicType.value),
+        modelKey: musicType.value,
+        schemaMode: retryMode,
+        schemaParams: retryParams
       };
       if (genAudioUrl.includes('/api/cache/temp/')) {
         try {
@@ -4085,6 +4515,18 @@ function friendlyErrorText(raw) {
 }
 function errorHint(raw) {
   const text = String(raw || '');
+  if (/显存不足|CUDA out of memory/i.test(text)) {
+    return '本地 GPU 显存被生图任务占满了。等生图队列清空（通常几分钟）后点「重试」即可。';
+  }
+  if (/加载模型|无响应（可能正在加载模型|提交超时|响应超时/.test(text)) {
+    return '本地音频服务正在加载模型或排队，等 1~2 分钟后点「重试」即可。';
+  }
+  if (/生图队列已满|image queue/i.test(text)) {
+    return '云端生图队列已满（临时限流），稍等几分钟再重试。';
+  }
+  if (/需要一段参考音频|参考音频没有读到|需要一段参考/.test(text)) {
+    return '声音克隆需要参考音频：先上传一段 10~15 秒的人声，再填写要合成的文字。';
+  }
   if (/BFF_PUBLIC_BASE|公网/.test(text)) {
     return '需要在「设置 → 运行时配置」里把 BFF_PUBLIC_BASE 填成可公网 HTTPS 访问的地址；或先切换到文生视频。';
   }
@@ -4131,21 +4573,37 @@ function sourcePromptFor(msg) {
   return msg?.role === 'user' ? (msg.content || '') : '';
 }
 
-function openSaveToLibraryModal(msg) {
+async function fillSaveTagsFromAsset(fid) {
+  if (!fid) return { space: '', style: '', purpose: '' };
+  try {
+    const res = await authFetch(`/api/assets/${encodeURIComponent(fid)}`);
+    const json = await res.json();
+    const tags = json.data?.tags || [];
+    const pick = (dim) => tags.find((item) => item.dimension === dim)?.dir || '';
+    const styles = tags.filter((item) => item.dimension === 'style_atom').map((item) => item.dir);
+    return { space: pick('space'), style: styles[0] || '', purpose: pick('video_purpose') };
+  } catch {
+    return { space: '', style: '', purpose: '' };
+  }
+}
+
+async function openSaveToLibraryModal(msg) {
   const prompt = sourcePromptFor(msg);
   let detectedType = 'image';
   if (msg?.videoUrl || msg?.modality === 'video') detectedType = 'video';
   else if (msg?.audioUrl || msg?.modality === 'music') detectedType = 'audio';
   else if (activeModality.value === 'video') detectedType = 'video';
   else if (activeModality.value === 'music') detectedType = 'audio';
+  const fromAsset = await fillSaveTagsFromAsset(msg?.assetFid);
 
   saveModal.value = {
     visible: true,
     title: prompt.replace(/\s+/g, ' ').trim().slice(0, 24) || '未命名创作',
     prompt,
     type: detectedType,
-    space: detectSpaceFromText(prompt),
-    style: detectStyleFromText(prompt),
+    space: fromAsset.space,
+    style: fromAsset.style,
+    purpose: detectedType === 'video' ? fromAsset.purpose : '',
     is_pinned: false,
     msg
   };
@@ -4166,9 +4624,10 @@ async function submitSaveToLibrary() {
         type: saveModal.value.type || 'image',
         space: saveModal.value.space || '',
         style: saveModal.value.style || '',
+        purpose: saveModal.value.type === 'video' ? (saveModal.value.purpose || '') : '',
         is_pinned: saveModal.value.is_pinned ? 1 : 0,
-        aspect_ratio: saveModal.value.msg?.ratio || selectedRatio.value,
-        origin_images: saveModal.value.msg?.refs || referenceTray.value,
+        aspect_ratio: saveModal.value.msg?.ratio || schemaParams.value.ratio || selectedRatio.value,
+        origin_images: recipeRefsForStorage(saveModal.value.msg?.refs?.length ? saveModal.value.msg.refs : referenceTray.value),
         result_images: isAudio ? [{
           url: saveModal.value.msg?.audioUrl || '',
           resolution: saveModal.value.msg?.duration || '音频产物'
@@ -4181,10 +4640,15 @@ async function submitSaveToLibrary() {
           modelKey: saveModal.value.msg?.modelKey,
           genMode: saveModal.value.type === 'audio' ? 'music' : (saveModal.value.type === 'video' ? 'video' : 'image'),
           mode: saveModal.value.type === 'audio' ? 'music' : (saveModal.value.type === 'video' ? 'video' : 'image'),
-          ratio: saveModal.value.msg?.ratio || selectedRatio.value,
-          resolution: saveModal.value.msg?.resolution || selectedResolution.value
+          // genMode/mode 存的是「模态」，schemaMode 才是首尾帧/多参考/文生视频这一层；
+          // 两者混用会让 applyTemplate 的模态判定拿到一个 schema id 而失效。
+          schemaMode: saveModal.value.msg?.schemaMode || activeGenMode.value || '',
+          // 从输入区直接存配方时没有 msg，不落到当前 schemaParams 就会把参数条的选择整条丢掉
+          schemaParams: saveModal.value.msg?.schemaParams || (currentSchema.value ? { ...schemaParams.value } : null),
+          ratio: saveModal.value.msg?.ratio || schemaParams.value.ratio || selectedRatio.value,
+          resolution: saveModal.value.msg?.resolution || schemaParams.value.resolution || schemaParams.value.size || selectedResolution.value
         },
-        tags: [saveModal.value.type, saveModal.value.space, saveModal.value.style, '收藏配方'].filter(Boolean)
+        tags: [saveModal.value.type, saveModal.value.space, saveModal.value.style, saveModal.value.purpose, '收藏配方'].filter(Boolean)
       })
     });
     const json = await res.json();

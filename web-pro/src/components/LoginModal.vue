@@ -2,7 +2,7 @@
   <div
     v-if="visible"
     class="fixed inset-0 z-[100] bg-black/70 backdrop-blur-md flex items-center justify-center p-4 font-sans"
-    @click.self="$emit('update:visible', false)"
+    @click.self="onBackdrop"
   >
     <div class="bg-studio-900 border border-studio-700 rounded-2xl max-w-sm w-full p-6 shadow-2xl space-y-5">
       <div class="flex flex-col items-center text-center gap-3">
@@ -13,6 +13,7 @@
           <p class="text-[10px] tracking-[0.2em] text-slate-400 font-semibold uppercase">Material Studio Pro</p>
           <h2 class="text-base font-bold text-white mt-1">登录素材工作台</h2>
           <p class="text-[11px] text-slate-400 mt-1">管理员可进入全部板块，检索员仅浏览下载</p>
+          <p v-if="reason" class="text-[11px] font-bold text-amber-300 mt-2 rounded-lg bg-amber-500/10 border border-amber-500/25 px-2.5 py-1.5">{{ reason }}</p>
         </div>
       </div>
 
@@ -67,6 +68,9 @@ import { login } from '../api.js';
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
+  // '登录已过期，请重新登录' 之类的服务端判定；带原因时不给点背景关掉，
+  // 否则关掉又是一屏破图，等于没提醒
+  reason: { type: String, default: '' },
 });
 const emit = defineEmits(['login-success', 'update:visible']);
 
@@ -74,6 +78,11 @@ const username = ref('');
 const password = ref('');
 const loading = ref(false);
 const error = ref('');
+
+function onBackdrop() {
+  if (props.reason) return;
+  emit('update:visible', false);
+}
 
 watch(() => props.visible, (v) => {
   if (v) { error.value = ''; }

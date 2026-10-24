@@ -435,6 +435,30 @@
         <button @click="saveBackup" class="px-4 py-2 bg-primary text-white rounded-xl font-medium">保存备份设置</button>
         <button @click="runRecluster" class="ml-2 px-4 py-2 bg-surface border border-outline-variant rounded-xl">全库按新规则重算查重</button>
       </div>
+      <div class="bg-surface-low border border-outline-variant rounded-2xl p-5 space-y-4 max-w-xl text-xs">
+        <h3 class="text-sm font-bold text-white">从 Ba 资源库拉取</h3>
+        <p class="text-[11px] text-on-surface-variant">按关键词分页拉取图片和视频，入库后走现有闸门和标签。地址、账号、密码写在模型页密钥：BA_RESOURCE_BASE、BA_RESOURCE_USER、BA_RESOURCE_PASSWORD。接口必须带关键词。登录若要求验证码，这一轮会停下来。</p>
+        <div>
+          <label class="block text-on-surface-variant mb-1">关键词</label>
+          <input v-model="baPull.keyword" type="text" placeholder="例如 客厅" class="w-full bg-surface border border-outline-variant rounded-xl px-3 py-2 text-white outline-none" />
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-on-surface-variant mb-1">类型</label>
+            <select v-model="baPull.type" class="w-full bg-surface border border-outline-variant rounded-xl px-3 py-2 text-white outline-none">
+              <option value="all">全部</option>
+              <option value="image">图片</option>
+              <option value="video">视频</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-on-surface-variant mb-1">每页条数</label>
+            <input v-model.number="baPull.size" type="number" min="1" max="50" class="w-full bg-surface border border-outline-variant rounded-xl px-3 py-2 text-white outline-none" />
+          </div>
+        </div>
+        <button @click="runBaPull" :disabled="baPull.busy" class="px-4 py-2 bg-primary text-white rounded-xl font-medium disabled:opacity-50">{{ baPull.busy ? '拉取中...' : '开始拉取' }}</button>
+        <p v-if="baPull.hint" class="text-primary whitespace-pre-wrap">{{ baPull.hint }}</p>
+      </div>
     </div>
 
     <div v-if="tab === 'vectors'" class="space-y-4">
@@ -957,6 +981,7 @@ const quarkInstallMsg = ref('')
 const quarkInstallOk = ref(false)
 const ingestHint = ref('')
 const backup = ref({ enabled: true, nasDir: '', quarkFid: '' })
+const baPull = ref({ keyword: '', type: 'all', size: 20, busy: false, hint: '' })
 const vectorStatus = ref(null)
 const vectorBusy = ref(false)
 const vectorHint = ref('')
@@ -1292,6 +1317,25 @@ async function onLocalFiles(ev) {
   }
   ingestHint.value = `完成：入库 ${ok} 张` + (fail ? `，失败 ${fail}` : '')
   ev.target.value = ''
+}
+
+async function runBaPull() {
+  const keyword = String(baPull.value.keyword || '').trim()
+  if (!keyword) {
+    baPull.value.hint = '请先填写关键词'
+    return
+  }
+  baPull.value.busy = true
+  baPull.value.hint = '正在分页拉取...'
+  try {
+    const data = await api.pullBaResources({ keyword, type: baPull.value.type, size: baPull.value.size })
+    const errors = (data.errors || []).map((item) => `${item.id}: ${item.error}`).join('\n')
+    baPull.value.hint = `拉到 ${data.pulled || 0} 条，新入库 ${data.filed || 0}，已有 ${data.skipped || 0}，失败 ${data.failed || 0}${data.truncated ? '。页数达到上限，后面的没拉' : ''}${errors ? '\n' + errors : ''}`
+  } catch (e) {
+    baPull.value.hint = e.message || '拉取失败'
+  } finally {
+    baPull.value.busy = false
+  }
 }
 
 async function saveBackup() {

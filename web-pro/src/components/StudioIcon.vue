@@ -33,6 +33,9 @@
     
     <!-- chat 对话 -->
     <path v-else-if="name === 'chat'" d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z" />
+
+    <!-- mic 语音输入 -->
+    <path v-else-if="name === 'mic'" d="M12 15a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v7a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V22h2v-3.08A7 7 0 0 0 19 12h-2z" />
     
     <!-- grid 网格 -->
     <path v-else-if="name === 'grid'" d="M3 3h8v8H3zm10 0h8v8h-8zM3 13h8v8H3zm10 0h8v8h-8z" />

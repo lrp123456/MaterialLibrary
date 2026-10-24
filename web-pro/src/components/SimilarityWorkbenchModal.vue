@@ -88,6 +88,20 @@
           </span>
         </div>
 
+        <!-- 排序方式 -->
+        <div class="flex items-center space-x-2 text-slate-300">
+          <span class="font-bold">排序:</span>
+          <select
+            v-model="sortBy"
+            @change="changeSort"
+            class="bg-studio-950 border border-studio-750 rounded-lg px-2 py-1 text-xs font-bold text-slate-200 outline-none cursor-pointer focus:border-studio-accent"
+          >
+            <option value="similarity" class="bg-studio-950 text-slate-200">相似度（默认）</option>
+            <option value="time_desc" class="bg-studio-950 text-slate-200">时间 · 最新优先</option>
+            <option value="time_asc" class="bg-studio-950 text-slate-200">时间 · 最早优先</option>
+          </select>
+        </div>
+
         <!-- 批量动作 -->
         <div class="flex items-center space-x-2">
           <button
@@ -119,13 +133,13 @@
 
         <!-- 相似素材簇列表 -->
         <div
-          v-for="(cluster, cIdx) in similarClusters"
+          v-for="(cluster, cIdx) in orderedClusters"
           :key="cluster.clusterId || cIdx"
           class="bg-studio-850/80 border border-studio-750 rounded-xl p-4 space-y-3 shadow-md"
         >
           <!-- 簇头部 -->
-          <div class="flex items-center justify-between border-b border-studio-750 pb-2.5">
-            <div class="flex items-center space-x-2">
+          <div class="flex items-center justify-between gap-2 border-b border-studio-750 pb-2.5">
+            <div class="flex items-center flex-wrap gap-x-2 gap-y-1">
               <span class="px-2 py-0.5 rounded bg-studio-800 text-studio-accent font-bold font-mono text-xs">
                 簇 #{{ cIdx + 1 }}
               </span>
@@ -135,10 +149,17 @@
               <span class="text-xs text-slate-400">
                 (共 {{ cluster.members.length }} 张相似图片)
               </span>
+              <span
+                v-if="cluster.timeStart"
+                class="text-[11px] font-mono text-slate-300 bg-studio-900 px-2 py-0.5 rounded border border-studio-750"
+                :title="`本簇素材时间跨度（${clusterTimeSource}）：${formatTimeFull(cluster.timeStart)} ~ ${formatTimeFull(cluster.timeEnd)}`"
+              >
+                🕒 {{ formatTimeRange(cluster.timeStart, cluster.timeEnd) }}
+              </span>
             </div>
 
             <!-- 簇操作按钮 -->
-            <div class="flex items-center space-x-2">
+            <div class="flex items-center space-x-2 shrink-0">
               <button
                 @click="resolveSingleCluster(cluster, 'keep_selected')"
                 class="px-2.5 py-1 bg-studio-accent hover:brightness-110 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center space-x-1"
@@ -210,8 +231,14 @@
                   <span class="text-slate-400">{{ m.orientation || '-' }}</span>
                 </div>
                 <div class="flex items-center justify-between text-[10px] text-slate-400">
-                  <span>{{ m.hasWatermark ? '⚠️ 带水印' : '✅ 无水印' }}</span>
+                  <span
+                    class="font-mono"
+                    :title="`${clusterTimeSource}\n${formatTimeFull(m.createdAt)}`"
+                  >{{ formatTimeSec(m.createdAt) }}</span>
                   <span v-if="m.favorite" class="text-amber-400">★ 收藏</span>
+                </div>
+                <div class="flex items-center justify-between text-[10px] text-slate-400">
+                  <span>{{ m.hasWatermark ? '⚠️ 带水印' : '✅ 无水印' }}</span>
                   <span v-if="m.derivCount > 0" class="text-studio-accent font-bold">{{ m.derivCount }}衍生</span>
                 </div>
               </div>
@@ -224,12 +251,13 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue';
+import { ref, reactive, computed } from 'vue';
 import {
   fetchSimilarityWorkbench,
   resolveSimilarityCluster as apiResolve,
   cleanExactDuplicates as apiCleanExact
 } from '../api';
+import { sortClusters } from '../utils/similaritySort';
 
 const props = defineProps({
   visible: { type: Boolean, default: false }
@@ -243,6 +271,18 @@ const cleaningExact = ref(false);
 const activeMode = ref('visual');
 const currentMaxDist = ref(8);
 
+const SORT_STORAGE_KEY = 'ml.similarityWorkbench.sort';
+const SORT_VALUES = ['similarity', 'time_desc', 'time_asc'];
+function readStoredSort() {
+  try {
+    const saved = localStorage.getItem(SORT_STORAGE_KEY);
+    return SORT_VALUES.includes(saved) ? saved : 'similarity';
+  } catch (_) {
+    return 'similarity';
+  }
+}
+const sortBy = ref(readStoredSort());
+
 const exactDuplicates = ref([]);
 const similarClusters = ref([]);
 const clusterSelection = reactive(new Map());
@@ -253,12 +293,19 @@ const modes = [
   { key: 'space', label: '同空间多视角', icon: '🏠' }
 ];
 
+// 素材时间口径：上传入库优先取文件的修改时间，其余路径为入库时刻
+const clusterTimeSource = '素材时间：上传时取文件修改时间，其余为入库时间';
+
+// 展示顺序在前端兜底：即便后端进程未热更新、忽略 sort 参数，排序也照样生效
+const orderedClusters = computed(() => sortClusters(similarClusters.value, sortBy.value));
+
 async function loadWorkbench() {
   loading.value = true;
   try {
     const res = await fetchSimilarityWorkbench({
       mode: activeMode.value,
-      maxDist: currentMaxDist.value
+      maxDist: currentMaxDist.value,
+      sort: sortBy.value
     });
     if (res.success && res.data) {
       exactDuplicates.value = res.data.exactDuplicates || [];
@@ -290,6 +337,51 @@ function switchMode(m) {
   else if (m === 'visual') currentMaxDist.value = 8;
   else currentMaxDist.value = 10;
   loadWorkbench();
+}
+
+function changeSort() {
+  try {
+    localStorage.setItem(SORT_STORAGE_KEY, sortBy.value);
+  } catch (_) {}
+  // 排序在前端完成（orderedClusters 计算属性），切换即时生效，不再触发全库重扫
+}
+
+function pad2(n) {
+  return String(n).padStart(2, '0');
+}
+
+// 简短时间：同年省略年份（MM-DD HH:mm），跨年补全年份
+function formatTime(ms) {
+  const t = Number(ms);
+  if (!Number.isFinite(t) || t <= 0) return '-';
+  const d = new Date(t);
+  if (Number.isNaN(d.getTime())) return '-';
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return `${sameYear ? '' : `${d.getFullYear()}-`}${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+function formatTimeFull(ms) {
+  const t = Number(ms);
+  if (!Number.isFinite(t) || t <= 0) return '-';
+  const d = new Date(t);
+  if (Number.isNaN(d.getTime())) return '-';
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+
+// 卡片用：精确到秒，同分钟内也能看出先后
+function formatTimeSec(ms) {
+  const t = Number(ms);
+  if (!Number.isFinite(t) || t <= 0) return '-';
+  const d = new Date(t);
+  if (Number.isNaN(d.getTime())) return '-';
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return `${sameYear ? '' : `${d.getFullYear()}-`}${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+
+function formatTimeRange(start, end) {
+  if (!start) return '-';
+  if (!end || end === start) return formatTime(start);
+  return `${formatTime(start)} ~ ${formatTime(end)}`;
 }
 
 function isMemberSelected(cluster, fid) {

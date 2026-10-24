@@ -73,6 +73,7 @@ export const api = {
   triggerRestage: (fid, body = {}) => request(`/assets/${encodeURIComponent(fid)}/restage`, { method: 'POST', body }),
   setMainDerivative: (fid, derivativeId) => request(`/assets/${encodeURIComponent(fid)}/main-derivative`, { method: 'POST', body: { derivativeId } }),
   ingest: (formData) => request('/assets/ingest', { method: 'POST', body: formData }),
+  pullBaResources: (body) => request('/ba-resource/pull', { method: 'POST', body }),
   backupSettings: () => request('/settings/backup'),
   saveBackupSettings: (body) => request('/settings/backup', { method: 'POST', body }),
   // 快照直收：App（素材库）直接推快照到本服务；此处仅剩设备状态查询

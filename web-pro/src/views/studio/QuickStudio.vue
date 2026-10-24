@@ -145,10 +145,10 @@
           class="absolute bottom-4 left-4 z-20 bg-studio-900/85 backdrop-blur-xs px-3.5 py-1.5 rounded-lg border border-studio-800 text-[11px] text-slate-300 font-mono space-x-3 pointer-events-none"
         >
           <span>滚轮: 缩放</span>
-          <span>右键/中键: 平移</span>
+          <span>右键拖动/中键: 平移</span>
           <span v-if="drawingAvoidMode" class="text-amber-300 font-bold">正在拉框标记【避让区】(禁止模型侵入)</span>
           <span v-else-if="annoTool === 'rect'">左键拖拽: 绘制目标选区矩形</span>
-          <span v-else class="text-studio-cyan font-bold">右键: 立即完成闭合绘制 | 左键: 落点添加锚点 | 双击: 闭合</span>
+          <span v-else class="text-studio-cyan font-bold">左键: 落点 | 双击: 闭合 | 右键单击: 撤销上一点 (已闭合则先取消闭合)</span>
         </div>
 
         <!-- 对比视图 (支持同轴滑动卷帘 / 左右并排双图对比) -->
@@ -356,7 +356,7 @@
                 :height="Math.abs(rectBBox.y2 - rectBBox.y1)"
                 fill="rgba(56, 189, 248, 0.25)"
                 stroke="#38bdf8"
-                stroke-width="2.5"
+                :stroke-width="uiPx(2.5)"
                 class="cursor-move"
               />
               <circle
@@ -364,10 +364,10 @@
                 :key="h.id"
                 :cx="h.x"
                 :cy="h.y"
-                :r="rectHandle === h.id ? 8 : 6"
+                :r="uiPx(rectHandle === h.id ? 8 : 6)"
                 fill="#38bdf8"
                 stroke="#fff"
-                stroke-width="1.5"
+                :stroke-width="uiPx(1.5)"
                 class="cursor-move"
                 @mouseenter="rectHandle = h.id"
                 @mouseleave="onRectHandleLeave"
@@ -382,44 +382,56 @@
                 :points="polygonPointsStr"
                 :fill="isPolyClosed ? 'rgba(59, 130, 246, 0.35)' : 'rgba(59, 130, 246, 0.15)'"
                 stroke="#38bdf8"
-                stroke-width="2"
-                :stroke-dasharray="isPolyClosed ? 'none' : '4'"
+                :stroke-width="uiPx(2)"
+                :stroke-dasharray="isPolyClosed ? 'none' : uiPx(6)"
                 class="cursor-move"
-                @mousedown.stop="onPolygonMouseDown"
+                @mousedown="onPolygonMouseDown"
               />
 
-              <!-- 多边形边线 (双击边线增加新顶点) -->
-              <line
-                v-for="(seg, idx) in polygonSegments"
-                :key="'seg_' + idx"
-                :x1="seg.p1.x"
-                :y1="seg.p1.y"
-                :x2="seg.p2.x"
-                :y2="seg.p2.y"
-                stroke="#38bdf8"
-                stroke-width="4"
-                stroke-opacity="0"
-                class="hover:stroke-opacity-70 cursor-pointer"
-                @dblclick.stop="insertPointOnLine(idx, $event)"
-              />
+              <!-- 已闭合时：边线命中区，双击边线插入新顶点（绘制中不启用，双击留给「闭合」） -->
+              <g v-if="isPolyClosed">
+                <line
+                  v-for="(seg, idx) in polygonSegments"
+                  :key="'seg_' + idx"
+                  :x1="seg.p1.x"
+                  :y1="seg.p1.y"
+                  :x2="seg.p2.x"
+                  :y2="seg.p2.y"
+                  stroke="#38bdf8"
+                  :stroke-width="uiPx(16)"
+                  stroke-opacity="0"
+                  class="hover:stroke-opacity-25 cursor-copy"
+                  @dblclick.stop="insertPointOnLine(idx, $event)"
+                />
+              </g>
 
-              <!-- 顶点手柄锚点 -->
-              <circle
-                v-for="(p, idx) in polygonPoints"
-                :key="'pt_' + idx"
-                :cx="p.x"
-                :cy="p.y"
-                :r="hoverPointIdx === idx ? 7 : 5"
-                :fill="idx === 0 ? '#fbbf24' : '#06b6d4'"
-                stroke="#ffffff"
-                stroke-width="2"
-                class="cursor-grab active:cursor-grabbing transition-all"
-                @mouseenter="hoverPointIdx = idx"
-                @mouseleave="hoverPointIdx = null"
-                @mousedown.stop="onPointMouseDown(idx, $event)"
-                @contextmenu.stop.prevent="deletePoint(idx)"
-                @click.stop="onPointClick(idx)"
-              />
+              <!-- 顶点手柄锚点：透明大命中圈 + 小圆点，屏幕尺寸恒定，缩小画布也好点 -->
+              <g v-for="(p, idx) in polygonPoints" :key="'pt_' + idx">
+                <circle
+                  :cx="p.x"
+                  :cy="p.y"
+                  :r="ptHitRadius"
+                  fill="transparent"
+                  pointer-events="all"
+                  class="cursor-grab active:cursor-grabbing"
+                  @mouseenter="hoverPointIdx = idx"
+                  @mouseleave="hoverPointIdx = null"
+                  @mousedown.stop.prevent="onPointMouseDown(idx, $event)"
+                  @contextmenu.stop.prevent="deletePoint(idx)"
+                  @click.stop="onPointClick(idx)"
+                  @dblclick.stop.prevent
+                />
+                <circle
+                  :cx="p.x"
+                  :cy="p.y"
+                  :r="ptRadius(idx)"
+                  :fill="idx === 0 ? '#fbbf24' : '#06b6d4'"
+                  stroke="#ffffff"
+                  :stroke-width="uiPx(2)"
+                  pointer-events="none"
+                  class="transition-all"
+                />
+              </g>
 
               <!-- 绘制中鼠标跟随虚线 -->
               <line
@@ -429,8 +441,8 @@
                 :x2="mouseCurrentPos.x"
                 :y2="mouseCurrentPos.y"
                 stroke="#fbbf24"
-                stroke-width="1.5"
-                stroke-dasharray="3"
+                :stroke-width="uiPx(1.5)"
+                :stroke-dasharray="uiPx(4)"
                 pointer-events="none"
               />
             </g>
@@ -491,6 +503,33 @@
             <option value="general_vlm">通用大模型 (自动调用 VLM 结合 3D 朝向截图优化提示词)</option>
           </select>
         </div>
+
+        <!-- 出图参数 (清晰度 / 画幅)：与对话生成共用契约参数条 -->
+        <div v-if="outSchema && selectedMode !== 'expand'" class="p-4 border-b border-studio-800 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-white">出图参数：</span>
+            <span class="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-studio-800 text-slate-300">模型契约</span>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <DynamicModelParamBar
+              :schema="outSchema"
+              v-model="outParams"
+              v-model:showAdvanced="showOutAdvanced"
+            />
+          </div>
+          <p v-if="outDiverging" class="text-[11px] leading-relaxed text-amber-300">
+            画幅 {{ outParams.ratio }} 与底图 {{ imageNaturalSize.w }}×{{ imageNaturalSize.h }} 不符，将整幅重绘，框外像素不再逐像素保留。
+            <template v-if="selectedMode === 'install'">安装模式必须贴回原图，画幅固定跟随底图，这一档不会生效。</template>
+          </p>
+          <p v-else class="text-[11px] leading-relaxed text-slate-400">
+            画幅默认按底图 {{ imageNaturalSize.w }}×{{ imageNaturalSize.h }} 取最接近的一档，框外逐像素贴回；清晰度会把底图一并放大到该档。
+          </p>
+          <p v-if="outEcho" class="text-[11px] font-mono leading-relaxed text-studio-cyan">{{ outEcho }}</p>
+          <p v-if="lastRegionNote" class="text-[11px] leading-relaxed text-amber-300">{{ lastRegionNote }}</p>
+        </div>
+        <p v-else-if="selectedMode !== 'expand'" class="px-4 pt-3 text-[11px] leading-relaxed text-slate-400 border-b border-studio-800">
+          这个模型的出图参数表还没接入，本次不指定清晰度与画幅，由服务端按默认出图。
+        </p>
 
         <!-- 模式选择 (6大专业模式) -->
         <div class="p-4 border-b border-studio-800 space-y-2.5">
@@ -927,6 +966,27 @@
           </button>
         </div>
 
+        <!-- 出图参数 (清晰度 / 画幅)：超分有自己的重建档位，不吃这一套 -->
+        <div v-if="activeGlobalMode !== 'upscale' && outSchema" class="p-4 rounded-xl bg-studio-950 border border-studio-800 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-white">出图参数：</span>
+            <span class="text-[10px] font-mono text-slate-400">{{ precisionModelKey }}</span>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <DynamicModelParamBar :schema="outSchema" v-model="outParams" v-model:showAdvanced="showOutAdvanced" />
+          </div>
+          <p v-if="outDiverging" class="text-[11px] leading-relaxed text-amber-300">
+            画幅 {{ outParams.ratio }} 与底图 {{ imageNaturalSize.w }}×{{ imageNaturalSize.h }} 不符，将整幅重绘，框外像素不再逐像素保留。
+          </p>
+          <p v-else class="text-[11px] leading-relaxed text-slate-400">
+            画幅默认取最接近底图 {{ imageNaturalSize.w }}×{{ imageNaturalSize.h }} 的一档，框外逐像素贴回。
+          </p>
+        </div>
+        <p v-if="outEcho || lastRegionNote" class="space-y-1 px-1">
+          <span v-if="outEcho" class="block text-[11px] font-mono leading-relaxed text-studio-cyan">{{ outEcho }}</span>
+          <span v-if="lastRegionNote" class="block text-[11px] leading-relaxed text-amber-300">{{ lastRegionNote }}</span>
+        </p>
+
         <!-- 模式 A：画质超分重建 -->
         <div v-if="activeGlobalMode === 'upscale'" class="p-4 rounded-xl bg-studio-950 border border-studio-800 space-y-3">
           <span class="font-bold text-white block">超分辨率重建档位：</span>
@@ -1083,11 +1143,13 @@ import { ref, computed, watch, onMounted } from 'vue';
 import StudioIcon from '../../components/StudioIcon.vue';
 import BeforeAfterSlider from '../../components/BeforeAfterSlider.vue';
 import AssetPickerModal from '../../components/AssetPickerModal.vue';
+import DynamicModelParamBar from '../../components/DynamicModelParamBar.vue';
 import {
   expandJimeng,
   runEditPipeline,
   registerGeneratedAsset,
   aiDetect,
+  fetchStudioCatalog,
   fetchCustomStyles,
   createCustomStyle,
   updateCustomStyle,
@@ -1306,6 +1368,19 @@ const mouseCurrentPos = ref(null);
 let draggingPointIdx = null;
 let isDraggingPolygon = false;
 let polyDragStart = { x: 0, y: 0 };
+let pointDragMoved = false; // 顶点是否真的被拖动过（拖动后不再当作点击）
+let pointDragStartClient = null;
+let rightPressInfo = null; // 右键按下信息：抬起时几乎没位移 => 视为「撤销」
+
+// 画布整体走 CSS transform 缩放，SVG 半径要按 1/scale 反算，屏幕上的大小才不会跟着缩成针尖
+const uiScale = computed(() => 1 / Math.max(0.05, canvasScale.value || 1));
+function uiPx(n) {
+  return n * uiScale.value;
+}
+const ptHitRadius = computed(() => 16 * uiScale.value);
+function ptRadius(idx) {
+  return (hoverPointIdx.value === idx ? 9.5 : 7) * uiScale.value;
+}
 
 const polygonPointsStr = computed(() => polygonPoints.value.map(p => `${p.x},${p.y}`).join(' '));
 
@@ -1325,6 +1400,11 @@ function onViewportMouseDown(e) {
   if (e.button === 2 || e.button === 1) {
     isPanning = true;
     panStart = { x: e.clientX - canvasOffset.value.x, y: e.clientY - canvasOffset.value.y };
+    if (e.button === 2) {
+      // 右键先按「平移」准备着：抬起时若几乎没动，就当成「撤销上一点」
+      rightPressInfo = { x: e.clientX, y: e.clientY, moved: false };
+      window.addEventListener('mouseup', finishPan);
+    }
     return;
   }
   if (annoTool.value === 'rect') {
@@ -1341,8 +1421,15 @@ function onViewportMouseDown(e) {
 
 function onViewportMouseMove(e) {
   if (draggingPointIdx !== null) {
+    if (pointDragStartClient) {
+      const d = Math.hypot(e.clientX - pointDragStartClient.x, e.clientY - pointDragStartClient.y);
+      if (d > 3) pointDragMoved = true;
+    }
     const pt = getImageRelativePoint(e);
-    if (pt && polygonPoints.value[draggingPointIdx]) polygonPoints.value[draggingPointIdx] = pt;
+    if (pt && polygonPoints.value[draggingPointIdx]) {
+      polygonPoints.value[draggingPointIdx] = pt;
+      if (!isPolyClosed.value) mouseCurrentPos.value = pt;
+    }
     return;
   }
   if (draggingRectHandle && rectBBox.value) {
@@ -1357,6 +1444,10 @@ function onViewportMouseMove(e) {
   }
   if (isPanning) {
     canvasOffset.value = { x: e.clientX - panStart.x, y: e.clientY - panStart.y };
+    if (rightPressInfo && !rightPressInfo.moved) {
+      const d = Math.hypot(e.clientX - rightPressInfo.x, e.clientY - rightPressInfo.y);
+      if (d > 4) rightPressInfo.moved = true;
+    }
     return;
   }
   if (isDrawingRect) {
@@ -1383,7 +1474,7 @@ function onViewportMouseUp(e) {
     return;
   }
   if (isPanning) {
-    isPanning = false;
+    finishPan();
     return;
   }
   if (isDrawingRect) {
@@ -1392,6 +1483,16 @@ function onViewportMouseUp(e) {
       drawingAvoidMode.value = false; // 避让区画完自动退出避让绘制状态
     }
   }
+}
+
+// 结束平移；若这次是「右键单击」（位移没超过 4px），就执行一次撤销
+function finishPan() {
+  if (!isPanning) return;
+  isPanning = false;
+  window.removeEventListener('mouseup', finishPan);
+  const info = rightPressInfo;
+  rightPressInfo = null;
+  if (info && !info.moved) undoPolygonStep();
 }
 
 function getImageRelativePoint(e) {
@@ -1404,29 +1505,64 @@ function getImageRelativePoint(e) {
 }
 
 function onSvgClick(e) {
-  if (annoTool.value === 'polygon' && !isPolyClosed.value) {
-    const pt = getImageRelativePoint(e);
-    if (!pt) return;
-    polygonPoints.value.push(pt);
+  if (annoTool.value !== 'polygon' || isPolyClosed.value) return;
+  // 双击的第二下（detail >= 2）不再落点，直接闭合，避免多出一个重复顶点
+  if (e.detail >= 2) {
+    closePolygon();
+    return;
   }
+  const pt = getImageRelativePoint(e);
+  if (!pt) return;
+  polygonPoints.value.push(pt);
+  mouseCurrentPos.value = pt;
+}
+
+function closePolygon() {
+  const pts = polygonPoints.value;
+  if (pts.length < 3) return false;
+  // 双击闭合时，双击的第一下会先落一个点；若它几乎压在上一个点上，就去掉这个重复顶点
+  if (pts.length > 3) {
+    const a = pts[pts.length - 1];
+    const b = pts[pts.length - 2];
+    if (Math.hypot(a.x - b.x, a.y - b.y) < 4 * uiScale.value) pts.pop();
+  }
+  isPolyClosed.value = true;
+  mouseCurrentPos.value = null;
+  return true;
+}
+
+// 右键撤销：已闭合 -> 先取消闭合（保留全部顶点继续微调）；未闭合 -> 删掉最后一个落点
+function undoPolygonStep() {
+  if (annoTool.value !== 'polygon') return;
+  if (isPolyClosed.value) {
+    isPolyClosed.value = false;
+    return;
+  }
+  if (!polygonPoints.value.length) return;
+  polygonPoints.value.pop();
+  mouseCurrentPos.value = null;
+  if (polygonPoints.value.length < 3) isPolyClosed.value = false;
 }
 
 function onPointClick(idx) {
-  if (idx === 0 && polygonPoints.value.length > 2) {
-    isPolyClosed.value = true;
-    mouseCurrentPos.value = null;
-  }
+  if (pointDragMoved) return; // 刚拖过锚点，不当作点击闭合
+  if (idx === 0 && polygonPoints.value.length > 2) closePolygon();
 }
 
 function onPointMouseDown(idx, e) {
+  if (e && e.button !== 0) return; // 右键在锚点上是删除该点，不进入拖拽
   draggingPointIdx = idx;
   hoverPointIdx.value = idx;
+  pointDragMoved = false;
+  pointDragStartClient = { x: e.clientX, y: e.clientY };
   window.addEventListener('mouseup', endPointDrag);
 }
 
 function deletePoint(idx) {
   polygonPoints.value.splice(idx, 1);
   if (polygonPoints.value.length < 3) isPolyClosed.value = false;
+  hoverPointIdx.value = null;
+  draggingPointIdx = null;
 }
 
 function insertPointOnLine(idx, e) {
@@ -1435,6 +1571,8 @@ function insertPointOnLine(idx, e) {
 }
 
 function onPolygonMouseDown(e) {
+  if (e && e.button !== 0) return; // 右键放行给视口：可能是平移，也可能是撤销
+  e.stopPropagation();
   isDraggingPolygon = true;
   polyDragStart = getImageRelativePoint(e);
 }
@@ -1500,12 +1638,10 @@ function fitCanvasToViewport() {
   }
 }
 
-// 鼠标右键即刻完成多边形闭合绘制
-function onContextMenu(e) {
-  if (annoTool.value === 'polygon' && !isPolyClosed.value && polygonPoints.value.length >= 3) {
-    isPolyClosed.value = true;
-    mouseCurrentPos.value = null;
-  }
+// 右键行为：单击 = 撤销上一步（见 finishPan -> undoPolygonStep），拖动 = 平移。
+// 这里只负责把浏览器原生右键菜单挡掉，闭合改由「左键双击 / 点回首点」完成。
+function onContextMenu() {
+  /* 原生菜单已在模板上用 .prevent 屏蔽，保留空实现以免误触发闭合 */
 }
 
 // 6 大专业精准编辑模式
@@ -1519,6 +1655,107 @@ const editModes = [
 ];
 const selectedMode = ref('replace');
 const precisionModelKey = ref('seedream5flash');
+
+// ==================== 出图参数（清晰度 / 画幅）====================
+// 与对话生成同一套做法：档位、画幅、默认值全部来自 /studio/catalog 的模型契约，
+// 页面不写死任何一档，选完直接把值发给 /edit/run，服务端再把真正生效的换算结果回显。
+const studioSchemas = ref({});
+const outParams = ref({});
+const showOutAdvanced = ref(false);
+const lastOutSize = ref(null);
+const lastRegionNote = ref('');
+
+// 编辑管线只吃这两项；组图、透明底这类契约参数在这里用不上，就不摆出来误导
+const outSchema = computed(() => {
+  const s = studioSchemas.value[precisionModelKey.value];
+  if (!s) return null;
+  const fields = (s.common || []).filter((f) => f.key === 'size' || f.key === 'ratio');
+  if (!fields.length) return null;
+  return { ...s, common: fields, advanced: [], modes: [], slots: null, free: null };
+});
+const ratioField = computed(() =>
+  (outSchema.value?.common || []).find((f) => f.key === 'ratio') || null
+);
+
+/** 契约里最接近底图宽高比的一档；与服务端 handlers/edit-size 的判据一致 */
+function nearestRatio(options, w, h) {
+  const nums = (options || []).filter((o) => /^\d+:\d+$/.test(String(o)));
+  if (!nums.length || !(w > 0 && h > 0)) return '';
+  const target = w / h;
+  let best = nums[0];
+  let bestGap = Infinity;
+  for (const r of nums) {
+    const [a, b] = String(r).split(':').map(Number);
+    const gap = Math.abs(Math.log(a / b / target));
+    if (gap < bestGap) { bestGap = gap; best = r; }
+  }
+  return best;
+}
+
+function resetOutParams() {
+  const s = outSchema.value;
+  showOutAdvanced.value = false;
+  if (!s) { outParams.value = {}; return; }
+  const next = {};
+  for (const f of s.common) next[f.key] = f.default;
+  const near = nearestRatio(ratioField.value.options, imageNaturalSize.value.w, imageNaturalSize.value.h);
+  if (next.ratio != null) next.ratio = near || next.ratio;
+  outParams.value = next;
+}
+
+// 画幅一旦偏离底图，服务端只能整幅重绘，框外像素保不住 —— 出图前就讲明白
+const outDiverging = computed(() => {
+  const f = ratioField.value;
+  const chosen = outParams.value.ratio;
+  if (!f || !chosen || String(chosen) === 'auto') return false;
+  const nearest = nearestRatio(f.options, imageNaturalSize.value.w, imageNaturalSize.value.h);
+  return !!nearest && String(chosen) !== String(nearest);
+});
+
+const outEcho = computed(() => {
+  const o = lastOutSize.value;
+  if (!o) return '';
+  const px = o.outW && o.outH ? `${o.outW}×${o.outH}` : '尺寸未知';
+  return `实发 ${o.sizeField || '未传'} · 画幅 ${o.ratio || '未选'} · ${px} · ${o.pasteback ? '框外逐像素贴回' : '未贴回（整幅出图）'}`;
+});
+
+// 全局重绘共用同一条 /edit/run 管线。只有契约里确实有出图参数时才带上 model，
+// 免得把「通用大模型」这类非生图 id 塞进图像管线改变原有行为。
+const outParamFields = computed(() =>
+  outSchema.value
+    ? {
+        model: precisionModelKey.value,
+        size: outParams.value.size || undefined,
+        ratio: outParams.value.ratio || undefined,
+      }
+    : {}
+);
+
+/** 服务端回传真正生效的出图参数与降级告知，页面只负责照实念出来 */
+function readEditEcho(res) {
+  const d = (res && (res.data || res)) || {};
+  lastOutSize.value = d.outSize || null;
+  lastRegionNote.value = d.regionNote || '';
+}
+
+watch(precisionModelKey, resetOutParams);
+// 换底图就是换基准宽高比，画幅默认值必须跟着重挑，否则「跟随原图」成了一句空话
+watch(() => `${imageNaturalSize.value.w}x${imageNaturalSize.value.h}`, () => {
+  const f = ratioField.value;
+  if (!f || !imageNaturalSize.value.w) return;
+  const near = nearestRatio(f.options, imageNaturalSize.value.w, imageNaturalSize.value.h);
+  if (near) outParams.value = { ...outParams.value, ratio: near };
+});
+
+onMounted(async () => {
+  try {
+    const catalog = await fetchStudioCatalog();
+    studioSchemas.value = catalog.schemas || {};
+  } catch (e) {
+    console.warn('出图参数表读取失败:', e);
+  }
+  resetOutParams();
+});
 
 // 3D 资产与模型自转
 const modelSources = [
@@ -1916,6 +2153,9 @@ onMounted(loadCustomStyles);
 async function runExecute() {
   if (!currentImage.value) return;
   executing.value = true;
+  // 上一次运行的回显不能留下来冒充这次的，扩图走的是另一条通道尤其容易看串
+  lastOutSize.value = null;
+  lastRegionNote.value = '';
   try {
     if (studioMode.value === 'precision' && selectedMode.value === 'expand') {
       // 扩图模式：对接真实即梦扩图 API (传递精确外扩比例与引导词)
@@ -1951,8 +2191,10 @@ async function runExecute() {
           // 优先用 LLM 解析后的风格锚定描述；未解析则退回用户的自由描述
           stylePrompt: useCustom ? (customAiPrompt.value.trim() || customStyleDesc.value.trim() || undefined) : undefined,
           strengthLevel: styleWeight.value > 70 ? 'strong' : (styleWeight.value > 40 ? 'standard' : 'subtle'),
-          extraPrompt: expandPrompt.value || undefined
+          extraPrompt: expandPrompt.value || undefined,
+          ...outParamFields.value
         });
+        readEditEcho(res);
         if (res.data?.image?.b64) {
           resultImage.value = `data:image/jpeg;base64,${res.data.image.b64}`;
         } else if (res.image?.b64) {
@@ -1965,6 +2207,7 @@ async function runExecute() {
           op: 'clarity',
           targetClarity: upscaleTarget.value
         });
+        readEditEcho(res);
         if (res.data?.image?.b64) {
           resultImage.value = `data:image/jpeg;base64,${res.data.image.b64}`;
         }
@@ -1973,8 +2216,10 @@ async function runExecute() {
           image: currentImage.value,
           assetFid: currentAssetFid.value || undefined,
           op: 'remove',
-          removeWatermark: true
+          removeWatermark: true,
+          ...outParamFields.value
         });
+        readEditEcho(res);
         if (res.data?.image?.b64) {
           resultImage.value = `data:image/jpeg;base64,${res.data.image.b64}`;
         }
@@ -2050,10 +2295,14 @@ async function runExecute() {
         modelYaw: modelRotation.value,
         modelPitch: modelPitch.value,
         model: precisionModelKey.value || undefined,
+        // 出图参数按字面下发；契约里没有这两项时保持 undefined，让服务端按默认出图
+        size: outParams.value.size || undefined,
+        ratio: outParams.value.ratio || undefined,
         prompt: selectedMode.value === 'add' ? (addItemPrompt.value || undefined) : undefined,
         avoidBBox: avoidPayload,
         gapPct: selectedMode.value === 'add' ? (addPaddingPercent.value || 30) : (gapWidth.value || 0),
       });
+      readEditEcho(res);
 
       const b64 = res.data?.image?.b64 || res.image?.b64;
       const imgUrl = res.data?.image?.url || res.image?.url || res.url;

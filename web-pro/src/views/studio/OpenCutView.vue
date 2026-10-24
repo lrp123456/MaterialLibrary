@@ -78,20 +78,32 @@ const isEmbedded = typeof window !== 'undefined' && window.self !== window.top;
 const canMount = ref(false);
 
 const iframeSrc = computed(() => {
+  const params = new URLSearchParams();
   const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('ml_token') || '') : '';
-  return token ? `/editor/projects?token=${encodeURIComponent(token)}` : '/editor/projects';
+  if (token) params.set('token', token);
+  // 主应用停在 HTTP 上排查时，iframe 也不能被跳去 HTTPS：
+  // HTTP 父页面里的跨源 HTTPS 子框架会被 Chrome 降级成非安全上下文，反而更糟。
+  if (typeof location !== 'undefined' && location.search.includes('keep-http')) {
+    params.set('keep-http', '1');
+  }
+  const q = params.toString();
+  return q ? `/editor/projects?${q}` : '/editor/projects';
 });
 
 /** 探活：HEAD 请求校验 /editor/projects 是否存活 */
 async function checkService() {
   try {
-    const res = await fetch('/editor/projects', { method: 'HEAD', cache: 'no-store' });
-    if (!res.ok) {
-      showHint.value = true;
-      return false;
-    }
-    showHint.value = false;
-    return true;
+    // redirect: manual 是必须的。局域网/公网的 HTTP 入口会把 /editor 302 到 HTTPS，
+    // 自动跟随会变成跨 scheme 的 CORS 请求直接抛错，被误判成「服务没起」。
+    // opaqueredirect 说明服务答了话，只是把我们踢去 HTTPS。
+    const res = await fetch('/editor/projects', {
+      method: 'HEAD',
+      cache: 'no-store',
+      redirect: 'manual'
+    });
+    const alive = res.type === 'opaqueredirect' || res.ok;
+    showHint.value = !alive;
+    return alive;
   } catch {
     showHint.value = true;
     return false;
@@ -138,10 +150,20 @@ function syncAuthToFrame() {
   );
 }
 
+// 统一把跨板块载荷规整为资产数组：兼容单体 {fid,...} 与批量 {assets:[...]} 两种形态
+function payloadAssets(payload) {
+  if (!payload) return [];
+  if (Array.isArray(payload.assets)) return payload.assets.filter(Boolean);
+  if (Array.isArray(payload)) return payload.filter(Boolean);
+  return [payload];
+}
+
 function sendPayloadToFrame(payload) {
-  if (!payload || !frameRef.value || !frameRef.value.contentWindow) return;
+  const assets = payloadAssets(payload);
+  if (!assets.length || !frameRef.value || !frameRef.value.contentWindow) return;
   frameRef.value.contentWindow.postMessage(
-    { type: 'MLS_IMPORT_ASSET', asset: payload },
+    // assets 为批量数组；asset 保留单体字段兼容旧版编辑器桥接（新版优先读 assets）
+    { type: 'MLS_IMPORT_ASSET', asset: assets[0], assets },
     '*'
   );
 }

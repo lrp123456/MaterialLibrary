@@ -823,7 +823,13 @@
               <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 text-xs">
                 <div class="p-2 rounded-lg bg-surface border border-outline-variant">
                   <span class="text-on-surface-variant block text-[10px]">挂载模型 (Model)</span>
-                  <span class="font-mono text-white font-medium">{{ mod.model_id || '(本地 CPU/FFmpeg 算法)' }}</span>
+                  <span class="font-mono text-white font-medium break-all">
+                    <template v-if="(mod.model_ids || []).length > 1">
+                      <span class="text-ok">主 {{ mod.model_ids[0] }}</span>
+                      <span class="text-on-surface-variant"> → 备 </span>{{ mod.model_ids.slice(1).join(' → 备 ') }}
+                    </template>
+                    <template v-else>{{ mod.model_id || '(本地 CPU/FFmpeg 算法)' }}</template>
+                  </span>
                 </div>
                 <div class="p-2 rounded-lg bg-surface border border-outline-variant">
                   <span class="text-on-surface-variant block text-[10px]">绑定任务提示词 (Prompt)</span>
@@ -1320,21 +1326,64 @@
 
           <!-- 3. 挂载模型与绑定任务提示词 -->
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label class="block text-on-surface-variant mb-1">3. 挂载执行模型 (Model Contract)</label>
-              <select
-                v-model="editingModule.model_id"
-                class="w-full px-3 py-2 rounded-xl bg-surface-low border border-outline-variant text-white font-mono"
-              >
-                <option :value="null">(纯本地 CPU / FFmpeg 算法算子，无需大模型)</option>
-                <option value="workflow_vision">workflow_vision (工作流免费视觉池)</option>
-                <option value="text-embedding-3-small">text-embedding-3-small (语义向量模型)</option>
-                <option value="umbra.expand">umbra.expand (veImageX/即梦专用扩图通道)</option>
-                <option value="local-4x">local-4x (端侧 4x 超分通道)</option>
-                <option v-for="m in modelsList" :key="m.id" :value="m.id">
-                  {{ m.name }} ({{ m.id }})
-                </option>
-              </select>
+            <div class="sm:col-span-1">
+              <label class="block text-on-surface-variant mb-1">
+                3. 挂载执行模型 (Model Contract · 可多选)
+              </label>
+              <div class="rounded-xl bg-surface-low border border-outline-variant overflow-hidden">
+                <!-- 已选模型：序号即优先级，第 1 个是主模型 -->
+                <div class="p-2 space-y-1 border-b border-outline-variant">
+                  <div
+                    v-for="(mid, idx) in editingModule.model_ids"
+                    :key="'sel-' + mid"
+                    class="flex items-center gap-2 px-1 py-0.5 rounded bg-canvas"
+                  >
+                    <span class="w-5 h-5 shrink-0 rounded bg-primary text-white text-[10px] flex items-center justify-center font-mono">{{ idx + 1 }}</span>
+                    <span class="text-white text-[11px] flex-1 truncate">{{ modelOptionLabel(mid) }}</span>
+                    <span class="shrink-0 text-[10px] px-1.5 py-0.5 rounded"
+                      :class="idx === 0 ? 'bg-ok/20 text-ok' : 'bg-outline-variant/40 text-on-surface-variant'">
+                      {{ idx === 0 ? '主模型' : '降级备选' }}
+                    </span>
+                    <button type="button" title="上移（提升优先级）" @click="moveModelUp(idx)"
+                      :disabled="idx === 0"
+                      class="shrink-0 w-5 h-5 rounded text-on-surface-variant hover:text-white hover:bg-surface-high disabled:opacity-30 cursor-pointer text-[11px] leading-none">↑</button>
+                    <button type="button" title="移出" @click="removeModel(mid)"
+                      class="shrink-0 w-5 h-5 rounded text-on-surface-variant hover:text-error hover:bg-surface-high cursor-pointer text-[11px] leading-none">✕</button>
+                  </div>
+                  <div v-if="!editingModule.model_ids.length" class="px-1 py-1 text-[10px] text-on-surface-variant">
+                    未挂载任何模型 = 纯本地 CPU / FFmpeg 算法算子
+                  </div>
+                </div>
+
+                <!-- 可选模型：勾选即加入，勾选顺序即优先级 -->
+                <div class="p-2">
+                  <input
+                    v-model="modelFilterText"
+                    placeholder="搜索模型…"
+                    class="w-full px-2 py-1 mb-1.5 rounded bg-canvas border border-outline-variant text-white text-[11px] placeholder:text-on-surface-variant"
+                  />
+                  <div class="max-h-40 overflow-y-auto grid grid-cols-1 gap-0.5">
+                    <label
+                      v-for="opt in filteredModelOptions"
+                      :key="opt.id"
+                      class="flex items-center gap-1.5 px-1 py-0.5 rounded hover:bg-surface-high cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        :checked="editingModule.model_ids.includes(opt.id)"
+                        @change="toggleModel(opt.id)"
+                        class="mt-0.5 rounded shrink-0"
+                      />
+                      <span class="text-white text-[11px] truncate">{{ opt.name }} <span class="text-on-surface-variant font-mono">({{ opt.id }})</span></span>
+                    </label>
+                    <div v-if="!filteredModelOptions.length" class="px-1 py-1 text-[10px] text-on-surface-variant">没有匹配的模型</div>
+                  </div>
+                </div>
+              </div>
+              <p class="text-[10px] text-on-surface-variant mt-1 leading-relaxed">
+                勾选顺序 = 优先级：第 1 个是主模型，主模型失败（超时/限流/确定性错误）时自动切到下一条通道；
+                每条通道用各自的模型与适配器，不会把 A 的请求打到 B 的端点上。
+              </p>
             </div>
             <div>
               <label class="block text-on-surface-variant mb-1">4. 绑定业务任务提示词 (Prompt Center)</label>
@@ -2246,6 +2295,73 @@ const availableTextModels = computed(() => {
   return list
 })
 
+// ---- 工作流节点「挂载执行模型」多选（勾选顺序 = 优先级，1 = 主模型）----
+const SPECIAL_MODEL_OPTIONS = [
+  { id: 'workflow_vision', name: 'workflow_vision（工作流免费视觉池）' },
+  { id: 'text-embedding-3-small', name: 'text-embedding-3-small（语义向量模型）' },
+  { id: 'umbra.expand', name: 'umbra.expand（veImageX/即梦专用扩图通道）' },
+  { id: 'local-4x', name: 'local-4x（端侧 4x 超分通道）' },
+]
+
+const modelFilterText = ref('')
+
+const modelOptions = computed(() => {
+  const fromCatalog = modelsList.value.map(m => ({
+    id: m.id,
+    name: m.name || m.id,
+  }))
+  const seen = new Set(fromCatalog.map(o => o.id))
+  const specials = SPECIAL_MODEL_OPTIONS.filter(o => !seen.has(o.id))
+  return [...specials, ...fromCatalog]
+})
+
+const filteredModelOptions = computed(() => {
+  const q = String(modelFilterText.value || '').trim().toLowerCase()
+  if (!q) return modelOptions.value
+  return modelOptions.value.filter(o =>
+    o.id.toLowerCase().includes(q) || String(o.name || '').toLowerCase().includes(q))
+})
+
+function modelOptionLabel(id) {
+  const hit = modelOptions.value.find(o => o.id === id)
+  return hit ? hit.name : id
+}
+
+function ensureModelIds() {
+  if (!editingModule.value) return []
+  if (!Array.isArray(editingModule.value.model_ids)) {
+    editingModule.value.model_ids = editingModule.value.model_id ? [editingModule.value.model_id] : []
+  }
+  return editingModule.value.model_ids
+}
+
+function toggleModel(id) {
+  const ids = ensureModelIds()
+  const at = ids.indexOf(id)
+  if (at >= 0) {
+    ids.splice(at, 1)
+  } else {
+    ids.push(id)
+  }
+  editingModule.value.model_id = ids.length ? ids[0] : null
+}
+
+function removeModel(id) {
+  const ids = ensureModelIds()
+  const at = ids.indexOf(id)
+  if (at >= 0) ids.splice(at, 1)
+  editingModule.value.model_id = ids.length ? ids[0] : null
+}
+
+function moveModelUp(idx) {
+  const ids = ensureModelIds()
+  if (idx <= 0 || idx >= ids.length) return
+  const tmp = ids[idx]
+  ids[idx] = ids[idx - 1]
+  ids[idx - 1] = tmp
+  editingModule.value.model_id = ids[0] || null
+}
+
 // 3. 提示词与公共积木中心状态
 const snippetsList = ref([])
 const editingSnippet = ref(null)
@@ -3019,6 +3135,7 @@ function onModuleOperatorChange() {
     editingModule.value.name = spec.name
   }
   editingModule.value.model_id = spec.defaultModelId || null
+  editingModule.value.model_ids = spec.defaultModelId ? [spec.defaultModelId] : []
   editingModule.value.prompt_id = spec.defaultPromptId || null
   editingModule.value.snippet_ids = Array.isArray(spec.defaultSnippets) ? [...spec.defaultSnippets] : []
   moduleParamsForm.value = {
@@ -3038,6 +3155,7 @@ function openNewModule() {
     name: defaultOp?.name || '新建工作流节点',
     node_type: defaultOp?.type || 'gate',
     model_id: defaultOp?.defaultModelId || null,
+    model_ids: defaultOp?.defaultModelId ? [defaultOp.defaultModelId] : [],
     prompt_id: defaultOp?.defaultPromptId || null,
     prompt_override: '',
     condition_expr: '',
@@ -3061,6 +3179,11 @@ function openEditModule(mod) {
   if (!Array.isArray(editingModule.value.snippet_ids)) {
     editingModule.value.snippet_ids = []
   }
+  // 多模型挂载：后端已下发有序数组；老数据只有单值 model_id 时回填成一项
+  if (!Array.isArray(editingModule.value.model_ids)) {
+    editingModule.value.model_ids = editingModule.value.model_id ? [editingModule.value.model_id] : []
+  }
+  editingModule.value.model_ids = editingModule.value.model_ids.filter(Boolean)
   moduleParamsForm.value = {
     temperature: 0.1,
     timeoutMs: 30000,
@@ -3073,14 +3196,22 @@ async function saveModule() {
   if (!editingModule.value) return
   savingModule.value = true
   try {
+    // 多模型挂载：有序数组（1 = 主模型）；model_id 始终与首项保持一致（后端按数组优先）
+    const modelIds = Array.isArray(editingModule.value.model_ids)
+      ? editingModule.value.model_ids.filter(Boolean)
+      : (editingModule.value.model_id ? [editingModule.value.model_id] : [])
     const payload = {
       ...editingModule.value,
+      model_ids: modelIds,
+      model_id: modelIds.length ? modelIds[0] : null,
       mount_point_id: selectedMountPointId.value,
       params: moduleParamsForm.value,
     }
     await api.saveMountModule(selectedMountPointId.value, payload)
     editingModule.value = null
-    successMsg.value = '工作流节点已保存并实时同步生效'
+    successMsg.value = modelIds.length > 1
+      ? `工作流节点已保存（挂载 ${modelIds.length} 个模型：主模型 + ${modelIds.length - 1} 个降级备选）并实时同步生效`
+      : '工作流节点已保存并实时同步生效'
     await refreshCurrentTab()
   } catch (e) {
     error.value = e.message

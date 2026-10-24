@@ -219,15 +219,28 @@
         </div>
       </div>
 
-      <!-- 版本选择（小型血缘：原图 + 衍生图） -->
+      <!-- 版本选择（小型血缘：原图 + 衍生图 + 缺失画幅插槽） -->
       <div v-if="versionPanelItem" class="absolute inset-0 z-40 flex items-end bg-black/55" @click.self="expandedFid = ''">
         <div class="w-full max-h-[62%] bg-studio-900 border-t border-studio-750 shadow-2xl flex flex-col">
           <div class="flex items-center justify-between px-5 py-3 border-b border-studio-800 shrink-0">
             <div class="min-w-0">
               <div class="text-xs font-bold text-white truncate">选择版本 · {{ versionPanelItem.name }}</div>
-              <div class="text-[10px] text-slate-500">点击缩略图可看大图、左右切换与原图对比；标「画幅变更」的版本会改变宽高比</div>
+              <div class="text-[10px] text-slate-500">
+                <span v-if="versionPanelSlots.length" class="text-sky-300 font-bold">虚线卡片是这类图片默认应有、但还没生成的画幅，点一下就地补；</span>
+                点击缩略图可看大图、左右切换与原图对比
+              </div>
             </div>
-            <button type="button" class="w-7 h-7 rounded-lg bg-studio-850 hover:bg-studio-800 text-slate-400 hover:text-white cursor-pointer" @click="expandedFid = ''">✕</button>
+            <div class="flex items-center gap-2 shrink-0">
+              <button
+                v-if="versionPanelSlots.length > 1"
+                type="button"
+                class="px-2.5 py-1 rounded-lg bg-sky-400/15 border border-sky-400/40 text-sky-300 text-[11px] font-bold cursor-pointer hover:bg-sky-400/25 disabled:opacity-40"
+                :disabled="!!slotBusyFid"
+                :title="`一次补齐 ${versionPanelSlots.map((s) => s.ratio).join(' / ')}`"
+                @click="generateSlots(versionPanelSlots)"
+              >补齐 {{ versionPanelSlots.length }} 档</button>
+              <button type="button" class="w-7 h-7 rounded-lg bg-studio-850 hover:bg-studio-800 text-slate-400 hover:text-white cursor-pointer" @click="expandedFid = ''">✕</button>
+            </div>
           </div>
           <div class="flex-1 overflow-y-auto scrollbar-thin p-4">
             <div v-if="derivativeLoading[versionPanelItem.fid]" class="h-32 flex items-center justify-center text-xs text-slate-400">读取衍生版本…</div>
@@ -262,7 +275,47 @@
                   {{ isSelected(version.key) ? '✓ 已选中 · 取消' : '选择此版本' }}
                 </button>
               </div>
+
+              <!-- 缺失画幅插槽：这类图片默认就该有这一档，缺的就地补出来 -->
+              <button
+                v-for="slot in versionPanelSlots"
+                :key="'slot-' + slot.kind"
+                type="button"
+                class="rounded-xl overflow-hidden border-2 border-dashed text-left transition-all flex flex-col cursor-pointer"
+                :class="slotStatus(slot) === 'failed'
+                  ? 'border-rose-400/70 bg-studio-950/70 hover:border-rose-300'
+                  : 'border-sky-400/60 bg-studio-950/70 hover:border-sky-300'"
+                :disabled="!!slotBusyFid || slotStatus(slot) === 'queued'"
+                :title="`${slot.label} 是这张图的默认规格，点一下现场生成`"
+                @click="generateSlots([slot])"
+              >
+                <div class="relative w-full h-28 flex flex-col items-center justify-center gap-1 bg-sky-400/5">
+                  <span
+                    v-if="slotStatus(slot) === 'running' || slotStatus(slot) === 'queued'"
+                    class="w-6 h-6 rounded-full border-2 border-sky-300 border-t-transparent animate-spin"
+                  ></span>
+                  <span
+                    v-else
+                    class="text-[13px] font-black"
+                    :class="slotStatus(slot) === 'failed' ? 'text-rose-300' : 'text-sky-200'"
+                  >{{ slotHeadline(slot) }}</span>
+                  <span class="px-1.5 py-0.5 rounded bg-black/40 border border-sky-400/40 text-[9px] font-bold text-sky-300 font-mono">{{ slot.ratio }}</span>
+                </div>
+                <div class="px-2 py-1.5 flex-1">
+                  <div class="text-[11px] font-bold text-slate-200 truncate">{{ slot.label }}</div>
+                  <div class="text-[9px] text-slate-500">默认挂载规格 · Seedream 5.0 Flash</div>
+                </div>
+                <div
+                  class="px-2 py-1.5 text-[10px] font-bold border-t border-studio-800 text-center"
+                  :class="slotStatus(slot) === 'failed' ? 'bg-rose-500/10 text-rose-300' : 'bg-sky-400/10 text-sky-300'"
+                >{{ slotActionText(slot) }}</div>
+              </button>
             </div>
+            <div
+              v-if="slotErrorText"
+              class="mt-3 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-[11px] font-bold text-rose-300 break-all"
+            >{{ slotErrorText }}</div>
+            <div v-if="slotChannelText" class="mt-2 text-[11px] font-bold text-emerald-300">{{ slotChannelText }}</div>
           </div>
           <div class="px-5 py-3 border-t border-studio-800 shrink-0 flex items-center justify-between bg-studio-950/50">
             <span class="text-[11px] text-slate-400">已选 {{ selected.length }} / {{ maxSelect }} 件</span>
@@ -397,13 +450,24 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
-import { fetchAssets, fetchAssetDetail, getAssetImageUrl, getAssetOriginalUrl, getDerivativeImageUrl } from '../api';
+import {
+  fetchAssets,
+  fetchAssetDetail,
+  getAssetImageUrl,
+  getAssetOriginalUrl,
+  getDerivativeImageUrl,
+  triggerRestageDerivatives,
+} from '../api';
 import {
   derivativeLabel,
   versionsOf as buildVersions,
   stripVersionKey,
   toggleSelection,
   isSelected as isVersionSelected,
+  missingSlotPresets,
+  readDerivativeSlotPrefs,
+  onDerivativeSlotPrefsChange,
+  slotStatusFromDetail,
 } from '../../../shared/ml-asset-core/index.ts';
 
 const props = defineProps({
@@ -451,6 +515,13 @@ const fileInput = ref(null);
 const previewVersion = ref(null);
 const previewCompare = ref(false);
 const sizeCache = ref({});
+// 默认衍生图插槽：缺哪档就补哪档。设置页可以整体关掉或按类目改规格。
+const slotPrefs = ref(readDerivativeSlotPrefs());
+const restageStatusByFid = ref({});
+const slotBusyFid = ref('');
+const slotErrorByFid = ref({});
+// 生成成功后回显实际走的通道，被降级到本机模型时用户看得见
+const slotChannelByFid = ref({});
 
 const shelfPlates = [
   { key: 'original', label: '原素材' },
@@ -473,7 +544,10 @@ const subMap = {
   video: [
     { key: 'all', label: '全部视频' },
     { key: 'walkthrough', label: '空间漫游' },
+    { key: 'product', label: '单品展示' },
+    { key: 'detail', label: '细节特写' },
     { key: 'ad', label: '商业短片' },
+    { key: 'portrait', label: '人像动态' },
   ],
   audio: [
     { key: 'all', label: '全部音频' },
@@ -569,14 +643,25 @@ function onPreviewKey(e) {
   else if (e.key === 'ArrowLeft') stepPreview(-1);
   else if (e.key === 'ArrowRight') stepPreview(1);
 }
-onMounted(() => window.addEventListener('keydown', onPreviewKey));
-onBeforeUnmount(() => window.removeEventListener('keydown', onPreviewKey));
+let stopSlotPrefsWatch = null;
+onMounted(() => {
+  window.addEventListener('keydown', onPreviewKey);
+  stopSlotPrefsWatch = onDerivativeSlotPrefsChange((next) => {
+    slotPrefs.value = next;
+  });
+});
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onPreviewKey);
+  if (stopSlotPrefsWatch) stopSlotPrefsWatch();
+});
 
 function resetPicker() {
   selected.value = [];
   expandedFid.value = '';
   closePreview();
   notice.value = '';
+  slotErrorByFid.value = {};
+  slotChannelByFid.value = {};
   tab.value = 'library';
   const nextMain = props.mediaTypes.includes(props.initialMain) ? props.initialMain : (props.mediaTypes[0] || 'image');
   main.value = nextMain;
@@ -613,8 +698,7 @@ async function loadAssets(targetPage = 1) {
     const params = { page: page.value, limit: pageSize, pageSize };
     if (main.value === 'video') {
       params.media_type = 'video';
-      if (sub.value === 'walkthrough') params.category = 'video';
-      if (sub.value === 'ad') params.category = 'finished';
+      if (sub.value && sub.value !== 'all') params.video_purpose = sub.value;
     } else if (main.value === 'audio') {
       params.media_type = 'music';
       params.category = 'music';
@@ -679,9 +763,9 @@ function versionsOf(item) {
   });
 }
 
-async function ensureDerivatives(item) {
+async function ensureDerivatives(item, options = {}) {
   if (!item.fid || item.kind === 'video' || item.kind === 'audio') return;
-  if (Object.prototype.hasOwnProperty.call(derivativeCache.value, item.fid)) return;
+  if (!options.force && Object.prototype.hasOwnProperty.call(derivativeCache.value, item.fid)) return;
   derivativeLoading.value = { ...derivativeLoading.value, [item.fid]: true };
   try {
     const detail = await fetchAssetDetail(item.fid);
@@ -689,10 +773,102 @@ async function ensureDerivatives(item) {
       ...derivativeCache.value,
       [item.fid]: Array.isArray(detail?.derivatives) ? detail.derivatives : [],
     };
+    // 插槽要显示「排队中 / 生成中 / 失败」而不是一律「待生成」，状态就来自这里
+    restageStatusByFid.value = {
+      ...restageStatusByFid.value,
+      [item.fid]: detail?.restageStatus || {},
+    };
   } catch (e) {
     derivativeCache.value = { ...derivativeCache.value, [item.fid]: [] };
   } finally {
     derivativeLoading.value = { ...derivativeLoading.value, [item.fid]: false };
+  }
+}
+
+/**
+ * 版本面板里还缺的默认插槽。
+ * 只有真正读到过详情才计算：详情还没回来时 cached 为空，此时报「待生成」会误伤。
+ */
+const versionPanelSlots = computed(() => {
+  const item = versionPanelItem.value;
+  if (!item) return [];
+  if (item.kind === 'video' || item.kind === 'audio') return [];
+  const cached = derivativeCache.value[item.fid];
+  if (!cached) return [];
+  return missingSlotPresets(item.category, cached, slotPrefs.value);
+});
+
+/** 本页正在跑的请求优先，其次才是后端队列状态。 */
+function slotStatus(slot) {
+  const item = versionPanelItem.value;
+  if (!item) return 'missing';
+  if (slotBusyFid.value === item.fid) return 'running';
+  return slotStatusFromDetail(slot.kind, restageStatusByFid.value[item.fid]);
+}
+
+function slotActionText(slot) {
+  const status = slotStatus(slot);
+  if (status === 'running') return '生成中…';
+  if (status === 'queued') return '排队中';
+  if (status === 'failed') return '重试生成';
+  return '点击生成';
+}
+
+/** 插槽正面的大字：一眼看出是「还没生成」还是「正在生成」。 */
+function slotHeadline(slot) {
+  const status = slotStatus(slot);
+  if (status === 'running') return '生成中…';
+  if (status === 'queued') return '排队中';
+  if (status === 'failed') return `${slot.shortLabel} 待重试`;
+  return `${slot.shortLabel} 待生成`;
+}
+
+const slotErrorText = computed(() => {
+  const item = versionPanelItem.value;
+  if (!item) return '';
+  return slotErrorByFid.value[item.fid] || '';
+});
+
+/** 这一张图刚才是走哪条通道生成出来的。 */
+const slotChannelText = computed(() => {
+  const item = versionPanelItem.value;
+  if (!item) return '';
+  const channels = slotChannelByFid.value[item.fid];
+  if (!channels || typeof channels !== 'object') return '';
+  const models = Object.values(channels)
+    .map((entry) => String(entry?.model || entry?.adapterId || ''))
+    .filter(Boolean);
+  if (!models.length) return '';
+  return `已生成 · 走 ${[...new Set(models)].join(' / ')}`;
+});
+
+/**
+ * 触发生成。后端 restage 是同步长请求，因此一张图同一次只允许跑一档，
+ * 多档缺失时合并成一次调用（ratios 数组），避免同一素材被并发排队两次。
+ */
+async function generateSlots(slots) {
+  const item = versionPanelItem.value;
+  if (!item || !item.fid || !slots.length) return;
+  if (slotBusyFid.value) return;
+  const fid = item.fid;
+  slotBusyFid.value = fid;
+  slotErrorByFid.value = { ...slotErrorByFid.value, [fid]: '' };
+  try {
+    const res = await triggerRestageDerivatives(fid, slots.map((slot) => slot.ratio));
+    slotChannelByFid.value = {
+      ...slotChannelByFid.value,
+      [fid]: res?.data?.channels || {},
+    };
+    // 缓存里那份是生成前的快照，必须强制重读，否则插槽会一直停在「待生成」
+    await ensureDerivatives(item, { force: true });
+    for (const version of versionsOf(item)) probeSize(version.url);
+  } catch (e) {
+    slotErrorByFid.value = {
+      ...slotErrorByFid.value,
+      [fid]: String(e?.message || '生成失败，请稍后重试'),
+    };
+  } finally {
+    slotBusyFid.value = '';
   }
 }
 
