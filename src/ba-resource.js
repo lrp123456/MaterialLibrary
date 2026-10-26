@@ -257,7 +257,7 @@ async function pullBaResources(services, opts = {}) {
   const db = services.db;
   ensureLedger(db);
   let token = await getToken(config, fetchImpl, false);
-  const summary = { pulled: 0, filed: 0, skipped: 0, failed: 0, errors: [], truncated: false };
+  const summary = { pulled: 0, filed: 0, skipped: 0, failed: 0, cards: 0, errors: [], truncated: false };
 
   for (let current = 1; current <= MAX_PAGES; current += 1) {
     let page;
@@ -292,6 +292,7 @@ async function pullBaResources(services, opts = {}) {
           updated_at: now,
         });
         rememberNote(db, known.fid, record.context);
+        if (upsertCreationCard(db, record)) summary.cards += 1;
         summary.skipped += 1;
         continue;
       }
@@ -322,6 +323,7 @@ async function pullBaResources(services, opts = {}) {
           error: '',
           updated_at: now,
         });
+        if (upsertCreationCard(db, record)) summary.cards += 1;
         if (filed.deduped) summary.skipped += 1;
         else summary.filed += 1;
       } catch (err) {
@@ -347,6 +349,127 @@ async function pullBaResources(services, opts = {}) {
   return summary;
 }
 
+function ensureCreationColumns(db) {
+  const add = (sql) => { try { db.exec(sql); } catch { /* 已有 */ } };
+  add("ALTER TABLE creation_templates ADD COLUMN type TEXT DEFAULT 'image'");
+  add("ALTER TABLE creation_templates ADD COLUMN space TEXT DEFAULT ''");
+  add("ALTER TABLE creation_templates ADD COLUMN style TEXT DEFAULT ''");
+  add("ALTER TABLE creation_templates ADD COLUMN is_pinned INTEGER DEFAULT 0");
+  add("ALTER TABLE creation_templates ADD COLUMN use_count INTEGER DEFAULT 0");
+  add("ALTER TABLE creation_templates ADD COLUMN purpose TEXT DEFAULT ''");
+  add("ALTER TABLE creation_templates ADD COLUMN channel TEXT DEFAULT 'studio'");
+}
+
+function parseInfo(raw) {
+  if (!raw) return {};
+  if (typeof raw === 'object') return raw;
+  try { return JSON.parse(String(raw)); } catch { return {}; }
+}
+
+function upsertCreationCard(db, record) {
+  const remoteId = String(record?.id ?? '').trim();
+  const prompt = String(record?.context || '').trim();
+  if (!remoteId || !prompt) return '';
+  ensureCreationColumns(db);
+  const info = parseInfo(record.info);
+  const typeRaw = String(record.type || 'image').toLowerCase();
+  const type = typeRaw.includes('video') ? 'video' : typeRaw.includes('audio') ? 'audio' : 'image';
+  const id = `ba_${remoteId}`;
+  const refs = (Array.isArray(info.referenceImages) ? info.referenceImages : [])
+    .filter(Boolean)
+    .map((url) => ({ url: String(url) }));
+  const result = record.url ? [{ url: String(record.url) }] : [];
+  const ratio = String(info.ratio || (type === 'video' ? '9:16' : '16:9'));
+  const purpose = require('./video-tags').purposeFromText(prompt);
+  const title = prompt.replace(/\s+/g, ' ').slice(0, 24);
+  const params = {
+    channel: 'ba',
+    model: info.modelId || '',
+    ratio,
+    resolution: info.resolution || '',
+    duration: info.duration || '',
+    remoteId,
+  };
+  const now = Date.now();
+  const existing = db.prepare('SELECT id FROM creation_templates WHERE id=?').get(id);
+  if (existing) {
+    db.prepare(`
+      UPDATE creation_templates
+      SET prompt=?, aspect_ratio=?, origin_images=?, result_images=?, params_json=?, type=?,
+          purpose=CASE WHEN purpose IS NULL OR purpose='' THEN ? ELSE purpose END,
+          channel='ba', updated_at=?
+      WHERE id=?
+    `).run(prompt, ratio, JSON.stringify(refs), JSON.stringify(result), JSON.stringify(params), type, purpose, now, id);
+    return id;
+  }
+  db.prepare(`
+    INSERT INTO creation_templates (
+      id, user_id, title, prompt, aspect_ratio, origin_images, result_images, params_json, tags,
+      type, space, style, purpose, channel, is_pinned, use_count, created_at, updated_at
+    ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, 'ba', 0, 0, ?, ?)
+  `).run(
+    id, title, prompt, ratio, JSON.stringify(refs), JSON.stringify(result), JSON.stringify(params),
+    JSON.stringify(['ba', type]), type, purpose, now, now
+  );
+  return id;
+}
+
+const CATALOG_KEYWORDS = ['的', '图', '生', '视', '一', '我', '帮', '室', '内', '风', '片', '像', '家', '客', '装', '画', '照', '景', '空', '间', '墙', '灯', '门', '窗', '沙', '发', '桌', '椅', '柜', '床'];
+
+async function syncBaCreationCatalog(services, opts = {}) {
+  const keywords = Array.isArray(opts.keywords) && opts.keywords.length ? opts.keywords : CATALOG_KEYWORDS;
+  const type = String(opts.type || 'all');
+  const size = Math.max(1, Math.min(50, Number(opts.size) || 50));
+  const config = readConfig();
+  if (!config.base || !config.username || !config.password) {
+    const err = new Error('未配置 BA_RESOURCE_BASE、BA_RESOURCE_USER、BA_RESOURCE_PASSWORD');
+    err.code = 400;
+    throw err;
+  }
+  const fetchImpl = opts.fetchImpl || fetch;
+  const db = services.db;
+  ensureLedger(db);
+  let token = await getToken(config, fetchImpl, false);
+  const seen = new Set();
+  const summary = { keywords: keywords.length, seen: 0, cards: 0, image: 0, video: 0, failed: 0, truncated: false };
+  for (const keyword of keywords) {
+    for (let current = 1; current <= MAX_PAGES; current += 1) {
+      let page;
+      try {
+        page = await searchPage(config, fetchImpl, token, { keyword, type, current, size });
+      } catch (err) {
+        if (err.code === 'unauthorized') {
+          token = await getToken(config, fetchImpl, true);
+          page = await searchPage(config, fetchImpl, token, { keyword, type, current, size });
+        } else {
+          summary.failed += 1;
+          break;
+        }
+      }
+      if (!page.records.length) break;
+      for (const record of page.records) {
+        const remoteId = String(record.id ?? '').trim();
+        if (!remoteId || seen.has(remoteId)) continue;
+        seen.add(remoteId);
+        try {
+          if (upsertCreationCard(db, record)) {
+            summary.cards += 1;
+            const kind = String(record.type || '').toLowerCase();
+            if (kind.includes('video')) summary.video += 1;
+            else summary.image += 1;
+          }
+        } catch {
+          summary.failed += 1;
+        }
+      }
+      if (current >= page.pages) break;
+      if (current === MAX_PAGES) summary.truncated = true;
+    }
+  }
+  summary.seen = seen.size;
+  return summary;
+}
+
 function resetTokenCache() {
   tokenCache = { base: '', token: '', exp: 0 };
 }
@@ -358,4 +481,6 @@ module.exports = {
   assertHttpUrl,
   resetTokenCache,
   fileIntoLibrary,
+  upsertCreationCard,
+  syncBaCreationCatalog,
 };

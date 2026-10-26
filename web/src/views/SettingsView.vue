@@ -1330,7 +1330,7 @@ async function runBaPull() {
   try {
     const data = await api.pullBaResources({ keyword, type: baPull.value.type, size: baPull.value.size })
     const errors = (data.errors || []).map((item) => `${item.id}: ${item.error}`).join('\n')
-    baPull.value.hint = `拉到 ${data.pulled || 0} 条，新入库 ${data.filed || 0}，已有 ${data.skipped || 0}，失败 ${data.failed || 0}${data.truncated ? '。页数达到上限，后面的没拉' : ''}${errors ? '\n' + errors : ''}`
+    baPull.value.hint = `拉到 ${data.pulled || 0} 条，新入库 ${data.filed || 0}，已有 ${data.skipped || 0}，创作库 ${data.cards || 0}，失败 ${data.failed || 0}${data.truncated ? '。页数达到上限，后面的没拉' : ''}${errors ? '\n' + errors : ''}`
   } catch (e) {
     baPull.value.hint = e.message || '拉取失败'
   } finally {

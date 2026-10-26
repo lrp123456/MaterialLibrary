@@ -3260,6 +3260,7 @@ async function handleApi(services, req, res, prefix = '/api') {
       try { db.exec("ALTER TABLE creation_templates ADD COLUMN is_pinned INTEGER DEFAULT 0;"); } catch (e) {}
       try { db.exec("ALTER TABLE creation_templates ADD COLUMN use_count INTEGER DEFAULT 0;"); } catch (e) {}
       try { db.exec("ALTER TABLE creation_templates ADD COLUMN purpose TEXT DEFAULT '';"); } catch (e) {}
+      try { db.exec("ALTER TABLE creation_templates ADD COLUMN channel TEXT DEFAULT 'studio';"); } catch (e) {}
       try { db.exec("CREATE INDEX IF NOT EXISTS idx_creation_tpl_sort ON creation_templates(is_pinned DESC, use_count DESC, updated_at DESC);"); } catch (e) {}
     }
 
@@ -3286,7 +3287,7 @@ async function handleApi(services, req, res, prefix = '/api') {
       params.push(`%${kw.toLowerCase()}%`, `%${kw.toLowerCase()}%`, `%${kw.toLowerCase()}%`, `%${kw.toLowerCase()}%`, `%${kw.toLowerCase()}%`);
     }
 
-    sql += ' ORDER BY is_pinned DESC, use_count DESC, updated_at DESC LIMIT 100';
+    sql += ' ORDER BY is_pinned DESC, use_count DESC, updated_at DESC LIMIT 1000';
     const rows = db.prepare(sql).all(...params);
 
     return sendJson(res, 200, {
@@ -3306,6 +3307,7 @@ async function handleApi(services, req, res, prefix = '/api') {
           space: r.space || '',
           style: r.style || '',
           purpose: r.purpose || '',
+          channel: r.channel || 'studio',
           is_pinned: Number(r.is_pinned || 0),
           use_count: Number(r.use_count || 0),
           origin_images,

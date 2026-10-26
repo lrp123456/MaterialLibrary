@@ -187,6 +187,31 @@ function ok(name) { console.log('✅ ' + name); }
   assert.strictEqual(videoRow.library_shelf, 'original');
   ok('Ba 视频进素材库，记为实拍来源');
 
+  const cardId = ba.upsertCreationCard(db, {
+    id: 450,
+    type: 'video',
+    context: '帮我生成一个一镜到底的中古风格室内装饰视频',
+    url: 'https://img.example/a.mp4',
+    info: JSON.stringify({ ratio: '9:16', modelId: 'seedance', referenceImages: ['https://img.example/ref.jpg'] }),
+  });
+  assert.strictEqual(cardId, 'ba_450');
+  const card = db.prepare('SELECT channel, type, aspect_ratio, prompt FROM creation_templates WHERE id=?').get(cardId);
+  assert.strictEqual(card.channel, 'ba');
+  assert.strictEqual(card.type, 'video');
+  assert.strictEqual(card.aspect_ratio, '9:16');
+  db.prepare("UPDATE creation_templates SET purpose='product' WHERE id=?").run(cardId);
+  ba.upsertCreationCard(db, {
+    id: 450,
+    type: 'video',
+    context: '同一条提示词再次同步',
+    url: 'https://img.example/b.mp4',
+    info: '{"ratio":"9:16"}',
+  });
+  const keptCard = db.prepare('SELECT purpose, prompt FROM creation_templates WHERE id=?').get(cardId);
+  assert.strictEqual(keptCard.purpose, 'product');
+  assert.strictEqual(keptCard.prompt, '同一条提示词再次同步');
+  ok('Ba 创作写进创作库，再次同步不覆盖已有用途');
+
   console.log('ba-video-tags 通过');
 })().catch((err) => {
   console.error(err);
