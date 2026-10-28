@@ -66,6 +66,29 @@ async function handleBaseLibraryRoutes(services, req, res, pathname, urlObj, { s
     return fs.createReadStream(fullPath).pipe(res);
   }
 
+  // 3.1 材质 3D 材质球预览图 GET /api/base-library/materials/:id/preview
+  const mMatPreview = pathname.match(/^\/base-library\/materials\/([^\/]+)\/preview$/);
+  if (mMatPreview && (req.method === 'GET' || req.method === 'HEAD')) {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const matId = decodeURIComponent(mMatPreview[1]);
+    const row = db.prepare('SELECT * FROM ba_materials WHERE id=? AND deleted_at IS NULL').get(matId);
+    if (!row) return sendJson(res, 404, { error: '材质不存在' });
+
+    const relPath = row.preview_rel || row.basecolor_rel;
+    const fullPath = path.resolve(dataDir, relPath);
+    if (!fs.existsSync(fullPath)) return sendJson(res, 404, { error: '预览图文件不存在' });
+
+    const stat = fs.statSync(fullPath);
+    const contentType = fullPath.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+    res.writeHead(200, {
+      'Content-Type': contentType,
+      'Content-Length': stat.size,
+      'Cache-Control': 'public, max-age=86400'
+    });
+    if (req.method === 'HEAD') return res.end();
+    return fs.createReadStream(fullPath).pipe(res);
+  }
+
   // 4. 材质远程搜索 POST /api/base-library/materials/search (管理员)
   if (pathname === '/base-library/materials/search' && (req.method === 'POST' || req.method === 'GET')) {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });

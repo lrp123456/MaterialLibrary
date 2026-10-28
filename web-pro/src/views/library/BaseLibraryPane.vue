@@ -128,17 +128,51 @@
           <div
             v-for="mat in filteredMaterials"
             :key="mat.id"
-            class="rounded-xl bg-studio-900 border border-studio-800 hover:border-studio-accent/60 overflow-hidden flex flex-col group transition shadow-sm"
+            class="rounded-xl bg-studio-900 border border-studio-800 hover:border-studio-accent/60 overflow-hidden flex flex-col group transition shadow-sm hover:shadow-md"
           >
-            <div class="relative aspect-square bg-studio-950 overflow-hidden">
-              <img :src="authedUrl(mat.thumb_url)" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-              <div v-if="mat.is_shell" class="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-amber-500/80 text-black text-[10px] font-bold">
+            <!-- 材质图像容器 (支持 3D材质球 与 1K平铺纹理一键快切) -->
+            <div 
+              class="relative aspect-square bg-studio-950 overflow-hidden flex items-center justify-center p-1.5 cursor-pointer"
+              @click="openMaterialDetail(mat)"
+            >
+              <img 
+                :src="authedUrl(matModeMap[mat.id] === 'texture' ? mat.basecolor_url : mat.thumb_url)" 
+                class="w-full h-full object-contain group-hover:scale-105 transition-transform duration-300 drop-shadow-md" 
+                :alt="mat.name_cn"
+                loading="lazy"
+              />
+              <div v-if="mat.is_shell" class="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-amber-500/90 text-black text-[10px] font-bold shadow-xs">
                 底色壳
               </div>
+              <div class="absolute top-1.5 right-1.5 flex items-center space-x-1">
+                <button
+                  v-if="mat.preview_url"
+                  type="button"
+                  @click.stop="toggleMatMode(mat.id)"
+                  class="px-1.5 py-0.5 rounded text-[10px] font-mono transition backdrop-blur-md border border-white/10 flex items-center space-x-1"
+                  :class="matModeMap[mat.id] === 'texture' ? 'bg-amber-500/30 text-amber-200 border-amber-400/40' : 'bg-studio-800/80 text-slate-300 hover:text-white'"
+                  :title="matModeMap[mat.id] === 'texture' ? '当前: 1K平铺纹理 (点击切3D材质球)' : '当前: 3D材质球 (点击切平铺纹理)'"
+                >
+                  <span>{{ matModeMap[mat.id] === 'texture' ? '平铺图' : '材质球' }}</span>
+                </button>
+              </div>
             </div>
+
+            <!-- 材质卡片元数据 -->
             <div class="p-2.5 flex-1 flex flex-col justify-between">
               <div>
-                <div class="text-xs font-bold text-white truncate" :title="mat.name_cn">{{ mat.name_cn }}</div>
+                <div 
+                  class="text-xs font-bold text-white truncate cursor-pointer hover:text-studio-accent transition-colors" 
+                  :title="mat.name_cn"
+                  @click="openMaterialDetail(mat)"
+                >
+                  {{ mat.name_cn }}
+                </div>
+                <!-- 真实物理质感标签 (木纹导管/镜面反射/磨砂颗粒等) -->
+                <div v-if="mat.roughness_label" class="text-[10px] text-amber-300/90 mt-1 flex items-center space-x-1 truncate" :title="mat.roughness_label">
+                  <span class="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0"></span>
+                  <span class="truncate">{{ mat.roughness_label }}</span>
+                </div>
                 <div class="flex flex-wrap gap-1 mt-1.5">
                   <span
                     v-for="t in mat.tags"
@@ -149,12 +183,18 @@
                   </span>
                 </div>
               </div>
-              <!-- 来源 CC0 署名 -->
+              <!-- 来源 CC0 署名与官方直达链接 -->
               <div class="mt-3 pt-1.5 border-t border-studio-800/60 flex items-center justify-between text-[10px] text-slate-500">
                 <span class="truncate">{{ mat.credit }}</span>
                 <a
                   v-if="mat.source === 'polyhaven' && mat.source_id"
                   :href="`https://polyhaven.com/a/${mat.source_id}`"
+                  target="_blank"
+                  class="text-studio-accent hover:underline ml-1"
+                >来源</a>
+                <a
+                  v-else-if="mat.source === 'ambientcg' && mat.source_id"
+                  :href="`https://ambientcg.com/view?id=${mat.source_id}`"
                   target="_blank"
                   class="text-studio-accent hover:underline ml-1"
                 >来源</a>
@@ -340,6 +380,115 @@
       @close="showSearchModal = false"
       @imported="onImported"
     />
+
+    <!-- 弹窗：材质高清 PBR 详情与 3D/纹理比对 -->
+    <div
+      v-if="selectedMaterial"
+      class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+      @click.self="closeMaterialDetail"
+    >
+      <div class="bg-studio-900 border border-studio-750 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col">
+        <!-- 弹窗顶部 -->
+        <div class="px-5 py-3.5 border-b border-studio-800 flex items-center justify-between">
+          <div class="flex items-center space-x-2">
+            <span class="text-xs px-2 py-0.5 rounded bg-studio-800 text-amber-400 font-mono">PBR 物理材质</span>
+            <h3 class="text-sm font-bold text-white">{{ selectedMaterial.name_cn }}</h3>
+          </div>
+          <button
+            type="button"
+            @click="closeMaterialDetail"
+            class="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-studio-800 transition cursor-pointer"
+          >
+            <StudioIcon name="close" :size="18" />
+          </button>
+        </div>
+
+        <!-- 弹窗主体 -->
+        <div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+          <!-- 左侧大图 (支持 3D材质球 与 1K平铺纹理快切) -->
+          <div class="relative aspect-square rounded-xl bg-studio-950 border border-studio-800 flex items-center justify-center p-3 overflow-hidden">
+            <img
+              :src="authedUrl(detailModalMode === 'texture' ? selectedMaterial.basecolor_url : (selectedMaterial.preview_url || selectedMaterial.thumb_url))"
+              class="w-full h-full object-contain drop-shadow-xl transition-all duration-300"
+              :alt="selectedMaterial.name_cn"
+            />
+            <!-- 模式切换浮钮 -->
+            <div class="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center bg-studio-900/90 backdrop-blur-md border border-studio-700 rounded-lg p-0.5 shadow-lg">
+              <button
+                type="button"
+                @click="detailModalMode = 'sphere'"
+                class="px-2.5 py-1 rounded-md text-xs font-medium transition cursor-pointer"
+                :class="detailModalMode === 'sphere' ? 'bg-studio-accent text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'"
+              >
+                3D材质球
+              </button>
+              <button
+                type="button"
+                @click="detailModalMode = 'texture'"
+                class="px-2.5 py-1 rounded-md text-xs font-medium transition cursor-pointer"
+                :class="detailModalMode === 'texture' ? 'bg-studio-accent text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'"
+              >
+                1K平铺纹理
+              </button>
+            </div>
+          </div>
+
+          <!-- 右侧物理属性 -->
+          <div class="space-y-4">
+            <div>
+              <div class="text-xs text-slate-400">物理质感 & 粗糙度</div>
+              <div class="text-sm font-bold text-amber-300 mt-0.5 flex items-center space-x-1.5">
+                <span class="w-2 h-2 rounded-full bg-amber-400 shrink-0"></span>
+                <span>{{ selectedMaterial.roughness_label || '标准漫反射物理质感' }}</span>
+              </div>
+            </div>
+
+            <div>
+              <div class="text-xs text-slate-400">适用的装修面</div>
+              <div class="flex flex-wrap gap-1.5 mt-1.5">
+                <span
+                  v-for="t in selectedMaterial.tags"
+                  :key="t.surface + '_' + t.subclass"
+                  class="text-xs px-2 py-0.5 rounded-md bg-studio-800 text-slate-200 font-mono"
+                >
+                  {{ t.subclass }} ({{ t.surface }})
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <div class="text-xs text-slate-400">材质底色壳 (Shell) 属性</div>
+              <div class="text-xs text-slate-300 mt-1 leading-relaxed">
+                <span v-if="selectedMaterial.is_shell" class="text-amber-400 font-bold">✓ 支持作为底色壳</span><span v-if="selectedMaterial.is_shell">：具备微观颗粒感与粗糙度，可叠加任意立邦/多乐士涂料色号上色。</span>
+                <span v-else class="text-slate-400">天然纹理材质：自带专属纹理与固有色，直接作为贴图使用。</span>
+              </div>
+            </div>
+
+            <div class="pt-3 border-t border-studio-800 flex items-center justify-between text-xs">
+              <span class="text-slate-500 font-mono">ID: {{ selectedMaterial.id }}</span>
+              <a
+                v-if="selectedMaterial.source === 'polyhaven' && selectedMaterial.source_id"
+                :href="`https://polyhaven.com/a/${selectedMaterial.source_id}`"
+                target="_blank"
+                class="text-studio-accent hover:underline flex items-center space-x-1"
+              >
+                <span>Poly Haven 官方页面</span>
+                <StudioIcon name="external" :size="12" />
+              </a>
+              <a
+                v-else-if="selectedMaterial.source === 'ambientcg' && selectedMaterial.source_id"
+                :href="`https://ambientcg.com/view?id=${selectedMaterial.source_id}`"
+                target="_blank"
+                class="text-studio-accent hover:underline flex items-center space-x-1"
+              >
+                <span>ambientCG 官方页面</span>
+                <StudioIcon name="external" :size="12" />
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -419,6 +568,22 @@ const localDirection = ref(props.direction || '');
 const localCct = ref(props.cct || '');
 const localModelCategory = ref(props.modelCategory || 'furniture');
 const showSearchModal = ref(false);
+const matModeMap = ref({});
+const selectedMaterial = ref(null);
+const detailModalMode = ref('sphere');
+
+function toggleMatMode(id) {
+  matModeMap.value[id] = matModeMap.value[id] === 'texture' ? 'sphere' : 'texture';
+}
+
+function openMaterialDetail(mat) {
+  selectedMaterial.value = mat;
+  detailModalMode.value = mat.preview_url ? 'sphere' : 'texture';
+}
+
+function closeMaterialDetail() {
+  selectedMaterial.value = null;
+}
 
 const surfaces = ref([]);
 const materials = ref([]);

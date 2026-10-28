@@ -75,6 +75,7 @@ function ensureBaseLibrarySchema(db) {
       source_id TEXT,                -- 手动上传为空
       license_note TEXT,
       is_shell INTEGER NOT NULL DEFAULT 0,
+      preview_rel TEXT,              -- cache/base-library/materials/{id}/sphere.jpg (3D材质球)
       basecolor_rel TEXT NOT NULL,   -- cache/base-library/materials/{id}/basecolor.jpg
       width INTEGER NOT NULL,
       height INTEGER NOT NULL,
@@ -86,6 +87,14 @@ function ensureBaseLibrarySchema(db) {
       ON ba_materials(source, source_id) WHERE source_id IS NOT NULL AND deleted_at IS NULL;
     CREATE INDEX IF NOT EXISTS idx_ba_mat_deleted
       ON ba_materials(deleted_at, updated_at DESC);
+
+    -- 补齐列 preview_rel (幂等升级)
+    try {
+      const matCols = db.pragma('table_info(ba_materials)').map(c => c.name);
+      if (!matCols.includes('preview_rel')) {
+        db.prepare('ALTER TABLE ba_materials ADD COLUMN preview_rel TEXT').run();
+      }
+    } catch (e) {}
 
     -- 色号仓库
     CREATE TABLE IF NOT EXISTS ba_paints (

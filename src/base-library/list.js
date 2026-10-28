@@ -111,11 +111,27 @@ function listMaterials(db, { surface, subclass, source, is_shell, q, limit = 60,
       credit = r.license_note;
     }
 
+    let roughness_label = '标准物理质感';
+    if (r.id === 'mat_white_oak') roughness_label = '半哑光木纹 (微导管)';
+    else if (r.id === 'mat_black_walnut') roughness_label = '哑光木纹 (天然山纹)';
+    else if (r.id === 'mat_roman_travertine') roughness_label = '漫反射 (天然孔洞肌理)';
+    else if (r.id === 'mat_calacatta_marble') roughness_label = '高光镜面 (天然灰脉)';
+    else if (r.id === 'mat_micro_cement') roughness_label = '哑光磨砂 (微水泥颗粒壳)';
+    else if (r.id === 'mat_linen_fabric') roughness_label = '柔光布艺 (高支经纬线)';
+    else if (r.id === 'mat_terrazzo_gray') roughness_label = '半抛光面 (细腻水磨骨料)';
+    else if (r.id === 'mat_gypsum_cornice') roughness_label = '超哑光面 (精细石膏质感)';
+
+    const previewUrl = r.preview_rel ? `/api/base-library/materials/${encodeURIComponent(r.id)}/preview` : null;
+    const basecolorUrl = `/api/base-library/materials/${encodeURIComponent(r.id)}/basecolor`;
+
     return {
       id: r.id,
       name_cn: r.name_cn,
       tags: tagMap.get(r.id) || [],
-      thumb_url: `/api/base-library/materials/${encodeURIComponent(r.id)}/basecolor`,
+      thumb_url: previewUrl || basecolorUrl,
+      preview_url: previewUrl,
+      basecolor_url: basecolorUrl,
+      roughness_label,
       source: r.source,
       source_id: r.source_id,
       credit,

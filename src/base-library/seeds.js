@@ -208,9 +208,9 @@ const SEED_MATERIALS = [
   {
     id: 'mat_micro_cement',
     name_cn: '浅灰一体微水泥 (艺术漆壳)',
-    source: 'manual',
-    source_id: 'shell_cement_01',
-    license_note: '官方标准底色壳, CC0',
+    source: 'ambientcg',
+    source_id: 'Concrete034',
+    license_note: 'ambientCG, CC0',
     is_shell: 1,
     hex: '#C2BEB6',
     tags: [
@@ -247,9 +247,9 @@ const SEED_MATERIALS = [
   {
     id: 'mat_gypsum_cornice',
     name_cn: '精工哑光石膏天花板',
-    source: 'manual',
-    source_id: 'ceiling_plaster_01',
-    license_note: '官方标准石膏质感, CC0',
+    source: 'ambientcg',
+    source_id: 'Plaster001',
+    license_note: 'ambientCG, CC0',
     is_shell: 0,
     hex: '#F0EEEB',
     tags: [
@@ -298,10 +298,10 @@ async function seedBaseLibraryData(db, dataDir) {
   const insMat = db.prepare(`
     INSERT OR IGNORE INTO ba_materials (
       id, name_cn, source, source_id, license_note, is_shell,
-      basecolor_rel, width, height, created_at, updated_at
+      preview_rel, basecolor_rel, width, height, created_at, updated_at
     ) VALUES (
       @id, @name_cn, @source, @source_id, @license_note, @is_shell,
-      @basecolor_rel, @width, @height, @created_at, @updated_at
+      @preview_rel, @basecolor_rel, @width, @height, @created_at, @updated_at
     )
   `);
 
@@ -311,6 +311,8 @@ async function seedBaseLibraryData(db, dataDir) {
   `);
 
   for (const m of SEED_MATERIALS) {
+    const ext = m.id === 'mat_calacatta_marble' ? '.png' : '.jpg';
+    const previewRel = `cache/base-library/materials/${m.id}/sphere${ext}`;
     const basecolorRel = `cache/base-library/materials/${m.id}/basecolor.jpg`;
     insMat.run({
       id: m.id,
@@ -319,6 +321,7 @@ async function seedBaseLibraryData(db, dataDir) {
       source_id: m.source_id,
       license_note: m.license_note,
       is_shell: m.is_shell,
+      preview_rel: previewRel,
       basecolor_rel: basecolorRel,
       width: 1024,
       height: 1024,
