@@ -343,6 +343,7 @@ const services = { db, config: { dataDir: testDir }, logger: console };
 
   console.log('=== 14. 巡检画布执行历史取有效状态而非末条 skipped ===');
   const inspectRunId = 'run_inspect_status';
+  const gRep = soloOwner;
   db.prepare(`
     INSERT INTO runs (id, workflow_id, workflow_version, trigger, status, asset_count, created_at, updated_at)
     VALUES (?, 'default', 1, 'restage_backfill', 'running', 1, ?, ?)

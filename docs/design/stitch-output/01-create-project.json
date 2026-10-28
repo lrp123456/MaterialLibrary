@@ -1,0 +1,22 @@
+{
+  "status": 200,
+  "json": {
+    "id": 2,
+    "jsonrpc": "2.0",
+    "result": {
+      "content": [
+        {
+          "text": "{\"name\":\"projects/13552649013419215261\",\"title\":\"灵感空间 Material Studio Pro\",\"visibility\":\"PRIVATE\",\"projectType\":\"PROJECT_DESIGN\",\"origin\":\"STITCH\"}",
+          "type": "text"
+        }
+      ],
+      "structuredContent": {
+        "name": "projects/13552649013419215261",
+        "origin": "STITCH",
+        "projectType": "PROJECT_DESIGN",
+        "title": "灵感空间 Material Studio Pro",
+        "visibility": "PRIVATE"
+      }
+    }
+  }
+}

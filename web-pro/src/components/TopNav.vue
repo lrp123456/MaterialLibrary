@@ -63,12 +63,21 @@
           class="px-2.5 py-1.5 rounded-xl border bg-studio-850 border-studio-700 hover:border-studio-600 transition-all flex items-center space-x-1.5 text-slate-300 hover:text-white cursor-pointer"
           title="切换界面主题配色"
         >
-          <span class="text-xs">
-            <template v-if="currentTheme === 'dark'">🌙 暗黑</template>
-            <template v-else-if="currentTheme === 'light'">☀️ 明朗</template>
-            <template v-else>🍵 护眼</template>
+          <span class="flex items-center gap-1.5 text-xs">
+            <template v-if="currentTheme === 'dark'">
+              <StudioIcon name="moon" :size="13" class="text-indigo-400" />
+              <span>暗黑</span>
+            </template>
+            <template v-else-if="currentTheme === 'light'">
+              <StudioIcon name="sun" :size="13" class="text-amber-400" />
+              <span>明朗</span>
+            </template>
+            <template v-else>
+              <StudioIcon name="palette" :size="13" class="text-emerald-400" />
+              <span>护眼</span>
+            </template>
           </span>
-          <span class="text-[10px] text-slate-400">▾</span>
+          <StudioIcon name="chevronDown" :size="10" class="text-slate-400" />
         </button>
 
         <div class="absolute right-0 top-full mt-1.5 w-28 py-1 bg-studio-850 border border-studio-700 rounded-xl shadow-xl opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all z-50">
@@ -76,21 +85,21 @@
             @click="setTheme('dark')"
             class="w-full px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-studio-750 hover:text-white flex items-center space-x-2 cursor-pointer"
           >
-            <span>🌙</span>
+            <StudioIcon name="moon" :size="13" class="text-indigo-400" />
             <span>暗黑模式</span>
           </button>
           <button
             @click="setTheme('light')"
             class="w-full px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-studio-750 hover:text-white flex items-center space-x-2 cursor-pointer"
           >
-            <span>☀️</span>
+            <StudioIcon name="sun" :size="13" class="text-amber-400" />
             <span>明朗模式</span>
           </button>
           <button
             @click="setTheme('eye-care')"
             class="w-full px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-studio-750 hover:text-white flex items-center space-x-2 cursor-pointer"
           >
-            <span>🍵</span>
+            <StudioIcon name="palette" :size="13" class="text-emerald-400" />
             <span>护眼模式</span>
           </button>
         </div>

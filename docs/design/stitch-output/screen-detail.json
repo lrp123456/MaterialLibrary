@@ -1,0 +1,130 @@
+{
+  "status": 200,
+  "json": {
+    "id": 11,
+    "jsonrpc": "2.0",
+    "result": {
+      "content": [
+        {
+          "text": "{\"projectId\":\"13552649013419215261\",\"sessionId\":\"15991425932780493885\",\"outputComponents\":[{\"design\":{\"screens\":[{\"screenshot\":{\"name\":\"projects/13552649013419215261/files/b4a7c2dcac98429e8ddc1496fe58af73\",\"downloadUrl\":\"https://lh3.googleusercontent.com/aida/AEtjO1Ub-u1VelegWHXlbklSoKzdI8I1upez0xUl5VMWXtZri_ZF1t5v4Cb8Oja8UwoJvph_3fOIXPYmYHkRHpuAl3cI0mJsWhSjaeATs0tcKWUDe3EYU-QbWtnTfTtWoy7M0xTfXLqw9l7uYSRR2EQvsk44tj3ojIDmImwKybFsArqIQOr3NthKIXnI25adWnggkW4aCdUYv_fMPxIsBaieOq9whgLcjUm8al9kubYjGZSq8tXO9urywNNCOgqv\"},\"id\":\"8dcb89ac3c54475b8a5b0bd349792f98\",\"generatedBy\":\"interactive_ui_controller\",\"width\":\"1200\",\"height\":\"896\",\"title\":\"High-end modern Japanese wabi-sabi minimalist living room interior design photography, warm oak wood panels, microcement floor, low profile beige linen sofa, natural diffused daylight through sheer linen curtains, soft shadows, architectural details, highly detailed, realistic photograph, clean interior, 8k, no people, no watermark.\",\"prompt\":\"High-end modern Japanese wabi-sabi minimalist living room interior design photography, warm oak wood panels, microcement floor, low profile beige linen sofa, natural diffused daylight through sheer linen curtains, soft shadows, architectural details, highly detailed, realistic photograph, clean interior, 8k, no people, no watermark.\",\"name\":\"projects/13552649013419215261/screens/8dcb89ac3c54475b8a5b0bd349792f98\",\"theme\":{},\"screenType\":\"IMAGE\",\"screenMetadata\":{\"agentType\":\"PRO_AGENT\",\"status\":\"COMPLETE\"},\"designSystem\":{\"name\":\"assets/11073803561422458846\",\"designSystem\":{\"displayName\":\"Obsidian Studio\",\"theme\":{\"colorMode\":\"DARK\",\"roundness\":\"ROUND_TWELVE\",\"customColor\":\"#6366F1\",\"headlineFont\":\"PLUS_JAKARTA_SANS\",\"bodyFont\":\"PLUS_JAKARTA_SANS\",\"colorVariant\":\"TONAL_SPOT\",\"overridePrimaryColor\":\"#6366F1\",\"overrideSecondaryColor\":\"#06B6D4\",\"overrideNeutralColor\":\"#0A0E17\"}},\"version\":\"1\"}},{\"screenshot\":{\"name\":\"projects/13552649013419215261/files/dbd36738bc344cdbbab28aff012a72b0\",\"downloadUrl\":\"https://lh3.googleusercontent.com/aida/AEtjO1VkNGQQIhdH2pROYumH2VwMln6D7qzBj7DMf2oFnXL4S2QSUqxpJdZofup1N1WDdoLwwPjy6LguuazMZv_MYHV4w8kfDiZHKVOC6iLp9FMQNFKvsHUTknOHff5X2hQXHyWDwaO67YX96G9R4Li5QV5ua14W-c1OjBQUpz5uw6qkCev1HASe8W1tZarsOBTvzmevxVhe8WnnQOushLT8KmpOsHk2Wh1xlfqGHq5YVp-etmtFzsKGWdj0g0U\"},\"htmlCode\":{\"name\":\"projects/13552649013419215261/files/2880d07874e24585be7b97fa40885888\",\"downloadUrl\":\"https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ8Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpbCiVodG1sX2NhZTE4ZWEzMjMzMzRmMTk4MTYyMGZlYTM3ZTcwYzg4EgsSBxC3wYujjBsYAZIBJAoKcHJvamVjdF9pZBIWQhQxMzU1MjY0OTAxMzQxOTIxNTI2MQ&filename=&opi=96797242\",\"mimeType\":\"text/html\"},\"id\":\"769f04e508a34155ad820bba7ed6c81e\",\"generatedBy\":\"figaro_agent\",\"width\":\"2560\",\"height\":\"2048\",\"title\":\"室内素材详情 - 灵感空间 PRO\",\"prompt\":\"桌面端专业设计工具，1440px 宽度，不是营销落地页，严格暗色专业工作台。\\n色彩系统：\\n- 页面底色：#0A0E17\\n- 栏底色 / 模态底色：#131A29\\n- 卡片底色：#182236\\n- 悬停色：#212E47\\n- 边框色：#27354D\\n- 主字：#F8FAFC\\n- 次字：#94A3B8\\n- 弱字：#64748B\\n- 主色：#6366F1\\n- 芯片青：#06B6D4\\n- 成功：#10B981\\n- 危险：#F43F5E\\n\\n字体与排版：\\n- 主要字体：Plus Jakarta Sans\\n- 编号、版本代号、元数据：JetBrains Mono 等宽字体\\n- 圆角：12px（弹窗圆角 16px）\\n- 8px 间距系统\\n- 严禁渐变背景、禁止玻璃拟态、严禁 emoji、禁止插画、禁止三栏营销英雄区、禁止大阴影\\n- 图标采用 20px 干净线框图标，点击区域至少 36px，静态无动画。\\n- 全界面简体中文，不写“AI 赋能”之类营销口号。\\n\\n布局结构：\\n1. 顶栏（56px 高，固顶）：\\n   - 左侧：#6366F1 靛蓝方块 Logo + 「灵感空间」字样加「PRO」Badge\\n   - 导航四项：「空间创作」、「素材库」（当前选中高亮状态）、「剪辑」、「设置」\\n   - 右侧：适老视图切换图标、主题状态「暗黑」（微标点圆点）、服务器状态「在线」（#10B981 绿点）以及圆形用户头像\\n\\n2. 背景底层：\\n   - 可以隐约看到背景后方被压暗（例如蒙版 rgba(10, 14, 23, 0.78)）的素材库瀑布流 / 缩略图网格资产（包含网格、过滤条、资产卡片），呈现真实的模态层覆盖效果。\\n\\n3. 中央素材详情层（Modal / Detail Overlay）：\\n   - 居中悬浮，宽度 1120px，高度约 86vh，背景色 #131A29，边框 1px solid #27354D，圆角 16px，内部布局：\\n   - 详情层头部：左侧显示编号/文件名例如「ARCH-7022_LivingRoom_WarmOak.raw.dng」（等宽字体 JetBrains Mono），右侧有关闭按钮（✕ 线框图标，36px 交互区）。\\n   - 主体为双列布局：\\n     * 左侧区域（大图展示与版本条）：\\n       - 主视图大图区域：居中完整展示中性现代日式侘寂原木客厅室内设计照片 {{DATA:IMAGE:IMAGE_4}}，样式设置 object-contain，完整展示画面不裁切主体，背景深色预览框 #0A0E17，带有尺寸比例标注（如 4:3 · 4000×3000 · 14.2MB）。\\n       - 大图正下方版本切换栏（flex 排列）：\\n         1. 「ORIGINAL 原图」（当前选中态，高亮实线边框，标注等宽字体）\\n         2. 「9:16 纵向画幅」（已渲染版本缩略预览，等宽字体）\\n         3. 「3:4 构图画幅」（已渲染版本缩略预览，等宽字体）\\n         4. 「+ 生成 16:9 画幅」（虚线边框卡片，带加号图标，标注待生成虚线档）\\n       - 底部说明微字：「衍生图来自正式图，不是缩略图。」（弱字 #64748B，12px）\\n     * 右侧信息列（固定宽度 360px，边框左侧 1px solid #27354D，内衬 24px）：\\n       - 资产基础信息组：分辨率 4K HDR、色彩空间 DCI-P3、格式 RAW、采集时间 2024-03-28。\\n       - 分组标签栏：\\n         - 空间标签：小芯片 [客厅]、[玄关]、[庭院过渡]（芯片青 #06B6D4 风格）\\n         - 风格标签：小芯片 [日式侘寂]、[极简主义]、[暖木微水泥]\\n         - 材质标签：小芯片 [白橡木饰面]、[棉麻织物]、[天然微水泥]、[砂岩石件]\\n       - 纵向操作按钮组（严谨专业排列，严格遵循全区只有一个实心靛蓝主按钮）：\\n         1. 主按钮（实心 #6366F1）：「加入创作」（带加号或画笔线框图标，高 40px，字重 600，文本居中）\\n         2. 次按钮（卡片底色 #182236，边框 #27354D，悬停 #212E47）：「送入剪辑」\\n         3. 次按钮：「下载原始文件 (RAW)」\\n         4. 次按钮：「收藏此资产」\\n         5. 危险次按钮（带危险色红框或淡红文字 #F43F5E）：「移入回收站」\\n       - 属性列表：色温 4200K、焦段 24mm f/2.8、光照 自然柔光扩散。\\n\",\"name\":\"projects/13552649013419215261/screens/769f04e508a34155ad820bba7ed6c81e\",\"theme\":{\"colorMode\":\"DARK\",\"roundness\":\"ROUND_TWELVE\",\"customColor\":\"#6366F1\",\"headlineFont\":\"PLUS_JAKARTA_SANS\",\"bodyFont\":\"PLUS_JAKARTA_SANS\",\"colorVariant\":\"TONAL_SPOT\",\"overridePrimaryColor\":\"#6366F1\",\"overrideSecondaryColor\":\"#06B6D4\",\"overrideNeutralColor\":\"#0A0E17\"},\"deviceType\":\"DESKTOP\",\"screenType\":\"DESIGN\",\"screenMetadata\":{\"agentType\":\"PRO_AGENT\",\"status\":\"COMPLETE\"},\"designSystem\":{\"name\":\"assets/11073803561422458846\",\"designSystem\":{\"displayName\":\"Obsidian Studio\",\"theme\":{\"colorMode\":\"DARK\",\"roundness\":\"ROUND_TWELVE\",\"customColor\":\"#6366F1\",\"headlineFont\":\"PLUS_JAKARTA_SANS\",\"bodyFont\":\"PLUS_JAKARTA_SANS\",\"colorVariant\":\"TONAL_SPOT\",\"overridePrimaryColor\":\"#6366F1\",\"overrideSecondaryColor\":\"#06B6D4\",\"overrideNeutralColor\":\"#0A0E17\"}},\"version\":\"1\"}}],\"theme\":{}}},{\"text\":\"已为您完成 1440px 桌面端专业工具「素材库」详情层模态界面的设计与构建，完全遵循所有专业工作台规格：\\n\\n### 核心设计与实现说明：\\n1. **统一暗色专业系统与严密配色**：\\n   - 底层工作区背景：`#0A0E17`，背面压暗保留素材库瀑布流与资产检索状态，还原专业桌面软件的模态上下文层级。\\n   - 栏与模态层：`#131A29`，卡片 `#182236`，边框 `#27354D`，交互悬停 `#212E47`。\\n   - 文字层级：主字 `#F8FAFC`、次字 `#94A3B8`、弱字 `#64748B`；主色 `#6366F1`，芯片青 `#06B6D4`，成功状态 `#10B981`，危险操作 `#F43F5E`。\\n   - 字体与规范：主要文本使用 Plus Jakarta Sans，资产编号、文件名、画幅比例与色彩参数使用 JetBrains Mono 等宽字体；遵循 8px 基础间距网格与 12px / 16px 圆角。\\n   - 严禁任何渐变、玻璃拟态、emoji 与无意义营销插画或口号。\\n\\n2. **顶栏规范 (56px)**：\\n   - 保持与全站一致结构：左侧靛蓝方标与「灵感空间 PRO」，导航项清晰激活「素材库」，右侧保留适老、主题「暗黑」、服务器「在线」指示与圆形头像。\\n\\n3. **中央素材详情层 (1120px 宽，~86% 视口高，圆角 16px)**：\\n   - **左侧完整大图区**：中性日式原木极简客厅摄影以 `object-contain` 完整呈现，不裁切主体；左上方标注原图画幅与文件规格。\\n   - **版本与画幅序列**：大图下方横向排列「ORIGINAL 原图」（高亮选中态）、「9:16 纵向」、「3:4 构图」以及虚线待生成档「+ 生成 16:9 画幅」；底部注明提示「衍生图来自正式图，不是缩略图。」。\\n   - **右侧 360px 信息与操作列**：\\n     - 文件名与物理光学元数据（分辨率、色彩空间、色温、焦段）。\\n     - 分类芯片标签组：空间标签（芯片青高亮）、设计风格标签与材质要素标签。\\n     - 纵向动作组（全区唯一实心靛蓝主按钮）：主按钮「加入创作」，配合次级线框按钮「送入剪辑」、「下载原始文件 (RAW)」、「收藏此资产」及危险次按钮「移入回收站」。所有交互区保持 ≥36px，搭配 20px 线性图标。\"},{\"suggestion\":\"为「生成 16:9 画幅」虚线档设计交互弹窗或参数配置面板\"},{\"suggestion\":\"展示「加入创作」后打开的画布工作台界面\"},{\"suggestion\":\"切换到「剪辑」模块查看素材送入后的时间轴工作台\"}]}",
+          "type": "text"
+        }
+      ],
+      "structuredContent": {
+        "outputComponents": [
+          {
+            "design": {
+              "screens": [
+                {
+                  "designSystem": {
+                    "designSystem": {
+                      "displayName": "Obsidian Studio",
+                      "theme": {
+                        "bodyFont": "PLUS_JAKARTA_SANS",
+                        "colorMode": "DARK",
+                        "colorVariant": "TONAL_SPOT",
+                        "customColor": "#6366F1",
+                        "headlineFont": "PLUS_JAKARTA_SANS",
+                        "overrideNeutralColor": "#0A0E17",
+                        "overridePrimaryColor": "#6366F1",
+                        "overrideSecondaryColor": "#06B6D4",
+                        "roundness": "ROUND_TWELVE"
+                      }
+                    },
+                    "name": "assets/11073803561422458846",
+                    "version": "1"
+                  },
+                  "generatedBy": "interactive_ui_controller",
+                  "height": "896",
+                  "id": "8dcb89ac3c54475b8a5b0bd349792f98",
+                  "name": "projects/13552649013419215261/screens/8dcb89ac3c54475b8a5b0bd349792f98",
+                  "prompt": "High-end modern Japanese wabi-sabi minimalist living room interior design photography, warm oak wood panels, microcement floor, low profile beige linen sofa, natural diffused daylight through sheer linen curtains, soft shadows, architectural details, highly detailed, realistic photograph, clean interior, 8k, no people, no watermark.",
+                  "screenMetadata": {
+                    "agentType": "PRO_AGENT",
+                    "status": "COMPLETE"
+                  },
+                  "screenType": "IMAGE",
+                  "screenshot": {
+                    "downloadUrl": "https://lh3.googleusercontent.com/aida/AEtjO1Ub-u1VelegWHXlbklSoKzdI8I1upez0xUl5VMWXtZri_ZF1t5v4Cb8Oja8UwoJvph_3fOIXPYmYHkRHpuAl3cI0mJsWhSjaeATs0tcKWUDe3EYU-QbWtnTfTtWoy7M0xTfXLqw9l7uYSRR2EQvsk44tj3ojIDmImwKybFsArqIQOr3NthKIXnI25adWnggkW4aCdUYv_fMPxIsBaieOq9whgLcjUm8al9kubYjGZSq8tXO9urywNNCOgqv",
+                    "name": "projects/13552649013419215261/files/b4a7c2dcac98429e8ddc1496fe58af73"
+                  },
+                  "theme": {},
+                  "title": "High-end modern Japanese wabi-sabi minimalist living room interior design photography, warm oak wood panels, microcement floor, low profile beige linen sofa, natural diffused daylight through sheer linen curtains, soft shadows, architectural details, highly detailed, realistic photograph, clean interior, 8k, no people, no watermark.",
+                  "width": "1200"
+                },
+                {
+                  "designSystem": {
+                    "designSystem": {
+                      "displayName": "Obsidian Studio",
+                      "theme": {
+                        "bodyFont": "PLUS_JAKARTA_SANS",
+                        "colorMode": "DARK",
+                        "colorVariant": "TONAL_SPOT",
+                        "customColor": "#6366F1",
+                        "headlineFont": "PLUS_JAKARTA_SANS",
+                        "overrideNeutralColor": "#0A0E17",
+                        "overridePrimaryColor": "#6366F1",
+                        "overrideSecondaryColor": "#06B6D4",
+                        "roundness": "ROUND_TWELVE"
+                      }
+                    },
+                    "name": "assets/11073803561422458846",
+                    "version": "1"
+                  },
+                  "deviceType": "DESKTOP",
+                  "generatedBy": "figaro_agent",
+                  "height": "2048",
+                  "htmlCode": {
+                    "downloadUrl": "https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ8Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpbCiVodG1sX2NhZTE4ZWEzMjMzMzRmMTk4MTYyMGZlYTM3ZTcwYzg4EgsSBxC3wYujjBsYAZIBJAoKcHJvamVjdF9pZBIWQhQxMzU1MjY0OTAxMzQxOTIxNTI2MQ&filename=&opi=96797242",
+                    "mimeType": "text/html",
+                    "name": "projects/13552649013419215261/files/2880d07874e24585be7b97fa40885888"
+                  },
+                  "id": "769f04e508a34155ad820bba7ed6c81e",
+                  "name": "projects/13552649013419215261/screens/769f04e508a34155ad820bba7ed6c81e",
+                  "prompt": "桌面端专业设计工具，1440px 宽度，不是营销落地页，严格暗色专业工作台。\n色彩系统：\n- 页面底色：#0A0E17\n- 栏底色 / 模态底色：#131A29\n- 卡片底色：#182236\n- 悬停色：#212E47\n- 边框色：#27354D\n- 主字：#F8FAFC\n- 次字：#94A3B8\n- 弱字：#64748B\n- 主色：#6366F1\n- 芯片青：#06B6D4\n- 成功：#10B981\n- 危险：#F43F5E\n\n字体与排版：\n- 主要字体：Plus Jakarta Sans\n- 编号、版本代号、元数据：JetBrains Mono 等宽字体\n- 圆角：12px（弹窗圆角 16px）\n- 8px 间距系统\n- 严禁渐变背景、禁止玻璃拟态、严禁 emoji、禁止插画、禁止三栏营销英雄区、禁止大阴影\n- 图标采用 20px 干净线框图标，点击区域至少 36px，静态无动画。\n- 全界面简体中文，不写“AI 赋能”之类营销口号。\n\n布局结构：\n1. 顶栏（56px 高，固顶）：\n   - 左侧：#6366F1 靛蓝方块 Logo + 「灵感空间」字样加「PRO」Badge\n   - 导航四项：「空间创作」、「素材库」（当前选中高亮状态）、「剪辑」、「设置」\n   - 右侧：适老视图切换图标、主题状态「暗黑」（微标点圆点）、服务器状态「在线」（#10B981 绿点）以及圆形用户头像\n\n2. 背景底层：\n   - 可以隐约看到背景后方被压暗（例如蒙版 rgba(10, 14, 23, 0.78)）的素材库瀑布流 / 缩略图网格资产（包含网格、过滤条、资产卡片），呈现真实的模态层覆盖效果。\n\n3. 中央素材详情层（Modal / Detail Overlay）：\n   - 居中悬浮，宽度 1120px，高度约 86vh，背景色 #131A29，边框 1px solid #27354D，圆角 16px，内部布局：\n   - 详情层头部：左侧显示编号/文件名例如「ARCH-7022_LivingRoom_WarmOak.raw.dng」（等宽字体 JetBrains Mono），右侧有关闭按钮（✕ 线框图标，36px 交互区）。\n   - 主体为双列布局：\n     * 左侧区域（大图展示与版本条）：\n       - 主视图大图区域：居中完整展示中性现代日式侘寂原木客厅室内设计照片 {{DATA:IMAGE:IMAGE_4}}，样式设置 object-contain，完整展示画面不裁切主体，背景深色预览框 #0A0E17，带有尺寸比例标注（如 4:3 · 4000×3000 · 14.2MB）。\n       - 大图正下方版本切换栏（flex 排列）：\n         1. 「ORIGINAL 原图」（当前选中态，高亮实线边框，标注等宽字体）\n         2. 「9:16 纵向画幅」（已渲染版本缩略预览，等宽字体）\n         3. 「3:4 构图画幅」（已渲染版本缩略预览，等宽字体）\n         4. 「+ 生成 16:9 画幅」（虚线边框卡片，带加号图标，标注待生成虚线档）\n       - 底部说明微字：「衍生图来自正式图，不是缩略图。」（弱字 #64748B，12px）\n     * 右侧信息列（固定宽度 360px，边框左侧 1px solid #27354D，内衬 24px）：\n       - 资产基础信息组：分辨率 4K HDR、色彩空间 DCI-P3、格式 RAW、采集时间 2024-03-28。\n       - 分组标签栏：\n         - 空间标签：小芯片 [客厅]、[玄关]、[庭院过渡]（芯片青 #06B6D4 风格）\n         - 风格标签：小芯片 [日式侘寂]、[极简主义]、[暖木微水泥]\n         - 材质标签：小芯片 [白橡木饰面]、[棉麻织物]、[天然微水泥]、[砂岩石件]\n       - 纵向操作按钮组（严谨专业排列，严格遵循全区只有一个实心靛蓝主按钮）：\n         1. 主按钮（实心 #6366F1）：「加入创作」（带加号或画笔线框图标，高 40px，字重 600，文本居中）\n         2. 次按钮（卡片底色 #182236，边框 #27354D，悬停 #212E47）：「送入剪辑」\n         3. 次按钮：「下载原始文件 (RAW)」\n         4. 次按钮：「收藏此资产」\n         5. 危险次按钮（带危险色红框或淡红文字 #F43F5E）：「移入回收站」\n       - 属性列表：色温 4200K、焦段 24mm f/2.8、光照 自然柔光扩散。\n",
+                  "screenMetadata": {
+                    "agentType": "PRO_AGENT",
+                    "status": "COMPLETE"
+                  },
+                  "screenType": "DESIGN",
+                  "screenshot": {
+                    "downloadUrl": "https://lh3.googleusercontent.com/aida/AEtjO1VkNGQQIhdH2pROYumH2VwMln6D7qzBj7DMf2oFnXL4S2QSUqxpJdZofup1N1WDdoLwwPjy6LguuazMZv_MYHV4w8kfDiZHKVOC6iLp9FMQNFKvsHUTknOHff5X2hQXHyWDwaO67YX96G9R4Li5QV5ua14W-c1OjBQUpz5uw6qkCev1HASe8W1tZarsOBTvzmevxVhe8WnnQOushLT8KmpOsHk2Wh1xlfqGHq5YVp-etmtFzsKGWdj0g0U",
+                    "name": "projects/13552649013419215261/files/dbd36738bc344cdbbab28aff012a72b0"
+                  },
+                  "theme": {
+                    "bodyFont": "PLUS_JAKARTA_SANS",
+                    "colorMode": "DARK",
+                    "colorVariant": "TONAL_SPOT",
+                    "customColor": "#6366F1",
+                    "headlineFont": "PLUS_JAKARTA_SANS",
+                    "overrideNeutralColor": "#0A0E17",
+                    "overridePrimaryColor": "#6366F1",
+                    "overrideSecondaryColor": "#06B6D4",
+                    "roundness": "ROUND_TWELVE"
+                  },
+                  "title": "室内素材详情 - 灵感空间 PRO",
+                  "width": "2560"
+                }
+              ],
+              "theme": {}
+            }
+          },
+          {
+            "text": "已为您完成 1440px 桌面端专业工具「素材库」详情层模态界面的设计与构建，完全遵循所有专业工作台规格：\n\n### 核心设计与实现说明：\n1. **统一暗色专业系统与严密配色**：\n   - 底层工作区背景：`#0A0E17`，背面压暗保留素材库瀑布流与资产检索状态，还原专业桌面软件的模态上下文层级。\n   - 栏与模态层：`#131A29`，卡片 `#182236`，边框 `#27354D`，交互悬停 `#212E47`。\n   - 文字层级：主字 `#F8FAFC`、次字 `#94A3B8`、弱字 `#64748B`；主色 `#6366F1`，芯片青 `#06B6D4`，成功状态 `#10B981`，危险操作 `#F43F5E`。\n   - 字体与规范：主要文本使用 Plus Jakarta Sans，资产编号、文件名、画幅比例与色彩参数使用 JetBrains Mono 等宽字体；遵循 8px 基础间距网格与 12px / 16px 圆角。\n   - 严禁任何渐变、玻璃拟态、emoji 与无意义营销插画或口号。\n\n2. **顶栏规范 (56px)**：\n   - 保持与全站一致结构：左侧靛蓝方标与「灵感空间 PRO」，导航项清晰激活「素材库」，右侧保留适老、主题「暗黑」、服务器「在线」指示与圆形头像。\n\n3. **中央素材详情层 (1120px 宽，~86% 视口高，圆角 16px)**：\n   - **左侧完整大图区**：中性日式原木极简客厅摄影以 `object-contain` 完整呈现，不裁切主体；左上方标注原图画幅与文件规格。\n   - **版本与画幅序列**：大图下方横向排列「ORIGINAL 原图」（高亮选中态）、「9:16 纵向」、「3:4 构图」以及虚线待生成档「+ 生成 16:9 画幅」；底部注明提示「衍生图来自正式图，不是缩略图。」。\n   - **右侧 360px 信息与操作列**：\n     - 文件名与物理光学元数据（分辨率、色彩空间、色温、焦段）。\n     - 分类芯片标签组：空间标签（芯片青高亮）、设计风格标签与材质要素标签。\n     - 纵向动作组（全区唯一实心靛蓝主按钮）：主按钮「加入创作」，配合次级线框按钮「送入剪辑」、「下载原始文件 (RAW)」、「收藏此资产」及危险次按钮「移入回收站」。所有交互区保持 ≥36px，搭配 20px 线性图标。"
+          },
+          {
+            "suggestion": "为「生成 16:9 画幅」虚线档设计交互弹窗或参数配置面板"
+          },
+          {
+            "suggestion": "展示「加入创作」后打开的画布工作台界面"
+          },
+          {
+            "suggestion": "切换到「剪辑」模块查看素材送入后的时间轴工作台"
+          }
+        ],
+        "projectId": "13552649013419215261",
+        "sessionId": "15991425932780493885"
+      }
+    }
+  }
+}

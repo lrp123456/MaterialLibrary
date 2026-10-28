@@ -1,0 +1,93 @@
+{
+  "status": 200,
+  "json": {
+    "id": 10,
+    "jsonrpc": "2.0",
+    "result": {
+      "content": [
+        {
+          "text": "{\"projectId\":\"13552649013419215261\",\"sessionId\":\"9357773088229547663\",\"outputComponents\":[{\"design\":{\"screens\":[{\"screenshot\":{\"name\":\"projects/13552649013419215261/files/ba48b8307d4d4a2dabd9206b68f07993\",\"downloadUrl\":\"https://lh3.googleusercontent.com/aida/AEtjO1XhEnEvLAWS1xcNrGClw-aqTWhNrLNNqK7C09hXhKKl6HbH13jCykQQAdBblGW5PLWzarwhspoFKB797PiozCXutbz2GbQFMW2-8cRLEoS_I45mrTaZSdnwyDpmPJBMZM8JFgYEUaIpb34JNZIIiKBhhbjQ-cr98WNfdoj-zoQiIcslOFIDgONGS1NLbo7EuJ-ZKin8MLrgHeXdhd2qrA1Pv7_DmQ7n8gKOuIhZS8pIzev11R0LScI9J8Fq\"},\"htmlCode\":{\"name\":\"projects/13552649013419215261/files/5691eb8bd7c34a6bac8375d3538133f2\",\"downloadUrl\":\"https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ8Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpbCiVodG1sXzVlZWZjYjEwYzVmYzQxMjE4ZjY0NWQyOTQzMjhkNDBmEgsSBxC3wYujjBsYAZIBJAoKcHJvamVjdF9pZBIWQhQxMzU1MjY0OTAxMzQxOTIxNTI2MQ&filename=&opi=96797242\",\"mimeType\":\"text/html\"},\"id\":\"d93fb711df2d4f66ba2fd88b3bf16e77\",\"generatedBy\":\"figaro_agent\",\"width\":\"2560\",\"height\":\"2048\",\"title\":\"室内设计素材库 - 灵感空间 PRO\",\"prompt\":\"桌面端专业设计档案系统工具页面，画布宽度 1440px。严格遵守以下专业规则：\\n【配色规范与禁止项】\\n- 严格单色背景与卡片系统：页面背景 #0A0E17，栏背景 #131A29，卡片背景 #182236，悬停底色 #212E47，边框 #27354D，主字色 #F8FAFC，次字色 #94A3B8，弱字色 #64748B，核心主色 #6366F1，芯片青 #06B6D4，成功色 #10B981，危险色 #F43F5E。\\n- 绝无渐变背景、禁止玻璃拟态(no backdrop-filter blur/glassmorphism)、禁止emoji、禁止任何插画、禁止任何三栏营销英雄区、禁止大阴影(仅纯粹微妙边框 #27354D)。\\n- 字体：界面使用 Plus Jakarta Sans，编号/计数字段使用 JetBrains Mono。圆角全部为 12px (rounded-xl)。严格 8px 间距节奏。\\n- 线框图标：所有图标为 20px 纯细线框 SVG 图标，静止无微动动画。点击区域至少 36px。一个视觉功能区内最多只有一个实心靛蓝主按钮(#6366F1)。\\n- 界面全部为简体中文。\\n\\n【顶栏 (高度 56px)】\\n- 背景 #131A29，底边框 1px solid #27354D。\\n- 左侧：实心靛蓝圆角方标图标（#6366F1）与「灵感空间」，紧跟微型标签「PRO」（#6366F1 背景或线框高亮）。\\n- 中左导航（4项）：空间创作、素材库（当前激活，高亮且带优雅下划线或指示）、剪辑、设置。\\n- 右侧功能区（紧凑专业）：适老化开关图标、主题「暗黑」（微型指示点）、服务器状态「在线」（#10B981 绿点与弱字）、32px 圆形用户头像。\\n\\n【顶部两层横向筛选栏（位于顶栏下方，无侧边栏遮挡）】\\n- 第一层类型标签（横向列表）：图片（当前选中，底色 #212E47 或边框高亮）、视频、音频、剪辑素材、回收站。\\n- 第二层品类标签（横向细分）：全部、室内外（当前选中）、家具、服装、人像。\\n- 右侧辅助工具：视图密度切换（紧凑/舒适）、刷新按钮（36px 线框按钮，带 20px 图标）。\\n\\n【搜索与多维芯片工具栏】\\n- 搜索输入框：深色背景 #131A29 边框 #27354D，带放大镜线框图标，占位符文字：「搜索空间、风格、材质」，等宽字体计数指示。\\n- 可多选小芯片筛选器：空间、风格、材质、色系。已呈现激活状态：「客厅」（带青色 #06B6D4 标签指示或已选样式）、「原木」（已选样式）。\\n- 栏目右侧：「多选」切换按钮（已处于激活状态）。\\n\\n【主区：专业室内设计档案瀑布流网格】\\n- 至少 8 张高质感中性极简室内设计摄影卡片（现代极简起居室、原木质感客厅、北欧极简侘寂光影、建筑室内大理石、混凝土采光廊道、木饰面会客室等高质量中性室内摄影，无人物面部、无水印）。\\n- 卡片风格：背景 #182236，细边框 #27354D，圆角 12px，内嵌照片保持一致整齐的高密度阵列。\\n- 极简无干扰展示：照片卡片默认不堆积冗余文字介绍，保持纯净画廊档案感。\\n- 悬停交互：仅在卡片悬停时浮现三个半透明或深色纯线框微操作图标按钮（点击区 36px，20px 线框图标）：送入创作、送入剪辑、收藏。\\n\\n【底部轻量状态与右下静默批处理栏】\\n- 页面底部居中或左侧：细小弱文字「已加载 48 张」，采用 JetBrains Mono 编号。\\n- 右下角常驻安静悬浮操作条（多选激活条）：背景 #131A29，边框 #27354D，圆角 12px，内含信息与操作：\\n  - 选中项统计：「已选 2」（强调编号）\\n  - 次级线框按钮：「送入创作」（线框按钮）\\n  - 实心靛蓝主按钮：「送入剪辑」（#6366F1）\\n  - 危险警示线框按钮：「移入回收站」（文字/边框微带 #F43F5E）\\n- 严禁任何底部营销浮窗或客服悬浮球。整体呈现工业级、高密度专业资产管理台质感。\",\"name\":\"projects/13552649013419215261/screens/d93fb711df2d4f66ba2fd88b3bf16e77\",\"theme\":{\"colorMode\":\"DARK\",\"roundness\":\"ROUND_TWELVE\",\"customColor\":\"#6366F1\",\"headlineFont\":\"PLUS_JAKARTA_SANS\",\"bodyFont\":\"PLUS_JAKARTA_SANS\",\"colorVariant\":\"TONAL_SPOT\",\"overridePrimaryColor\":\"#6366F1\",\"overrideSecondaryColor\":\"#06B6D4\",\"overrideNeutralColor\":\"#0A0E17\"},\"deviceType\":\"DESKTOP\",\"screenType\":\"DESIGN\",\"screenMetadata\":{\"agentType\":\"PRO_AGENT\",\"status\":\"COMPLETE\"},\"designSystem\":{\"name\":\"assets/11073803561422458846\",\"designSystem\":{\"displayName\":\"Obsidian Studio\",\"theme\":{\"colorMode\":\"DARK\",\"roundness\":\"ROUND_TWELVE\",\"customColor\":\"#6366F1\",\"headlineFont\":\"PLUS_JAKARTA_SANS\",\"bodyFont\":\"PLUS_JAKARTA_SANS\",\"colorVariant\":\"TONAL_SPOT\",\"overridePrimaryColor\":\"#6366F1\",\"overrideSecondaryColor\":\"#06B6D4\",\"overrideNeutralColor\":\"#0A0E17\"}},\"version\":\"1\"}}],\"theme\":{}}},{\"text\":\"已为您生成 1440 宽桌面端专业工具「灵感空间 PRO」素材库档案浏览界面：\\n\\n### 设计实现细节：\\n1. **严格专业暗色基调与层级色彩**：\\n   - 页面背景使用 `#0A0E17`，工具栏 `#131A29`，卡片 `#182236`，边框线 `#27354D`。\\n   - 弱化大阴影与弥散光，彻底移除渐变背景与玻璃拟态，呈现极简、克制的工业级档案库质感。\\n   - 重点功能采用精准色彩分配：主操作使用单点实心靛蓝（`#6366F1`），选中筛选芯片应用青色（`#06B6D4`），系统状态指示采用健康绿（`#10B981`），回收站警示使用危险红（`#F43F5E`）。\\n\\n2. **信息架构与无遮挡两层筛选**：\\n   - **56px 标准顶栏**：包含左侧靛蓝方标品牌「灵感空间 PRO」、中段导航项（当前聚焦「素材库」）、右侧适老化、暗黑模式切换、服务器在线与用户头像。\\n   - **水平无遮挡双层筛选**：\\n     - 第一层：图片（当前选中）、视频、音频、剪辑素材、回收站。\\n     - 第二层：全部、室内外（当前选中）、家具、服装、人像。右上角提供紧凑/舒适密度切换及刷新。\\n   - **快速检索与条件芯片**：包含「搜索空间、风格、材质」检索框，以及空间、风格、材质（已选「原木」）、色系（已选「冷暖中性/客厅」）等多选芯片。\\n\\n3. **8+ 单元纯净中性室内摄影瀑布流**：\\n   - 展示高品质极简现代室内建筑摄影（无人物面貌、无水印、中性色调）。\\n   - 卡片上移除杂乱营销文字堆砌，纯粹呈现档案编号（JetBrains Mono 等宽字体）与画质规格标签；悬停提供 36px 规格线框动作（送入创作、送入剪辑、收藏）。\\n\\n4. **右下角常驻多选操作条**：\\n   - 静默悬浮于右下角：包含「已选 02 项」状态、次级线框操作「送入创作」、单点实心高亮「送入剪辑」，以及危险色「移入回收站」。底部状态栏清晰展示「已加载 48 张档案资产」。\"},{\"suggestion\":\"查看单张素材的详情抽屉/全屏检查视图\"},{\"suggestion\":\"切换「紧凑模式」查看超高密度档案网格\"},{\"suggestion\":\"设计进入「剪辑」或「空间创作」的工作台界面\"}]}",
+          "type": "text"
+        }
+      ],
+      "structuredContent": {
+        "outputComponents": [
+          {
+            "design": {
+              "screens": [
+                {
+                  "designSystem": {
+                    "designSystem": {
+                      "displayName": "Obsidian Studio",
+                      "theme": {
+                        "bodyFont": "PLUS_JAKARTA_SANS",
+                        "colorMode": "DARK",
+                        "colorVariant": "TONAL_SPOT",
+                        "customColor": "#6366F1",
+                        "headlineFont": "PLUS_JAKARTA_SANS",
+                        "overrideNeutralColor": "#0A0E17",
+                        "overridePrimaryColor": "#6366F1",
+                        "overrideSecondaryColor": "#06B6D4",
+                        "roundness": "ROUND_TWELVE"
+                      }
+                    },
+                    "name": "assets/11073803561422458846",
+                    "version": "1"
+                  },
+                  "deviceType": "DESKTOP",
+                  "generatedBy": "figaro_agent",
+                  "height": "2048",
+                  "htmlCode": {
+                    "downloadUrl": "https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ8Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpbCiVodG1sXzVlZWZjYjEwYzVmYzQxMjE4ZjY0NWQyOTQzMjhkNDBmEgsSBxC3wYujjBsYAZIBJAoKcHJvamVjdF9pZBIWQhQxMzU1MjY0OTAxMzQxOTIxNTI2MQ&filename=&opi=96797242",
+                    "mimeType": "text/html",
+                    "name": "projects/13552649013419215261/files/5691eb8bd7c34a6bac8375d3538133f2"
+                  },
+                  "id": "d93fb711df2d4f66ba2fd88b3bf16e77",
+                  "name": "projects/13552649013419215261/screens/d93fb711df2d4f66ba2fd88b3bf16e77",
+                  "prompt": "桌面端专业设计档案系统工具页面，画布宽度 1440px。严格遵守以下专业规则：\n【配色规范与禁止项】\n- 严格单色背景与卡片系统：页面背景 #0A0E17，栏背景 #131A29，卡片背景 #182236，悬停底色 #212E47，边框 #27354D，主字色 #F8FAFC，次字色 #94A3B8，弱字色 #64748B，核心主色 #6366F1，芯片青 #06B6D4，成功色 #10B981，危险色 #F43F5E。\n- 绝无渐变背景、禁止玻璃拟态(no backdrop-filter blur/glassmorphism)、禁止emoji、禁止任何插画、禁止任何三栏营销英雄区、禁止大阴影(仅纯粹微妙边框 #27354D)。\n- 字体：界面使用 Plus Jakarta Sans，编号/计数字段使用 JetBrains Mono。圆角全部为 12px (rounded-xl)。严格 8px 间距节奏。\n- 线框图标：所有图标为 20px 纯细线框 SVG 图标，静止无微动动画。点击区域至少 36px。一个视觉功能区内最多只有一个实心靛蓝主按钮(#6366F1)。\n- 界面全部为简体中文。\n\n【顶栏 (高度 56px)】\n- 背景 #131A29，底边框 1px solid #27354D。\n- 左侧：实心靛蓝圆角方标图标（#6366F1）与「灵感空间」，紧跟微型标签「PRO」（#6366F1 背景或线框高亮）。\n- 中左导航（4项）：空间创作、素材库（当前激活，高亮且带优雅下划线或指示）、剪辑、设置。\n- 右侧功能区（紧凑专业）：适老化开关图标、主题「暗黑」（微型指示点）、服务器状态「在线」（#10B981 绿点与弱字）、32px 圆形用户头像。\n\n【顶部两层横向筛选栏（位于顶栏下方，无侧边栏遮挡）】\n- 第一层类型标签（横向列表）：图片（当前选中，底色 #212E47 或边框高亮）、视频、音频、剪辑素材、回收站。\n- 第二层品类标签（横向细分）：全部、室内外（当前选中）、家具、服装、人像。\n- 右侧辅助工具：视图密度切换（紧凑/舒适）、刷新按钮（36px 线框按钮，带 20px 图标）。\n\n【搜索与多维芯片工具栏】\n- 搜索输入框：深色背景 #131A29 边框 #27354D，带放大镜线框图标，占位符文字：「搜索空间、风格、材质」，等宽字体计数指示。\n- 可多选小芯片筛选器：空间、风格、材质、色系。已呈现激活状态：「客厅」（带青色 #06B6D4 标签指示或已选样式）、「原木」（已选样式）。\n- 栏目右侧：「多选」切换按钮（已处于激活状态）。\n\n【主区：专业室内设计档案瀑布流网格】\n- 至少 8 张高质感中性极简室内设计摄影卡片（现代极简起居室、原木质感客厅、北欧极简侘寂光影、建筑室内大理石、混凝土采光廊道、木饰面会客室等高质量中性室内摄影，无人物面部、无水印）。\n- 卡片风格：背景 #182236，细边框 #27354D，圆角 12px，内嵌照片保持一致整齐的高密度阵列。\n- 极简无干扰展示：照片卡片默认不堆积冗余文字介绍，保持纯净画廊档案感。\n- 悬停交互：仅在卡片悬停时浮现三个半透明或深色纯线框微操作图标按钮（点击区 36px，20px 线框图标）：送入创作、送入剪辑、收藏。\n\n【底部轻量状态与右下静默批处理栏】\n- 页面底部居中或左侧：细小弱文字「已加载 48 张」，采用 JetBrains Mono 编号。\n- 右下角常驻安静悬浮操作条（多选激活条）：背景 #131A29，边框 #27354D，圆角 12px，内含信息与操作：\n  - 选中项统计：「已选 2」（强调编号）\n  - 次级线框按钮：「送入创作」（线框按钮）\n  - 实心靛蓝主按钮：「送入剪辑」（#6366F1）\n  - 危险警示线框按钮：「移入回收站」（文字/边框微带 #F43F5E）\n- 严禁任何底部营销浮窗或客服悬浮球。整体呈现工业级、高密度专业资产管理台质感。",
+                  "screenMetadata": {
+                    "agentType": "PRO_AGENT",
+                    "status": "COMPLETE"
+                  },
+                  "screenType": "DESIGN",
+                  "screenshot": {
+                    "downloadUrl": "https://lh3.googleusercontent.com/aida/AEtjO1XhEnEvLAWS1xcNrGClw-aqTWhNrLNNqK7C09hXhKKl6HbH13jCykQQAdBblGW5PLWzarwhspoFKB797PiozCXutbz2GbQFMW2-8cRLEoS_I45mrTaZSdnwyDpmPJBMZM8JFgYEUaIpb34JNZIIiKBhhbjQ-cr98WNfdoj-zoQiIcslOFIDgONGS1NLbo7EuJ-ZKin8MLrgHeXdhd2qrA1Pv7_DmQ7n8gKOuIhZS8pIzev11R0LScI9J8Fq",
+                    "name": "projects/13552649013419215261/files/ba48b8307d4d4a2dabd9206b68f07993"
+                  },
+                  "theme": {
+                    "bodyFont": "PLUS_JAKARTA_SANS",
+                    "colorMode": "DARK",
+                    "colorVariant": "TONAL_SPOT",
+                    "customColor": "#6366F1",
+                    "headlineFont": "PLUS_JAKARTA_SANS",
+                    "overrideNeutralColor": "#0A0E17",
+                    "overridePrimaryColor": "#6366F1",
+                    "overrideSecondaryColor": "#06B6D4",
+                    "roundness": "ROUND_TWELVE"
+                  },
+                  "title": "室内设计素材库 - 灵感空间 PRO",
+                  "width": "2560"
+                }
+              ],
+              "theme": {}
+            }
+          },
+          {
+            "text": "已为您生成 1440 宽桌面端专业工具「灵感空间 PRO」素材库档案浏览界面：\n\n### 设计实现细节：\n1. **严格专业暗色基调与层级色彩**：\n   - 页面背景使用 `#0A0E17`，工具栏 `#131A29`，卡片 `#182236`，边框线 `#27354D`。\n   - 弱化大阴影与弥散光，彻底移除渐变背景与玻璃拟态，呈现极简、克制的工业级档案库质感。\n   - 重点功能采用精准色彩分配：主操作使用单点实心靛蓝（`#6366F1`），选中筛选芯片应用青色（`#06B6D4`），系统状态指示采用健康绿（`#10B981`），回收站警示使用危险红（`#F43F5E`）。\n\n2. **信息架构与无遮挡两层筛选**：\n   - **56px 标准顶栏**：包含左侧靛蓝方标品牌「灵感空间 PRO」、中段导航项（当前聚焦「素材库」）、右侧适老化、暗黑模式切换、服务器在线与用户头像。\n   - **水平无遮挡双层筛选**：\n     - 第一层：图片（当前选中）、视频、音频、剪辑素材、回收站。\n     - 第二层：全部、室内外（当前选中）、家具、服装、人像。右上角提供紧凑/舒适密度切换及刷新。\n   - **快速检索与条件芯片**：包含「搜索空间、风格、材质」检索框，以及空间、风格、材质（已选「原木」）、色系（已选「冷暖中性/客厅」）等多选芯片。\n\n3. **8+ 单元纯净中性室内摄影瀑布流**：\n   - 展示高品质极简现代室内建筑摄影（无人物面貌、无水印、中性色调）。\n   - 卡片上移除杂乱营销文字堆砌，纯粹呈现档案编号（JetBrains Mono 等宽字体）与画质规格标签；悬停提供 36px 规格线框动作（送入创作、送入剪辑、收藏）。\n\n4. **右下角常驻多选操作条**：\n   - 静默悬浮于右下角：包含「已选 02 项」状态、次级线框操作「送入创作」、单点实心高亮「送入剪辑」，以及危险色「移入回收站」。底部状态栏清晰展示「已加载 48 张档案资产」。"
+          },
+          {
+            "suggestion": "查看单张素材的详情抽屉/全屏检查视图"
+          },
+          {
+            "suggestion": "切换「紧凑模式」查看超高密度档案网格"
+          },
+          {
+            "suggestion": "设计进入「剪辑」或「空间创作」的工作台界面"
+          }
+        ],
+        "projectId": "13552649013419215261",
+        "sessionId": "9357773088229547663"
+      }
+    }
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "projectId": "13552649013419215261",
+  "designSystem": "11073803561422458846",
+  "screens": [
+    {
+      "file": "library",
+      "title": "素材库",
+      "seconds": 101,
+      "screen": "projects/13552649013419215261/screens/d93fb711df2d4f66ba2fd88b3bf16e77",
+      "status": 200,
+      "error": null
+    },
+    {
+      "file": "detail",
+      "title": "素材详情",
+      "seconds": 56,
+      "screen": "projects/13552649013419215261/screens/8dcb89ac3c54475b8a5b0bd349792f98",
+      "status": 200,
+      "error": null
+    },
+    {
+      "file": "studio",
+      "title": "空间创作",
+      "seconds": 66,
+      "screen": "projects/13552649013419215261/screens/3951a37f8a16484b974c03dd035f99e4",
+      "status": 200,
+      "error": null
+    },
+    {
+      "file": "studio-edit",
+      "title": "空间创作编辑",
+      "seconds": 75,
+      "screen": "projects/13552649013419215261/screens/ad0b8c81036d44faa59b0aa125cced35",
+      "status": 200,
+      "error": null
+    },
+    {
+      "file": "clip",
+      "title": "剪辑",
+      "seconds": 96,
+      "screen": "projects/13552649013419215261/screens/cffcd861afed4934b69b1c191d80158a",
+      "status": 200,
+      "error": null
+    },
+    {
+      "file": "settings",
+      "title": "设置",
+      "seconds": 35,
+      "screen": "projects/13552649013419215261/screens/77daf7b7a1bc417d9101a0cf82b54df3",
+      "status": 200,
+      "error": null
+    }
+  ]
+}

@@ -3,38 +3,53 @@
     <!-- ========================================================================= -->
     <!-- 1. 左侧抽屉栏：豆包/千问双模式（会话历史 / 我的创作库） -->
     <!-- ========================================================================= -->
-    <aside class="w-80 bg-studio-900 border-r border-studio-750 flex flex-col justify-between shrink-0 select-none">
-      <div class="flex flex-col flex-1 overflow-hidden">
+    <!-- 1. 左侧抽屉栏：会话历史与我的创作库 (默认展开，宽 300px，可收起) -->
+    <aside
+      :class="[
+        'bg-studio-900 border-r border-studio-700 flex flex-col justify-between shrink-0 select-none transition-all duration-200',
+        leftCollapsed ? 'w-12 items-center' : 'w-[300px]'
+      ]"
+    >
+      <div v-if="!leftCollapsed" class="flex flex-col flex-1 overflow-hidden">
         <!-- 侧栏顶部 Tab：会话历史 vs 我的创作库 -->
-        <div class="p-3 border-b border-studio-800 flex items-center justify-between bg-studio-950/60">
+        <div class="p-2.5 border-b border-studio-700 flex items-center justify-between bg-studio-950/60 gap-1.5">
           <div class="flex items-center space-x-1.5 flex-1 min-w-0">
-            <span class="px-2.5 py-1.5 rounded-lg bg-studio-800 text-white text-xs font-bold border border-studio-700 flex items-center space-x-1.5 shrink-0 shadow-xs">
-              <StudioIcon name="history" :size="14" class="text-studio-accent" />
-              <span>对话历史</span>
+            <span class="px-2 py-1.5 rounded-lg bg-studio-800 text-white text-xs font-bold border border-studio-700 flex items-center space-x-1 shrink-0 shadow-xs">
+              <StudioIcon name="history" :size="13" class="text-studio-accent" />
+              <span>对话</span>
             </span>
 
             <button
               type="button"
               @click="openCreationLibraryModal"
-              class="flex-1 min-w-0 px-2.5 py-1.5 rounded-lg bg-studio-accent/20 hover:bg-studio-accent/30 text-studio-accent hover:text-white border border-studio-accent/40 text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs truncate group"
-              title="点击直接打开全屏创作库弹窗"
+              class="flex-1 min-w-0 px-2 py-1.5 rounded-lg bg-studio-accent/20 hover:bg-studio-accent/30 text-studio-accent hover:text-white border border-studio-accent/40 text-xs font-bold transition-all flex items-center justify-center space-x-1 cursor-pointer shadow-xs truncate group"
+              title="点击打开全屏创作库"
             >
-              <StudioIcon name="wand" :size="13" class="group-hover:rotate-12 transition-transform" />
-              <span class="truncate">我的创作库</span>
-              <span class="text-[10px] opacity-75 font-mono">⛶</span>
+              <StudioIcon name="wand" :size="13" hoverMorph />
+              <span class="truncate">创作库</span>
+              <span class="text-[9px] opacity-75 font-mono">⛶</span>
             </button>
           </div>
 
-          <button
-            @click="createNewSession"
-            class="p-2 rounded-lg bg-studio-800 hover:bg-studio-750 text-slate-200 text-xs border border-studio-700 transition-all cursor-pointer shrink-0"
-            title="新建对话"
-          >
-            <StudioIcon name="plus" :size="14" />
-          </button>
+          <div class="flex items-center space-x-1 shrink-0">
+            <button
+              @click="createNewSession"
+              class="p-1.5 rounded-lg bg-studio-800 hover:bg-studio-750 text-slate-200 text-xs border border-studio-700 transition-all cursor-pointer"
+              title="新建对话"
+            >
+              <StudioIcon name="plus" :size="13" />
+            </button>
+            <button
+              @click="leftCollapsed = true"
+              class="p-1.5 rounded-lg hover:bg-studio-800 text-slate-400 hover:text-white transition-all cursor-pointer"
+              title="收起对话历史"
+            >
+              <StudioIcon name="chevronLeft" :size="13" />
+            </button>
+          </div>
         </div>
 
-        <!-- 模式 A：对话历史列表 -->
+        <!-- 历史会话列表 (当前项左边 2px #6366F1) -->
         <div class="flex-1 overflow-y-auto p-3 space-y-2 scrollbar-thin">
           <div v-if="sessions.length === 0" class="text-center py-12 text-xs text-slate-500">
             暂无历史对话
@@ -44,14 +59,14 @@
             :key="s.id"
             @click="selectSession(s)"
             :class="[
-              'group px-3.5 py-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between text-xs',
+              'group px-3 py-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between text-xs',
               currentSessionId === s.id
-                ? 'bg-studio-850 border-studio-accent text-white font-bold shadow-md'
+                ? 'bg-studio-850 border-studio-700 border-l-2 !border-l-studio-accent text-white font-bold shadow-md'
                 : 'bg-studio-950/50 border-studio-800 hover:bg-studio-850 hover:border-studio-700 text-slate-300'
             ]"
           >
-            <div class="flex items-center space-x-2.5 truncate">
-              <StudioIcon name="chat" :size="15" :class="currentSessionId === s.id ? 'text-studio-accent' : 'text-slate-500'" />
+            <div class="flex items-center space-x-2 truncate">
+              <StudioIcon name="chat" :size="14" :class="currentSessionId === s.id ? 'text-studio-accent' : 'text-slate-500'" />
               <span class="truncate font-medium">{{ s.title }}</span>
             </div>
             <button
@@ -62,367 +77,107 @@
             </button>
           </div>
         </div>
+
+        <!-- 底部固定栏：新对话与创作库直达入口 -->
+        <div class="p-3 bg-studio-950/80 border-t border-studio-700 flex flex-col gap-2">
+          <button
+            type="button"
+            @click="createNewSession"
+            class="w-full py-2 px-3 rounded-xl bg-studio-850 hover:bg-studio-800 border border-studio-700 text-white text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer"
+          >
+            <StudioIcon name="plus" :size="14" />
+            <span>新对话</span>
+          </button>
+          <div class="flex items-center justify-between text-xs text-slate-400 pt-1">
+            <button
+              type="button"
+              @click="openCreationLibraryModal"
+              class="flex items-center gap-1.5 text-slate-300 hover:text-studio-accent cursor-pointer transition-colors font-medium text-[11px]"
+              title="点击直接打开全屏创作库"
+            >
+              <StudioIcon name="wand" :size="13" class="text-studio-accent" />
+              <span># 创作库 · @ 引用素材</span>
+            </button>
+            <span class="text-[10px] font-mono text-emerald-400 font-bold">DAM 已连接</span>
+          </div>
+        </div>
       </div>
 
-      <div class="p-3 bg-studio-950/80 border-t border-studio-800 text-xs text-slate-400 flex items-center justify-between">
+      <!-- 收起状态下的窄栏 -->
+      <div v-else class="flex flex-col items-center py-3 gap-3">
         <button
-          type="button"
-          @click="openCreationLibraryModal"
-          class="flex items-center gap-1.5 text-slate-300 hover:text-studio-accent cursor-pointer transition-colors"
-          title="点击直接打开全屏创作库"
+          @click="leftCollapsed = false"
+          class="p-2 rounded-lg hover:bg-studio-800 text-slate-400 hover:text-white transition-all cursor-pointer"
+          title="展开对话历史"
         >
-          <StudioIcon name="wand" :size="14" class="text-studio-accent" />
-          <span># 创作库 · @ 引用素材</span>
+          <StudioIcon name="chevronRight" :size="16" />
         </button>
-        <span class="text-[11px] font-mono text-emerald-400 font-bold">DAM 数据库已连接</span>
+        <button
+          @click="createNewSession"
+          class="p-2 rounded-lg bg-studio-800 hover:bg-studio-750 text-slate-200 border border-studio-700 cursor-pointer"
+          title="新建对话"
+        >
+          <StudioIcon name="plus" :size="14" />
+        </button>
+        <button
+          @click="openCreationLibraryModal"
+          class="p-2 rounded-lg bg-studio-accent/20 hover:bg-studio-accent/30 text-studio-accent hover:text-white border border-studio-accent/40 cursor-pointer transition-colors"
+          title="我的创作库"
+        >
+          <StudioIcon name="wand" :size="14" hoverMorph />
+        </button>
       </div>
     </aside>
 
     <!-- ========================================================================= -->
     <!-- 2. 中央核心工作区：空状态【大号参考图主工作台】 VS 消息流 -->
     <!-- ========================================================================= -->
-    <main class="chat-main flex-1 flex flex-col justify-between overflow-hidden bg-studio-950 relative p-4 space-y-3">
-      <!-- 2.1 中间工作区：空状态居中灵感与参考看板 VS 真实消息流 -->
-      <div class="relative flex min-h-0 flex-1 flex-col">
+    <main class="chat-main flex-1 flex flex-col min-w-0 overflow-hidden bg-studio-950 relative">
+      <!-- 2.0 收缩状态下底条回归顶部 (紧凑横向条) -->
+      <StudioBottomTray
+        v-if="viewerCollapsed"
+        mode="horizontal"
+        :images="referenceTray"
+        :selectedIndex="selectedImageIndex"
+        @select="onTraySelect($event)"
+        @open-picker="openAssetSelectorModal"
+        @expand-viewer="viewerCollapsed = false"
+      />
+      <!-- 2.1 历史消息流区 (仅在看图区收缩/缩小状态下展示，占满空间；看图区展开时完全隐藏，全部留给大图展示) -->
+      <div
+        v-if="viewerCollapsed"
+        class="relative flex flex-1 min-h-0 flex-col transition-all duration-200"
+      >
       <div
         ref="messageScroller"
-        class="chat-scroll flex-1 overflow-y-auto px-2 space-y-4 scrollbar-thin"
+        class="chat-scroll flex-1 overflow-y-auto px-4 py-2 space-y-3 scrollbar-thin"
         @scroll.passive="onChatScroll"
       >
-        <!-- 空状态展示 (根据当前底部选中的主模式，展示不同形态的大号参考图工作台！) -->
-        <div v-if="messages.length === 0" class="h-full flex flex-col items-center justify-center text-center max-w-4xl mx-auto py-4 space-y-5 select-none">
-          <!-- A. 纯对话模式 (默认) -->
-          <template v-if="activeModality === 'chat'">
-            <div class="w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-600 to-cyan-500 flex items-center justify-center text-white shadow-xl">
-              <StudioIcon name="chat" :size="32" />
-            </div>
-
-            <div class="space-y-1">
-              <h2 class="text-xl font-extrabold text-white tracking-tight">室内空间 AI 智能多模态对话中枢</h2>
-              <p class="text-xs text-slate-400 leading-relaxed max-w-xl">
-                支持直接在下方输入框中提问，或从私有素材库选取实景图进行空间诊断、色彩分析、软装搭配评估与提示词润色。
-              </p>
-            </div>
-
-            <!-- 大号参考图/问答图卡槽 (类似 App 居中大号展示) -->
-            <div class="w-full max-w-2xl p-4 rounded-2xl bg-studio-900 border border-studio-750 shadow-lg space-y-3 text-left">
-              <div class="flex items-center justify-between">
-                <span class="text-xs font-bold text-white flex items-center gap-2">
-                  <span>🖼️ 空间多模态问答参考图 (可选)</span>
-                  <span class="text-studio-cyan font-mono text-xs">{{ referenceTray.length > 0 ? '已载入 1 张' : '未挂载' }}</span>
-                </span>
-                <span class="text-[11px] text-slate-400">挂载后 AI 将结合视觉画面回答问题</span>
-              </div>
-
-              <div class="flex items-center space-x-3">
-                <div
-                  v-if="referenceTray.length > 0"
-                  class="relative w-32 h-32 rounded-xl overflow-hidden border-2 border-studio-accent bg-studio-950 shrink-0 group shadow-md cursor-pointer"
-                  @click="openMediaPreview(referenceTray[0], 'image')"
-                >
-                  <img :src="authedMediaUrl(referenceTray[0].url)" class="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                  <div class="absolute inset-0 bg-black/65 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-2 text-xs">
-                    <div class="flex items-center justify-between text-white">
-                      <span class="font-bold truncate">{{ referenceTray[0].name }}</span>
-                      <button @click.stop="openMediaPreview(referenceTray[0], 'image')" class="p-1 rounded bg-black/60 text-studio-cyan hover:text-white" title="查看大图">🔍</button>
-                    </div>
-                    <div class="flex items-center justify-between">
-                      <span class="text-[10px] text-slate-300 underline font-mono">点击预览</span>
-                      <button @click.stop="removeRef(0)" class="text-rose-400 hover:text-rose-300 font-bold cursor-pointer">移除 ✕</button>
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  v-else
-                  @click="openAssetSelectorModal"
-                  class="w-32 h-32 rounded-xl border-2 border-dashed border-studio-600 hover:border-studio-accent bg-studio-950/70 hover:bg-studio-950 flex flex-col items-center justify-center text-slate-400 hover:text-studio-accent space-y-2 shrink-0 transition-all cursor-pointer group"
-                >
-                  <div class="w-9 h-9 rounded-full bg-studio-800 group-hover:bg-studio-accent/20 flex items-center justify-center">
-                    <StudioIcon name="plus" :size="18" />
-                  </div>
-                  <span class="text-xs font-bold">选择分析图片</span>
-                </button>
-
-                <div class="flex-1 space-y-2 text-xs text-slate-400">
-                  <p class="leading-relaxed text-slate-300">
-                    💡 您可以在右侧快速点击常见空间设计问题，或在底部输入框输入：
-                  </p>
-                  <div class="flex flex-wrap gap-2">
-                    <button
-                      v-for="q in chatQuickStarters"
-                      :key="q"
-                      @click="applyPromptText(q)"
-                      class="px-2.5 py-1.5 rounded-lg bg-studio-850 hover:bg-studio-800 text-slate-200 border border-studio-750 text-xs text-left cursor-pointer transition-all"
-                    >
-                      {{ q }} ➔
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </template>
-
-          <!-- B. 图像生成模式 (大号参考生图工作台，对齐 App) -->
-          <template v-else-if="activeModality === 'image'">
-            <div class="w-16 h-16 rounded-2xl bg-gradient-to-tr from-studio-accent to-studio-cyan flex items-center justify-center text-white shadow-xl">
-              <StudioIcon name="wand" :size="32" />
-            </div>
-
-            <div class="space-y-1">
-              <h2 class="text-xl font-extrabold text-white tracking-tight">AI 空间图像创作工作台</h2>
-              <p class="text-xs text-slate-400 leading-relaxed max-w-xl">
-                参考下方大号槽位中的真实素材，在提示词中键入 @ 可直接挂载图文混排胶囊（如“参考@图1的采光，加入@图2的沙发”）。
-              </p>
-            </div>
-
-            <!-- 大号参考生图槽位。上限只读契约；契约没写张数时不显示分母。 -->
-            <div class="w-full max-w-3xl p-4 rounded-2xl bg-studio-900 border border-studio-750 shadow-xl space-y-3 text-left">
-              <div class="flex items-center justify-between">
-                <span class="text-xs font-extrabold text-white flex items-center gap-2">
-                  <span>🖼️ 参考生图 / 素材挂载 (可选)</span>
-                  <span class="text-studio-cyan font-mono font-bold">{{ referenceTray.length }}<template v-if="refCap() != null">/{{ refCap() }}</template></span>
-                </span>
-                <span class="text-[11px] text-slate-400">
-                  大号槽位已连接私有 DAM 素材库，点击可从素材库选择或本地上传
-                </span>
-              </div>
-
-              <!-- 大号参考图槽位带 (至少 110px x 110px) -->
-              <div class="flex items-center space-x-3.5 overflow-x-auto py-2 scrollbar-none">
-                <!-- 已载入的大号参考图卡片 -->
-                <div
-                  v-for="(refItem, idx) in referenceTray"
-                  :key="refItem.name + idx"
-                  class="relative w-28 h-28 rounded-xl overflow-hidden border-2 border-studio-accent bg-studio-950 shrink-0 group shadow-lg cursor-pointer"
-                  @click="openMediaPreview(refItem, refItem.kind === 'video' ? 'video' : 'image')"
-                >
-                  <img :src="authedMediaUrl(refItem.url)" class="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                  <!-- 遮罩与权重/移除/大图预览 -->
-                  <div class="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-2 text-xs">
-                    <div class="flex justify-between items-center text-white">
-                      <span class="truncate font-bold">@图{{ idx + 1 }}</span>
-                      <div class="flex items-center space-x-1.5">
-                        <button @click.stop="openMediaPreview(refItem, refItem.kind === 'video' ? 'video' : 'image')" class="text-studio-cyan hover:text-white font-bold cursor-pointer" title="查看高清大图">🔍</button>
-                        <button @click.stop="removeRef(idx)" class="text-rose-400 hover:text-rose-300 font-bold cursor-pointer" title="移除">✕</button>
-                      </div>
-                    </div>
-                    <div class="flex items-center justify-between">
-                      <span class="text-studio-cyan font-mono font-bold text-[10px]">
-                        权重: {{ refItem.weight }}%
-                      </span>
-                      <span class="text-[10px] text-slate-300 underline font-mono">点击预览</span>
-                    </div>
-                  </div>
-                  <span class="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/80 text-[10px] text-white font-mono group-hover:opacity-0 truncate max-w-[90%]">
-                    @图{{ idx + 1 }}: {{ refItem.name }}
-                  </span>
-                </div>
-
-                <!-- 大号添加参考图插槽 -->
-                <button
-                  v-if="refCap() == null || referenceTray.length < refCap()"
-                  @click="openAssetSelectorModal"
-                  class="w-28 h-28 rounded-xl border-2 border-dashed border-studio-600 hover:border-studio-accent bg-studio-950/70 hover:bg-studio-950 flex flex-col items-center justify-center text-slate-400 hover:text-studio-accent space-y-2 shrink-0 transition-all cursor-pointer group"
-                >
-                  <div class="w-10 h-10 rounded-full bg-studio-800 group-hover:bg-studio-accent/20 flex items-center justify-center">
-                    <StudioIcon name="plus" :size="20" />
-                  </div>
-                  <span class="text-xs font-bold">添加参考</span>
-                </button>
-              </div>
-
-              <!-- 4 组图像创作灵感快捷起手 -->
-              <div class="grid grid-cols-2 gap-2.5 pt-2 border-t border-studio-800">
-                <div
-                  v-for="rec in imageQuickStarters"
-                  :key="rec.title"
-                  @click="applyQuickStarter(rec)"
-                  class="p-2.5 rounded-xl bg-studio-950/60 border border-studio-750 hover:border-studio-accent hover:bg-studio-850 cursor-pointer transition-all space-y-1 group"
-                >
-                  <div class="text-xs font-bold text-white group-hover:text-studio-accent flex items-center justify-between">
-                    <span>{{ rec.title }}</span>
-                    <span class="text-xs opacity-75">➔</span>
-                  </div>
-                  <p class="text-[11px] text-slate-400 line-clamp-1 leading-relaxed">{{ rec.desc }}</p>
-                </div>
-              </div>
-            </div>
-          </template>
-
-          <!-- C. 视频生成模式 (首尾帧 / 全能参考大号双槽位) -->
-          <template v-else-if="activeModality === 'video'">
-            <div class="w-16 h-16 rounded-2xl bg-studio-accent flex items-center justify-center text-white shadow-xl">
-              <StudioIcon name="film" :size="32" />
-            </div>
-
-            <div class="space-y-1">
-              <h2 class="text-xl font-extrabold text-white tracking-tight">影视级空间 AI 视频动态中枢</h2>
-              <p class="text-xs text-slate-400 leading-relaxed max-w-xl">
-                支持首尾帧平滑过渡、运镜轨迹控制与空间音频同步生成，构建影视级漫游视频。
-              </p>
-            </div>
-
-            <!-- 视频大号槽位工作台 (支持首尾帧双槽位 / 全能槽位) -->
-            <div class="w-full max-w-3xl p-4 rounded-2xl bg-studio-900 border border-studio-750 shadow-xl space-y-3.5 text-left">
-              <div class="flex items-center justify-between">
-                <div class="flex items-center space-x-2">
-                  <span class="text-xs font-bold text-white">视频动态构建模式:</span>
-                  <div class="flex items-center space-x-1 bg-studio-950 p-1 rounded-lg border border-studio-750">
-                    <button
-                      @click="setGenMode('first_last_frame')"
-                      :class="['px-2.5 py-1 rounded text-xs font-bold transition-all cursor-pointer', activeGenMode === 'first_last_frame' ? 'bg-studio-indigo text-white shadow-sm' : 'text-slate-400 hover:text-white']"
-                    >
-                      🎞️ 首尾帧过渡
-                    </button>
-                    <button
-                      @click="setGenMode(activeModality === 'video' && currentSchema?.modes?.some((mode) => mode.id === 'omni_reference') ? 'omni_reference' : 'image_to_video')"
-                      :class="['px-2.5 py-1 rounded text-xs font-bold transition-all cursor-pointer', activeGenMode === 'omni_reference' || activeGenMode === 'image_to_video' ? 'bg-studio-indigo text-white shadow-sm' : 'text-slate-400 hover:text-white']"
-                    >
-                      🎬 全能多参考
-                    </button>
-                    <button
-                      @click="setGenMode('text_to_video')"
-                      :class="['px-2.5 py-1 rounded text-xs font-bold transition-all cursor-pointer', activeGenMode === 'text_to_video' ? 'bg-studio-indigo text-white shadow-sm' : 'text-slate-400 hover:text-white']"
-                    >
-                      ✍️ 文生视频
-                    </button>
-                  </div>
-                </div>
-
-                <span class="text-[11px] text-studio-cyan font-mono font-bold">{{ getModelDisplayName(videoModelKey) }} 驱动</span>
-              </div>
-
-              <!-- 若是首尾帧模式：并列展示两大核心卡槽 -->
-              <div v-if="videoSubMode === 'first_last'" class="grid grid-cols-2 gap-4">
-                <!-- 首帧槽位 -->
-                <div class="p-3 rounded-xl bg-studio-950 border border-studio-750 flex flex-col items-center justify-center space-y-2 relative group min-h-[140px]">
-                  <span class="text-xs font-bold text-white self-start">🎬 起步首帧 (Start Frame):</span>
-                  <div v-if="referenceTray[0]" class="relative w-full h-24 rounded-lg overflow-hidden border border-studio-accent group cursor-pointer" @click="openMediaPreview(referenceTray[0], 'image')">
-                    <img :src="authedMediaUrl(referenceTray[0].url)" class="w-full h-full object-cover" />
-                    <div class="absolute top-1 right-1 flex items-center space-x-1">
-                      <button @click.stop="openMediaPreview(referenceTray[0], 'image')" class="p-1 rounded bg-black/70 text-studio-cyan text-xs cursor-pointer" title="查看大图">🔍</button>
-                      <button @click.stop="removeRef(0)" class="p-1 rounded bg-black/70 text-rose-400 text-xs cursor-pointer">✕</button>
-                    </div>
-                    <span class="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/80 text-[10px] text-white">@首帧: {{ referenceTray[0].name }}</span>
-                  </div>
-                  <button
-                    v-else
-                    @click="openAssetSelectorModal"
-                    class="w-full h-24 rounded-lg border-2 border-dashed border-studio-700 hover:border-studio-accent flex flex-col items-center justify-center text-slate-400 hover:text-white cursor-pointer"
-                  >
-                    <StudioIcon name="plus" :size="18" />
-                    <span class="text-xs mt-1">从素材库选择首帧</span>
-                  </button>
-                </div>
-
-                <!-- 尾帧槽位 -->
-                <div class="p-3 rounded-xl bg-studio-950 border border-studio-750 flex flex-col items-center justify-center space-y-2 relative group min-h-[140px]">
-                  <span class="text-xs font-bold text-white self-start">🏁 落幅尾帧 (End Frame):</span>
-                  <div v-if="referenceTray[1]" class="relative w-full h-24 rounded-lg overflow-hidden border border-studio-indigo group cursor-pointer" @click="openMediaPreview(referenceTray[1], 'image')">
-                    <img :src="authedMediaUrl(referenceTray[1].url)" class="w-full h-full object-cover" />
-                    <div class="absolute top-1 right-1 flex items-center space-x-1">
-                      <button @click.stop="openMediaPreview(referenceTray[1], 'image')" class="p-1 rounded bg-black/70 text-studio-cyan text-xs cursor-pointer" title="查看大图">🔍</button>
-                      <button @click.stop="removeRef(1)" class="p-1 rounded bg-black/70 text-rose-400 text-xs cursor-pointer">✕</button>
-                    </div>
-                    <span class="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/80 text-[10px] text-white">@尾帧: {{ referenceTray[1].name }}</span>
-                  </div>
-                  <button
-                    v-else
-                    @click="openAssetSelectorModal"
-                    class="w-full h-24 rounded-lg border-2 border-dashed border-studio-700 hover:border-studio-indigo flex flex-col items-center justify-center text-slate-400 hover:text-white cursor-pointer"
-                  >
-                    <StudioIcon name="plus" :size="18" />
-                    <span class="text-xs mt-1">从素材库选择尾帧</span>
-                  </button>
-                </div>
-              </div>
-
-              <!-- 全能参考模式槽位 -->
-              <div v-else-if="videoSubMode === 'multi_ref'" class="flex items-center space-x-3 overflow-x-auto py-1 scrollbar-none">
-                <div
-                  v-for="(refItem, idx) in referenceTray"
-                  :key="refItem.name + idx"
-                  class="relative w-24 h-24 rounded-xl overflow-hidden border-2 border-studio-indigo bg-studio-950 shrink-0 group shadow-md cursor-pointer"
-                  @click="openMediaPreview(refItem, 'image')"
-                >
-                  <img :src="authedMediaUrl(refItem.url)" class="w-full h-full object-cover" />
-                  <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-1.5 text-xs">
-                    <div class="flex items-center justify-between">
-                      <span class="truncate font-bold text-white">@图{{ idx + 1 }}</span>
-                      <button @click.stop="openMediaPreview(refItem, 'image')" class="text-studio-cyan hover:text-white" title="查看大图">🔍</button>
-                    </div>
-                    <button @click.stop="removeRef(idx)" class="text-rose-400 hover:text-rose-300 self-end cursor-pointer">✕</button>
-                  </div>
-                </div>
-
-                <button
-                  v-if="referenceTray.length < 5"
-                  @click="openAssetSelectorModal"
-                  class="w-24 h-24 rounded-xl border-2 border-dashed border-studio-600 hover:border-studio-indigo bg-studio-950 flex flex-col items-center justify-center text-slate-400 hover:text-white space-y-1 shrink-0 cursor-pointer"
-                >
-                  <StudioIcon name="plus" :size="18" />
-                  <span class="text-xs font-bold">添加参考图</span>
-                </button>
-              </div>
-
-              <!-- 快捷视频动态灵感胶囊 -->
-              <div class="grid grid-cols-2 gap-2 pt-2 border-t border-studio-800">
-                <div
-                  v-for="rec in videoQuickStarters"
-                  :key="rec.title"
-                  @click="applyQuickStarter(rec)"
-                  class="p-2.5 rounded-xl bg-studio-950/60 border border-studio-750 hover:border-studio-indigo hover:bg-studio-850 cursor-pointer transition-all space-y-1 group"
-                >
-                  <div class="text-xs font-bold text-white group-hover:text-studio-indigo flex items-center justify-between">
-                    <span>{{ rec.title }}</span>
-                    <span class="text-xs opacity-75">🎬</span>
-                  </div>
-                  <p class="text-[11px] text-slate-400 line-clamp-1 leading-relaxed">{{ rec.desc }}</p>
-                </div>
-              </div>
-            </div>
-          </template>
-
-          <!-- D. 音乐生成模式 -->
-          <template v-else-if="activeModality === 'music'">
-            <div class="w-16 h-16 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white shadow-xl">
-              <StudioIcon name="music" :size="32" />
-            </div>
-
-            <div class="space-y-1">
-              <h2 class="text-xl font-extrabold text-white tracking-tight">空间氛围音效与影视配乐生成</h2>
-              <p class="text-xs text-slate-400 leading-relaxed max-w-xl">
-                为室内空间设计效果图或漫游视频量身定制白噪音、北欧轻音乐与场景环绕音效。
-              </p>
-            </div>
-
-            <div class="w-full max-w-2xl p-4 rounded-2xl bg-studio-900 border border-studio-750 shadow-xl space-y-3 text-left">
-              <span class="text-xs font-bold text-white block">🎵 推荐配乐与音效主题：</span>
-              <div class="grid grid-cols-2 gap-2.5">
-                <button
-                  v-for="m in musicStarters"
-                  :key="m.title"
-                  @click="applyPromptText(m.desc)"
-                  class="p-3 rounded-xl bg-studio-950 border border-studio-750 hover:border-emerald-500 hover:bg-studio-850 text-left transition-all cursor-pointer space-y-1"
-                >
-                  <div class="text-xs font-bold text-white flex justify-between">
-                    <span>{{ m.title }}</span>
-                    <span class="text-emerald-400 font-mono">{{ m.duration }}</span>
-                  </div>
-                  <p class="text-[11px] text-slate-400 line-clamp-1">{{ m.desc }}</p>
-                </button>
-              </div>
-            </div>
-          </template>
+        <div v-if="messages.length > 0" class="text-center py-1 text-[11px] text-slate-500 font-medium">
+          ↑ 向上滚动查看更早记录
         </div>
-
+        <div v-if="messages.length === 0" class="h-full flex items-center justify-center text-xs text-slate-500">
+          暂无更早记录，请在下方看图区选定参考图开始创作
+        </div>
         <!-- 真实消息流列表 -->
         <div v-for="(msg, i) in messages" :key="i" class="flex flex-col space-y-2">
           <!-- 用户消息 (图文混排呈现) -->
           <div v-if="msg.role === 'user'" class="flex justify-end">
-            <div class="max-w-2xl rounded-2xl rounded-tr-xs bg-studio-accent px-4 py-3 text-white text-xs leading-relaxed shadow-lg select-text">
+            <div class="max-w-2xl rounded-2xl rounded-tr-xs bg-studio-accent px-4 py-3 text-white text-xs leading-relaxed shadow-lg select-text group relative">
               <div class="space-y-2">
+                <!-- 顶栏：审查当时请求出站报文快照 -->
+                <div class="flex items-center justify-between text-[11px] pb-1 border-b border-white/20 opacity-80 group-hover:opacity-100 transition-opacity">
+                  <span class="text-white/80 font-mono text-[10px]">用户提示词</span>
+                  <button
+                    type="button"
+                    @click="openRequestSnapshot(msg)"
+                    class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/25 hover:bg-black/40 text-white/90 hover:text-white border border-white/25 text-[10px] font-mono cursor-pointer transition-colors"
+                    title="审查当时提交的请求报文与方言快照"
+                  >
+                    <StudioIcon name="sliders" :size="10" />
+                    <span>请求</span>
+                  </button>
+                </div>
                 <div v-if="msg.referencedCard" class="px-2 py-1 rounded bg-black/25 text-studio-cyan text-[11px] border border-studio-cyan/40 flex items-center space-x-1.5">
                   <StudioIcon name="wand" :size="12" />
                   <span>已调用创作库模板: {{ msg.referencedCard }}</span>
@@ -435,12 +190,12 @@
                     <button
                       v-else-if="segment.type === 'chip'"
                       type="button"
-                      class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-white/20 border border-white/40 text-white font-bold text-xs shadow-sm align-middle"
+                      class="inline-flex items-center px-2 py-0.5 rounded-full bg-studio-cyan/20 border border-studio-cyan/40 text-studio-cyan font-bold font-mono text-xs shadow-xs align-middle cursor-pointer hover:bg-studio-cyan/30 transition-colors"
                       :class="segment.ref && segment.ref.url ? 'cursor-zoom-in' : 'cursor-default'"
                       @click="segment.ref && segment.ref.url && openMediaPreview(segment.ref)"
+                      :title="segment.name || segment.tag"
                     >
-                      <img v-if="segment.thumb" :src="authedMediaUrl(segment.thumb)" class="w-4 h-4 rounded-full object-cover border border-white/50" alt="" />
-                      <span>{{ segment.tag }}: {{ segment.name }}</span>
+                      <span>{{ segment.tag }}</span>
                     </button>
                   </template>
                 </div>
@@ -512,7 +267,7 @@
                   <div class="h-3 w-px bg-studio-750"></div>
                   <button @click="triggerPrecisionEdit(msg)" class="flex items-center space-x-1 text-studio-accent hover:text-blue-300 text-xs font-bold cursor-pointer">
                     <StudioIcon name="edit" :size="13" />
-                    <span>精准重绘</span>
+                    <span>进入编辑</span>
                   </button>
                   <div class="h-3 w-px bg-studio-750"></div>
                   <a :href="resultImageDownloadHref(msg)" target="_blank" download class="flex items-center space-x-1 text-slate-300 hover:text-white text-xs font-bold">
@@ -679,27 +434,48 @@
               <div v-if="msg.isError" class="gen-error">
                 <div class="gen-error-head">
                   <span class="gen-error-icon">
-                    <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M12 2L1 21h22L12 2zm1 14h-2v2h2v-2zm0-7h-2v5h2v-5z"/></svg>
+                    <StudioIcon name="warning" :size="15" />
                   </span>
                   <span class="gen-error-title">生成未成功</span>
                 </div>
                 <p class="gen-error-body">{{ friendlyErrorText(msg.content) }}</p>
                 <p v-if="errorHint(msg.content)" class="gen-error-hint">
-                  <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+                  <StudioIcon name="info" :size="12" />
                   {{ errorHint(msg.content) }}
                 </p>
                 <div class="gen-error-actions">
                   <button type="button" class="gen-error-retry" @click="openRetry(msg)">
-                    <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+                    <StudioIcon name="refresh" :size="12" />
                     重试
                   </button>
                   <button type="button" class="gen-error-edit" @click="editFromError(msg)">
-                    <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                    <StudioIcon name="edit" :size="12" />
                     编辑后再发
                   </button>
                 </div>
               </div>
               <div v-else class="chat-md" v-html="renderMarkdown(msg.content)" @click="onMdClick"></div>
+
+              <!-- 阶段 6：助手回复成功后的「接着可以」智能接续建议 -->
+              <div
+                v-if="!msg.isError && msg.nextSuggestions && msg.nextSuggestions.length"
+                class="pt-2.5 mt-2 border-t border-studio-800/80 flex flex-wrap items-center gap-1.5"
+              >
+                <span class="text-[11px] text-amber-300 font-mono font-medium flex items-center gap-1 mr-1">
+                  <StudioIcon name="sparkles" :size="12" class="text-amber-400" />
+                  接着可以：
+                </span>
+                <button
+                  v-for="(sug, sIdx) in msg.nextSuggestions"
+                  :key="sIdx"
+                  type="button"
+                  @click="applySuggestionToSupplement(sug)"
+                  class="text-xs px-2.5 py-1 rounded-full bg-studio-800 hover:bg-studio-700 text-slate-300 hover:text-white border border-studio-700 hover:border-amber-400/50 transition-all cursor-pointer text-left shadow-xs"
+                  title="点击将此建议填入下方输入框补充句"
+                >
+                  {{ sug }}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -728,8 +504,36 @@
       </button>
       </div>
 
+      <!-- 2.2 展开状态：看图区与右侧窄长槽位并排 (节省纵向高度) -->
+      <div v-if="!viewerCollapsed" class="flex flex-1 min-h-0 overflow-hidden">
+        <StudioViewer
+          class="flex-1 min-w-0 h-full"
+          :images="referenceTray"
+          :selectedIndex="selectedImageIndex"
+          :hoveredRegionKey="hoveredRegionKey"
+          @region-hover="k => hoveredRegionKey = k"
+          @select="selectedImageIndex = $event"
+          @remove="removeRef($event)"
+          @open-edit="openEditLayer($event)"
+          @revert-annotation="onRevertAnnotation($event)"
+          @toggle-collapse="viewerCollapsed = true"
+          @suggest-prompts="handleSuggestPrompts"
+        />
+
+        <!-- 图3所标：右侧窄长槽位 (高度铺满看图区，收缩时回归顶部) -->
+        <StudioBottomTray
+          mode="vertical"
+          :images="referenceTray"
+          :selectedIndex="selectedImageIndex"
+          :hoveredRegionKey="hoveredRegionKey"
+          @region-hover="k => hoveredRegionKey = k"
+          @select="onTraySelect($event)"
+          @open-picker="openAssetSelectorModal"
+        />
+      </div>
+
       <!-- ========================================================================= -->
-      <!-- 2.2 底部对话输入中枢卡片 (模型参数紧密集成 + 底部模式选择行) -->
+      <!-- 2.4 底部对话输入中枢卡片 (模型参数紧密集成 + 底部模式选择行) -->
       <!-- ========================================================================= -->
       <section class="rounded-2xl bg-studio-900 border border-studio-750 p-3.5 shadow-2xl space-y-2.5 shrink-0">
         <!-- 2.2.1 顶部紧密控制条：根据当前模式联动展示模型选择与参数 -->
@@ -828,17 +632,77 @@
 
         <!-- 2.2.2 提示词富文本输入中枢 (图文混排) -->
         <div class="rounded-xl bg-studio-950 border border-studio-700/80 p-3 relative shadow-inner space-y-2">
-          <div v-if="referenceTray.length" class="flex items-center gap-2 overflow-x-auto">
-            <span class="shrink-0 text-xs font-bold text-slate-300">即将提交 {{ referenceTray.length }} {{ audioOnlyModel() ? '段音频' : '张' }}</span>
-            <div v-for="(item, idx) in referenceTray" :key="(item.url || item.name) + idx" class="relative shrink-0">
-              <button type="button" class="block text-left" @click="openMediaPreview(item)">
-                <audio v-if="mediaKind(item) === 'audio'" :src="authedMediaUrl(item.url)" class="h-10 w-36" controls @click.stop></audio>
-                <img v-else :src="authedMediaUrl(item.url)" class="h-10 w-10 rounded-lg object-cover" :alt="item.name" />
-                <span class="block max-w-16 truncate text-[10px] text-slate-300">{{ activeGenMode === 'first_last_frame' ? (idx === 0 ? '首帧' : '尾帧') : (item.tag || item.name) }}</span>
+
+          <!-- @ 符号悬浮快捷引用浮层 (看图区已有图时展现，底部为「从素材库添加」) -->
+          <div
+            v-if="showAtMenu"
+            class="absolute bottom-full left-4 mb-2 w-80 bg-studio-900 border border-studio-700 rounded-xl shadow-2xl p-2 z-40 max-h-80 overflow-y-auto scrollbar-thin select-none"
+          >
+            <div class="text-[11px] text-slate-400 font-mono px-2 py-1 border-b border-studio-800 flex items-center justify-between">
+              <span>引用参考图或局部区域:</span>
+              <span class="text-studio-cyan font-bold">{{ referenceTray.length }} 张可用</span>
+            </div>
+            <div class="py-1 space-y-1">
+              <template v-for="(item, idx) in referenceTray" :key="item.url || idx">
+                <button
+                  type="button"
+                  @click="selectAtMention(item, idx)"
+                  class="w-full px-2.5 py-1.5 rounded-lg hover:bg-studio-800 cursor-pointer text-xs text-slate-200 flex items-center space-x-2.5 transition-colors text-left"
+                >
+                  <img :src="item.thumbUrl || item.url" class="w-8 h-8 rounded object-cover border border-studio-700 shrink-0" />
+                  <div class="flex-1 min-w-0">
+                    <div class="font-bold text-studio-cyan font-mono flex items-center justify-between">
+                      <span>图{{ idx + 1 }} (整图)</span>
+                      <span v-if="item.regions && item.regions.length > 0" class="text-[10px] text-studio-accent font-normal">
+                        {{ item.regions.length }} 个子区域
+                      </span>
+                    </div>
+                    <div class="text-[10px] text-slate-400 truncate">{{ item.name || '参考图' }}</div>
+                  </div>
+                </button>
+
+                <!-- 若该图存在子选区，树状下钻展示子区域 -->
+                <div
+                  v-if="item.regions && item.regions.length > 0"
+                  class="ml-5 pl-2.5 border-l-2 border-studio-800/80 space-y-1 my-0.5"
+                >
+                  <button
+                    v-for="reg in item.regions"
+                    :key="reg.id"
+                    type="button"
+                    @click="selectAtRegionMention(item, idx, reg)"
+                    @mouseenter="hoveredRegionKey = `${idx}_${reg.id}`"
+                    @mouseleave="hoveredRegionKey = null"
+                    class="w-full px-2 py-1 rounded-md hover:bg-studio-800 cursor-pointer text-xs text-slate-300 flex items-center justify-between transition-colors text-left group"
+                  >
+                    <div class="flex items-center space-x-1.5 min-w-0">
+                      <span
+                        class="w-2 h-2 rounded-full shrink-0"
+                        :style="{ backgroundColor: reg.color?.border || '#3B82F6' }"
+                      ></span>
+                      <span class="font-bold text-studio-cyan font-mono truncate text-[11px]">
+                        @图{{ idx + 1 }}[{{ reg.name }}]
+                      </span>
+                    </div>
+                    <span class="text-[10px] text-slate-500 group-hover:text-slate-300 font-mono shrink-0 ml-1">
+                      {{ getRegionOpDisplayName(reg.op) }}
+                    </span>
+                  </button>
+                </div>
+              </template>
+            </div>
+            <div class="pt-1 border-t border-studio-800">
+              <button
+                type="button"
+                @click="openAssetSelectorModal(); showAtMenu = false"
+                class="w-full px-2.5 py-1.5 rounded-lg hover:bg-studio-800 cursor-pointer text-xs text-studio-accent hover:text-white flex items-center justify-center gap-1.5 transition-colors font-bold"
+              >
+                <StudioIcon name="plus" :size="13" />
+                <span>从素材库添加...</span>
               </button>
-              <button type="button" class="tray-ref-delete" title="移除" @click.stop="removeRef(idx)">×</button>
             </div>
           </div>
+
           <!-- # 符号悬浮模糊匹配浮层 -->
           <div
             v-if="showHashMenu"
@@ -862,20 +726,82 @@
             </div>
           </div>
 
-          <!-- 富文本可编辑提示词容器 -->
-          <div class="relative">
+          <!-- 配方句输入区域 (顶部，浅底色，小标签，右侧清空叉，支持@图N胶囊高亮与自由编辑) -->
+          <div
+            v-if="recipePrompt || rightDrawerOpen"
+            class="p-2 rounded-lg bg-studio-900/90 border border-studio-750 flex items-start gap-2 animate-in fade-in duration-150"
+          >
+            <div class="flex items-center gap-1.5 px-2 py-0.5 rounded bg-studio-accent/20 text-studio-accent font-bold text-[11px] shrink-0 mt-0.5 select-none">
+              <StudioIcon name="wand" :size="11" />
+              <span>配方句</span>
+            </div>
+            <!-- 当不在编辑态且有内容时，胶囊高亮显示与优雅多行结构化展示；点击任意处切换到 textarea 自由编辑 -->
+            <div
+              v-if="!isRecipeEditing && recipePrompt"
+              @click="startRecipeEdit"
+              class="flex-1 text-xs text-slate-100 font-medium leading-relaxed cursor-text py-0.5 min-h-[24px] whitespace-pre-wrap select-text"
+              title="点击编辑配方句"
+            >
+              <template v-for="(seg, idx) in parseRecipeSegments(recipePrompt)" :key="idx">
+                <span
+                  v-if="seg.type === 'chip'"
+                  @mouseenter="seg.regionName && highlightRegionFromChip(seg.tuNum - 1, seg.regionName)"
+                  @mouseleave="hoveredRegionKey = null"
+                  class="inline-flex items-center px-1.5 py-0.5 rounded-full bg-studio-cyan/20 text-studio-cyan border border-studio-cyan/40 font-mono font-bold text-[11px] select-none shadow-xs hover:brightness-125 cursor-pointer align-middle mx-0.5 transition-all"
+                >{{ seg.tag }}</span>
+                <span v-else class="align-middle">{{ seg.text }}</span>
+              </template>
+            </div>
+            <textarea
+              v-else
+              ref="recipeInputRef"
+              v-model="recipePrompt"
+              @blur="isRecipeEditing = false"
+              rows="2"
+              placeholder="编辑/微调空间全局配方句，支持引用 @图1"
+              class="flex-1 bg-transparent text-xs text-slate-100 font-medium outline-none resize-none placeholder:text-slate-500 leading-relaxed scrollbar-thin"
+              style="min-height: 24px; max-height: 120px;"
+            ></textarea>
+            <button
+              v-if="recipePrompt"
+              type="button"
+              @click="recipePrompt = ''"
+              class="p-1 text-slate-400 hover:text-rose-400 cursor-pointer shrink-0 transition-colors"
+              title="清空配方句"
+            >
+              <StudioIcon name="close" :size="13" />
+            </button>
+          </div>
+          <div
+            v-else
+            class="px-2.5 py-1.5 rounded-lg bg-studio-900/40 border border-studio-800/60 flex items-center justify-between text-[11px] text-slate-500 cursor-pointer hover:border-studio-700 hover:text-slate-400 transition-colors"
+            @click="rightDrawerOpen = true"
+          >
+            <span class="flex items-center gap-1.5">
+              <StudioIcon name="sliders" :size="12" class="text-studio-accent/60" />
+              <span>空间全局配方句（点击右侧「全局配方」展开风格/超分/去水印）</span>
+            </span>
+            <span class="text-[10px] text-studio-cyan font-mono">展开工具 →</span>
+          </div>
+
+          <!-- 补充句富文本输入容器 -->
+          <div class="relative pt-1">
+            <div class="text-[10px] font-bold text-slate-400 mb-1 flex items-center justify-between">
+              <span>补充细节 / 自定义要求:</span>
+              <span class="text-[10px] text-slate-500 font-mono">输入 @ 引用图片，# 引用配方</span>
+            </div>
             <div
               ref="richEditorRef"
               contenteditable="true"
               class="rich-prompt-editor text-slate-100 text-sm leading-relaxed font-medium min-h-[44px] max-h-36 overflow-y-auto outline-none"
               :class="activeModality === 'chat' ? 'pr-3' : (optimizeUndo ? 'pr-48' : 'pr-32')"
-              :data-placeholder="getEditorPlaceholder()"
+              data-placeholder="例如：沙发换成深灰色布艺，百叶窗拉上一半，阳光只洒在地毯上..."
               @input="onEditorInput"
               @keyup="onEditorKeyup"
               @keydown="onEditorKeydown"
             ></div>
 
-            <div v-if="activeModality !== 'chat'" class="absolute top-0 right-0 flex items-center gap-1.5">
+            <div v-if="activeModality !== 'chat'" class="absolute top-6 right-0 flex items-center gap-1.5">
               <button
                 v-if="optimizeUndo"
                 type="button"
@@ -1012,11 +938,23 @@
               </div>
             </div>
 
+            <!-- 预览请求按钮 (全链路透传审查) -->
+            <button
+              type="button"
+              @click="handlePreviewRequest"
+              :disabled="generating || previewLoading"
+              class="px-3.5 py-2 rounded-xl border border-studio-700 bg-studio-850 hover:bg-studio-800 text-studio-cyan text-xs font-extrabold flex items-center space-x-1.5 cursor-pointer transition-all disabled:opacity-40 shadow-sm"
+              title="审查透传给大模型网关的完整请求与方言报文"
+            >
+              <StudioIcon name="sliders" :size="13" :class="{ 'animate-spin': previewLoading }" />
+              <span>{{ previewLoading ? '审查中...' : '预览请求' }}</span>
+            </button>
+
             <!-- 立即生成/发送按钮 -->
             <button
               @click="sendMessage"
               :disabled="generating"
-              class="px-5 py-2 rounded-xl bg-gradient-to-r from-studio-accent to-studio-cyan hover:brightness-110 text-white text-xs font-extrabold flex items-center space-x-2 shadow-lg shadow-studio-accent/25 transition-all disabled:opacity-40 cursor-pointer ml-2"
+              class="px-5 py-2 rounded-xl bg-gradient-to-r from-studio-accent to-studio-cyan hover:brightness-110 text-white text-xs font-extrabold flex items-center space-x-2 shadow-lg shadow-studio-accent/25 transition-all disabled:opacity-40 cursor-pointer ml-1"
             >
               <span>{{ getSendButtonText() }}</span>
               <StudioIcon name="send" :size="13" />
@@ -1024,7 +962,43 @@
           </div>
         </div>
       </section>
+
+      <!-- 全屏独立图片编辑层 (画板五、六、七) -->
+      <StudioEditLayer
+        :visible="showEditModal"
+        :image="currentEditingImage"
+        :imageIndex="selectedImageIndex"
+        :targetTag="targetRefTag"
+        :totalReferenceCount="referenceTray.length"
+        @close="showEditModal = false"
+        @apply-recipe-with-refs="onEditApplyRecipeWithRefs"
+        @apply-regions-to-image="onEditApplyRegionsToImage"
+        @apply-outpainted-image="onEditApplyOutpaintedImage"
+        @apply-custom-image="onEditApplyCustomImage"
+      />
     </main>
+
+    <!-- 3. 右侧精准编辑抽屉 (宽 380px，支持风格/超分/去水印，仅修改配方句) -->
+    <StudioGlobalDrawer
+      v-if="rightDrawerOpen"
+      v-model:recipePrompt="recipePrompt"
+      :targetTag="targetRefTag"
+              :targetImageThumb="targetRefThumb"
+      :targetImageName="targetRefName"
+      @close="rightDrawerOpen = false"
+    />
+
+    <!-- 右边缘关闭状态下的竖向标签「精准编辑」 -->
+    <button
+      v-else
+      type="button"
+      @click="rightDrawerOpen = true"
+      class="w-10 bg-studio-900 border-l border-studio-700 hover:bg-studio-850 hover:text-white text-slate-400 flex flex-col items-center justify-center py-6 gap-2 shrink-0 cursor-pointer transition-colors z-10"
+      title="展开全局配方"
+    >
+      <StudioIcon name="sliders" :size="15" />
+      <span class="text-xs font-bold [writing-mode:vertical-rl] tracking-widest">全局配方</span>
+    </button>
 
     <!-- 3. 共享素材选择器（AI 对话 / 快捷编辑同一组件） -->
     <AssetPickerModal
@@ -1032,10 +1006,19 @@
       context="chat"
       :max-select="10"
       :recent="assetPickerRecent"
+      commit-on-version
       upload-enabled
       @close="showAssetSelector = false"
       @confirm="onAssetPickerConfirm"
       @upload="onAssetPickerUpload"
+    />
+
+    <!-- 请求审查与方言预览模态框 -->
+    <RequestPreviewModal
+      :visible="showPreviewModal"
+      :previewData="previewModalData"
+      @close="showPreviewModal = false"
+      @send="onPreviewSend"
     />
 
     <!-- ========================================================================= -->
@@ -1062,6 +1045,16 @@
               <button @click="zoomPreview(0.25)" class="px-2 py-1 rounded bg-studio-800 hover:bg-studio-750 text-slate-200 font-bold cursor-pointer">+</button>
               <button @click="previewModal.scale = 1.0" class="px-2 py-1 rounded bg-studio-800 hover:bg-studio-750 text-slate-300 text-[11px] cursor-pointer">1:1</button>
               <div class="h-3 w-px bg-studio-750 mx-1"></div>
+              <button
+                type="button"
+                @click="openEditFromLightbox"
+                class="px-2.5 py-1 rounded-lg bg-studio-accent/20 hover:bg-studio-accent/30 text-studio-accent border border-studio-accent/40 font-bold flex items-center space-x-1 cursor-pointer transition-colors"
+                title="挂载到看图区并进入编辑"
+              >
+                <StudioIcon name="edit" :size="13" />
+                <span>进入编辑</span>
+              </button>
+              <div class="h-3 w-px bg-studio-750 mx-1"></div>
             </template>
 
             <a :href="previewModal.url" download target="_blank" class="px-3 py-1 rounded-lg bg-studio-800 hover:bg-studio-750 text-slate-200 font-bold flex items-center space-x-1">
@@ -1080,7 +1073,9 @@
             v-if="previewModal.type === 'image'"
             :src="previewModal.url"
             :style="{ transform: `scale(${previewModal.scale})` }"
-            class="max-h-[78vh] max-w-full object-contain transition-transform duration-100 select-none rounded-lg"
+            class="max-h-[78vh] max-w-full object-contain transition-transform duration-100 select-none rounded-lg cursor-pointer"
+            @click="openEditFromLightbox"
+            title="点击直接进入图片编辑"
           />
 
           <!-- 视频播放视图 -->
@@ -1502,15 +1497,17 @@
           </div>
 
           <!-- 网格卡片列表 -->
-          <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-5">
+          <div v-else class="gap-5" style="columns: 240px; column-gap: 1.25rem;">
             <div
               v-for="tpl in filteredTemplates"
               :key="tpl.id"
-              class="rounded-2xl bg-studio-850 border border-studio-750 hover:border-studio-accent/70 transition-all shadow-md hover:shadow-2xl flex flex-col overflow-hidden group/card"
+              class="break-inside-avoid mb-5 w-full inline-block rounded-2xl bg-studio-850 border border-studio-750 hover:border-studio-accent/70 transition-all shadow-md hover:shadow-2xl overflow-hidden group/card"
+              :data-tpl-id="tpl.id"
             >
-              <!-- 卡片大预览区域 -->
+              <!-- 卡片大预览区域 (自适应画幅) -->
               <div
-                class="relative aspect-video bg-studio-950 overflow-hidden border-b border-studio-800 cursor-pointer"
+                class="relative bg-studio-950 overflow-hidden border-b border-studio-800 cursor-pointer"
+                :style="{ aspectRatio: getTemplateAspectRatio(tpl) }"
                 @click="openTemplateDetail(tpl)"
                 title="点击查看配方详情"
               >
@@ -1537,14 +1534,30 @@
                   </div>
                 </template>
 
-                <!-- 视频模式：视频播放或海报 -->
+                <!-- 视频模式：视口按需挂载播放器 -->
                 <template v-else-if="tpl.type === 'video'">
                   <video
-                    v-if="tpl.result_images?.[0]?.url"
+                    v-if="tpl.result_images?.[0]?.url && isCardInViewport(tpl.id)"
                     :src="tpl.result_images[0].url"
                     controls
                     class="w-full h-full object-cover"
+                    @loadedmetadata="(e) => onVideoLoadedMetadata(e, tpl)"
                   ></video>
+                  <div
+                    v-else-if="tpl.result_images?.[0]?.url"
+                    class="w-full h-full relative flex items-center justify-center bg-purple-950/20"
+                  >
+                    <img
+                      v-if="tpl.origin_images?.[0]?.url"
+                      :src="tpl.origin_images[0].url"
+                      class="w-full h-full object-cover opacity-60"
+                    />
+                    <div class="absolute inset-0 flex items-center justify-center">
+                      <div class="w-10 h-10 rounded-full bg-black/60 backdrop-blur-xs flex items-center justify-center text-purple-300 shadow-md">
+                        <StudioIcon name="play" :size="20" />
+                      </div>
+                    </div>
+                  </div>
                   <div v-else class="w-full h-full flex flex-col items-center justify-center text-purple-400 bg-purple-950/30">
                     <StudioIcon name="video" :size="32" class="mb-2" />
                     <span class="text-xs font-bold">空间动态视频配方</span>
@@ -1705,13 +1718,25 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import StudioIcon from '../../components/StudioIcon.vue';
 import DynamicModelParamBar from '../../components/DynamicModelParamBar.vue';
 import AssetPickerModal from '../../components/AssetPickerModal.vue';
-import { STUDIO_SKILLS_REGISTRY, evaluateClientModelRules, normalizeClientLayerStack } from '../../utils/model-protocol';
+import StudioViewer from './StudioViewer.vue';
+import StudioBottomTray from './StudioBottomTray.vue';
+import StudioGlobalDrawer from './StudioGlobalDrawer.vue';
+import StudioEditLayer from './StudioEditLayer.vue';
+import RequestPreviewModal from '../../components/RequestPreviewModal.vue';
+import {
+  STUDIO_SKILLS_REGISTRY,
+  evaluateClientModelRules,
+  normalizeClientLayerStack,
+  compilePrecisionEditPrompt,
+  getModelPrecisionSpec,
+  REGION_COLORS
+} from '../../utils/model-protocol';
 import { contextBudgetTokens, trimChatMessages } from '../../../../src/chat-context.mjs';
 import {
   getAssetImageUrl,
@@ -1730,7 +1755,9 @@ import {
   registerGeneratedAsset,
   moveAssetShelf,
   reportUnauthorized,
-  fetchStudioCatalog
+  fetchStudioCatalog,
+  previewAiGeneration,
+  fetchSuggestPrompts
 } from '../../api';
 
 const props = defineProps({
@@ -1740,6 +1767,605 @@ const props = defineProps({
 const emit = defineEmits(['sendToPrecisionEdit', 'sendToClip']);
 
 // 侧栏与基础状态
+// 阶段 1 新增状态机
+const leftCollapsed = ref(false);
+const rightDrawerOpen = ref(false);
+const viewerCollapsed = ref(false);
+const selectedImageIndex = ref(0);
+const showEditModal = ref(false);
+const currentEditingImage = computed(() => {
+  if (referenceTray.value.length === 0) return null;
+  const idx = selectedImageIndex.value >= 0 && selectedImageIndex.value < referenceTray.value.length
+    ? selectedImageIndex.value
+    : 0;
+  return referenceTray.value[idx] || null;
+});
+const showAtMenu = ref(false);
+
+// 阶段 2 状态：配方句、请求审查与抽屉联动
+const recipePrompt = ref('');
+const hoveredRegionKey = ref(null);
+const DRAFT_STORAGE_KEY = 'ml_studio_persistent_draft_v1';
+
+function saveDraftToStorage() {
+  try {
+    const data = {
+      recipePrompt: recipePrompt.value || '',
+      editorHtml: richEditorRef.value ? richEditorRef.value.innerHTML : '',
+      referenceTray: JSON.parse(JSON.stringify(referenceTray.value || [])),
+      selectedImageIndex: selectedImageIndex.value || 0,
+    };
+    if (data.referenceTray.length > 0 || data.recipePrompt || (data.editorHtml && data.editorHtml.trim())) {
+      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(data));
+    } else {
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
+    }
+  } catch (e) {}
+}
+
+function restoreDraftFromStorage() {
+  try {
+    const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
+    if (!raw) return false;
+    const data = JSON.parse(raw);
+    if (data && (Array.isArray(data.referenceTray) && data.referenceTray.length > 0 || data.recipePrompt || data.editorHtml)) {
+      if (Array.isArray(data.referenceTray) && data.referenceTray.length > 0) {
+        referenceTray.value = data.referenceTray;
+      }
+      if (data.recipePrompt) {
+        recipePrompt.value = data.recipePrompt;
+      }
+      if (data.editorHtml && richEditorRef.value) {
+        richEditorRef.value.innerHTML = data.editorHtml;
+      }
+      if (typeof data.selectedImageIndex === 'number') {
+        selectedImageIndex.value = data.selectedImageIndex;
+      }
+      return true;
+    }
+  } catch (e) {}
+  return false;
+}
+
+const sessionDrafts = reactive(new Map());
+const showPreviewModal = ref(false);
+const previewModalData = ref(null);
+const previewLoading = ref(false);
+
+const targetRefTag = computed(() => {
+  if (referenceTray.value.length === 0) return '@图1';
+  const idx = selectedImageIndex.value >= 0 && selectedImageIndex.value < referenceTray.value.length
+    ? selectedImageIndex.value
+    : 0;
+  return `@图${idx + 1}`;
+});
+
+const targetRefThumb = computed(() => {
+  if (referenceTray.value.length === 0) return '';
+  const idx = selectedImageIndex.value >= 0 && selectedImageIndex.value < referenceTray.value.length
+    ? selectedImageIndex.value
+    : 0;
+  const it = referenceTray.value[idx];
+  return it ? (it.thumbUrl || it.url || '') : '';
+});
+
+const targetRefName = computed(() => {
+  if (referenceTray.value.length === 0) return '';
+  const idx = selectedImageIndex.value >= 0 && selectedImageIndex.value < referenceTray.value.length
+    ? selectedImageIndex.value
+    : 0;
+  const it = referenceTray.value[idx];
+  return it ? (it.name || '') : '';
+});
+
+function getFullPromptText() {
+  const supplement = getRawEditorText();
+  const recipe = (recipePrompt.value || '').trim();
+  return [recipe, supplement].filter(Boolean).join('\n');
+}
+
+const imageSuggestions = ref([]);
+const imageSuggestionsLoading = ref(false);
+
+function applySuggestionToSupplement(text) {
+  if (!text) return;
+  const existing = getRawEditorText();
+  appendRichSegmentText((existing ? ' ' : '') + text.trim());
+}
+
+async function loadNextSuggestions(asstMsg) {
+  if (!asstMsg || asstMsg.isError || asstMsg.nextSuggestionsLoaded) return;
+  asstMsg.nextSuggestionsLoaded = true;
+  const text = asstMsg.content || asstMsg.prompt || '';
+  if (!text.trim()) return;
+  try {
+    const res = await fetchSuggestPrompts({
+      kind: 'next',
+      assistantText: text
+    });
+    if (res && Array.isArray(res.suggestions) && res.suggestions.length > 0) {
+      asstMsg.nextSuggestions = res.suggestions.slice(0, 3);
+    }
+  } catch (err) {
+    console.warn('[suggest-prompts] 加载接续建议失败:', err.message);
+  }
+}
+
+async function handleSuggestPrompts(promptText) {
+  if (typeof promptText === 'string' && promptText.trim()) {
+    applySuggestionToSupplement(promptText);
+    return;
+  }
+  // 未带参数说明是用户点击了「按这些图给建议」
+  const validImages = referenceTray.value
+    .map(r => r.annotatedUrl || r.previewUrl || r.url)
+    .filter(Boolean);
+  if (!validImages.length) {
+    alert('请先在下方看图区添加或选择参考图');
+    return;
+  }
+  imageSuggestionsLoading.value = true;
+  imageSuggestions.value = [];
+  try {
+    const res = await fetchSuggestPrompts({
+      kind: 'images',
+      images: validImages
+    });
+    if (res && Array.isArray(res.suggestions) && res.suggestions.length > 0) {
+      imageSuggestions.value = res.suggestions.slice(0, 3);
+    }
+  } catch (err) {
+    alert('获取看图建议失败: ' + err.message);
+  } finally {
+    imageSuggestionsLoading.value = false;
+  }
+}
+
+function _old_handleSuggestPrompts(promptText) {
+  if (!promptText) return;
+  const existing = getRawEditorText();
+  appendRichSegmentText((existing ? ' ' : '') + promptText);
+}
+
+function resolveDeliveryImageForModel(item, modelKey) {
+  if (!item) return { url: '', isWireframe: false };
+  const spec = getModelPrecisionSpec(modelKey);
+  const hasPolygon = Array.isArray(item.regions) && item.regions.some((r) => r.type === 'polygon');
+  const needsVisual = Boolean(spec?.supportsVisualMarker || spec?.mode === 'qwen_visual' || hasPolygon);
+  if (needsVisual && item.wireframeUrl) {
+    return { url: item.wireframeUrl, isWireframe: true };
+  }
+  return { url: item.url || '', isWireframe: false };
+}
+
+async function handlePreviewRequest() {
+  const fullPrompt = getFullPromptText();
+  if (!fullPrompt) {
+    composerError.value = '请先输入配方句或补充细节要求再预览请求';
+    return;
+  }
+  composerError.value = '';
+  previewLoading.value = true;
+  try {
+    const currentMod = activeModality.value;
+    const typedTray = JSON.parse(JSON.stringify(referenceTray.value));
+    let currentTray = typedTray;
+    if (currentMod !== 'chat' && currentTray.length === 0) {
+      currentTray = carryPriorRefs(currentTray);
+    }
+    const currentModel = currentMod === 'chat'
+      ? chatModelKey.value
+      : (currentMod === 'image' ? imageModelKey.value : (currentMod === 'video' ? videoModelKey.value : musicType.value));
+
+    const sanitizeForPreview = (u) => {
+      if (typeof u === 'string' && u.startsWith('data:')) {
+        return u.length > 120 ? `${u.slice(0, 80)}...[Base64已脱敏略(${Math.round(u.length / 1024)}KB)]` : u;
+      }
+      return u;
+    };
+
+    const deliveryTray = currentTray.map((it) => {
+      const resolved = resolveDeliveryImageForModel(it, currentModel);
+      return {
+        ...it,
+        deliveryUrl: resolved.url,
+        isWireframe: resolved.isWireframe
+      };
+    });
+
+    const imageUrls = [];
+    for (const it of deliveryTray) {
+      if (it && it.deliveryUrl) imageUrls.push(sanitizeForPreview(it.deliveryUrl));
+      if (it && Array.isArray(it.baseAttrRefs)) {
+        for (const bar of it.baseAttrRefs) {
+          if (bar?.path) imageUrls.push(authedMediaUrl(bar.path));
+        }
+      } else if (it && Array.isArray(it.silentRefs)) {
+        for (const sr of it.silentRefs) {
+          if (sr?.url) imageUrls.push(sanitizeForPreview(sr.url));
+        }
+      }
+    }
+    const imageItems = deliveryTray.map((it, idx) => ({
+      tag: it.tag || `@图${idx + 1}`,
+      source: 'stage',
+      url: it.deliveryUrl,
+      isWireframe: it.isWireframe
+    }));
+    for (const it of currentTray) {
+      if (it && Array.isArray(it.silentRefs)) {
+        for (const sr of it.silentRefs) {
+          if (sr?.url) {
+            imageItems.push({
+              tag: sr.tag || `@图${imageItems.length + 1}`,
+              source: '3d_snapshot',
+              url: sr.url,
+              isWireframe: false
+            });
+          }
+        }
+      }
+    }
+
+    let dialectPrompt = fullPrompt;
+    currentTray.forEach((img, idx) => {
+      if (img?.regions && img.regions.length > 0) {
+        const res = compilePrecisionEditPrompt({
+          rawPrompt: dialectPrompt,
+          regions: img.regions,
+          imageIndex: idx,
+          targetModelKey: currentModel,
+        });
+        dialectPrompt = res.dialectPrompt;
+      }
+    });
+
+    const previewPayload = {
+      prompt: dialectPrompt,
+      model: currentModel,
+      modality: currentMod,
+      size: selectedResolution.value || '2K',
+      ratio: selectedRatio.value || '16:9',
+      imageUrls,
+      imageItems,
+      params: declaredParams(),
+      extras: schemaParams.value || {},
+      snippetIds: activeSnippetIds()
+    };
+
+    const result = await previewAiGeneration(previewPayload);
+    previewModalData.value = result;
+    showPreviewModal.value = true;
+  } catch (err) {
+    console.error('预览请求失败:', err);
+    composerError.value = err.message || '预览请求生成失败';
+  } finally {
+    previewLoading.value = false;
+  }
+}
+
+function onPreviewSend() {
+  showPreviewModal.value = false;
+  sendMessage();
+}
+
+function openRequestSnapshot(msg) {
+  if (msg.requestSnapshot) {
+    previewModalData.value = msg.requestSnapshot;
+    showPreviewModal.value = true;
+    return;
+  }
+  if (msg.params?.outbound || msg.params?.requestSnapshot) {
+    previewModalData.value = msg.params.outbound || msg.params.requestSnapshot;
+    showPreviewModal.value = true;
+    return;
+  }
+  const refs = msg.refs || [];
+  const images = (msg.images || refs.map(r => r.url || '')).map((u, i) => ({
+    tag: `@图${i + 1}`,
+    source: 'history',
+    path: String(u || '').split('?')[0],
+    fullUrl: String(u || '').split('?')[0]
+  }));
+  const modelName = msg.model || msg.params?.model || 'Seedream 5.0';
+  const mod = msg.modality || 'image';
+  const body = {
+    model: modelName,
+    prompt: msg.content,
+    images: images.map(img => img.path),
+    size: msg.resolution || msg.params?.resolution || '2K',
+    ratio: msg.ratio || msg.params?.ratio || '16:9'
+  };
+  previewModalData.value = {
+    rawPrompt: msg.content,
+    dialectPrompt: msg.content,
+    images,
+    request: {
+      endpoint: '/api/gen/' + mod,
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ***' },
+      body,
+      curl: `curl -X POST "/api/gen/${mod}" \\\n  -H "Content-Type: application/json" \\\n  -H "Authorization: Bearer $API_KEY" \\\n  -d '${JSON.stringify(body, null, 2)}'`
+    }
+  };
+  showPreviewModal.value = true;
+}
+
+function openEditLayer(idx) {
+  selectedImageIndex.value = idx;
+  showEditModal.value = true;
+}
+
+const isRecipeEditing = ref(false);
+const recipeInputRef = ref(null);
+
+function startRecipeEdit() {
+  isRecipeEditing.value = true;
+  nextTick(() => {
+    if (recipeInputRef.value) {
+      recipeInputRef.value.focus();
+    }
+  });
+}
+
+function highlightRegionFromChip(imgIdx, regionName) {
+  const targetImg = referenceTray.value[imgIdx];
+  if (!targetImg || !Array.isArray(targetImg.regions)) return;
+  const found = targetImg.regions.find(r => r.name === regionName || r.name.includes(regionName) || regionName.includes(r.name));
+  if (found) {
+    hoveredRegionKey.value = `${imgIdx}_${found.id}`;
+  }
+}
+
+function parseRecipeSegments(text) {
+  if (!text) return [];
+  const segments = [];
+  const regex = /(@(?:图|图片|视频|音频)\d+(?:\[[^\]]+\])?)/g;
+  let lastIdx = 0;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIdx) {
+      segments.push({ type: 'text', text: text.slice(lastIdx, match.index) });
+    }
+    const fullTag = match[1];
+    const m = fullTag.match(/@(?:图|图片)(\d+)(?:\[([^\]]+)\])?/);
+    const tuNum = m ? Number(m[1]) : 1;
+    const regionName = m ? m[2] : null;
+    segments.push({
+      type: 'chip',
+      tag: fullTag,
+      tuNum,
+      regionName,
+      key: regionName ? `${tuNum - 1}_${regionName}` : null
+    });
+    lastIdx = regex.lastIndex;
+  }
+  if (lastIdx < text.length) {
+    segments.push({ type: 'text', text: text.slice(lastIdx) });
+  }
+  return segments;
+}
+
+function syncAggregatedRecipePrompt() {
+  const recipes = [];
+  referenceTray.value.forEach((item, idx) => {
+    if (item.recipe && item.recipe.trim()) {
+      recipes.push({ idx, recipe: item.recipe.trim() });
+    }
+  });
+  if (recipes.length === 0) return;
+  if (recipes.length === 1) {
+    recipePrompt.value = recipes[0].recipe;
+    return;
+  }
+  const bulletLines = [];
+  recipes.forEach(r => {
+    const lines = r.recipe.split('\n');
+    lines.forEach(l => {
+      const trimmed = l.trim();
+      if (trimmed.startsWith('•') || trimmed.startsWith('-') || trimmed.includes('[区域') || trimmed.includes('改为') || trimmed.includes('替换为')) {
+        bulletLines.push(trimmed.startsWith('•') ? trimmed : `• ${trimmed}`);
+      }
+    });
+  });
+  if (bulletLines.length > 0) {
+    recipePrompt.value = `【空间组合编辑方案】\n${bulletLines.join('\n')}\n要求：保持空间整体结构、主要动线与光影一致。框外保持原图像素。`;
+  } else {
+    recipePrompt.value = recipes.map(r => r.recipe).join('\n\n');
+  }
+}
+
+function syncGenModeWithReferenceTray() {
+  const schema = currentSchema.value;
+  if (!schema || !schema.modes || !schema.modes.length) return;
+  const modes = schema.modes;
+  const tray = referenceTray.value || [];
+  const imgCount = tray.filter(it => !it.kind || it.kind === 'image').length;
+
+  if (imgCount === 0) {
+    if (activeGenMode.value !== 'text_to_image' && modes.some(m => m.id === 'text_to_image')) {
+      setGenMode('text_to_image');
+    }
+    return;
+  }
+
+  // 有图状态下：禁止停留在文生图
+  const hasRegions = tray.some(img => Array.isArray(img.regions) && img.regions.length > 0) || Boolean(recipePrompt.value?.trim());
+  const hasOutpaint = tray.some(img => img.outpainted);
+
+  if (hasOutpaint && modes.some(m => m.id === 'expand_fill')) {
+    setGenMode('expand_fill');
+  } else if (hasRegions && modes.some(m => m.id === 'image_edit')) {
+    setGenMode('image_edit');
+  } else if (imgCount === 1) {
+    const target = modes.some(m => m.id === 'image_to_image')
+      ? 'image_to_image'
+      : (modes.some(m => m.id === 'image_reference') ? 'image_reference' : modes.find(m => m.id !== 'text_to_image')?.id);
+    if (target && (activeGenMode.value === 'text_to_image' || !modes.some(m => m.id === activeGenMode.value))) {
+      setGenMode(target);
+    }
+  } else if (imgCount > 1) {
+    const target = hasRegions && modes.some(m => m.id === 'image_edit')
+      ? 'image_edit'
+      : (modes.some(m => m.id === 'image_reference') ? 'image_reference' : (modes.some(m => m.id === 'image_to_image') ? 'image_to_image' : modes[0]?.id));
+    if (target && (activeGenMode.value === 'text_to_image' || !modes.some(m => m.id === activeGenMode.value))) {
+      setGenMode(target);
+    }
+  }
+}
+
+function onEditApplyRegionsToImage({ imageIndex, regions, recipe, silentRefs, annotations, wireframeDataUrl, baseAttrRefs }) {
+  const target = referenceTray.value[imageIndex];
+  if (target) {
+    target.regions = regions;
+    target.annotations = annotations;
+    if (baseAttrRefs && Array.isArray(baseAttrRefs)) {
+      const mappedRefs = [];
+      for (const item of baseAttrRefs) {
+        if (!item || !item.rel) continue;
+        const rel = String(item.rel);
+        const mSwatch = rel.match(/cache\/base-library\/paints\/([^\/]+)\/swatch\.png$/);
+        const mBasecolor = rel.match(/cache\/base-library\/materials\/([^\/]+)\/basecolor\.jpg$/);
+        if (item.kind === 'swatch' && mSwatch) {
+          mappedRefs.push({
+            kind: 'swatch',
+            path: `/api/base-library/paints/${mSwatch[1]}/swatch`
+          });
+        } else if (item.kind === 'basecolor' && mBasecolor) {
+          mappedRefs.push({
+            kind: 'basecolor',
+            path: `/api/base-library/materials/${mBasecolor[1]}/basecolor`
+          });
+        }
+      }
+      target.baseAttrRefs = mappedRefs;
+      target.silentRefs = [];
+      target.wireframeUrl = null;
+    } else {
+      target.silentRefs = silentRefs;
+      target.wireframeUrl = wireframeDataUrl || null;
+    }
+    if (recipe) {
+      target.recipe = recipe;
+    }
+  }
+  syncAggregatedRecipePrompt();
+  syncGenModeWithReferenceTray();
+}
+
+function onEditApplyRecipeWithRefs({ recipe, newRefs }) {
+  if (recipe) {
+    const mainImg = referenceTray.value[0];
+    if (mainImg) {
+      mainImg.recipe = recipe;
+    } else {
+      recipePrompt.value = recipe;
+    }
+    syncAggregatedRecipePrompt();
+  }
+  if (Array.isArray(newRefs) && newRefs.length > 0) {
+    for (const ref of newRefs) {
+      const exists = referenceTray.value.some((it) => it.url === ref.url);
+      if (!exists) {
+        const nextIdx = referenceTray.value.length + 1;
+        const tag = ref.tag || `@图${nextIdx}`;
+        referenceTray.value.push({
+          name: ref.name || `3D参考_${nextIdx}`,
+          url: ref.url,
+          tag,
+          kind: 'image',
+          weight: 85,
+          origin: ref.origin || '3d_snapshot',
+          isRefObject: true,
+          relatedImageIndex: 0
+        });
+      }
+    }
+  }
+  syncGenModeWithReferenceTray();
+}
+
+function onEditApplyOutpaintedImage({ imageIndex, url }) {
+  const target = referenceTray.value[imageIndex];
+  if (target) {
+    if (!target.originalUrl) {
+      target.originalUrl = target.url;
+    }
+    target.url = url;
+    target.outpainted = true;
+  }
+}
+
+function onEditApplyCustomImage({ imageIndex, dataUrl }) {
+  const target = referenceTray.value[imageIndex];
+  if (target) {
+    if (!target.originalUrl) {
+      target.originalUrl = target.url;
+    }
+    target.url = dataUrl;
+    target.annotated = true;
+  }
+}
+
+function onRevertAnnotation(imageIndex) {
+  const target = referenceTray.value[imageIndex];
+  if (target && target.originalUrl) {
+    target.url = target.originalUrl;
+    target.annotated = false;
+    target.outpainted = false;
+  }
+}
+
+function onTraySelect(idx) {
+  selectedImageIndex.value = idx;
+  if (viewerCollapsed.value) {
+    viewerCollapsed.value = false;
+  }
+}
+
+function getRegionOpDisplayName(op) {
+  if (op === 'replace') return '3D替换';
+  if (op === 'add') return '增加陈设';
+  if (op === 'recolor') return '基础属性';
+  if (op === 'erase') return '智能消除';
+  return '定制空间';
+}
+
+function selectAtMention(item, idx) {
+  showAtMenu.value = false;
+  hoveredRegionKey.value = null;
+  if (richEditorRef.value) {
+    const text = getRawEditorText();
+    if (text.endsWith('@')) {
+      const walker = document.createTreeWalker(richEditorRef.value, NodeFilter.SHOW_TEXT, null);
+      let lastNode = null;
+      while (walker.nextNode()) lastNode = walker.currentNode;
+      if (lastNode && lastNode.nodeValue && lastNode.nodeValue.endsWith('@')) {
+        lastNode.nodeValue = lastNode.nodeValue.slice(0, -1);
+      }
+    }
+  }
+  insertChipToEditor(item);
+}
+
+function selectAtRegionMention(item, idx, reg) {
+  showAtMenu.value = false;
+  hoveredRegionKey.value = null;
+  if (richEditorRef.value) {
+    const text = getRawEditorText();
+    if (text.endsWith('@')) {
+      const walker = document.createTreeWalker(richEditorRef.value, NodeFilter.SHOW_TEXT, null);
+      let lastNode = null;
+      while (walker.nextNode()) lastNode = walker.currentNode;
+      if (lastNode && lastNode.nodeValue && lastNode.nodeValue.endsWith('@')) {
+        lastNode.nodeValue = lastNode.nodeValue.slice(0, -1);
+      }
+    }
+  }
+  const tag = `@图${idx + 1}[${reg.name}]`;
+  const regionKey = `${idx}_${reg.id}`;
+  insertChipToEditor(item, tag, regionKey);
+}
+
 const sidebarTab = ref('history'); // 'history' | 'library'
 const currentSessionId = ref('default_session');
 const tplSearch = ref('');
@@ -2176,6 +2802,7 @@ function resetSchemaForModel() {
   }
   schemaParams.value = next;
   applyModeLocks();
+  syncGenModeWithReferenceTray();
   const id = activeGenMode.value;
   if (id === 'first_last_frame') videoSubMode.value = 'first_last';
   else if (id === 'text_to_video' || id === 'text_to_image') videoSubMode.value = 'prompt_only';
@@ -2568,7 +3195,10 @@ async function loadStudioCatalog() {
   }
 }
 
+watch([recipePrompt, referenceTray], () => { saveDraftToStorage(); syncGenModeWithReferenceTray(); }, { deep: true });
+
 onMounted(async () => {
+  restoreDraftFromStorage();
   await loadStudioCatalog();
   resetSchemaForModel();
   window.addEventListener('keydown', handleGlobalKeydown);
@@ -2711,37 +3341,43 @@ function jumpToLatest() {
   scrollToBottom({ behavior: 'smooth' });
 }
 
-// 跨板块：将真实素材直接挂载为 @图1 并插入富文本输入框！
+// 跨板块：将真实素材追加至看图区并挂载为 @图N，不覆盖已有内容
 function mountAssetFromLibrary(item) {
-  const assetUrl = item.url || getAssetImageUrl(item.fid, item.mediaToken);
+  const assetUrl = item.url || (item.fid ? getAssetImageUrl(item.fid, item.mediaToken) : '');
   const assetName = item.file_name || item.name || '选定素材';
+  if (!assetUrl) return;
 
-  // 清空历史假参考，实打实挂载选中资产为 @图1
-  referenceTray.value = [{
-    name: assetName,
-    url: assetUrl,
-    weight: 90,
-    tag: '@图1',
-    fid: item.fid
-  }];
-
-  // 若素材为视频，自动切换到底栏【视频生成】；若为图片，默认切换到【图片生成】或【纯对话】
-  if (item.category === 'video' || item.kind === 'video') {
-    activeModality.value = 'video';
-    autoSelectRefMode(['video']);
+  let asset = referenceTray.value.find(r => r.url === assetUrl);
+  if (!asset) {
+    const idx = referenceTray.value.length + 1;
+    asset = {
+      name: assetName,
+      url: assetUrl,
+      weight: 90,
+      tag: `@图${idx}`,
+      fid: item.fid,
+      mediaToken: item.mediaToken,
+    };
+    referenceTray.value.push(asset);
+    selectedImageIndex.value = referenceTray.value.length - 1;
   } else {
-    activeModality.value = 'image';
-    autoSelectRefMode(['image']);
+    selectedImageIndex.value = referenceTray.value.indexOf(asset);
   }
 
-  nextTick(() => {
-    if (richEditorRef.value) {
-      richEditorRef.value.innerHTML = '';
-      appendRichSegmentText('参考 ');
-      insertChipToEditor(referenceTray.value[0]);
-      appendRichSegmentText(' 的空间结构与采光风格，在中央布置家具并保持温润通透质感。');
-    }
-  });
+  if (item._openDrawer) {
+    rightDrawerOpen.value = true;
+  }
+
+  if (item.category === 'video' || item.kind === 'video') {
+    activeModality.value = 'video';
+  } else if (item.category === 'audio' || item.kind === 'audio') {
+    activeModality.value = 'music';
+  } else {
+    activeModality.value = 'image';
+  }
+
+  // 用户需求：增加了图片后对话框不自动新增图片引用，取消输入框自动关联
+  selectedImageIndex.value = referenceTray.value.indexOf(asset);
 }
 
 /**
@@ -2845,37 +3481,21 @@ function applyQuickStarter(rec) {
 function paintChipTag(chip, tag) {
   chip.setAttribute('data-tag', tag);
   const span = [...chip.querySelectorAll('span')].find((el) => !el.classList.contains('inline-asset-delete'));
-  if (span) span.textContent = `${tag} ${chip.getAttribute('data-name') || ''}`.trim();
+  if (span) span.textContent = tag;
 }
 
 function syncTrayFromEditor() {
-  if (!richEditorRef.value) {
-    referenceTray.value = [];
-    return;
-  }
+  // 用户需求：取消输入框胶囊与看图区 referenceTray 的强绑定，不再因编辑器无胶囊清空看图区
+  if (!richEditorRef.value) return;
   const chips = [...richEditorRef.value.querySelectorAll('.inline-asset-chip')];
-  const next = [];
   chips.forEach((chip) => {
     const url = chip.getAttribute('data-url') || '';
-    const resolved = chip.getAttribute('data-resolved') !== '0';
-    if (!resolved || !url) return;
-    const existing = next.find((item) => item.url === url);
-    const tag = existing ? existing.tag : `@图${next.length + 1}`;
-    paintChipTag(chip, tag);
-    if (existing) return;
-    next.push({
-      name: chip.getAttribute('data-name') || labelForRef(url, ''),
-      url,
-      fid: chip.getAttribute('data-fid') || '',
-      kind: chip.getAttribute('data-kind') || 'image',
-      origin: chip.getAttribute('data-origin') || 'upload',
-      weight: 85,
-      tag
-    });
+    if (!url) return;
+    const existing = referenceTray.value.find((item) => item.url === url);
+    if (existing) {
+      paintChipTag(chip, existing.tag);
+    }
   });
-  const prev = referenceTray.value;
-  const same = prev.length === next.length && next.every((item, i) => item.url === prev[i].url && item.tag === prev[i].tag);
-  if (!same) referenceTray.value = next;
 }
 function editorHasRawMention() {
   if (!richEditorRef.value) return false;
@@ -2912,7 +3532,13 @@ function onEditorInput() {
   }
 
   if (text.endsWith('@')) {
-    openAssetSelectorModal();
+    if (referenceTray.value.length > 0) {
+      showAtMenu.value = true;
+    } else {
+      openAssetSelectorModal();
+    }
+  } else if (!text.includes('@')) {
+    showAtMenu.value = false;
   }
   if (reparsingEditor) return;
   if (editorHasRawMention()) reparseEditorChips([]);
@@ -3051,7 +3677,13 @@ function getRawEditorText() {
       if (node.classList && node.classList.contains('inline-asset-chip')) {
         const tag = node.getAttribute('data-tag') || '@图1';
         const name = node.getAttribute('data-name') || '';
-        result += ` ${tag}[${name}] `;
+        if (tag.includes('[')) {
+          result += ` ${tag} `;
+        } else if (name) {
+          result += ` ${tag}[${name}] `;
+        } else {
+          result += ` ${tag} `;
+        }
       } else {
         node.childNodes.forEach(walk);
       }
@@ -3061,7 +3693,7 @@ function getRawEditorText() {
   return result.trim();
 }
 
-function insertChipToEditor(asset) {
+function insertChipToEditor(asset, customTag = null, regionKey = null) {
   if (!richEditorRef.value) return;
   const last = richEditorRef.value.lastChild;
   if (last && last.nodeType === Node.TEXT_NODE) {
@@ -3070,7 +3702,7 @@ function insertChipToEditor(asset) {
   const chip = document.createElement('span');
   chip.className = 'inline-asset-chip';
   chip.contentEditable = 'false';
-  const tag = asset.tag || `@图${referenceTray.value.indexOf(asset) + 1}`;
+  const tag = customTag || asset.tag || `@图${referenceTray.value.indexOf(asset) + 1}`;
   chip.setAttribute('data-tag', tag);
   chip.setAttribute('data-name', asset.name || '');
   chip.setAttribute('data-url', asset.url || '');
@@ -3078,16 +3710,17 @@ function insertChipToEditor(asset) {
   chip.setAttribute('data-kind', asset.kind || 'image');
   chip.setAttribute('data-origin', asset.origin || 'upload');
   chip.setAttribute('data-resolved', asset.url && asset.resolved !== false ? '1' : '0');
+  if (regionKey) {
+    chip.setAttribute('data-region-key', regionKey);
+    chip.onmouseenter = () => { hoveredRegionKey.value = regionKey; };
+    chip.onmouseleave = () => { hoveredRegionKey.value = null; };
+  }
   chip.onclick = () => {
     if (asset.url) openMediaPreview(asset);
   };
 
-  const img = document.createElement('img');
-  if (asset.url) img.src = asset.url;
-  img.className = 'inline-asset-thumb';
-
   const textSpan = document.createElement('span');
-  textSpan.innerText = `${tag} ${asset.name || ''}`.trim();
+  textSpan.innerText = tag;
 
   const delBtn = document.createElement('span');
   delBtn.className = 'inline-asset-delete';
@@ -3098,7 +3731,6 @@ function insertChipToEditor(asset) {
     syncTrayFromEditor();
   };
 
-  chip.appendChild(img);
   chip.appendChild(textSpan);
   chip.appendChild(delBtn);
 
@@ -3272,7 +3904,7 @@ function messageAttachments(msg) {
 function parseRichSegments(content, msg) {
   if (!content) return [];
   const segments = [];
-  const regex = /(@(?:图|图片|视频|音频)(\d+))\[([^\]]+)\]/g;
+  const regex = /(@(?:图|图片|视频|音频)(\d+))(?:\[([^\]]*)\])?/g;
   const refs = messageAttachments(msg || {});
   let lastIdx = 0;
   let match;
@@ -3283,8 +3915,8 @@ function parseRichSegments(content, msg) {
     }
     const tag = match[1];
     const num = parseInt(match[2], 10);
-    const name = match[3];
-    const matchedAsset = refs[num - 1] || refs.find((item) => item.name === name) || null;
+    const bracketContent = (match[3] || '').trim();
+    const matchedAsset = refs[num - 1] || (bracketContent ? refs.find((item) => item.name === bracketContent) : null) || null;
     const thumb = matchedAsset && matchedAsset.url && mediaKind(matchedAsset) === 'image' && matchedAsset.url !== '/favicon.ico'
       ? matchedAsset.url
       : '';
@@ -3292,10 +3924,15 @@ function parseRichSegments(content, msg) {
     segments.push({
       type: 'chip',
       tag,
-      name,
+      name: bracketContent,
       thumb,
       ref: matchedAsset,
     });
+
+    if (bracketContent && bracketContent.startsWith('区域')) {
+      segments.push({ type: 'text', text: `[${bracketContent}]` });
+    }
+
     lastIdx = regex.lastIndex;
   }
 
@@ -3501,17 +4138,195 @@ async function loadTagVocab() {
   }
 }
 
+// 视口与懒加载状态管理
+const visibleCardIds = ref(new Set());
+const forbiddenAspectTplIds = new Set();
+let cardIntersectionObserver = null;
+
+function isCardInViewport(id) {
+  return visibleCardIds.value.has(id);
+}
+
+function getTemplateAspectRatio(tpl) {
+  if (tpl.poster_w > 0 && tpl.poster_h > 0) {
+    return `${tpl.poster_w} / ${tpl.poster_h}`;
+  }
+  if (tpl.aspect_ratio && tpl.aspect_ratio !== '16:9') {
+    const parts = String(tpl.aspect_ratio).split(':');
+    if (parts.length === 2 && Number(parts[0]) > 0 && Number(parts[1]) > 0) {
+      return `${parts[0]} / ${parts[1]}`;
+    }
+  }
+  return '1 / 1';
+}
+
+function onVideoLoadedMetadata(e, tpl) {
+  if (!tpl || forbiddenAspectTplIds.has(tpl.id)) return;
+  const video = e.target;
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  if (!vw || !vh) return;
+  if (!tpl.poster_w || !tpl.poster_h) {
+    tpl.poster_w = vw;
+    tpl.poster_h = vh;
+    tpl.aspect_ratio = `${vw}:${vh}`;
+    authFetch(`/api/creation-templates/${encodeURIComponent(tpl.id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        poster_w: vw,
+        poster_h: vh,
+        aspect_ratio: `${vw}:${vh}`
+      })
+    }).then(res => {
+      if (res.status === 403) {
+        forbiddenAspectTplIds.add(tpl.id);
+      }
+    }).catch(() => {});
+  }
+}
+
+function setupCardObserver() {
+  if (typeof window === 'undefined' || !('IntersectionObserver' in window)) return;
+  if (cardIntersectionObserver) cardIntersectionObserver.disconnect();
+  cardIntersectionObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      const id = entry.target.getAttribute('data-tpl-id');
+      if (!id) return;
+      if (entry.isIntersecting) {
+        visibleCardIds.value.add(id);
+      } else {
+        visibleCardIds.value.delete(id);
+      }
+    });
+  }, { rootMargin: '200px' });
+
+  nextTick(() => {
+    const elements = document.querySelectorAll('[data-tpl-id]');
+    elements.forEach(el => cardIntersectionObserver.observe(el));
+  });
+}
+
+watch(filteredTemplates, () => {
+  nextTick(() => {
+    if (cardIntersectionObserver) {
+      const elements = document.querySelectorAll('[data-tpl-id]');
+      elements.forEach(el => cardIntersectionObserver.observe(el));
+    }
+  });
+});
+
 async function loadTemplates() {
   await loadTagVocab();
+  const userId = sessionUser.value?.id || 'default';
+
+  // 1. 先读本地 IndexedDB 缓存
   try {
-    const res = await authFetch('/api/creation-templates');
-    const json = await res.json();
-    if (json.success && Array.isArray(json.data)) {
-      templates.value = json.data;
+    const cached = await getTemplatesCache(userId);
+    if (cached && Array.isArray(cached.templates) && cached.templates.length > 0) {
+      templates.value = cached.templates;
       sortTemplates();
+      setupCardObserver();
     }
   } catch (e) {
-    console.warn('加载创作库模板失败', e);
+    console.warn('读取创作库本地缓存异常:', e);
+  }
+
+  // 2. 增量刷新
+  try {
+    const cached = await getTemplatesCache(userId);
+    let pageSince = cached.row_cursor;
+    let pageTomb = cached.tomb_cursor;
+
+    // 两支游标均无，直接全量拉取
+    if (!pageSince && !pageTomb) {
+      const fullRes = await fetchCreationTemplatesIncremental();
+      if (fullRes.success && Array.isArray(fullRes.data)) {
+        templates.value = fullRes.data;
+        sortTemplates();
+        setupCardObserver();
+        await replaceTemplatesCache(
+          fullRes.data,
+          {
+            row_cursor: fullRes.next_since,
+            tomb_cursor: { deleted_at: fullRes.server_time, id: '' }
+          },
+          userId
+        );
+      }
+      return;
+    }
+
+    // 增量循环翻页合并
+    let hasMoreRows = pageSince !== null;
+    let hasMoreTombs = pageTomb !== null;
+    let loopCount = 0;
+
+    while ((hasMoreRows || hasMoreTombs) && loopCount < 50) {
+      loopCount++;
+      const deltaRes = await fetchCreationTemplatesIncremental({
+        since: pageSince ? pageSince.updated_at : undefined,
+        sinceId: pageSince ? pageSince.id : undefined,
+        deletedSince: pageTomb ? pageTomb.deleted_at : undefined,
+        deletedSinceId: pageTomb ? pageTomb.id : undefined
+      });
+
+      if (!deltaRes.success) break;
+
+      if (deltaRes.resync) {
+        await clearTemplatesCache();
+        const fullRes = await fetchCreationTemplatesIncremental();
+        if (fullRes.success && Array.isArray(fullRes.data)) {
+          templates.value = fullRes.data;
+          sortTemplates();
+          setupCardObserver();
+          await replaceTemplatesCache(
+            fullRes.data,
+            {
+              row_cursor: fullRes.next_since,
+              tomb_cursor: { deleted_at: fullRes.server_time, id: '' }
+            },
+            userId
+          );
+        }
+        return;
+      }
+
+      const incoming = deltaRes.data || [];
+      const deletedList = deltaRes.deleted_ids || [];
+      const deletedIdSet = new Set(deletedList.map(d => d.id));
+
+      if (incoming.length > 0 || deletedIdSet.size > 0) {
+        const tMap = new Map(templates.value.map(t => [t.id, t]));
+        for (const delId of deletedIdSet) {
+          tMap.delete(delId);
+        }
+        for (const item of incoming) {
+          const old = tMap.get(item.id);
+          if (!old || (item.updated_at >= (old.updated_at || 0))) {
+            tMap.set(item.id, item);
+          }
+        }
+        templates.value = Array.from(tMap.values());
+        sortTemplates();
+        setupCardObserver();
+      }
+
+      pageSince = deltaRes.next_since;
+      pageTomb = deltaRes.deleted_next;
+      hasMoreRows = !!deltaRes.has_more;
+      hasMoreTombs = !!deltaRes.deleted_has_more;
+
+      const isFinal = !hasMoreRows && !hasMoreTombs;
+      await mergeTemplatesCache(
+        incoming,
+        deletedList.map(d => d.id),
+        isFinal ? { row_cursor: pageSince, tomb_cursor: pageTomb } : null,
+        userId
+      );
+    }
+  } catch (e) {
+    console.warn('增量加载创作库失败:', e);
   }
 }
 
@@ -3544,10 +4359,35 @@ async function loadSessions() {
 
 async function selectSession(s) {
   if (!s || !s.id) return;
+  // 1. 保存前一个会话的草稿状态（配方句、富文本、参考托盘、选图索引）
+  if (currentSessionId.value && currentSessionId.value !== s.id) {
+    sessionDrafts.set(currentSessionId.value, {
+      recipePrompt: recipePrompt.value || '',
+      editorHtml: richEditorRef.value ? richEditorRef.value.innerHTML : '',
+      referenceTray: JSON.parse(JSON.stringify(referenceTray.value || [])),
+      selectedImageIndex: selectedImageIndex.value || 0,
+    });
+  }
+
   currentSessionId.value = s.id;
-  resetComposerState();
   messages.value = [];
   pinned.value = true;
+  hasNewBelow.value = false;
+
+  // 2. 恢复目标会话的草稿状态；如果无草稿，彻底干净重置输入区和配方句
+  if (sessionDrafts.has(s.id)) {
+    const draft = sessionDrafts.get(s.id);
+    recipePrompt.value = draft.recipePrompt || '';
+    if (richEditorRef.value) {
+      richEditorRef.value.innerHTML = draft.editorHtml || '';
+    }
+    referenceTray.value = JSON.parse(JSON.stringify(draft.referenceTray || []));
+    selectedImageIndex.value = draft.selectedImageIndex || 0;
+  } else {
+    recipePrompt.value = '';
+    resetComposerState();
+    selectedImageIndex.value = 0;
+  }
   hasNewBelow.value = false;
   try {
     const rawMsgs = await fetchChatMessages(s.id);
@@ -3579,6 +4419,8 @@ async function selectSession(s) {
           userPrompt: m.result?.userPrompt || (m.role === 'user' ? (m.prompt || '') : ''),
           refs: m.result?.refs || m.params?.refs || [],
           images: Array.isArray(m.images) ? m.images : [],
+          requestSnapshot: m.params?.requestSnapshot || m.params?.outbound || m.result?.requestSnapshot || null,
+          params: m.params || null,
           isError: Boolean(m.result?.isError) || String(m.prompt || m.result?.content || '').startsWith('生成遇到问题'),
           genMode: m.result?.genMode || m.mode,
           assetFid: m.result?.assetFid || '',
@@ -3631,17 +4473,40 @@ async function selectSession(s) {
  */
 function resetComposerState() {
   if (richEditorRef.value) richEditorRef.value.innerHTML = '';
+  recipePrompt.value = '';
   referenceTray.value = [];
   sessionRefPool.value = [];
   activeSkillIds.value = [];
   optimizeUndo.value = null;
+  hoveredRegionKey.value = null;
 }
 
 async function createNewSession(opts = {}) {
+  const currentDraft = {
+    recipePrompt: recipePrompt.value || '',
+    editorHtml: richEditorRef.value ? richEditorRef.value.innerHTML : '',
+    referenceTray: JSON.parse(JSON.stringify(referenceTray.value || [])),
+    selectedImageIndex: selectedImageIndex.value || 0,
+  };
+  const hasActiveContent = currentDraft.referenceTray.length > 0 || currentDraft.recipePrompt || (currentDraft.editorHtml && currentDraft.editorHtml.trim());
+
+  if (currentSessionId.value) {
+    sessionDrafts.set(currentSessionId.value, currentDraft);
+  }
   const newId = `sess_${Date.now()}`;
   const newSess = { id: newId, title: '新创作会话' };
-  // 首条消息才懒建会话：此时输入区、挂载的技能都属于「这次发送」，不能清。
-  if (!opts.keepComposer) resetComposerState();
+
+  // 默认跨会话自动继承未提交的参考图托盘、选区与提示词
+  if (!opts.forceReset && hasActiveContent) {
+    sessionDrafts.set(newId, currentDraft);
+    saveDraftToStorage();
+  } else if (!opts.keepComposer) {
+    recipePrompt.value = '';
+    resetComposerState();
+    selectedImageIndex.value = 0;
+    try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch (_) {}
+  }
+
   sessions.value.unshift(newSess);
   currentSessionId.value = newId;
   messages.value = [];
@@ -3849,7 +4714,7 @@ function onAssetPickerConfirm(versions) {
     referenceTray.value.push(asset);
     kinds.push(asset.kind);
     rememberSessionRefs([asset]);
-    insertChipToEditor(asset);
+    // 用户需求：不自动在对话框新增胶囊
   }
   showAssetSelector.value = false;
   autoSelectRefMode(kinds);
@@ -3864,7 +4729,7 @@ function onAssetPickerUpload(file) {
   const kind = file.type.startsWith('video/') ? 'video' : (file.type.startsWith('audio/') ? 'audio' : 'image');
   const asset = { name, url, weight: 85, tag: `@图${idx}`, kind };
   referenceTray.value.push(asset);
-  insertChipToEditor(asset);
+  // 用户需求：不自动在对话框新增胶囊
   showAssetSelector.value = false;
   autoSelectRefMode([kind]);
 }
@@ -3896,6 +4761,27 @@ function openMediaPreview(itemOrUrl, defaultType = 'image') {
 
 function closeMediaPreview() {
   previewModal.value.visible = false;
+}
+
+function openEditFromLightbox() {
+  const url = previewModal.value.url;
+  const title = previewModal.value.title || '编辑图片';
+  closeMediaPreview();
+  if (!url) return;
+  const existing = referenceTray.value.find(r => r.url === url);
+  let targetIdx = 0;
+  if (!existing) {
+    const idx = referenceTray.value.length + 1;
+    referenceTray.value.push({
+      name: title,
+      url,
+      tag: `@图${idx}`
+    });
+    targetIdx = referenceTray.value.length - 1;
+  } else {
+    targetIdx = referenceTray.value.indexOf(existing);
+  }
+  openEditLayer(targetIdx);
 }
 
 function zoomPreview(delta) {
@@ -4027,7 +4913,7 @@ function getModelDisplayName(key) {
 // 发送消息
 async function sendMessage() {
   syncTrayFromEditor();
-  const rawContent = getRawEditorText();
+  const rawContent = getFullPromptText();
   if (!rawContent || generating.value) return;
 
   const currentMod = activeModality.value;
@@ -4067,12 +4953,48 @@ async function sendMessage() {
   }
   rememberSessionTitle(rawContent);
 
+  const outboundSnapshot = {
+    rawPrompt: rawContent,
+    dialectPrompt: rawContent,
+    images: currentTray.map((item, idx) => ({
+      tag: item.tag || `@图${idx + 1}`,
+      source: 'stage',
+      path: String(item.url || '').split('?')[0],
+      fullUrl: String(item.url || '').split('?')[0]
+    })),
+    request: {
+      endpoint: '/api/gen/' + currentMod,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ***',
+        'X-Model-Provider': retryModel
+      },
+      body: {
+        model: retryModel,
+        prompt: rawContent,
+        size: selectedResolution.value,
+        ratio: selectedRatio.value,
+        images: currentTray.map(r => String(r.url || '').split('?')[0]),
+        params: retryParams
+      },
+      curl: `curl -X POST "/api/gen/${currentMod}" \\\n  -H "Content-Type: application/json" \\\n  -H "Authorization: Bearer $API_KEY" \\\n  -d '${JSON.stringify({
+        model: retryModel,
+        prompt: rawContent,
+        size: selectedResolution.value,
+        ratio: selectedRatio.value,
+        images: currentTray.map(r => String(r.url || '').split('?')[0]),
+        params: retryParams
+      }, null, 2)}'`
+    }
+  };
+
   messages.value.push({
     role: 'user',
     content: rawContent,
     modality: currentMod,
     refs: currentTray,
-    images: currentTray.map((item) => item.url)
+    images: currentTray.map((item) => item.url),
+    requestSnapshot: outboundSnapshot
   });
   rememberSessionRefs(currentTray, 'upload');
   scrollToBottom();
@@ -4080,9 +5002,12 @@ async function sendMessage() {
   if (richEditorRef.value) {
     richEditorRef.value.innerHTML = '';
   }
-  referenceTray.value = [];
+  recipePrompt.value = '';
+  // 规范：发送之后看图区里的图保留，不执行 referenceTray = []
   optimizeUndo.value = null;
   generating.value = true;
+  try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch (_) {}
+  if (currentSessionId.value) sessionDrafts.delete(currentSessionId.value);
 
   // 保存用户消息至数据库
   try {
@@ -4099,7 +5024,9 @@ async function sendMessage() {
         refs: currentTray,
         genMode: currentMod,
         schemaMode: retryMode,
-        schemaParams: retryParams
+        schemaParams: retryParams,
+        outbound: outboundSnapshot,
+        requestSnapshot: outboundSnapshot
       }
     });
   } catch (e) {
@@ -4170,6 +5097,7 @@ async function sendMessage() {
         warning: warnings.length ? warnings.join('；') : ''
       };
       messages.value.push(asstMsg);
+      loadNextSuggestions(asstMsg);
 
       await saveChatMessage({
         sessionId: currentSessionId.value,
@@ -4180,8 +5108,38 @@ async function sendMessage() {
         result: asstMsg
       });
     } else if (currentMod === 'image') {
-      const imageUrls = await portableImageUrls(currentTray, currentTray.length || 1);
-      const promptForModel = promptWithPriorAnalysis(rawContent, usedPriorMedia ? currentTray.length : 0);
+      const deliveryTray = currentTray.map((it) => {
+        const resolved = resolveDeliveryImageForModel(it, imageModelKey.value);
+        return {
+          ...it,
+          url: resolved.url,
+          isWireframe: resolved.isWireframe
+        };
+      });
+      const imageUrls = await portableImageUrls(deliveryTray, deliveryTray.length || 1);
+      for (const it of currentTray) {
+        if (Array.isArray(it.baseAttrRefs)) {
+          for (const bar of it.baseAttrRefs) {
+            if (bar?.path) imageUrls.push(authedMediaUrl(bar.path));
+          }
+        } else if (Array.isArray(it.silentRefs)) {
+          for (const sr of it.silentRefs) {
+            if (sr?.url) imageUrls.push(sr.url);
+          }
+        }
+      }
+      let promptForModel = promptWithPriorAnalysis(rawContent, usedPriorMedia ? currentTray.length : 0);
+      currentTray.forEach((img, idx) => {
+        if (img?.regions && img.regions.length > 0) {
+          const compiled = compilePrecisionEditPrompt({
+            rawPrompt: promptForModel,
+            regions: img.regions,
+            imageIndex: idx,
+            targetModelKey: imageModelKey.value,
+          });
+          promptForModel = compiled.dialectPrompt;
+        }
+      });
       // 尺寸/画幅以契约参数条为准（Qwen 本地默认 1K：2K 生成慢 2~3 倍，不再用写死的 2K 兜底）
       const submitImageSize = retryParams.size || retryParams.resolution || schemaParams.value.size || selectedResolution.value;
       const submitImageRatio = retryParams.ratio || schemaParams.value.ratio || selectedRatio.value;
@@ -4242,6 +5200,7 @@ async function sendMessage() {
       }
       rememberSessionRefs([{ url: genUrl, name: labelForRef(genUrl, ''), fid: asstMsg.assetFid || '' }], 'generated');
       messages.value.push(asstMsg);
+      loadNextSuggestions(asstMsg);
 
       await saveChatMessage({
         sessionId: currentSessionId.value,
@@ -4327,6 +5286,7 @@ async function sendMessage() {
         console.warn('写入精修素材失败', fileErr);
       }
       messages.value.push(asstMsg);
+      loadNextSuggestions(asstMsg);
 
       await saveChatMessage({
         sessionId: currentSessionId.value,
@@ -4396,6 +5356,7 @@ async function sendMessage() {
         }
       }
       messages.value.push(asstMsg);
+      loadNextSuggestions(asstMsg);
 
       await saveChatMessage({
         sessionId: currentSessionId.value,
@@ -4679,7 +5640,21 @@ async function deleteTemplate(id) {
 }
 
 function triggerPrecisionEdit(msg) {
-  emit('sendToPrecisionEdit', msg.imageUrl);
+  const url = msg.imageUrl || msg.url;
+  if (!url) return;
+  const existing = referenceTray.value.find(r => r.url === url);
+  if (!existing) {
+    const idx = referenceTray.value.length + 1;
+    referenceTray.value.push({
+      name: `生成结果_${idx}`,
+      url,
+      tag: `@图${idx}`,
+    });
+    selectedImageIndex.value = referenceTray.value.length - 1;
+  } else {
+    selectedImageIndex.value = referenceTray.value.indexOf(existing);
+  }
+  rightDrawerOpen.value = true;
 }
 
 function sendVideoToClip(msg) {
@@ -4724,7 +5699,7 @@ function captureFrameFromVideo(msg) {
     origin: 'video_frame'
   };
   referenceTray.value.push(asset);
-  insertChipToEditor(asset);
+  // 用户需求：不自动在对话框新增胶囊
 }
 
 const videoPlayers = {};

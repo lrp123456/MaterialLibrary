@@ -718,6 +718,12 @@ function migrate(dataDir, { doBackup = true } = {}) {
     } catch (e) {
       console.warn('[migrate] assets-delete ensureTables skip:', e.message);
     }
+    try {
+      const { ensureBaseLibrarySchema } = require('../src/base-library/schema');
+      ensureBaseLibrarySchema(db);
+    } catch (e) {
+      console.warn('[migrate] base-library schema skip:', e.message);
+    }
     seedTags(db);
 
     try { db.exec('ALTER TABLE dup_groups ADD COLUMN match_reason TEXT;'); } catch (e) {}
@@ -836,6 +842,89 @@ function migrate(dataDir, { doBackup = true } = {}) {
       }
     } catch (e) {
       console.warn('[migrate] product_presets 表迁移警告:', e.message);
+    }
+
+    // 11. 空间创作换色配色表 (color_schemes)
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS color_schemes (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          kind TEXT NOT NULL, -- scheme | swatch
+          roles_json TEXT NOT NULL, -- scheme: [{role,name,hex}]  swatch: [{name,hex}]
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_color_schemes_sort ON color_schemes(sort_order);
+      `);
+
+      const csCount = db.prepare('SELECT COUNT(*) as c FROM color_schemes').get().c;
+      if (csCount === 0) {
+        const insCs = db.prepare(`
+          INSERT INTO color_schemes (id, name, kind, roles_json, sort_order, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `);
+        const now = Date.now();
+        insCs.run(
+          'wabi_sabi_cream',
+          '奶油侘寂风',
+          'scheme',
+          JSON.stringify([
+            { role: '墙面', name: '米白艺术漆', hex: '#F4F0E6' },
+            { role: '顶面', name: '柔白平顶', hex: '#FAFAF8' },
+            { role: '地面', name: '原木人字拼', hex: '#D9C3B0' },
+            { role: '家具', name: '燕麦绒布', hex: '#C7B299' }
+          ]),
+          10,
+          now
+        );
+        insCs.run(
+          'modern_minimal_gray',
+          '现代极简灰',
+          'scheme',
+          JSON.stringify([
+            { role: '墙面', name: '浅灰微水泥', hex: '#E0E2E4' },
+            { role: '顶面', name: '纯白哑光', hex: '#F8F9FA' },
+            { role: '地面', name: '浅灰地砖', hex: '#B8BCC0' },
+            { role: '家具', name: '深炭黑皮质', hex: '#3A3D40' }
+          ]),
+          20,
+          now
+        );
+        insCs.run(
+          'warm_nordic_wood',
+          '温暖原木风',
+          'scheme',
+          JSON.stringify([
+            { role: '墙面', name: '暖白乳胶漆', hex: '#F8F5EE' },
+            { role: '顶面', name: '哑光白', hex: '#FFFFFF' },
+            { role: '地面', name: '白橡木地板', hex: '#CEB195' },
+            { role: '家具', name: '中古胡桃木', hex: '#7B5E43' }
+          ]),
+          30,
+          now
+        );
+        insCs.run(
+          'default_swatches',
+          '经典常用单色',
+          'swatch',
+          JSON.stringify([
+            { name: '羊脂白', hex: '#F7F6F2' },
+            { name: '石灰白', hex: '#EAE8E1' },
+            { name: '冷灰', hex: '#BCC3C8' },
+            { name: '暖灰', hex: '#BEB7AE' },
+            { name: '鼠尾草绿', hex: '#9CAF88' },
+            { name: '克莱因蓝', hex: '#002FA7' },
+            { name: '焦糖棕', hex: '#9E5B32' },
+            { name: '黑曜石', hex: '#222325' }
+          ]),
+          40,
+          now
+        );
+        console.log('[migrate] color_schemes 换色预置已种子化 (3套整案方案 + 1套常用单色)');
+      }
+    } catch (e) {
+      console.warn('[migrate] color_schemes 表迁移警告:', e.message);
     }
 
     // 7. 按真值分桶重算 origin_orientation（纠正手机 19.5:9 被标成 9:16）
@@ -1617,7 +1706,11 @@ if (require.main === module) {
   console.log('[migrate] 目标数据目录:', targetDir);
   const db = migrate(targetDir, { doBackup: true });
   const { reextractReadyColors } = require('./reextract_ready_colors');
-  reextractReadyColors(db, targetDir).then(() => {
+  const { seedBaseLibraryData } = require('../src/base-library/seeds');
+  Promise.all([
+    reextractReadyColors(db, targetDir),
+    seedBaseLibraryData(db, targetDir).catch(e => console.warn('[migrate] base library seed error:', e.message))
+  ]).then(() => {
     db.close();
     console.log('[migrate] 执行完毕');
   });

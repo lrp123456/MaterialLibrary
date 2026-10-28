@@ -165,3 +165,238 @@ export function normalizeClientLayerStack(res, params = {}) {
     })),
   };
 }
+
+/**
+ * 标准 6 色系分配 (按区域顺序循环赋予，保证视觉鲜明区分)
+ */
+export const REGION_COLORS = [
+  { name: '蓝色', hex: '#3B82F6', lightBg: 'rgba(59, 130, 246, 0.18)', border: '#3B82F6', badgeClass: 'bg-blue-500 text-white', tag: '蓝色线框' },
+  { name: '红色', hex: '#EF4444', lightBg: 'rgba(239, 68, 68, 0.18)', border: '#EF4444', badgeClass: 'bg-rose-500 text-white', tag: '红色线框' },
+  { name: '黄色', hex: '#EAB308', lightBg: 'rgba(234, 179, 8, 0.18)', border: '#EAB308', badgeClass: 'bg-amber-500 text-slate-950 font-bold', tag: '黄色线框' },
+  { name: '绿色', hex: '#10B981', lightBg: 'rgba(16, 185, 129, 0.18)', border: '#10B981', badgeClass: 'bg-emerald-500 text-white', tag: '绿色线框' },
+  { name: '紫色', hex: '#8B5CF6', lightBg: 'rgba(139, 92, 246, 0.18)', border: '#8B5CF6', badgeClass: 'bg-purple-500 text-white', tag: '紫色线框' },
+  { name: '青色', hex: '#06B6D4', lightBg: 'rgba(6, 182, 212, 0.18)', border: '#06B6D4', badgeClass: 'bg-cyan-500 text-slate-950 font-bold', tag: '青色线框' },
+  { name: '橙色', hex: '#F97316', lightBg: 'rgba(249, 115, 22, 0.18)', border: '#F97316', badgeClass: 'bg-orange-500 text-white', tag: '橙色线框' },
+  { name: '白色', hex: '#FFFFFF', lightBg: 'rgba(255, 255, 255, 0.18)', border: '#CBD5E1', badgeClass: 'bg-slate-200 text-slate-950 font-bold', tag: '白色线框' },
+];
+
+/**
+ * 图片编辑模型区域与要求指定体系注册表
+ * 划分 4 大主流范式：
+ * 1. seedream_bbox: Seedream 5.0 Pro/Flash 归一化 [0, 999] 坐标体系 + 自然语言 (如 图1 <bbox>120 180 640 760</bbox> (蓝色框内的沙发))
+ * 2. qwen_visual: Qwen-Image 2.1 视觉画框标记 + 引用符 (中文【图1】英文<image1> + 蓝色框内的区域)
+ * 3. inpaint_mask: Flux/SD/Imagen 二值蒙版 (黑底白框/涂抹) + 局部重绘 Prompt
+ * 4. text_only: 语义自动识别 (Titan/一句话改图)
+ */
+export const MODEL_PRECISION_EDIT_REGISTRY = {
+  // Seedream 5.0 系列
+  'doubao_seedream_5': {
+    name: 'Seedream 5.0',
+    mode: 'seedream_bbox',
+    refSyntax: 'cn_tu', // 图1
+    supportsNormalizedBbox: true,
+    supportsPoints: true,
+  },
+  'seedream_5_pro': {
+    name: 'Seedream 5.0 Pro',
+    mode: 'seedream_bbox',
+    refSyntax: 'cn_tu',
+    supportsNormalizedBbox: true,
+    supportsPoints: true,
+  },
+  'seedream_5_flash': {
+    name: 'Seedream 5.0 Flash',
+    mode: 'seedream_bbox',
+    refSyntax: 'cn_tu',
+    supportsNormalizedBbox: true,
+    supportsPoints: true,
+  },
+  // Qwen-Image 系列
+  'qwen_image_2_1': {
+    name: 'Qwen-Image 2.1',
+    mode: 'qwen_visual',
+    refSyntax: 'bracket_tu', // 【图1】
+    supportsVisualMarker: true,
+  },
+  'qwen_image': {
+    name: 'Qwen-Image',
+    mode: 'qwen_visual',
+    refSyntax: 'bracket_tu',
+    supportsVisualMarker: true,
+  },
+  // SD / Flux 蒙版重绘系列
+  'flux_inpaint': {
+    name: 'Flux Inpaint',
+    mode: 'inpaint_mask',
+    refSyntax: 'at_tu',
+    supportsMask: true,
+  },
+  'sd_inpaint': {
+    name: 'Stable Diffusion Inpaint',
+    mode: 'inpaint_mask',
+    refSyntax: 'at_tu',
+    supportsMask: true,
+  },
+  // Agnes 空间灵感交互
+  'agnes': {
+    name: 'Agnes 空间助手',
+    mode: 'general_natural',
+    refSyntax: 'at_tu',
+    supportsVisualMarker: true,
+  },
+};
+
+/**
+ * 获得指定模型的精度编辑能力规范
+ */
+export function getModelPrecisionSpec(modelKey = '') {
+  const k = String(modelKey || '').toLowerCase();
+  for (const [key, spec] of Object.entries(MODEL_PRECISION_EDIT_REGISTRY)) {
+    if (k.includes(key) || key.includes(k)) {
+      return spec;
+    }
+  }
+  // 智能推断：根据命名包含判断
+  if (k.includes('seedream') || k.includes('doubao')) {
+    return MODEL_PRECISION_EDIT_REGISTRY.doubao_seedream_5;
+  }
+  if (k.includes('qwen') || k.includes('wanx')) {
+    return MODEL_PRECISION_EDIT_REGISTRY.qwen_image_2_1;
+  }
+  if (k.includes('flux') || k.includes('sd') || k.includes('inpaint')) {
+    return MODEL_PRECISION_EDIT_REGISTRY.flux_inpaint;
+  }
+  if (k.includes('agnes') || k.includes('chat')) {
+    return MODEL_PRECISION_EDIT_REGISTRY.agnes;
+  }
+  // 默认使用 Seedream 5.0 规范
+  return MODEL_PRECISION_EDIT_REGISTRY.doubao_seedream_5;
+}
+
+/**
+ * 将区域像素矩形换算为 Seedream 5.0 标准的 0~999 归一化坐标字符串
+ * x1 = round((x / width) * 1000), 取值范围 [0, 999]
+ */
+export function calculateNormalizedBbox(reg, dispW = 800, dispH = 600) {
+  if (!reg) return '0 0 0 0';
+
+  if (reg.norm && typeof reg.norm.x === 'number') {
+    const x1 = Math.min(999, Math.max(0, Math.round(reg.norm.x * 1000)));
+    const y1 = Math.min(999, Math.max(0, Math.round(reg.norm.y * 1000)));
+    const x2 = Math.min(999, Math.max(0, Math.round((reg.norm.x + reg.norm.w) * 1000)));
+    const y2 = Math.min(999, Math.max(0, Math.round((reg.norm.y + reg.norm.h) * 1000)));
+    return `${x1} ${y1} ${x2} ${y2}`;
+  }
+
+  const w = Math.max(1, dispW);
+  const h = Math.max(1, dispH);
+
+  let rx = reg.x || 0;
+  let ry = reg.y || 0;
+  let rw = reg.w || 20;
+  let rh = reg.h || 20;
+
+  if (reg.type === 'polygon' && Array.isArray(reg.points) && reg.points.length > 0) {
+    const xs = reg.points.map((p) => p.x);
+    const ys = reg.points.map((p) => p.y);
+    rx = Math.min(...xs);
+    ry = Math.min(...ys);
+    rw = Math.max(...xs) - rx;
+    rh = Math.max(...ys) - ry;
+  }
+
+  const x1 = Math.min(999, Math.max(0, Math.round((rx / w) * 1000)));
+  const y1 = Math.min(999, Math.max(0, Math.round((ry / h) * 1000)));
+  const x2 = Math.min(999, Math.max(0, Math.round(((rx + rw) / w) * 1000)));
+  const y2 = Math.min(999, Math.max(0, Math.round(((ry + rh) / h) * 1000)));
+
+  return `${x1} ${y1} ${x2} ${y2}`;
+}
+
+function getRegionRegex(tuNum, reg) {
+  const names = [];
+  if (reg.name) {
+    names.push(reg.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    const m = reg.name.match(/\d+/);
+    if (m) {
+      names.push(`区域${m[0]}`);
+    }
+  } else {
+    names.push('区域\\d+');
+  }
+  const nameUnion = Array.from(new Set(names)).join('|');
+  return new RegExp(`@图${tuNum}\\[(?:${nameUnion})\\](?:（[^）]*）)?`, 'g');
+}
+
+/**
+ * 客户端精准编辑提示词转译器
+ * 根据当前选中的目标模型，将前端抽象的 @图1[区域1] 转换为该模型最偏好的方言格式
+ */
+export function compilePrecisionEditPrompt({
+  rawPrompt = '',
+  regions = [],
+  imageIndex = 0,
+  targetModelKey = '',
+  dispW = 800,
+  dispH = 600,
+}) {
+  const spec = getModelPrecisionSpec(targetModelKey);
+  let dialectPrompt = rawPrompt;
+  const tuNum = imageIndex + 1;
+
+  // 正则同时匹配多区域聚合标签与单区域标签：@图1[区域1]、@图1[区域2]（红色线框） 或 @图1[区域1]（红色线框）
+  const aggRegex = new RegExp(`(@图${tuNum}\\[[^\\]]+\\](?:、@图${tuNum}\\[[^\\]]+\\])*)(?:（([^）]*)）)?`, 'g');
+
+  if (spec.mode === 'seedream_bbox') {
+    dialectPrompt = dialectPrompt.replace(aggRegex, (match, targets, colorDesc) => {
+      const nameMatches = [...targets.matchAll(/\[([^\]]+)\]/g)].map((m) => m[1]);
+      const matchedRegs = nameMatches
+        .map((name) => regions.find((r) => r.name === name || r.name.includes(name)))
+        .filter(Boolean);
+      const colorName = matchedRegs[0]?.color?.name || (colorDesc ? colorDesc.replace('线框', '') : '指定');
+      
+      // 多点选区 (polygon) 因几何不规则，Seedream bbox 不支持任意多边形坐标，自动采用 Qwen 式视觉线框描述
+      const hasPolygon = matchedRegs.some((r) => r.type === 'polygon');
+      if (hasPolygon) {
+        if (matchedRegs.length > 1) {
+          return `图${tuNum}（${colorName}线框内的各区域）`;
+        }
+        return `图${tuNum}（${colorName}线框内的区域）`;
+      }
+
+      // 矩形选区严格保留 Seedream 归一化 <bbox> 坐标
+      const bboxes = (matchedRegs.length > 0 ? matchedRegs : regions)
+        .map((r) => `<bbox>${calculateNormalizedBbox(r, dispW, dispH)}</bbox>`)
+        .join(' ');
+      return `图${tuNum} ${bboxes}（${colorName}线框）`;
+    });
+    dialectPrompt = dialectPrompt.replace(/@图(\d+)/g, '图$1');
+    dialectPrompt = dialectPrompt.replace(/@图片(\d+)/g, '图$1');
+  } else if (spec.mode === 'qwen_visual') {
+    dialectPrompt = dialectPrompt.replace(aggRegex, (match, targets, colorDesc) => {
+      const nameMatches = [...targets.matchAll(/\[([^\]]+)\]/g)].map((m) => m[1]);
+      const matchedRegs = nameMatches
+        .map((name) => regions.find((r) => r.name === name || r.name.includes(name)))
+        .filter(Boolean);
+      const colorName = matchedRegs[0]?.color?.name || (colorDesc ? colorDesc.replace('线框', '') : '标注');
+      if (matchedRegs.length > 1) {
+        return `【图${tuNum}】${colorName}线框内的各区域`;
+      }
+      return `【图${tuNum}】${colorName}线框内的区域`;
+    });
+    dialectPrompt = dialectPrompt.replace(/@图(\d+)/g, '【图$1】');
+    dialectPrompt = dialectPrompt.replace(/@图片(\d+)/g, '【图$1】');
+  } else {
+    // Agnes / Default
+    for (const reg of regions) {
+      const colorName = reg.color?.name || '指定';
+      dialectPrompt = dialectPrompt.replace(getRegionRegex(tuNum, reg), `@图${tuNum}[${reg.name}]（${colorName}线框）`);
+    }
+  }
+
+  return {
+    spec,
+    dialectPrompt,
+    requiresVisualMarker: spec.mode === 'qwen_visual',
+  };
+}

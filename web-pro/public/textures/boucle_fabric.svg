@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
+  <defs>
+    <pattern id="bouclePattern" width="30" height="30" patternUnits="userSpaceOnUse">
+      <circle cx="8" cy="8" r="4.5" fill="none" stroke="#D5CEC5" stroke-width="2.5" />
+      <circle cx="7" cy="7" r="2.5" fill="#FAF6F0" />
+      <circle cx="22" cy="12" r="4.5" fill="none" stroke="#C8BFB4" stroke-width="2.5" />
+      <circle cx="21" cy="11" r="2.5" fill="#F4EFE8" />
+      <circle cx="14" cy="24" r="5" fill="none" stroke="#DBD4CB" stroke-width="2.5" />
+      <circle cx="13" cy="23" r="3" fill="#FFFFFF" />
+      <circle cx="27" cy="26" r="3.5" fill="none" stroke="#C2B8AC" stroke-width="2" />
+    </pattern>
+  </defs>
+  <rect width="300" height="300" fill="#EAE5DC" />
+  <rect width="300" height="300" fill="url(#bouclePattern)" />
+</svg>

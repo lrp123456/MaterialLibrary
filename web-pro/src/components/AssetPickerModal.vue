@@ -19,9 +19,7 @@
             <div class="text-[11px] text-slate-400">点击素材卡片可展开「原图 / 衍生图」版本选择；支持分类筛选与多选</div>
           </div>
         </div>
-        <button type="button" @click="close" class="w-8 h-8 rounded-lg bg-studio-850 hover:bg-studio-800 text-slate-400 hover:text-white flex items-center justify-center transition-all cursor-pointer">
-          ✕
-        </button>
+        <button type="button" @click="close" class="w-8 h-8 rounded-lg bg-studio-850 hover:bg-studio-800 text-slate-400 hover:text-white flex items-center justify-center transition-all cursor-pointer" title="关闭"><StudioIcon name="close" :size="16" /></button>
       </div>
 
       <!-- 选项卡与控制栏 -->
@@ -54,7 +52,7 @@
               placeholder="搜索名称 / 标签 / 空间..."
               class="w-full pl-8 pr-3 py-1.5 bg-studio-950 border border-studio-750 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-studio-accent"
             />
-            <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs">🔍</span>
+            <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500"><StudioIcon name="search" :size="13" /></span>
           </div>
           <button type="button" @click="loadAssets(1)" class="px-3 py-1.5 rounded-lg bg-studio-850 hover:bg-studio-800 border border-studio-750 text-slate-200 text-xs font-bold cursor-pointer">
             检索
@@ -115,7 +113,7 @@
                 <button v-for="item in orientations" :key="item.key" type="button" class="lib-chip" :class="{ 'is-on': orientation === item.key }" @click="orientation = orientation === item.key ? '' : item.key; loadAssets(1)">{{ item.label }}</button>
               </div>
             </section>
-            <section v-if="sub === 'interior_exterior'" class="lib-group">
+            <section v-if="sub === 'interior_exterior' || sub === 'material'" class="lib-group">
               <button type="button" class="lib-group-head" @click="openGroups.space = !openGroups.space"><span>空间</span><span class="lib-meta">{{ openGroups.space ? '收起' : '展开' }}</span></button>
               <div v-if="openGroups.space" class="lib-chips">
                 <button v-for="item in filterSpaces" :key="item.dir" type="button" class="lib-chip" :class="{ 'is-on': space === item.dir }" @click="space = space === item.dir ? '' : item.dir; loadAssets(1)">{{ item.label }}</button>
@@ -449,6 +447,7 @@
 </template>
 
 <script setup>
+import StudioIcon from './StudioIcon.vue';
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import {
   fetchAssets,
@@ -477,9 +476,11 @@ const props = defineProps({
   submitLabel: { type: String, default: '' },
   maxSelect: { type: Number, default: 1 },
   initialMain: { type: String, default: 'image' },
+  initialSub: { type: String, default: '' },
   mediaTypes: { type: Array, default: () => ['image', 'video', 'audio'] },
   recent: { type: Array, default: () => [] },
   uploadEnabled: { type: Boolean, default: false },
+  commitOnVersion: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['close', 'confirm', 'upload']);
@@ -523,6 +524,15 @@ const slotErrorByFid = ref({});
 // 生成成功后回显实际走的通道，被降级到本机模型时用户看得见
 const slotChannelByFid = ref({});
 
+const PRESET_LIBRARY_TEXTURES = [
+  { fid: 'mat_travertine', name: '罗马洞石天然肌理切片', material: '罗马洞石', url: '/textures/travertine_stone.svg', category: 'material', kind: 'image' },
+  { fid: 'mat_black_walnut', name: '北美黑胡桃木纹切片', material: '北美黑胡桃', url: '/textures/black_walnut.svg', category: 'material', kind: 'image' },
+  { fid: 'mat_micro_cement', name: '极简无缝微水泥切片', material: '极简微水泥', url: '/textures/micro_cement.svg', category: 'material', kind: 'image' },
+  { fid: 'mat_boucle', name: '羊羔绒颗粒卷毛切片', material: '羊羔绒', url: '/textures/boucle_fabric.svg', category: 'material', kind: 'image' },
+  { fid: 'mat_brushed_brass', name: '拉丝黄铜金属微槽切片', material: '拉丝黄铜', url: '/textures/brushed_brass.svg', category: 'material', kind: 'image' },
+  { fid: 'mat_terrazzo', name: '复古水磨石石料骨料切片', material: '复古水磨石', url: '/textures/terrazzo.svg', category: 'material', kind: 'image' },
+];
+
 const shelfPlates = [
   { key: 'original', label: '原素材' },
   { key: 'retouched', label: '精修素材' },
@@ -536,6 +546,7 @@ const mainTabs = computed(() => [
 const subMap = {
   image: [
     { key: 'all', label: '全部图片' },
+    { key: 'material', label: '🧱 材质与色板库' },
     { key: 'interior_exterior', label: '室内外设计' },
     { key: 'portrait', label: '空间人像' },
     { key: 'clothing', label: '服装服饰' },
@@ -665,7 +676,13 @@ function resetPicker() {
   tab.value = 'library';
   const nextMain = props.mediaTypes.includes(props.initialMain) ? props.initialMain : (props.mediaTypes[0] || 'image');
   main.value = nextMain;
-  sub.value = nextMain === 'image' ? 'interior_exterior' : 'all';
+  if (props.initialSub && (subMap[nextMain] || []).some((s) => s.key === props.initialSub)) {
+    sub.value = props.initialSub;
+  } else if (props.context === 'edit' && nextMain === 'image') {
+    sub.value = 'material';
+  } else {
+    sub.value = nextMain === 'image' ? 'interior_exterior' : 'all';
+  }
 }
 
 watch(() => props.visible, (open) => {
@@ -722,7 +739,7 @@ async function loadAssets(targetPage = 1) {
     if (Array.isArray(opts.style_atom)) filterStyles.value = opts.style_atom;
     if (Array.isArray(opts.material_kind)) filterMaterials.value = opts.material_kind.slice(0, 8);
     if (Array.isArray(opts.colors)) filterColors.value = opts.colors.slice(0, 12);
-    libraryItems.value = items.map((it) => ({
+    let mapped = items.map((it) => ({
       id: it.fid,
       fid: it.fid,
       mediaToken: it.mediaToken,
@@ -731,11 +748,29 @@ async function loadAssets(targetPage = 1) {
       category: it.category,
       kind: it.kind || it.media_type || 'image',
     }));
+    if (sub.value === 'material') {
+      const kw = keyword.value.trim().toLowerCase();
+      const presets = PRESET_LIBRARY_TEXTURES.filter(
+        (p) => !kw || p.name.toLowerCase().includes(kw) || (p.material && p.material.toLowerCase().includes(kw))
+      );
+      mapped = [...presets, ...mapped];
+      libraryTotal.value += presets.length;
+    }
+    libraryItems.value = mapped;
   } catch (e) {
     console.warn('加载素材库资产失败:', e);
-    libraryItems.value = [];
-    libraryTotal.value = 0;
-    notice.value = '素材库读取失败，请稍后重试';
+    if (sub.value === 'material') {
+      const kw = keyword.value.trim().toLowerCase();
+      const presets = PRESET_LIBRARY_TEXTURES.filter(
+        (p) => !kw || p.name.toLowerCase().includes(kw) || (p.material && p.material.toLowerCase().includes(kw))
+      );
+      libraryItems.value = presets;
+      libraryTotal.value = presets.length;
+    } else {
+      libraryItems.value = [];
+      libraryTotal.value = 0;
+      notice.value = '素材库读取失败，请稍后重试';
+    }
   } finally {
     loading.value = false;
   }
@@ -754,6 +789,19 @@ function selectedLabel(item) {
 }
 
 function versionsOf(item) {
+  if (item?.url && (String(item.fid || '').startsWith('mat_') || String(item.url).startsWith('/textures/'))) {
+    return [{
+      key: 'origin:' + item.fid,
+      fid: item.fid,
+      derivativeId: null,
+      derivativeKind: 'origin',
+      label: '原图',
+      name: item.name,
+      material: item.material,
+      url: item.url,
+      previewUrl: item.url,
+    }];
+  }
   return buildVersions(item, derivativeCache.value[item.fid], {
     originUrl: (it) =>
       it.fid && !['video', 'audio'].includes(it.kind)
@@ -862,6 +910,15 @@ async function generateSlots(slots) {
     // 缓存里那份是生成前的快照，必须强制重读，否则插槽会一直停在「待生成」
     await ensureDerivatives(item, { force: true });
     for (const version of versionsOf(item)) probeSize(version.url);
+    if (props.commitOnVersion) {
+      const versions = versionsOf(item);
+      const generated = versions.find((v) => v.derivativeId && v.ratio === slots[0].ratio) || versions[versions.length - 1];
+      if (generated) {
+        emit('confirm', [stripVersionKey({ ...generated, name: generated.name || item.name })]);
+        close();
+        return;
+      }
+    }
   } catch (e) {
     slotErrorByFid.value = {
       ...slotErrorByFid.value,
@@ -875,7 +932,7 @@ async function generateSlots(slots) {
 async function openVersions(item) {
   // 无 fid 的条目无法下载/入库，直接忽略点击
   if (!item.fid) return;
-  if (item.kind === 'video' || item.kind === 'audio') {
+  if (item.kind === 'video' || item.kind === 'audio' || String(item.fid).startsWith('mat_')) {
     const origin = versionsOf(item)[0];
     if (origin) pick(item, origin);
     return;
@@ -891,6 +948,11 @@ async function openVersions(item) {
 }
 
 function pick(item, version) {
+  if (props.commitOnVersion) {
+    emit('confirm', [stripVersionKey({ ...version, name: version.name || item.name })]);
+    close();
+    return;
+  }
   const res = toggleSelection(
     selected.value,
     { ...version, name: version.name || item.name },

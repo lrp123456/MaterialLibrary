@@ -23,60 +23,100 @@
             type="button"
             class="lib-plate"
             :class="{ 'is-on': sourcePlate === plate.key }"
-            @click="setSourcePlate(plate.key)"
+            @click="selectSourcePlate(plate.key)"
           >
             <span class="lib-mark" aria-hidden="true"></span>
             <span>{{ plate.label }}</span>
             <span v-if="sourcePlate === plate.key" class="lib-now">当前</span>
           </button>
         </div>
-        <div class="sidebar-group">
-          <template v-for="cat in plateTabs" :key="cat.key">
-            <button
-              type="button"
-              class="lib-l1"
-              :class="{ 'is-on': activeMainTab === cat.key }"
-              :aria-expanded="activeMainTab === cat.key"
-              @click="switchMainTab(cat.key)"
-            >
-              <span class="lib-mark" aria-hidden="true"></span>
-              <span class="lib-l1-label">{{ cat.label }}</span>
-              <span v-if="cat.key === 'trash' && trashTotal > 0" class="lib-count">{{ trashTotal }}</span>
-              <span class="lib-state">{{ activeMainTab === cat.key ? '已展开' : '展开' }}</span>
-            </button>
-            <div v-if="activeMainTab === cat.key" class="lib-sheet" role="group" :aria-label="cat.label">
+
+        <!-- 分支 1：原素材 / 精修素材 / 成品素材 (展示相同，为图片、视频、音频三个大类，筛选也相同) -->
+        <template v-if="sourcePlate === 'original' || sourcePlate === 'retouched' || sourcePlate === 'finished'">
+          <div class="sidebar-group">
+            <template v-for="cat in DAM_MAIN_TABS" :key="cat.key">
               <button
-                v-for="sub in currentSubCategories"
-                :key="cat.key + '-' + sub.key"
                 type="button"
-                class="lib-l2"
-                :class="{ 'is-on': activeSubCategory === sub.key }"
-                :aria-current="activeSubCategory === sub.key ? 'true' : undefined"
-                @click="switchSubCategory(sub.key); closeSidebarOnNarrow()"
+                class="lib-l1"
+                :class="{ 'is-on': activeMainTab === cat.key }"
+                :aria-expanded="activeMainTab === cat.key"
+                @click="switchMainTab(cat.key)"
               >
                 <span class="lib-mark" aria-hidden="true"></span>
-                <span class="lib-l2-label">{{ sub.label }}</span>
-                <span v-if="activeSubCategory === sub.key" class="lib-now">当前</span>
+                <span class="lib-l1-label">{{ cat.label }}</span>
+                <span class="lib-state">{{ activeMainTab === cat.key ? '已展开' : '展开' }}</span>
               </button>
-              <!-- 剪辑「素材」库：按云端快照项目再筛一层 -->
-              <button
-                v-for="pr in clipProjectChips"
-                :key="cat.key + '-proj-' + (pr.key || 'all')"
-                type="button"
-                class="lib-l2 lib-l2-nested"
-                :class="{ 'is-on': activeClipProject === pr.key }"
-                :aria-current="activeClipProject === pr.key ? 'true' : undefined"
-                @click="selectClipProject(pr.key); closeSidebarOnNarrow()"
-              >
-                <span class="lib-l2-label">{{ pr.label }}</span>
-                <span v-if="pr.count != null" class="lib-count">{{ pr.count }}</span>
-              </button>
-            </div>
-          </template>
-        </div>
+              <div v-if="activeMainTab === cat.key && cat.key === 'image'" class="lib-sheet" role="group" :aria-label="cat.label">
+                <button
+                  v-for="sub in SUB_CATEGORIES_CONFIG.image"
+                  :key="cat.key + '-' + sub.key"
+                  type="button"
+                  class="lib-l2"
+                  :class="{ 'is-on': activeSubCategory === sub.key }"
+                  :aria-current="activeSubCategory === sub.key ? 'true' : undefined"
+                  @click="switchSubCategory(sub.key); closeSidebarOnNarrow()"
+                >
+                  <span class="lib-mark" aria-hidden="true"></span>
+                  <span class="lib-l2-label">{{ sub.label }}</span>
+                  <span v-if="activeSubCategory === sub.key" class="lib-now">当前</span>
+                </button>
+              </div>
+            </template>
+          </div>
+        </template>
+
+        <!-- 分支 2：剪辑素材 (分为：素材和成品，素材混合排放图、视频、音频等所有用到的素材按照项目排布) -->
+        <template v-else-if="sourcePlate === 'clip'">
+          <div class="sidebar-group">
+            <button
+              v-for="sub in CLIP_SCOPES"
+              :key="'clip-' + sub.key"
+              type="button"
+              class="lib-l1"
+              :class="{ 'is-on': activeSubCategory === sub.key }"
+              @click="switchClipScope(sub.key)"
+            >
+              <span class="lib-mark" aria-hidden="true"></span>
+              <span class="lib-l1-label">{{ sub.label }}</span>
+              <span class="lib-now" v-if="activeSubCategory === sub.key">当前</span>
+            </button>
+          </div>
+        </template>
+
+        <!-- 分支 3：基础素材 (下设材质库、色号库、灯具库、模型库，每个库都有独立的筛选机制) -->
+        <template v-else-if="sourcePlate === 'base'">
+          <div class="sidebar-group">
+            <button
+              v-for="wh in BASE_WAREHOUSES"
+              :key="wh.key"
+              type="button"
+              class="lib-l1"
+              :class="{ 'is-on': baseWarehouse === wh.key }"
+              @click="onSelectBaseWarehouse(wh.key)"
+            >
+              <span class="lib-mark" aria-hidden="true"></span>
+              <span class="lib-l1-label">{{ wh.label }}</span>
+              <span v-if="baseWarehouse === wh.key" class="lib-now">当前</span>
+            </button>
+          </div>
+        </template>
+
+        <!-- 分支 4：回收站 -->
+        <template v-else-if="sourcePlate === 'trash'">
+          <div class="sidebar-group">
+            <button type="button" class="lib-l1 is-on" disabled>
+              <span class="lib-mark" aria-hidden="true"></span>
+              <span class="lib-l1-label">回收站</span>
+              <span v-if="trashTotal > 0" class="lib-count">{{ trashTotal }}</span>
+            </button>
+          </div>
+        </template>
       </div>
 
-      <div v-if="activeMainTab !== 'trash'" class="lib-filters">
+      <!-- 下方独立专属筛选区 (彻底杜绝筛选串行) -->
+
+      <!-- 1. 原素材/精修素材/成品素材专属筛选 (只看收藏、空间类型、风格流派、主导色系) -->
+      <div v-if="sourcePlate === 'original' || sourcePlate === 'retouched' || sourcePlate === 'finished'" class="lib-filters">
         <button
           type="button"
           class="filter-switch"
@@ -131,7 +171,239 @@
 
         <button v-if="activeFilterCount > 0" type="button" class="lib-reset" @click="clearAllFilters">重置全部筛选</button>
       </div>
-      <div v-else class="lib-filters">
+
+      <!-- 2. 剪辑素材专属筛选：素材混合排放图、视频、音频等所有用到的素材按照项目排布 -->
+      <div v-else-if="sourcePlate === 'clip'" class="lib-filters">
+        <template v-if="activeSubCategory === 'input'">
+          <!-- 按项目排布 -->
+          <section class="lib-group">
+            <div class="lib-group-head">
+              <span class="font-bold text-white text-xs">按剪辑项目排布</span>
+              <span class="lib-meta">{{ clipProjects.length }} 个项目</span>
+            </div>
+            <div class="lib-chips mt-2">
+              <button
+                v-for="pr in clipProjectChips"
+                :key="'clip-proj-' + (pr.key || 'all')"
+                type="button"
+                class="lib-chip"
+                :class="{ 'is-on': activeClipProject === pr.key }"
+                @click="selectClipProject(pr.key); closeSidebarOnNarrow()"
+              >
+                <span>{{ pr.label }}</span>
+                <span v-if="pr.count != null" class="lib-count">{{ pr.count }}</span>
+              </button>
+            </div>
+          </section>
+
+          <!-- 媒体类型快速过滤 (图/视/音混排) -->
+          <section class="lib-group mt-3">
+            <div class="lib-group-head">
+              <span class="font-bold text-white text-xs">媒体类型过滤</span>
+            </div>
+            <div class="lib-chips mt-2">
+              <button
+                v-for="mt in CLIP_MEDIA_TYPES"
+                :key="mt.key"
+                type="button"
+                class="lib-chip"
+                :class="{ 'is-on': clipMediaTypeFilter === mt.key }"
+                @click="clipMediaTypeFilter = mt.key; reloadAssets(true)"
+              >
+                <span>{{ mt.label }}</span>
+              </button>
+            </div>
+          </section>
+        </template>
+        <template v-else>
+          <div class="p-3 rounded-xl bg-studio-900 border border-studio-800 text-xs text-slate-400 space-y-2">
+            <div class="font-bold text-slate-200">剪辑成品库</div>
+            <p>展示由本地剪辑台导出至云端的所有成品音视频文件。</p>
+          </div>
+        </template>
+      </div>
+
+      <!-- 3. 基础素材专属独立筛选：每个库都有独立的筛选机制 -->
+      <div v-else-if="sourcePlate === 'base'" class="lib-filters">
+        <!-- 3.1 材质库独立筛选 -->
+        <template v-if="baseWarehouse === 'material'">
+          <section class="lib-group">
+            <div class="lib-group-head">
+              <span class="font-bold text-white text-xs">装修面货架分类</span>
+            </div>
+            <div class="lib-chips mt-2">
+              <button
+                type="button"
+                class="lib-chip"
+                :class="{ 'is-on': baseMaterialSurface === '' }"
+                @click="baseMaterialSurface = ''"
+              >
+                <span>全部装修面</span>
+              </button>
+              <button
+                v-for="s in baseSurfaces"
+                :key="s.key"
+                type="button"
+                class="lib-chip"
+                :class="{ 'is-on': baseMaterialSurface === s.key }"
+                @click="baseMaterialSurface = s.key"
+              >
+                <span>{{ s.label }}</span>
+              </button>
+            </div>
+          </section>
+
+          <section class="lib-group mt-3">
+            <div class="lib-group-head">
+              <span class="font-bold text-white text-xs">来源渠道</span>
+            </div>
+            <div class="lib-chips mt-2">
+              <button
+                v-for="src in BASE_MAT_SOURCES"
+                :key="src.key"
+                type="button"
+                class="lib-chip"
+                :class="{ 'is-on': baseMaterialSource === src.key }"
+                @click="baseMaterialSource = src.key"
+              >
+                <span>{{ src.label }}</span>
+              </button>
+            </div>
+          </section>
+
+          <section class="lib-group mt-3">
+            <label class="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer p-1">
+              <input type="checkbox" v-model="baseMaterialShellOnly" class="rounded bg-studio-800 text-studio-accent" />
+              <span>仅看官方标准底色壳 (Shell)</span>
+            </label>
+          </section>
+        </template>
+
+        <!-- 3.2 色号库独立筛选 -->
+        <template v-else-if="baseWarehouse === 'paint'">
+          <section class="lib-group">
+            <div class="lib-group-head">
+              <span class="font-bold text-white text-xs">品牌筛选</span>
+            </div>
+            <div class="lib-chips mt-2">
+              <button
+                v-for="b in BASE_PAINT_BRANDS"
+                :key="b.key"
+                type="button"
+                class="lib-chip"
+                :class="{ 'is-on': basePaintBrand === b.key }"
+                @click="basePaintBrand = b.key"
+              >
+                <span>{{ b.label }}</span>
+              </button>
+            </div>
+          </section>
+
+          <section class="lib-group mt-3">
+            <div class="lib-group-head">
+              <span class="font-bold text-white text-xs">色系分类</span>
+            </div>
+            <div class="lib-chips mt-2">
+              <button
+                v-for="f in BASE_PAINT_FAMILIES"
+                :key="f.key"
+                type="button"
+                class="lib-chip"
+                :class="{ 'is-on': basePaintFamily === f.key }"
+                @click="basePaintFamily = f.key"
+              >
+                <span>{{ f.label }}</span>
+              </button>
+            </div>
+          </section>
+
+          <section class="lib-group mt-3">
+            <label class="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer p-1">
+              <input type="checkbox" v-model="basePaintPinnedOnly" class="rounded bg-studio-800 text-studio-accent" />
+              <span>仅看官方常用置顶色卡</span>
+            </label>
+          </section>
+        </template>
+
+        <!-- 3.3 灯具库独立筛选 -->
+        <template v-else-if="baseWarehouse === 'light'">
+          <section class="lib-group">
+            <div class="lib-group-head">
+              <span class="font-bold text-white text-xs">投光朝向预设</span>
+            </div>
+            <div class="lib-chips mt-2">
+              <button
+                v-for="d in BASE_LIGHT_DIRECTIONS"
+                :key="d.key"
+                type="button"
+                class="lib-chip"
+                :class="{ 'is-on': baseLightDirection === d.key }"
+                @click="baseLightDirection = d.key"
+              >
+                <span>{{ d.label }}</span>
+              </button>
+            </div>
+          </section>
+
+          <section class="lib-group mt-3">
+            <div class="lib-group-head">
+              <span class="font-bold text-white text-xs">色温物理锚点 (Kelvin)</span>
+            </div>
+            <div class="lib-chips mt-2">
+              <button
+                v-for="c in BASE_LIGHT_CCTS"
+                :key="c.key"
+                type="button"
+                class="lib-chip"
+                :class="{ 'is-on': baseLightCct === c.key }"
+                @click="baseLightCct = c.key"
+              >
+                <span>{{ c.label }}</span>
+              </button>
+            </div>
+          </section>
+        </template>
+
+        <!-- 3.4 模型库独立筛选与资产范畴说明 -->
+        <template v-else-if="baseWarehouse === 'model'">
+          <section class="lib-group">
+            <div class="lib-group-head">
+              <span class="font-bold text-white text-xs">模型库资产品类</span>
+            </div>
+            <div class="lib-chips mt-2">
+              <button
+                v-for="mc in BASE_MODEL_CATEGORIES"
+                :key="mc.key"
+                type="button"
+                class="lib-chip"
+                :class="{ 'is-on': baseModelCategory === mc.key }"
+                @click="baseModelCategory = mc.key"
+              >
+                <span>{{ mc.label }}</span>
+              </button>
+            </div>
+          </section>
+
+          <div class="mt-4 p-3 rounded-xl bg-studio-900 border border-studio-800/80 text-[11px] text-slate-400 space-y-2">
+            <div class="font-bold text-slate-200 flex items-center gap-1.5">
+              <StudioIcon name="info" :size="13" class="text-amber-400" />
+              模型库覆盖范畴包含：
+            </div>
+            <ul class="list-disc pl-4 space-y-1 text-slate-400">
+              <li><strong class="text-slate-300">活动家具</strong>：沙发、茶几、餐桌椅、床榻</li>
+              <li><strong class="text-slate-300">定制木作</strong>：全屋定制柜、嵌入式衣帽间、吧台</li>
+              <li><strong class="text-slate-300">厨卫五金</strong>：智能马桶、浴缸、面盆花洒</li>
+              <li><strong class="text-slate-300">软装绿植</strong>：艺术雕塑摆件、抽象挂画、绿植</li>
+            </ul>
+            <div class="text-[10px] text-amber-400/80 pt-1 border-t border-studio-800">
+              当前版本主模型遵循 409 契约响应，规范资产库就绪。
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- 4. 回收站专属操作 -->
+      <div v-else-if="sourcePlate === 'trash'" class="lib-filters">
         <p class="lib-note">回收站没有收藏开关，也没有室内筛选。</p>
         <p class="lib-note">已选 {{ selectedFids.length }} 项</p>
         <button type="button" class="theme-btn-success rounded-xl" :disabled="selectedFids.length === 0" @click="handleRestoreBatch">恢复到素材库</button>
@@ -140,7 +412,27 @@
       <div class="lib-resize" title="拖动调整宽度" @pointerdown="startSidebarResize"></div>
     </aside>
 
-    <div class="library-main">
+    <div class="flex-1 h-full min-w-0 overflow-hidden" v-if="libraryRail === 'base'">
+      <BaseLibraryPane
+        :warehouse="baseWarehouse"
+        :surface="baseMaterialSurface"
+        :mat-source="baseMaterialSource"
+        :shell-only="baseMaterialShellOnly"
+        :brand="basePaintBrand"
+        :family="basePaintFamily"
+        :pinned-only="basePaintPinnedOnly"
+        :direction="baseLightDirection"
+        :cct="baseLightCct"
+        :model-category="baseModelCategory"
+        :search-query="keyword"
+        @update:surface="baseMaterialSurface = $event"
+        @update:brand="basePaintBrand = $event"
+        @update:family="basePaintFamily = $event"
+        @update:pinnedOnly="basePaintPinnedOnly = $event"
+        @update:modelCategory="baseModelCategory = $event"
+      />
+    </div>
+    <div class="library-main" v-show="libraryRail === 'dam'">
       <div class="library-toolbar">
         <button type="button" class="sidebar-open-btn" @click="openLibrarySidebar">菜单</button>
         <button type="button" :class="{ 'is-on': showSidebarTimeline }" @click="showSidebarTimeline = !showSidebarTimeline"><span class="lib-mark"></span>时间轴<span v-if="showSidebarTimeline" class="lib-now">当前</span></button>
@@ -239,10 +531,7 @@
               <span class="text-xs font-extrabold font-mono whitespace-nowrap text-slate-100 tabular-nums">
                 {{ scrubDisplayYear }} <span class="text-studio-cyan font-bold">{{ scrubDisplayMonthDay }}</span>
               </span>
-              <svg class="h-3.5 w-3.5 text-studio-cyan shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                <path d="m7 15 5 5 5-5"></path>
-                <path d="m7 9 5-5 5 5"></path>
-              </svg>
+              <StudioIcon name="chevronsUpDown" :size="14" customClass="text-studio-cyan shrink-0" />
             </div>
           </div>
         </div>
@@ -490,7 +779,7 @@
                       :title="isSelected(item.fid) ? '取消勾选' : '勾选此素材'"
                       @click.stop="toggleSelect(item)"
                     >
-                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" /></svg>
+                      <StudioIcon name="check" :size="16" />
                     </button>
 
                     <!-- 顶部浮层标签：画幅比例徽标与收藏星标 -->
@@ -536,7 +825,7 @@
 
                         <button
                           v-if="activeMainTab !== 'trash'"
-                          @click.stop="$emit('sendToChat', { ...item, url: getThumbnailSrc(item), imgUrl: getThumbnailSrc(item) })"
+                          @click.stop="$emit('sendToChat', { ...item, url: getAssetImageUrl(item.fid, item.mediaToken), imgUrl: getAssetImageUrl(item.fid, item.mediaToken) })"
                           class="p-2 rounded-lg bg-studio-800/90 hover:bg-studio-accent text-white transition-all shadow-md cursor-pointer"
                           title="送入 AI 对话引用生成"
                         >
@@ -705,9 +994,7 @@
               class="absolute left-3 top-1/2 -translate-y-1/2 z-30 w-11 h-11 rounded-full bg-studio-900/85 hover:bg-studio-accent text-white border border-studio-700/80 shadow-2xl flex items-center justify-center transition-all cursor-pointer backdrop-blur-md active:scale-95 group hover:shadow-studio-accent/40"
               title="上一件素材 (快捷键: ←)"
             >
-              <svg class="w-5 h-5 transition-transform group-hover:-translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7" />
-              </svg>
+              <StudioIcon name="chevronLeft" :size="20" customClass="transition-transform group-hover:-translate-x-0.5" />
             </button>
 
             <button
@@ -716,9 +1003,7 @@
               class="absolute right-3 top-1/2 -translate-y-1/2 z-30 w-11 h-11 rounded-full bg-studio-900/85 hover:bg-studio-accent text-white border border-studio-700/80 shadow-2xl flex items-center justify-center transition-all cursor-pointer backdrop-blur-md active:scale-95 group hover:shadow-studio-accent/40"
               title="下一件素材 (快捷键: →)"
             >
-              <svg class="w-5 h-5 transition-transform group-hover:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7" />
-              </svg>
+              <StudioIcon name="chevronRight" :size="20" customClass="transition-transform group-hover:translate-x-0.5" />
             </button>
 
             <div v-if="isDetailLoading" class="absolute inset-0 flex items-center justify-center bg-studio-950/50 backdrop-blur-sm z-10">
@@ -1196,6 +1481,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import StudioIcon from '../components/StudioIcon.vue';
+import BaseLibraryPane from './library/BaseLibraryPane.vue';
 import LineageGraph from '../components/LineageGraph.vue';
 import SimilarityWorkbenchModal from '../components/SimilarityWorkbenchModal.vue';
 import {
@@ -1315,11 +1601,106 @@ const SOURCE_PLATES = [
   { key: 'original', label: '原素材' },
   { key: 'retouched', label: '精修素材' },
   { key: 'finished', label: '成品素材' },
-  // 被云端剪辑工程引用的素材。只读视图，数据来自 clip_snapshot_assets 关联表，
-  // 不做物理复制（底层按 sha256 去重，复制只会让归属变模糊）。
   { key: 'clip', label: '剪辑素材' },
+  { key: 'base', label: '基础素材' },
   { key: 'trash', label: '回收站' }
 ];
+
+const DAM_MAIN_TABS = [
+  { key: 'image', label: '图片', icon: 'image', subTitle: '图片品类细分' },
+  { key: 'video', label: '视频', icon: 'video', subTitle: '视频形式细分' },
+  { key: 'audio', label: '音频', icon: 'music', subTitle: '音频类型细分' }
+];
+
+const BASE_WAREHOUSES = [
+  { key: 'material', label: '材质库' },
+  { key: 'paint', label: '色号库' },
+  { key: 'light', label: '灯具库' },
+  { key: 'model', label: '模型库' }
+];
+
+const BASE_MAT_SOURCES = [
+  { key: '', label: '全部渠道' },
+  { key: 'ambientcg', label: 'ambientCG (CC0)' },
+  { key: 'polyhaven', label: 'Poly Haven (CC0)' },
+  { key: 'manual', label: '官方底色壳' }
+];
+
+const BASE_PAINT_BRANDS = [
+  { key: '', label: '全部品牌' },
+  { key: 'nippon-paint', label: '立邦' },
+  { key: 'dulux', label: '多乐士' }
+];
+
+const BASE_PAINT_FAMILIES = [
+  { key: '', label: '全部色系' },
+  { key: 'off-white', label: '米白珍珠' },
+  { key: 'beige', label: '暖调米咖' },
+  { key: 'greige', label: '原麻灰米' },
+  { key: 'gray', label: '现代冷灰' },
+  { key: 'green', label: '复古草绿' },
+  { key: 'ivory', label: '中性象牙' },
+  { key: 'white', label: '纯净雪域' }
+];
+
+const BASE_LIGHT_DIRECTIONS = [
+  { key: '', label: '全部方位' },
+  { key: 'left', label: '画面左侧' },
+  { key: 'upper_left', label: '左上方' },
+  { key: 'top', label: '正上方' },
+  { key: 'upper_right', label: '右上方' },
+  { key: 'right', label: '画面右侧' }
+];
+
+const BASE_LIGHT_CCTS = [
+  { key: '', label: '全部色温' },
+  { key: '2700', label: '2700K 暖黄' },
+  { key: '3000', label: '3000K 暖白' },
+  { key: '4000', label: '4000K 自然白' },
+  { key: '5000', label: '5000K 正白' },
+  { key: '6500', label: '6500K 冷白' }
+];
+
+const BASE_MODEL_CATEGORIES = [
+  { key: 'furniture', label: '活动家具' },
+  { key: 'millwork', label: '定制柜体木作' },
+  { key: 'sanitary', label: '卫浴与厨电五金' },
+  { key: 'decor', label: '软装陈设与绿植' }
+];
+
+const CLIP_MEDIA_TYPES = [
+  { key: '', label: '全部媒体' },
+  { key: 'image', label: '图片' },
+  { key: 'video', label: '视频' },
+  { key: 'audio', label: '音频' }
+];
+const clipMediaTypeFilter = ref('');
+
+const libraryRail = ref('dam'); // 'dam' | 'base'
+const baseWarehouse = ref('material'); // 'material' | 'paint' | 'light' | 'model'
+const baseMaterialSurface = ref('');
+const baseMaterialSource = ref('');
+const baseMaterialShellOnly = ref(false);
+const basePaintBrand = ref('');
+const basePaintFamily = ref('');
+const basePaintPinnedOnly = ref(false);
+const baseLightDirection = ref('');
+const baseLightCct = ref('');
+const baseModelCategory = ref('furniture');
+const baseSurfaces = ref([]);
+
+async function loadBaseSurfaces() {
+  try {
+    const res = await fetch('/api/base-library/taxonomy', {
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('ml_token') || ''}` }
+    });
+    const json = await res.json();
+    if (json.success && json.data?.surfaces) {
+      baseSurfaces.value = json.data.surfaces;
+    }
+  } catch (e) {}
+}
+
 const sourcePlate = ref('original');
 const plateTabs = computed(() => {
   if (sourcePlate.value === 'clip') {
@@ -1328,20 +1709,49 @@ const plateTabs = computed(() => {
   if (sourcePlate.value === 'trash') return MAIN_TABS.filter((tab) => tab.key === 'trash');
   return MAIN_TABS.filter((tab) => tab.key !== 'trash');
 });
-function setSourcePlate(key) {
+
+function selectSourcePlate(key) {
   if (sourcePlate.value === key) return;
   sourcePlate.value = key;
-  if (key === 'trash') {
-    activeMainTab.value = 'trash';
-    activeSubCategory.value = 'all';
-  } else if (key === 'clip') {
-    activeMainTab.value = 'clip';
-    activeSubCategory.value = 'all';
-  } else if (activeMainTab.value === 'trash' || activeMainTab.value === 'clip') {
-    activeMainTab.value = 'image';
-    activeSubCategory.value = 'interior_exterior';
+  if (key === 'base') {
+    libraryRail.value = 'base';
+  } else {
+    libraryRail.value = 'dam';
+    if (key === 'trash') {
+      activeMainTab.value = 'trash';
+      activeSubCategory.value = 'all';
+    } else if (key === 'clip') {
+      activeMainTab.value = 'clip';
+      activeSubCategory.value = 'input';
+    } else {
+      if (activeMainTab.value === 'trash' || activeMainTab.value === 'clip') {
+        activeMainTab.value = 'image';
+        activeSubCategory.value = 'interior_exterior';
+      }
+    }
+    reloadAssets(true);
   }
+}
+
+function onSelectDamPlate(plateKey) {
+  selectSourcePlate(plateKey);
+}
+
+function onSelectBaseWarehouse(whKey) {
+  libraryRail.value = 'base';
+  sourcePlate.value = 'base';
+  baseWarehouse.value = whKey;
+}
+
+function switchClipScope(key) {
+  if (activeSubCategory.value === key) return;
+  activeSubCategory.value = key;
+  activeClipProject.value = '';
   reloadAssets(true);
+}
+
+function setSourcePlate(key) {
+  selectSourcePlate(key);
 }
 
 const finishedFileInput = ref(null);
@@ -1590,7 +2000,7 @@ function handleBatchSendToChat() {
   const items = getSelectedAssets();
   if (!items.length) return;
   emit('sendToChat', {
-    items: items.map((it) => ({ ...it, url: getThumbnailSrc(it), imgUrl: getThumbnailSrc(it) }))
+    items: items.map((it) => ({ ...it, url: getAssetImageUrl(it.fid, it.mediaToken), imgUrl: getAssetImageUrl(it.fid, it.mediaToken) }))
   });
   exitSelectMode();
 }
@@ -1669,6 +2079,21 @@ const clipProjectChips = computed(() => {
 const mainTabsWithoutTrash = computed(() => MAIN_TABS.filter((tab) => tab.key !== 'trash'));
 
 const searchPlaceholder = computed(() => {
+  if (sourcePlate.value === 'base') {
+    switch (baseWarehouse.value) {
+      case 'material': return '搜索材质名称、纹理、来源...';
+      case 'paint': return '搜索色号代码、名称、色系...';
+      case 'light': return '搜索灯具方位、色温预设...';
+      case 'model': return '搜索家具、木作、厨卫、软装...';
+      default: return '搜索基础素材...';
+    }
+  }
+  if (sourcePlate.value === 'clip') {
+    return '搜索剪辑素材、工程名称…';
+  }
+  if (sourcePlate.value === 'trash') {
+    return '搜索回收站废弃素材…';
+  }
   switch (activeMainTab.value) {
     case 'image':
       if (activeSubCategory.value === 'portrait') return '搜索人像姿态、角色、景别…';
@@ -2288,6 +2713,9 @@ async function reloadAssets(reset = true) {
         fileName: it.file_name,
         thumbUrl: it.thumb_url || null
       }));
+      if (scope === 'input' && clipMediaTypeFilter.value) {
+        items = items.filter(it => it.kind === clipMediaTypeFilter.value);
+      }
       clipProjects.value = data.projects || [];
       assetsList.value = items;
       totalAssetsCount.value = Number(data.total) || items.length;
@@ -2958,6 +3386,7 @@ watch(sentinelRef, () => {
 });
 
 onMounted(() => {
+  loadBaseSurfaces();
   reloadAssets(true);
   loadTimelineDays();
   setTimeout(setupIntersectionObserver, 300);

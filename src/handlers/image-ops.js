@@ -604,6 +604,101 @@ async function pastebackToTarget(sceneBuffer, generatedBuffer, { selection = nul
   return pastebackComposite(baseBuffer, generatedBuffer, scaledRect, scaledSel || scaledRect);
 }
 
+/**
+ * 选区内部裁切 (JEV 选区分类专用，严禁外扩 90%，严禁带标注)
+ * 适配 TypeSafe System One: 短边 < 280 放大到 280，长边 > 1568 缩小到 1568；
+ * 宽高比 > 5.6 时长边收至 1568，短边以边缘像素延展至 280。输出 JPEG quality 85。
+ */
+async function cropSelectionInterior(imageBuffer, selection, { minShort = 280, maxLong = 1568, quality = 85 } = {}) {
+  let norm = null;
+  if (!selection) {
+    norm = { x: 0, y: 0, w: 1, h: 1 };
+  } else if (selection.norm_points && Array.isArray(selection.norm_points) && selection.norm_points.length > 0) {
+    const pts = selection.norm_points;
+    const minX = Math.min(...pts.map((p) => (p && typeof p.x === 'number' ? p.x : 0)));
+    const maxX = Math.max(...pts.map((p) => (p && typeof p.x === 'number' ? p.x : 0)));
+    const minY = Math.min(...pts.map((p) => (p && typeof p.y === 'number' ? p.y : 0)));
+    const maxY = Math.max(...pts.map((p) => (p && typeof p.y === 'number' ? p.y : 0)));
+    norm = { x: minX, y: minY, w: Math.max(0.001, maxX - minX), h: Math.max(0.001, maxY - minY) };
+  } else if (selection.normPoints && Array.isArray(selection.normPoints) && selection.normPoints.length > 0) {
+    const pts = selection.normPoints;
+    const minX = Math.min(...pts.map((p) => (p && typeof p.x === 'number' ? p.x : 0)));
+    const maxX = Math.max(...pts.map((p) => (p && typeof p.x === 'number' ? p.x : 0)));
+    const minY = Math.min(...pts.map((p) => (p && typeof p.y === 'number' ? p.y : 0)));
+    const maxY = Math.max(...pts.map((p) => (p && typeof p.y === 'number' ? p.y : 0)));
+    norm = { x: minX, y: minY, w: Math.max(0.001, maxX - minX), h: Math.max(0.001, maxY - minY) };
+  } else if (selection.norm && typeof selection.norm === 'object') {
+    norm = selection.norm;
+  } else if (typeof selection.x === 'number' && typeof selection.y === 'number') {
+    norm = selection;
+  } else {
+    norm = { x: 0, y: 0, w: 1, h: 1 };
+  }
+
+  const meta = await sharp(imageBuffer).metadata();
+  const imgW = meta.width;
+  const imgH = meta.height;
+
+  let left = Math.max(0, Math.floor((norm.x || 0) * imgW));
+  let top = Math.max(0, Math.floor((norm.y || 0) * imgH));
+  let width = Math.round((norm.w || 1) * imgW);
+  let height = Math.round((norm.h || 1) * imgH);
+
+  if (left + width > imgW) width = imgW - left;
+  if (top + height > imgH) height = imgH - top;
+  left = Math.max(0, Math.min(left, imgW - 1));
+  top = Math.max(0, Math.min(top, imgH - 1));
+  width = Math.max(1, Math.min(width, imgW - left));
+  height = Math.max(1, Math.min(height, imgH - top));
+
+  let pipeline = sharp(imageBuffer).extract({ left, top, width, height });
+
+  const curW = width;
+  const curH = height;
+  const longEdge = Math.max(curW, curH);
+  const shortEdge = Math.min(curW, curH);
+  const ar = longEdge / shortEdge;
+  const maxAr = maxLong / minShort; // 1568 / 280 = 5.6
+
+  if (ar > maxAr) {
+    if (curW >= curH) {
+      const scaledW = maxLong;
+      const scaledH = Math.max(1, Math.round(curH * (maxLong / curW)));
+      pipeline = pipeline.resize(scaledW, scaledH);
+      const diff = minShort - scaledH;
+      if (diff > 0) {
+        const topPad = Math.floor(diff / 2);
+        const bottomPad = diff - topPad;
+        pipeline = pipeline.extend({ top: topPad, bottom: bottomPad, extendWith: 'copy' });
+      }
+    } else {
+      const scaledH = maxLong;
+      const scaledW = Math.max(1, Math.round(curW * (maxLong / curH)));
+      pipeline = pipeline.resize(scaledW, scaledH);
+      const diff = minShort - scaledW;
+      if (diff > 0) {
+        const leftPad = Math.floor(diff / 2);
+        const rightPad = diff - leftPad;
+        pipeline = pipeline.extend({ left: leftPad, right: rightPad, extendWith: 'copy' });
+      }
+    }
+  } else {
+    if (shortEdge < minShort) {
+      const scale = minShort / shortEdge;
+      const targetW = Math.round(curW * scale);
+      const targetH = Math.round(curH * scale);
+      pipeline = pipeline.resize(targetW, targetH);
+    } else if (longEdge > maxLong) {
+      const scale = maxLong / longEdge;
+      const targetW = Math.round(curW * scale);
+      const targetH = Math.round(curH * scale);
+      pipeline = pipeline.resize(targetW, targetH);
+    }
+  }
+
+  return await pipeline.jpeg({ quality }).toBuffer();
+}
+
 module.exports = {
   axisToPx,
   normalizeQuadOrRect,
@@ -616,4 +711,5 @@ module.exports = {
   scaleSelection,
   scaleRect,
   pastebackToTarget,
+  cropSelectionInterior,
 };

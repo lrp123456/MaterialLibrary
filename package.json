@@ -36,6 +36,6 @@
         "restart": "bash start.sh restart",
         "status": "bash start.sh status",
         "logs": "bash start.sh logs",
-        "test": "node test/suite.js && node test/e2e.js && node test/ai-tasks.test.js && node test/lab.test.js && node test/quick-pipeline.test.js && node test/portrait-music.test.js && node test/admin-model.test.js"
+        "test": "node test/suite.js && node test/e2e.js && node test/ai-tasks.test.js && node test/lab.test.js && node test/quick-pipeline.test.js && node test/portrait-music.test.js && node test/admin-model.test.js && node test/creation-templates-since.test.js && node test/crop-selection-interior.test.js && node test/classify-parse.test.js && node test/base-library-compile.test.js && node test/base-library-list.test.js && node test/base-library-flags.test.js && node test/base-library-prefill.test.js && node test/paint-alias.test.js && node test/paint-mirror-upsert.test.js"
     }
 }

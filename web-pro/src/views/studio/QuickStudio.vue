@@ -552,6 +552,20 @@
           </div>
         </div>
 
+        <!-- 基础属性四仓库控制面板 -->
+        <div class="p-3 border-b border-studio-800 bg-studio-950/80 rounded-xl space-y-2 mb-3">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-white">基础属性（四仓库）</span>
+            <span v-if="inferredSurface" class="text-[10px] text-studio-cyan bg-studio-cyan/15 px-1.5 py-0.5 rounded font-mono font-bold">
+              AI识别: {{ inferredSurface }}
+            </span>
+          </div>
+          <BaseAttrPicker
+            :inferredSurface="inferredSurface"
+            v-model="quickBaseAttr"
+          />
+        </div>
+
         <!-- 模式专属配置面板 -->
         <div class="flex-1 p-4 space-y-4 text-xs">
           <!-- ==================== 1. 替换模式 ==================== -->
@@ -987,6 +1001,54 @@
           <span v-if="lastRegionNote" class="block text-[11px] leading-relaxed text-amber-300">{{ lastRegionNote }}</span>
         </p>
 
+        <!-- 整图光线控制 (风格/超分/去水印通用接续) -->
+        <div class="p-4 rounded-xl bg-studio-950 border border-studio-800 space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-white">整图光线控制：</span>
+            <label class="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
+              <input type="checkbox" v-model="globalLightKeep" class="rounded border-studio-700 bg-studio-900 text-studio-accent" />
+              <span>保持原图光线</span>
+            </label>
+          </div>
+          <div v-if="!globalLightKeep" class="space-y-3">
+            <div>
+              <span class="text-[11px] text-slate-400 block mb-1">主光来向（屏幕方向）：</span>
+              <div class="grid grid-cols-5 gap-1 text-[10px]">
+                <button
+                  v-for="d in lightDirections"
+                  :key="d.key"
+                  type="button"
+                  @click="globalLightDir = d.key"
+                  :class="['py-1.5 rounded-lg border text-center transition cursor-pointer', globalLightDir === d.key ? 'bg-studio-accent border-studio-accent text-white font-bold' : 'border-studio-800 bg-studio-900 text-slate-400']"
+                >
+                  {{ d.label }}
+                </button>
+              </div>
+            </div>
+            <div>
+              <div class="flex items-center justify-between text-[11px] text-slate-400 mb-1">
+                <span>色温微调：</span>
+                <span class="font-mono text-studio-cyan font-bold">{{ globalKelvin }}K</span>
+              </div>
+              <input
+                type="range"
+                min="2700"
+                max="6500"
+                step="100"
+                v-model.number="globalKelvin"
+                class="w-full accent-studio-accent"
+              />
+              <div class="flex justify-between text-[9px] text-slate-500 font-mono mt-1">
+                <span @click="globalKelvin = 2700" class="cursor-pointer hover:text-slate-300">2700K</span>
+                <span @click="globalKelvin = 3000" class="cursor-pointer hover:text-slate-300">3000K</span>
+                <span @click="globalKelvin = 4000" class="cursor-pointer hover:text-slate-300">4000K</span>
+                <span @click="globalKelvin = 5000" class="cursor-pointer hover:text-slate-300">5000K</span>
+                <span @click="globalKelvin = 6500" class="cursor-pointer hover:text-slate-300">6500K</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- 模式 A：画质超分重建 -->
         <div v-if="activeGlobalMode === 'upscale'" class="p-4 rounded-xl bg-studio-950 border border-studio-800 space-y-3">
           <span class="font-bold text-white block">超分辨率重建档位：</span>
@@ -1141,6 +1203,7 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue';
 import StudioIcon from '../../components/StudioIcon.vue';
+import BaseAttrPicker from '../../components/BaseAttrPicker.vue';
 import BeforeAfterSlider from '../../components/BeforeAfterSlider.vue';
 import AssetPickerModal from '../../components/AssetPickerModal.vue';
 import DynamicModelParamBar from '../../components/DynamicModelParamBar.vue';
@@ -1480,7 +1543,19 @@ function onViewportMouseUp(e) {
   if (isDrawingRect) {
     isDrawingRect = false;
     if (drawingAvoidMode.value) {
-      drawingAvoidMode.value = false; // 避让区画完自动退出避让绘制状态
+      drawingAvoidMode.value = false;
+    } else if (rectBBox.value) {
+      const w = Math.abs(rectBBox.value.x2 - rectBBox.value.x1);
+      const h = Math.abs(rectBBox.value.y2 - rectBBox.value.y1);
+      if (w > 5 && h > 5 && imageNaturalSize.value.w > 0 && imageNaturalSize.value.h > 0) {
+        const norm = {
+          x: Math.min(rectBBox.value.x1, rectBBox.value.x2) / imageNaturalSize.value.w,
+          y: Math.min(rectBBox.value.y1, rectBBox.value.y2) / imageNaturalSize.value.h,
+          w: w / imageNaturalSize.value.w,
+          h: h / imageNaturalSize.value.h
+        };
+        classifyQuickRegion({ type: 'rect', norm });
+      }
     }
   }
 }
@@ -1528,6 +1603,13 @@ function closePolygon() {
   }
   isPolyClosed.value = true;
   mouseCurrentPos.value = null;
+  if (polygonPoints.value.length >= 3 && imageNaturalSize.value.w > 0) {
+    const norm_points = polygonPoints.value.map(p => ({
+      x: p.x / imageNaturalSize.value.w,
+      y: p.y / imageNaturalSize.value.h
+    }));
+    classifyQuickRegion({ type: 'polygon', norm_points });
+  }
   return true;
 }
 
@@ -1654,7 +1736,53 @@ const editModes = [
   { key: 'expand', label: '扩图模式', icon: '🖼️' }
 ];
 const selectedMode = ref('replace');
+const quickBaseAttr = ref({
+  surface: 'wall',
+  subclass: 'wall_paint',
+  warehouse: 'paint',
+  asset_id: null,
+  use_shell: false
+});
+const inferredSurface = ref('');
 const precisionModelKey = ref('seedream5flash');
+const globalLightKeep = ref(true);
+const globalLightDir = ref('top');
+const globalKelvin = ref(4000);
+const lightDirections = [
+  { key: 'left', label: '画面左侧' },
+  { key: 'upper_left', label: '左上' },
+  { key: 'top', label: '正上' },
+  { key: 'upper_right', label: '右上' },
+  { key: 'right', label: '画面右侧' }
+];
+
+async function classifyQuickRegion(selection) {
+  if (studioMode.value !== 'precision' || selectedMode.value === 'expand') return;
+  if (!selection) return;
+  const payload = {
+    selection,
+    asset_fid: currentAssetFid.value || null
+  };
+  try {
+    const token = localStorage.getItem('token') || '';
+    const res = await fetch('/api/base-library/classify-region', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) return;
+    const json = await res.json();
+    if (json.success && json.data && !json.data.uncertain && json.data.surface && json.data.probability >= 0.75) {
+      inferredSurface.value = json.data.surface;
+      if (!quickBaseAttr.value.subclass && !quickBaseAttr.value.asset_id) {
+        quickBaseAttr.value.surface = json.data.surface;
+      }
+    }
+  } catch (_) {}
+}
 
 // ==================== 出图参数（清晰度 / 画幅）====================
 // 与对话生成同一套做法：档位、画幅、默认值全部来自 /studio/catalog 的模型契约，
@@ -2272,7 +2400,24 @@ async function runExecute() {
         gap: 'space',
         remove: 'remove',
       };
-      const targetOp = opMapping[selectedMode.value] || selectedMode.value;
+      let targetOp = opMapping[selectedMode.value] || selectedMode.value;
+      let bindingsPayload = null;
+      if (quickBaseAttr.value && (quickBaseAttr.value.asset_id || quickBaseAttr.value.subclass === 'millwork_carcass')) {
+        targetOp = 'base_attr';
+        bindingsPayload = {
+          regions: [{
+            region_id: 'qs_reg_' + Date.now(),
+            surface: quickBaseAttr.value.surface,
+            subclass: quickBaseAttr.value.subclass,
+            warehouse: quickBaseAttr.value.warehouse,
+            asset_id: quickBaseAttr.value.asset_id,
+            use_shell: quickBaseAttr.value.use_shell,
+            finish: quickBaseAttr.value.finish,
+            roughness: quickBaseAttr.value.roughness
+          }],
+          light_mode: null
+        };
+      }
 
       let resolvedProductName = '';
       if (selectedMode.value === 'add') {
@@ -2288,14 +2433,14 @@ async function runExecute() {
         assetFid: currentAssetFid.value || undefined,
         op: targetOp,
         region: regionPayload,
-        refImage: refImage || undefined,
+        bindings: bindingsPayload,
+        refImage: targetOp === 'base_attr' ? undefined : (refImage || undefined),
         productImage: selectedMode.value === 'install' ? installPreview.value : undefined,
         fidelity: selectedMode.value === 'install' ? activeFidelity.value : undefined,
         productName: resolvedProductName,
         modelYaw: modelRotation.value,
         modelPitch: modelPitch.value,
         model: precisionModelKey.value || undefined,
-        // 出图参数按字面下发；契约里没有这两项时保持 undefined，让服务端按默认出图
         size: outParams.value.size || undefined,
         ratio: outParams.value.ratio || undefined,
         prompt: selectedMode.value === 'add' ? (addItemPrompt.value || undefined) : undefined,

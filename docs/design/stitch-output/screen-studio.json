@@ -1,0 +1,130 @@
+{
+  "status": 200,
+  "json": {
+    "id": 12,
+    "jsonrpc": "2.0",
+    "result": {
+      "content": [
+        {
+          "text": "{\"projectId\":\"13552649013419215261\",\"sessionId\":\"635926598861971409\",\"outputComponents\":[{\"design\":{\"screens\":[{\"screenshot\":{\"name\":\"projects/13552649013419215261/files/a8bb8108ca584933a3f0f2ef621e7c31\",\"downloadUrl\":\"https://stitch.googleapis.com/v1/projects/13552649013419215261/files/a8bb8108ca584933a3f0f2ef621e7c31:download\"},\"id\":\"3951a37f8a16484b974c03dd035f99e4\",\"generatedBy\":\"interactive_ui_controller\",\"width\":\"1200\",\"height\":\"896\",\"title\":\"High-end modern architectural interior photography of a minimalist wabi-sabi living room with concrete microcement walls, sleek warm wooden oak bench, low linen armchair, soft diffused natural daylight, architectural symmetry, strictly no people, no watermark, professional clean interior photography\",\"prompt\":\"High-end modern architectural interior photography of a minimalist wabi-sabi living room with concrete microcement walls, sleek warm wooden oak bench, low linen armchair, soft diffused natural daylight, architectural symmetry, strictly no people, no watermark, professional clean interior photography\",\"name\":\"projects/13552649013419215261/screens/3951a37f8a16484b974c03dd035f99e4\",\"theme\":{},\"screenType\":\"IMAGE\",\"screenMetadata\":{\"agentType\":\"PRO_AGENT\",\"status\":\"COMPLETE\"},\"designSystem\":{\"name\":\"assets/11073803561422458846\",\"designSystem\":{\"displayName\":\"Obsidian Studio\",\"theme\":{\"colorMode\":\"DARK\",\"roundness\":\"ROUND_TWELVE\",\"customColor\":\"#6366F1\",\"headlineFont\":\"PLUS_JAKARTA_SANS\",\"bodyFont\":\"PLUS_JAKARTA_SANS\",\"colorVariant\":\"TONAL_SPOT\",\"overridePrimaryColor\":\"#6366F1\",\"overrideSecondaryColor\":\"#06B6D4\",\"overrideNeutralColor\":\"#0A0E17\"}},\"version\":\"1\"}},{\"screenshot\":{\"name\":\"projects/13552649013419215261/files/ef043de5b72e47fb81c4b4cd5f01828b\",\"downloadUrl\":\"https://stitch.googleapis.com/v1/projects/13552649013419215261/files/ef043de5b72e47fb81c4b4cd5f01828b:download\"},\"htmlCode\":{\"name\":\"projects/13552649013419215261/files/1721c6a79c3c4b0192ff4e935d599358\",\"downloadUrl\":\"https://stitch.googleapis.com/v1/projects/13552649013419215261/files/1721c6a79c3c4b0192ff4e935d599358:download\",\"mimeType\":\"text/html\"},\"id\":\"3a99af1438674d328d5d3fba51609df3\",\"generatedBy\":\"figaro_agent\",\"width\":\"2560\",\"height\":\"2048\",\"title\":\"空间创作 - 灵感空间 PRO\",\"prompt\":\"构建桌面端专业级室内设计创作工作台「空间创作 - 灵感空间 PRO」，精确宽度 1440px 桌面端设计规范，禁止营销落地页风格。\\n\\n严格遵循视觉与规范标准：\\n- 配色：页面背景 #0A0E17，栏/侧边栏 #131A29，卡片容器 #182236，悬停底色 #212E47，描边线 #27354D，主字 #F8FAFC，次字 #94A3B8，弱字 #64748B，主色 #6366F1（Indigo-500），芯片青色 #06B6D4（Cyan-500），成功绿 #10B981，危险红 #F43F5E。\\n- 字体：文字用 Plus Jakarta Sans，数字及编号用 JetBrains Mono。圆角全部为 12px (rounded-xl)。严格遵循 8px 网格间距。\\n- 绝无渐变背景、绝无玻璃拟态磨砂、绝无 emoji、绝无插画、绝无三栏营销大图英雄区、绝无大阴影扩散（扁平干净利落的专业工作台工具质感）。\\n- 图标全部为 20px 纯细线描（Lucide 或 Material Symbols 风格 outline），静止状态无动画，每个动作配单个图标。所有可交互点击区域尺寸至少 36px。各独立分区内最多仅保留一个实心靛蓝主按钮。\\n- 全界面使用规范纯正简体中文。中性高品质室内设计摄影图，无人物无水印：直接在画廊中使用 {{DATA:IMAGE:IMAGE_4}} 和 {{DATA:IMAGE:IMAGE_6}}。\\n\\n页面结构分解：\\n1. 顶栏（高度 56px，背景 #131A29，下边框 #27354D）：\\n   - 左侧：实心靛蓝方标带「灵感空间」与小号精致标签「PRO」。\\n   - 导航 4 项：空间创作、素材库、剪辑、设置。当前激活项为「空间创作」（底部 2px 靛蓝指示线）。严禁出现「对话生成 / 精准编辑」二级菜单！\\n   - 右侧：适老无障碍图标按钮、主题胶囊「● 暗黑」、状态胶囊「● 在线」（成功绿点）、圆形用户头像。\\n\\n2. 顶栏下方三列布局（高度占满视口 h-[calc(100vh-56px)]，无全局外边距）：\\n   - 左列（固定宽度 300px，背景 #131A29，右边框 #27354D，flex flex-col）：\\n     * 顶部标题区：「对话历史」（附搜索/过滤线框图标）。\\n     * 5 条历史会话列表，当前会话处于激活状态（左侧 2px 纯色靛蓝竖指示条 #6366F1，背景 #182236，主标题与弱字时间戳如「10:24」「昨日」）。其他 4 条会话为常规状态带悬停效果。\\n     * 底部固定：一个「新对话」操作栏（线框加号图标，规范点击高度 36px+）。\\n\\n   - 中列（自适应宽度，背景 #0A0E17，flex flex-col）：\\n     * (1) 顶部消息区（较矮，轻量，padding 12px 20px，底边框 #27354D）：\\n       顶部一行微弱提示「↑ 向上滚动查看更早记录」。展示一条用户最新消息「参考原木侘寂风格调整整体采光与软装搭配」，并带有一张已生成的小结果缩略图（约 48x48 或 64x48 圆角微缩图）。\\n     * (2) 看图区（约占中列高度的 70%，flex-1 flex flex-col p-4）：\\n       - 顶部工具行：显示画廊控制项，左右方向翻页箭头图标按钮、中间标注「视图 1-2 / 2」，右上角文字加线框图标按钮「收缩」。\\n       - 照片并排展示区域：横排展示两张同样大的完整高精度室内照片，绝对不能中间一张巨大两侧只露一条！\\n         * 图 1 卡片：容器底色 #182236，边框为 2px 实心靛蓝 #6366F1（表示当前选中状态），圆角 12px。上方标题栏包含 JetBrains Mono 等宽字体「图1」及下一行小文件名「ARCH-7022_LivingRoom_WarmOak.raw.dng」。中间嵌入完整照片 {{DATA:IMAGE:IMAGE_4}}。右下角操作浮层提供铅笔编辑图标与删除图标（危险悬停红）。\\n         * 图 2 卡片：容器底色 #182236，标准边框 #27354D，圆角 12px。上方标题栏等宽字体「图2」及文件名「ARCH-7023_MinimalConcrete_Bench.raw.dng」。中间嵌入完整照片 {{DATA:IMAGE:IMAGE_6}}。右下角同样有铅笔和删除线框图标。\\n         * 末尾跟随一个虚线边框卡片「+ 添加图幅/视角」（居中线框加号，高度与前两者呼应）。\\n     * (3) 底部固定输入区（背景 #131A29，顶边框 #27354D，p-4 flex flex-col gap-3）：\\n       - 模式切换与参数行：\\n         * 模式切换胶囊组：对话、生图、生视频、生音乐，其中「生图」为选中状态（底色 #182236 描边 #6366F1 字色 #F8FAFC）。\\n         * 模型选择下拉标签（如「Architect-Diffusion v4.2」）与画幅标签「16:9」（JetBrains Mono）。\\n         * 辅助文字按钮：「按这些图给建议」（带线框灯泡或建议图标）。\\n       - 输入表单两行：\\n         * 第一行标签「配方句」：预填输入内容包含青色小芯片标签「图1」（底色带有青色高亮 #06B6D4），后跟文字「将图1改为原木侘寂风」。\\n         * 第二行标签「补充句」：输入框占位符「例如沙发再深一点，百叶窗阴影更柔和...」。\\n       - 底部操作行：右侧包含次按钮「预览请求」（轮廓线框按钮，高 36px），以及本区域唯一的实心靛蓝主按钮「生成」（背景 #6366F1，文字白色，高 36px，带魔棒图标）。\\n\\n   - 右列（固定宽度 380px，背景 #131A29，左边框 #27354D，flex flex-col）：\\n     * 顶部标题区：标题「精准编辑」（附重置和关闭线框图标）。\\n     * 分组 Tab 切换：分为「全局」与「预定」两组选项卡，「全局」当前处于激活状态。\\n     * 全局子分类：横向展示「风格」「材质」「光影」「镜头」，当前选中「风格」。\\n     * 风格网格/列表：提供 6 项经典室内风格（如「日式侘寂」「极简原木」「包豪斯工业」「现代轻奢」「微水泥极简」「北欧斯堪的纳维亚」），其中「日式侘寂」处于高亮选中状态。\\n     * 选中项详情配置：在选中项下方展开一段可编辑的多行文本风格描述框（配微弱边框，内容如「自然微水泥肌理，未经雕琢的原木质感，柔和米灰色粗麻布艺，低矮家具重心与大面积柔和漫射天光」）。\\n     * 抽屉内部绝无第二块画布。\\n     * 抽屉底部固定行（顶边框 #27354D，p-3）：显示弱字提示信息「已写入配方句，发送前可以改」，并带一个小同步图标。\\n\\n整体界面比例和谐，专业性拉满，排版极致规整，符合专业生产力工作站的最高设计标准。\",\"name\":\"projects/13552649013419215261/screens/3a99af1438674d328d5d3fba51609df3\",\"theme\":{\"colorMode\":\"DARK\",\"roundness\":\"ROUND_TWELVE\",\"customColor\":\"#6366F1\",\"headlineFont\":\"PLUS_JAKARTA_SANS\",\"bodyFont\":\"PLUS_JAKARTA_SANS\",\"colorVariant\":\"TONAL_SPOT\",\"overridePrimaryColor\":\"#6366F1\",\"overrideSecondaryColor\":\"#06B6D4\",\"overrideNeutralColor\":\"#0A0E17\"},\"deviceType\":\"DESKTOP\",\"screenType\":\"DESIGN\",\"screenMetadata\":{\"agentType\":\"PRO_AGENT\",\"status\":\"COMPLETE\"},\"designSystem\":{\"name\":\"assets/11073803561422458846\",\"designSystem\":{\"displayName\":\"Obsidian Studio\",\"theme\":{\"colorMode\":\"DARK\",\"roundness\":\"ROUND_TWELVE\",\"customColor\":\"#6366F1\",\"headlineFont\":\"PLUS_JAKARTA_SANS\",\"bodyFont\":\"PLUS_JAKARTA_SANS\",\"colorVariant\":\"TONAL_SPOT\",\"overridePrimaryColor\":\"#6366F1\",\"overrideSecondaryColor\":\"#06B6D4\",\"overrideNeutralColor\":\"#0A0E17\"}},\"version\":\"1\"}}],\"theme\":{}}},{\"text\":\"已为您构建高精度的专业桌面端室内设计创作工作台界面——「空间创作 - 灵感空间 PRO」（1440px 宽度规范）。\\n\\n### 设计实现要点：\\n1. **纯正专业暗色工具质感**：严格遵循指定色板（底色 `#0A0E17`、面板栏 `#131A29`、卡片 `#182236`、边框 `#27354D`、悬停 `#212E47`、主色 `#6366F1`、青色芯片 `#06B6D4` 等）。彻底剔除渐变、磨砂拟态、emoji、插画及扩散阴影，恪守 8px 间距网格与 12px 圆角。\\n2. **统一标准顶栏 (56px)**：左侧为品牌靛蓝方标与「灵感空间 PRO」，主导航包含「空间创作、素材库、剪辑、设置」，当前高亮「空间创作」（底部 2px 靛蓝指示线），不含任何次级二级菜单；右侧集成无障碍适老图标、暗黑模式指示、在线绿色状态与用户头像。\\n3. **左列对话历史 (300px)**：包含历史对话检索、5 条真实室内方案会话项（当前条左侧带 2px 靛蓝指示线），以及底部的「新对话」触发按钮。\\n4. **中列三段式工作台**：\\n   - **顶部轻量消息区**：展示较矮的消息回溯区，带向上滚动提示、用户提示语及小缩略图。\\n   - **看图区（约 70% 高度）**：横排展示两张等宽等高完整室内设计大图，标题标明 JetBrains Mono「图1」「图2」与文件编号，图1 为实心靛蓝选中态，右下角带有线框编辑与删除图标；右侧附带虚线「添加视角」卡片。\\n   - **底部双行输入与配置区**：顶部模式组（生图选中）搭配模型与 16:9 画幅标签；输入区分设带有青色「图1」芯片的「配方句」与「补充句」；右侧包含「预览请求」与唯一的实心靛蓝「生成」主按钮。\\n5. **右列精准编辑抽屉 (380px)**：无第二块画布，包含「全局 / 预定」分组，全局下设有「风格、材质、光影、镜头」分类。风格列表提供 6 项并选中「日式侘寂」，下方配有多行可编辑特征描述框，底部固定弱字状态提示「已写入配方句，发送前可以改」。\"},{\"suggestion\":\"在右侧面板切换到「材质」或「光影」参数调节选项卡\"},{\"suggestion\":\"测试「预览请求」查看当前配方参数与提示词构建弹窗\"},{\"suggestion\":\"为中列看图区添加多选对比或全屏放大审片视图\"}]}",
+          "type": "text"
+        }
+      ],
+      "structuredContent": {
+        "outputComponents": [
+          {
+            "design": {
+              "screens": [
+                {
+                  "designSystem": {
+                    "designSystem": {
+                      "displayName": "Obsidian Studio",
+                      "theme": {
+                        "bodyFont": "PLUS_JAKARTA_SANS",
+                        "colorMode": "DARK",
+                        "colorVariant": "TONAL_SPOT",
+                        "customColor": "#6366F1",
+                        "headlineFont": "PLUS_JAKARTA_SANS",
+                        "overrideNeutralColor": "#0A0E17",
+                        "overridePrimaryColor": "#6366F1",
+                        "overrideSecondaryColor": "#06B6D4",
+                        "roundness": "ROUND_TWELVE"
+                      }
+                    },
+                    "name": "assets/11073803561422458846",
+                    "version": "1"
+                  },
+                  "generatedBy": "interactive_ui_controller",
+                  "height": "896",
+                  "id": "3951a37f8a16484b974c03dd035f99e4",
+                  "name": "projects/13552649013419215261/screens/3951a37f8a16484b974c03dd035f99e4",
+                  "prompt": "High-end modern architectural interior photography of a minimalist wabi-sabi living room with concrete microcement walls, sleek warm wooden oak bench, low linen armchair, soft diffused natural daylight, architectural symmetry, strictly no people, no watermark, professional clean interior photography",
+                  "screenMetadata": {
+                    "agentType": "PRO_AGENT",
+                    "status": "COMPLETE"
+                  },
+                  "screenType": "IMAGE",
+                  "screenshot": {
+                    "downloadUrl": "https://stitch.googleapis.com/v1/projects/13552649013419215261/files/a8bb8108ca584933a3f0f2ef621e7c31:download",
+                    "name": "projects/13552649013419215261/files/a8bb8108ca584933a3f0f2ef621e7c31"
+                  },
+                  "theme": {},
+                  "title": "High-end modern architectural interior photography of a minimalist wabi-sabi living room with concrete microcement walls, sleek warm wooden oak bench, low linen armchair, soft diffused natural daylight, architectural symmetry, strictly no people, no watermark, professional clean interior photography",
+                  "width": "1200"
+                },
+                {
+                  "designSystem": {
+                    "designSystem": {
+                      "displayName": "Obsidian Studio",
+                      "theme": {
+                        "bodyFont": "PLUS_JAKARTA_SANS",
+                        "colorMode": "DARK",
+                        "colorVariant": "TONAL_SPOT",
+                        "customColor": "#6366F1",
+                        "headlineFont": "PLUS_JAKARTA_SANS",
+                        "overrideNeutralColor": "#0A0E17",
+                        "overridePrimaryColor": "#6366F1",
+                        "overrideSecondaryColor": "#06B6D4",
+                        "roundness": "ROUND_TWELVE"
+                      }
+                    },
+                    "name": "assets/11073803561422458846",
+                    "version": "1"
+                  },
+                  "deviceType": "DESKTOP",
+                  "generatedBy": "figaro_agent",
+                  "height": "2048",
+                  "htmlCode": {
+                    "downloadUrl": "https://stitch.googleapis.com/v1/projects/13552649013419215261/files/1721c6a79c3c4b0192ff4e935d599358:download",
+                    "mimeType": "text/html",
+                    "name": "projects/13552649013419215261/files/1721c6a79c3c4b0192ff4e935d599358"
+                  },
+                  "id": "3a99af1438674d328d5d3fba51609df3",
+                  "name": "projects/13552649013419215261/screens/3a99af1438674d328d5d3fba51609df3",
+                  "prompt": "构建桌面端专业级室内设计创作工作台「空间创作 - 灵感空间 PRO」，精确宽度 1440px 桌面端设计规范，禁止营销落地页风格。\n\n严格遵循视觉与规范标准：\n- 配色：页面背景 #0A0E17，栏/侧边栏 #131A29，卡片容器 #182236，悬停底色 #212E47，描边线 #27354D，主字 #F8FAFC，次字 #94A3B8，弱字 #64748B，主色 #6366F1（Indigo-500），芯片青色 #06B6D4（Cyan-500），成功绿 #10B981，危险红 #F43F5E。\n- 字体：文字用 Plus Jakarta Sans，数字及编号用 JetBrains Mono。圆角全部为 12px (rounded-xl)。严格遵循 8px 网格间距。\n- 绝无渐变背景、绝无玻璃拟态磨砂、绝无 emoji、绝无插画、绝无三栏营销大图英雄区、绝无大阴影扩散（扁平干净利落的专业工作台工具质感）。\n- 图标全部为 20px 纯细线描（Lucide 或 Material Symbols 风格 outline），静止状态无动画，每个动作配单个图标。所有可交互点击区域尺寸至少 36px。各独立分区内最多仅保留一个实心靛蓝主按钮。\n- 全界面使用规范纯正简体中文。中性高品质室内设计摄影图，无人物无水印：直接在画廊中使用 {{DATA:IMAGE:IMAGE_4}} 和 {{DATA:IMAGE:IMAGE_6}}。\n\n页面结构分解：\n1. 顶栏（高度 56px，背景 #131A29，下边框 #27354D）：\n   - 左侧：实心靛蓝方标带「灵感空间」与小号精致标签「PRO」。\n   - 导航 4 项：空间创作、素材库、剪辑、设置。当前激活项为「空间创作」（底部 2px 靛蓝指示线）。严禁出现「对话生成 / 精准编辑」二级菜单！\n   - 右侧：适老无障碍图标按钮、主题胶囊「● 暗黑」、状态胶囊「● 在线」（成功绿点）、圆形用户头像。\n\n2. 顶栏下方三列布局（高度占满视口 h-[calc(100vh-56px)]，无全局外边距）：\n   - 左列（固定宽度 300px，背景 #131A29，右边框 #27354D，flex flex-col）：\n     * 顶部标题区：「对话历史」（附搜索/过滤线框图标）。\n     * 5 条历史会话列表，当前会话处于激活状态（左侧 2px 纯色靛蓝竖指示条 #6366F1，背景 #182236，主标题与弱字时间戳如「10:24」「昨日」）。其他 4 条会话为常规状态带悬停效果。\n     * 底部固定：一个「新对话」操作栏（线框加号图标，规范点击高度 36px+）。\n\n   - 中列（自适应宽度，背景 #0A0E17，flex flex-col）：\n     * (1) 顶部消息区（较矮，轻量，padding 12px 20px，底边框 #27354D）：\n       顶部一行微弱提示「↑ 向上滚动查看更早记录」。展示一条用户最新消息「参考原木侘寂风格调整整体采光与软装搭配」，并带有一张已生成的小结果缩略图（约 48x48 或 64x48 圆角微缩图）。\n     * (2) 看图区（约占中列高度的 70%，flex-1 flex flex-col p-4）：\n       - 顶部工具行：显示画廊控制项，左右方向翻页箭头图标按钮、中间标注「视图 1-2 / 2」，右上角文字加线框图标按钮「收缩」。\n       - 照片并排展示区域：横排展示两张同样大的完整高精度室内照片，绝对不能中间一张巨大两侧只露一条！\n         * 图 1 卡片：容器底色 #182236，边框为 2px 实心靛蓝 #6366F1（表示当前选中状态），圆角 12px。上方标题栏包含 JetBrains Mono 等宽字体「图1」及下一行小文件名「ARCH-7022_LivingRoom_WarmOak.raw.dng」。中间嵌入完整照片 {{DATA:IMAGE:IMAGE_4}}。右下角操作浮层提供铅笔编辑图标与删除图标（危险悬停红）。\n         * 图 2 卡片：容器底色 #182236，标准边框 #27354D，圆角 12px。上方标题栏等宽字体「图2」及文件名「ARCH-7023_MinimalConcrete_Bench.raw.dng」。中间嵌入完整照片 {{DATA:IMAGE:IMAGE_6}}。右下角同样有铅笔和删除线框图标。\n         * 末尾跟随一个虚线边框卡片「+ 添加图幅/视角」（居中线框加号，高度与前两者呼应）。\n     * (3) 底部固定输入区（背景 #131A29，顶边框 #27354D，p-4 flex flex-col gap-3）：\n       - 模式切换与参数行：\n         * 模式切换胶囊组：对话、生图、生视频、生音乐，其中「生图」为选中状态（底色 #182236 描边 #6366F1 字色 #F8FAFC）。\n         * 模型选择下拉标签（如「Architect-Diffusion v4.2」）与画幅标签「16:9」（JetBrains Mono）。\n         * 辅助文字按钮：「按这些图给建议」（带线框灯泡或建议图标）。\n       - 输入表单两行：\n         * 第一行标签「配方句」：预填输入内容包含青色小芯片标签「图1」（底色带有青色高亮 #06B6D4），后跟文字「将图1改为原木侘寂风」。\n         * 第二行标签「补充句」：输入框占位符「例如沙发再深一点，百叶窗阴影更柔和...」。\n       - 底部操作行：右侧包含次按钮「预览请求」（轮廓线框按钮，高 36px），以及本区域唯一的实心靛蓝主按钮「生成」（背景 #6366F1，文字白色，高 36px，带魔棒图标）。\n\n   - 右列（固定宽度 380px，背景 #131A29，左边框 #27354D，flex flex-col）：\n     * 顶部标题区：标题「精准编辑」（附重置和关闭线框图标）。\n     * 分组 Tab 切换：分为「全局」与「预定」两组选项卡，「全局」当前处于激活状态。\n     * 全局子分类：横向展示「风格」「材质」「光影」「镜头」，当前选中「风格」。\n     * 风格网格/列表：提供 6 项经典室内风格（如「日式侘寂」「极简原木」「包豪斯工业」「现代轻奢」「微水泥极简」「北欧斯堪的纳维亚」），其中「日式侘寂」处于高亮选中状态。\n     * 选中项详情配置：在选中项下方展开一段可编辑的多行文本风格描述框（配微弱边框，内容如「自然微水泥肌理，未经雕琢的原木质感，柔和米灰色粗麻布艺，低矮家具重心与大面积柔和漫射天光」）。\n     * 抽屉内部绝无第二块画布。\n     * 抽屉底部固定行（顶边框 #27354D，p-3）：显示弱字提示信息「已写入配方句，发送前可以改」，并带一个小同步图标。\n\n整体界面比例和谐，专业性拉满，排版极致规整，符合专业生产力工作站的最高设计标准。",
+                  "screenMetadata": {
+                    "agentType": "PRO_AGENT",
+                    "status": "COMPLETE"
+                  },
+                  "screenType": "DESIGN",
+                  "screenshot": {
+                    "downloadUrl": "https://stitch.googleapis.com/v1/projects/13552649013419215261/files/ef043de5b72e47fb81c4b4cd5f01828b:download",
+                    "name": "projects/13552649013419215261/files/ef043de5b72e47fb81c4b4cd5f01828b"
+                  },
+                  "theme": {
+                    "bodyFont": "PLUS_JAKARTA_SANS",
+                    "colorMode": "DARK",
+                    "colorVariant": "TONAL_SPOT",
+                    "customColor": "#6366F1",
+                    "headlineFont": "PLUS_JAKARTA_SANS",
+                    "overrideNeutralColor": "#0A0E17",
+                    "overridePrimaryColor": "#6366F1",
+                    "overrideSecondaryColor": "#06B6D4",
+                    "roundness": "ROUND_TWELVE"
+                  },
+                  "title": "空间创作 - 灵感空间 PRO",
+                  "width": "2560"
+                }
+              ],
+              "theme": {}
+            }
+          },
+          {
+            "text": "已为您构建高精度的专业桌面端室内设计创作工作台界面——「空间创作 - 灵感空间 PRO」（1440px 宽度规范）。\n\n### 设计实现要点：\n1. **纯正专业暗色工具质感**：严格遵循指定色板（底色 `#0A0E17`、面板栏 `#131A29`、卡片 `#182236`、边框 `#27354D`、悬停 `#212E47`、主色 `#6366F1`、青色芯片 `#06B6D4` 等）。彻底剔除渐变、磨砂拟态、emoji、插画及扩散阴影，恪守 8px 间距网格与 12px 圆角。\n2. **统一标准顶栏 (56px)**：左侧为品牌靛蓝方标与「灵感空间 PRO」，主导航包含「空间创作、素材库、剪辑、设置」，当前高亮「空间创作」（底部 2px 靛蓝指示线），不含任何次级二级菜单；右侧集成无障碍适老图标、暗黑模式指示、在线绿色状态与用户头像。\n3. **左列对话历史 (300px)**：包含历史对话检索、5 条真实室内方案会话项（当前条左侧带 2px 靛蓝指示线），以及底部的「新对话」触发按钮。\n4. **中列三段式工作台**：\n   - **顶部轻量消息区**：展示较矮的消息回溯区，带向上滚动提示、用户提示语及小缩略图。\n   - **看图区（约 70% 高度）**：横排展示两张等宽等高完整室内设计大图，标题标明 JetBrains Mono「图1」「图2」与文件编号，图1 为实心靛蓝选中态，右下角带有线框编辑与删除图标；右侧附带虚线「添加视角」卡片。\n   - **底部双行输入与配置区**：顶部模式组（生图选中）搭配模型与 16:9 画幅标签；输入区分设带有青色「图1」芯片的「配方句」与「补充句」；右侧包含「预览请求」与唯一的实心靛蓝「生成」主按钮。\n5. **右列精准编辑抽屉 (380px)**：无第二块画布，包含「全局 / 预定」分组，全局下设有「风格、材质、光影、镜头」分类。风格列表提供 6 项并选中「日式侘寂」，下方配有多行可编辑特征描述框，底部固定弱字状态提示「已写入配方句，发送前可以改」。"
+          },
+          {
+            "suggestion": "在右侧面板切换到「材质」或「光影」参数调节选项卡"
+          },
+          {
+            "suggestion": "测试「预览请求」查看当前配方参数与提示词构建弹窗"
+          },
+          {
+            "suggestion": "为中列看图区添加多选对比或全屏放大审片视图"
+          }
+        ],
+        "projectId": "13552649013419215261",
+        "sessionId": "635926598861971409"
+      }
+    }
+  }
+}

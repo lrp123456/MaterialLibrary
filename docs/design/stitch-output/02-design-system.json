@@ -1,0 +1,33 @@
+{
+  "status": 200,
+  "json": {
+    "id": 3,
+    "jsonrpc": "2.0",
+    "result": {
+      "content": [
+        {
+          "text": "{\"name\":\"assets/11073803561422458846\",\"designSystem\":{\"displayName\":\"Obsidian Studio\",\"theme\":{\"colorMode\":\"DARK\",\"roundness\":\"ROUND_TWELVE\",\"customColor\":\"#6366F1\",\"headlineFont\":\"PLUS_JAKARTA_SANS\",\"bodyFont\":\"PLUS_JAKARTA_SANS\",\"colorVariant\":\"TONAL_SPOT\",\"overridePrimaryColor\":\"#6366F1\",\"overrideSecondaryColor\":\"#06B6D4\",\"overrideNeutralColor\":\"#0A0E17\"}},\"version\":\"1\"}",
+          "type": "text"
+        }
+      ],
+      "structuredContent": {
+        "designSystem": {
+          "displayName": "Obsidian Studio",
+          "theme": {
+            "bodyFont": "PLUS_JAKARTA_SANS",
+            "colorMode": "DARK",
+            "colorVariant": "TONAL_SPOT",
+            "customColor": "#6366F1",
+            "headlineFont": "PLUS_JAKARTA_SANS",
+            "overrideNeutralColor": "#0A0E17",
+            "overridePrimaryColor": "#6366F1",
+            "overrideSecondaryColor": "#06B6D4",
+            "roundness": "ROUND_TWELVE"
+          }
+        },
+        "name": "assets/11073803561422458846",
+        "version": "1"
+      }
+    }
+  }
+}

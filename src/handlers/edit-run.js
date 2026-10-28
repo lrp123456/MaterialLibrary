@@ -23,7 +23,7 @@ const { resolveEditSize } = require('./edit-size');
 const { regionClause, regionNoteOf, routeFor, reconcilePrompt, stripCoordSyntax } = require('./region-route');
 const { describeRegion, needsVlm } = require('./region-vlm');
 
-const OPS = new Set(['replace', 'insert', 'add', 'space', 'remove', 'expand', 'style_transfer', 'clarity', 'install', 'gap']);
+const OPS = new Set(['replace', 'insert', 'add', 'space', 'remove', 'expand', 'style_transfer', 'clarity', 'install', 'gap', 'base_attr']);
 const OP_ALIAS = {
   install: 'insert',
   gap: 'space',
@@ -182,8 +182,20 @@ async function runAdapter(services, imageBuffers, prompt, preferredModel, extra)
   }
   const { executeAdapter } = require('../gen');
   const imageUrls = imageBuffers.map((buf, i) => {
-    const mime = i === 0 ? 'image/jpeg' : 'image/png';
-    return `data:${mime};base64,${buf.toString('base64')}`;
+    let mime = 'image/jpeg';
+    if (buf && buf.mime) {
+      mime = buf.mime;
+    } else if (i === 0) {
+      mime = 'image/jpeg';
+    } else {
+      if (Buffer.isBuffer(buf) && buf.length > 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) {
+        mime = 'image/png';
+      } else {
+        mime = 'image/jpeg';
+      }
+    }
+    const rawBuf = Buffer.isBuffer(buf) ? buf : (buf && buf.buffer ? buf.buffer : buf);
+    return `data:${mime};base64,${rawBuf.toString('base64')}`;
   });
   const res = await executeAdapter(services, adapter, {
     imageUrls,
@@ -522,7 +534,13 @@ ${promptExtra ? `${promptExtra}\n` : ''}
 【出图标准】整体光影渲染真实自然，材质质感极度细腻逼真，空间透视严丝合缝，无任何多余畸变杂物，商业室内设计大师级实景大片摄影。`;
     }
 
+    if (opts.light_clause || opts.lightClause) {
+      finalPrompt += '\n' + (opts.light_clause || opts.lightClause);
+    }
     // ★ 用户在客户端选的模型必须透传给适配器，否则「前端能选、服务端忽略」=选了个摆设
+    if (opts.light_clause || opts.lightClause) {
+      finalPrompt += '\n' + (opts.light_clause || opts.lightClause);
+    }
     const generated = await runAdapter(services, [sceneImageBuffer], finalPrompt, opts.model, {
       size: outSpec.sizeField,
       ratio: outSpec.ratioField,
@@ -628,6 +646,72 @@ ${promptExtra ? `${promptExtra}\n` : ''}
       untouchedDiff: { unchangedRatio: 1, note: '超分增强全图保真' },
       prompt: finalPrompt,
       outSize: clarSize,
+    };
+  }
+
+  // base_attr：基础属性重绘（精准编辑读取四仓库，单选区唯一参考图）
+  if (op === 'base_attr') {
+    const { compileBaseAttributes } = require('../base-library/compile');
+    const path = require('path');
+    const fs = require('fs');
+    const dataDir = (services && services.config && services.config.dataDir) ||
+      process.env.ML_DATA_DIR ||
+      path.join(require('os').homedir(), '.dsh-material-library');
+
+    let bindingsPayload = opts.bindings;
+    if (!bindingsPayload) {
+      bindingsPayload = {
+        regions: opts.regions || (opts.region ? [opts.region] : []),
+        light_mode: opts.light_mode || opts.lightMode || null,
+        kelvin: typeof opts.kelvin === 'number' ? opts.kelvin : null
+      };
+    }
+
+    let maxRefs = 4;
+    try {
+      const { slotLimit } = require('../models-contract');
+      const schema = services && services.schemas && services.schemas[opts.model];
+      if (schema) {
+        const cap = slotLimit(schema, 'images');
+        if (cap > 0) maxRefs = Math.max(0, cap - 1);
+      }
+    } catch {}
+
+    const compiled = compileBaseAttributes(services && services.db, {
+      ...bindingsPayload,
+      maxRefs
+    });
+
+    const imageBuffers = [sceneImageBuffer];
+    for (const ref of compiled.references) {
+      if (ref && ref.rel) {
+        const fullPath = path.resolve(dataDir, ref.rel);
+        if (fs.existsSync(fullPath)) {
+          const buf = fs.readFileSync(fullPath);
+          imageBuffers.push(buf);
+        }
+      }
+    }
+
+    const generated = await runAdapter(services, imageBuffers, compiled.prompt, opts.model, {
+      size: outSpec.sizeField,
+      ratio: outSpec.ratioField,
+    });
+
+    if (opts.assetFid && services && services.db) {
+      await persistEditDerivative(services, opts.assetFid, 'base_attr', generated, {
+        prompt: compiled.prompt,
+        light_clause: compiled.light_clause
+      });
+    }
+
+    return {
+      buffer: generated,
+      apiBox: { x1: 0, y1: 0, x2: 999, y2: 999 },
+      untouchedDiff: { unchangedRatio: null, note: '基础属性全图重绘' },
+      prompt: compiled.prompt,
+      outSize: publicOutSize(outSpec, false),
+      refDropped: compiled.ref_dropped || []
     };
   }
 

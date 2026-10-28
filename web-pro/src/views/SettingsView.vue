@@ -362,6 +362,144 @@
         </span>
       </div>
 
+      <!-- 设置模块 4.5：空间创作换色预置 -->
+      <div class="p-6 rounded-2xl bg-studio-900 border border-studio-700 space-y-4 shadow-sm">
+        <div class="flex items-center justify-between">
+          <div>
+            <h3 class="text-sm font-bold text-white flex items-center gap-2 uppercase tracking-wide font-mono">
+              <StudioIcon name="palette" :size="16" class="text-amber-400" />
+              空间创作换色预置方案
+            </h3>
+            <p class="text-xs text-slate-400 mt-1">管理空间创作「换色」预定操作中可选择的整案配色与常用材质单色库</p>
+          </div>
+          <div class="flex items-center gap-3">
+            <span v-if="colorSchemesMsg" class="text-xs font-mono" :class="colorSchemesMsg.includes('失败') ? 'text-rose-400' : 'text-emerald-400'">
+              {{ colorSchemesMsg }}
+            </span>
+            <button
+              @click="loadColorSchemes"
+              :disabled="colorSchemesLoading"
+              class="px-3 py-1.5 rounded-lg bg-studio-800 hover:bg-studio-750 border border-studio-700 text-slate-300 hover:text-white text-xs font-bold cursor-pointer disabled:opacity-50"
+            >刷新</button>
+            <button
+              @click="handleSaveColorSchemes"
+              :disabled="colorSchemesSaving || colorSchemesLoading"
+              class="px-4 py-1.5 rounded-lg bg-studio-accent text-white font-bold text-xs shadow cursor-pointer disabled:opacity-50"
+            >{{ colorSchemesSaving ? '保存中…' : '保存换色预置' }}</button>
+          </div>
+        </div>
+
+        <div v-if="colorSchemesLoading && !colorSchemes.length" class="text-xs text-slate-400 py-4 text-center">
+          正在读取换色配色表…
+        </div>
+
+        <div v-else class="space-y-4">
+          <!-- 方案列表 (scheme) -->
+          <div
+            v-for="(scheme, sIdx) in colorSchemes.filter(s => s.kind === 'scheme')"
+            :key="scheme.id"
+            class="p-4 rounded-xl bg-studio-950 border border-studio-800 space-y-3"
+          >
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-bold text-amber-300 font-mono">方案 {{ sIdx + 1 }}:</span>
+                <input
+                  v-model="scheme.name"
+                  type="text"
+                  class="bg-studio-900 border border-studio-700 rounded px-2 py-1 text-xs text-white font-medium focus:border-studio-accent outline-none"
+                />
+              </div>
+              <button
+                @click="addColorRole(scheme)"
+                class="text-xs text-studio-accent hover:underline cursor-pointer"
+              >+ 添加空间角色</button>
+            </div>
+
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+              <div
+                v-for="(roleItem, rIdx) in (scheme.roles || [])"
+                :key="rIdx"
+                class="p-2.5 rounded-lg bg-studio-900 border border-studio-750 flex flex-col gap-1.5"
+              >
+                <div class="flex items-center justify-between">
+                  <input
+                    v-model="roleItem.role"
+                    placeholder="角色(如墙面)"
+                    class="bg-transparent border-b border-studio-700 text-[11px] text-slate-300 w-16 outline-none focus:border-amber-400 font-bold"
+                  />
+                  <button
+                    @click="removeColorRole(scheme, rIdx)"
+                    class="text-slate-500 hover:text-rose-400 text-xs cursor-pointer"
+                  >×</button>
+                </div>
+                <input
+                  v-model="roleItem.name"
+                  placeholder="材质名称"
+                  class="bg-transparent text-xs text-white outline-none font-medium"
+                />
+                <div class="flex items-center gap-2 pt-1 border-t border-studio-800/60">
+                  <input
+                    type="color"
+                    v-model="roleItem.hex"
+                    class="w-6 h-6 rounded cursor-pointer border-0 bg-transparent p-0"
+                  />
+                  <input
+                    v-model="roleItem.hex"
+                    class="bg-transparent text-[11px] font-mono text-slate-300 uppercase w-16 outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 常用单色库 (swatch) -->
+          <div
+            v-for="swatch in colorSchemes.filter(s => s.kind === 'swatch')"
+            :key="swatch.id"
+            class="p-4 rounded-xl bg-studio-950 border border-studio-800 space-y-3"
+          >
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-bold text-sky-300 font-mono">常用单色库:</span>
+                <input
+                  v-model="swatch.name"
+                  type="text"
+                  class="bg-studio-900 border border-studio-700 rounded px-2 py-1 text-xs text-white font-medium focus:border-studio-accent outline-none"
+                />
+              </div>
+              <button
+                @click="addSwatchColor(swatch)"
+                class="text-xs text-studio-accent hover:underline cursor-pointer"
+              >+ 添加常用单色</button>
+            </div>
+
+            <div class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2">
+              <div
+                v-for="(col, cIdx) in (swatch.roles || [])"
+                :key="cIdx"
+                class="p-2 rounded-lg bg-studio-900 border border-studio-750 flex items-center justify-between gap-1.5"
+              >
+                <div class="flex items-center gap-2 min-w-0">
+                  <input
+                    type="color"
+                    v-model="col.hex"
+                    class="w-5 h-5 rounded cursor-pointer border-0 bg-transparent p-0 shrink-0"
+                  />
+                  <input
+                    v-model="col.name"
+                    class="bg-transparent text-xs text-white outline-none font-medium truncate w-14"
+                  />
+                </div>
+                <button
+                  @click="removeSwatchColor(swatch, cIdx)"
+                  class="text-slate-500 hover:text-rose-400 text-xs cursor-pointer shrink-0"
+                >×</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- 设置模块 5：管理员账户密码 -->
       <div class="p-6 rounded-2xl bg-studio-900 border border-studio-700 space-y-4 shadow-sm">
         <div class="flex items-center justify-between">
@@ -425,6 +563,8 @@ import {
   fetchAppUpdateState,
   fetchEnvSecrets,
   saveEnvSecrets,
+  fetchColorSchemes,
+  saveColorSchemes,
   authFetch,
 } from '../api.js';
 import {
@@ -736,6 +876,7 @@ onMounted(() => {
     serverLabelText.value = detail.label || serverLabel();
     candidates.value = listCandidates();
   });
+  loadColorSchemes();
   loadAdminSettings();
   loadGrayStatus();
   stopSlotPrefsWatch = onDerivativeSlotPrefsChange((next) => {

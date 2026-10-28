@@ -8,8 +8,13 @@
           :key="mode.id"
           type="button"
           class="param-mode"
-          :class="{ 'is-on': activeMode === mode.id }"
-          @click="$emit('select-mode', mode.id)"
+          :class="{
+            'is-on': activeMode === mode.id,
+            'opacity-40 cursor-not-allowed': isModeDisabled(mode.id)
+          }"
+          :disabled="isModeDisabled(mode.id)"
+          :title="isModeDisabled(mode.id) ? '当前已挂载参考图，若要纯文生图请先清空看图区' : ''"
+          @click="!isModeDisabled(mode.id) && $emit('select-mode', mode.id)"
         >
           <span class="param-mode-dot"></span>
           <span>{{ mode.label }}</span>
@@ -24,7 +29,7 @@
           :class="slotFillClass(refCounts.images, effectiveImageSlotCap)"
           :title="`图片参考槽位 ${refCounts.images || 0}/${effectiveImageSlotCap}`"
         >
-          <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm0 16H5l4.5-6 3.5 4.5 2.5-3 3.5 4.5zM8.5 10a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/></svg>
+          <StudioIcon name="image" :size="12" />
           <span>{{ refCounts.images || 0 }}/{{ effectiveImageSlotCap }}</span>
         </span>
         <span
@@ -33,7 +38,7 @@
           :class="slotFillClass(refCounts.videos, schema.slots.videos)"
           :title="`视频参考槽位 ${refCounts.videos || 0}/${schema.slots.videos}`"
         >
-          <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M15 8v8H5a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2h10zm4-1.5v11l-3-2.5V9l3-2.5z"/></svg>
+          <StudioIcon name="video" :size="12" />
           <span>{{ refCounts.videos || 0 }}/{{ schema.slots.videos }}</span>
         </span>
         <span
@@ -42,7 +47,7 @@
           :class="slotFillClass(refCounts.audios, schema.slots.audios)"
           :title="`音频参考槽位 ${refCounts.audios || 0}/${schema.slots.audios}`"
         >
-          <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+          <StudioIcon name="music" :size="12" />
           <span>{{ refCounts.audios || 0 }}/{{ schema.slots.audios }}</span>
         </span>
       </div>
@@ -59,7 +64,7 @@
       >
         <span class="param-label">
           {{ field.label }}
-          <svg v-if="isLocked(field.key)" viewBox="0 0 24 24" width="10" height="10" fill="currentColor" title="已联动锁定"><path d="M18 8h-1V6a5 5 0 0 0-10 0v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2zm-6 9a2 2 0 1 1 0-4 2 2 0 0 1 0 4zM9 8V6a3 3 0 0 1 6 0v2H9z"/></svg>
+          <StudioIcon v-if="isLocked(field.key)" name="lock" :size="10" title="已联动锁定" />
         </span>
 
         <select
@@ -164,10 +169,10 @@
         :class="{ 'is-on': showAdvanced }"
         @click="$emit('update:showAdvanced', !showAdvanced)"
       >
-        <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+        <StudioIcon name="settings" :size="13" />
         <span>高级配置</span>
         <span class="param-advanced-count">{{ effectiveAdvancedFields.length }}</span>
-        <svg v-if="showAdvanced" viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+        <StudioIcon v-if="showAdvanced" name="chevronDown" :size="11" />
       </button>
     </div>
 
@@ -185,7 +190,7 @@
       >
         <span class="param-label">
           {{ field.label }}
-          <svg v-if="isLocked(field.key)" viewBox="0 0 24 24" width="10" height="10" fill="currentColor"><path d="M18 8h-1V6a5 5 0 0 0-10 0v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2zm-6 9a2 2 0 1 1 0-4 2 2 0 0 1 0 4zM9 8V6a3 3 0 0 1 6 0v2H9z"/></svg>
+          <StudioIcon v-if="isLocked(field.key)" name="lock" :size="10" />
         </span>
 
         <select
@@ -261,7 +266,7 @@
 
     <!-- 4. 联动警告 -->
     <div v-if="ruleEval.warnings.length" class="basis-full flex flex-wrap items-center gap-1.5 text-[11px] studio-warning-text px-2.5 py-1.5 rounded-lg studio-warning-bg studio-border-warning">
-      <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M12 2L1 21h22L12 2zm1 14h-2v2h2v-2zm0-7h-2v5h2v-5z"/></svg>
+      <StudioIcon name="warning" :size="12" />
       <span v-for="(w, i) in ruleEval.warnings" :key="i">{{ w }}</span>
     </div>
   </div>
@@ -269,6 +274,7 @@
 
 <script setup>
 import { computed, reactive } from 'vue';
+import StudioIcon from './StudioIcon.vue';
 import { evaluateClientModelRules } from '../utils/model-protocol';
 
 const props = defineProps({
@@ -287,13 +293,22 @@ const ruleEval = computed(() =>
 
 const lockReasons = computed(() => ruleEval.value.lockReasons || {});
 
+function isModeDisabled(modeId) {
+  const imgCount = Number(props.refCounts?.images || 0);
+  const vidCount = Number(props.refCounts?.videos || 0);
+  if (modeId === 'text_to_image' || modeId === 'text_to_video') {
+    return imgCount > 0 || vidCount > 0;
+  }
+  return false;
+}
+
 const effectiveImageSlotCap = computed(() => {
   const slots = Number(props.schema?.slots?.images ?? 10);
   const free = props.schema?.free?.maxRefs;
   let cap = free != null ? Math.min(slots, Number(free)) : slots;
   // 首尾帧模式最多两张（首帧+尾帧）；单图编辑模式只允许一张
   if (props.activeMode === 'first_last_frame') cap = Math.min(cap, 2);
-  if (props.activeMode === 'image_edit' || props.activeMode === 'expand_fill') cap = Math.min(cap, 1);
+  if (props.activeMode === 'expand_fill') cap = Math.min(cap, 1);
   return cap;
 });
 

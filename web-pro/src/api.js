@@ -608,6 +608,19 @@ export async function fetchStudioCatalog() {
   return json.data || json;
 }
 
+export async function previewAiGeneration(params) {
+  const res = await authFetch('/api/gen/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params)
+  });
+  const json = await res.json();
+  if (!res.ok || json.error) {
+    throw new Error(json.error || `请求预览失败: HTTP ${res.status}`);
+  }
+  return json.data || json;
+}
+
 export async function generateAiImage(params) {
   const res = await authFetch('/api/gen/images', {
     method: 'POST',
@@ -840,6 +853,67 @@ export async function saveEnvSecrets(updates) {
   return json.data || {};
 }
 
+/**
+ * 空间创作：获取配色方案列表 (GET /api/viewer/studio/color-schemes)
+ */
+export async function fetchColorSchemes() {
+  const res = await authFetch('/api/viewer/studio/color-schemes');
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.success === false) {
+    throw new Error(json.error || `获取配色列表失败: HTTP ${res.status}`);
+  }
+  return json.data || [];
+}
+
+/**
+ * 空间创作：保存/更新配色方案 (PUT /api/viewer/studio/color-schemes)
+ */
+export async function saveColorSchemes(schemes) {
+  const res = await authFetch('/api/viewer/studio/color-schemes', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ schemes }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.success === false) {
+    throw new Error(json.error || `保存配色列表失败: HTTP ${res.status}`);
+  }
+  return json.data || [];
+}
+
+/**
+ * 空间创作：智能建议提示词 (POST /api/viewer/chat/suggest-prompts)
+ * kind: 'images' (看图给建议) | 'next' (接续建议)
+ */
+export async function fetchSuggestPrompts({ kind = 'images', images = [], assistantText = '' } = {}) {
+  const res = await authFetch('/api/viewer/chat/suggest-prompts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kind, images, assistantText }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.success === false) {
+    throw new Error(json.error || `获取建议提示词失败: HTTP ${res.status}`);
+  }
+  return json.data || { suggestions: [] };
+}
+
+/**
+ * 空间创作：出站请求脱敏预览 (POST /api/viewer/gen/preview)
+ */
+export async function fetchGenPreview(payload = {}) {
+  const res = await authFetch('/api/viewer/gen/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.success === false) {
+    throw new Error(json.error || `请求预览生成失败: HTTP ${res.status}`);
+  }
+  return json.data || {};
+}
+
 // ===== 服务端三级回退（转发自 server-resolve.js，组件统一从 api.js 引入）=====
 export { resolveApiUrl };
 export {
@@ -856,3 +930,19 @@ export {
 
 
 
+
+export async function fetchCreationTemplatesIncremental({ since, sinceId, deletedSince, deletedSinceId } = {}) {
+  const params = new URLSearchParams();
+  if (since !== undefined && since !== null) {
+    params.set('since', String(since));
+    params.set('since_id', sinceId || '');
+  }
+  if (deletedSince !== undefined && deletedSince !== null) {
+    params.set('deleted_since', String(deletedSince));
+    params.set('deleted_since_id', deletedSinceId || '');
+  }
+  const qs = params.toString();
+  const url = qs ? `/api/creation-templates?${qs}` : '/api/creation-templates';
+  const res = await authFetch(url);
+  return res.json();
+}
