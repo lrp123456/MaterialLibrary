@@ -2191,6 +2191,51 @@
                     <StudioIcon name="download" :size="13" />
                   </a>
                 </div>
+
+                <!-- 缺失画幅插槽（3:4、9:16）：方便用户手动触发新增重构图 -->
+                <div
+                  v-for="slot in missingRestageSlots"
+                  :key="'slot-' + slot.kind"
+                  class="p-2.5 rounded-xl border border-dashed border-sky-400/50 bg-sky-500/5 hover:bg-sky-500/10 transition-all flex items-center space-x-3"
+                >
+                  <div class="w-12 h-14 rounded-lg bg-sky-950/40 border border-dashed border-sky-400/40 shrink-0 flex flex-col items-center justify-center text-sky-300">
+                    <span class="text-base">{{ slot.icon }}</span>
+                    <span class="text-[9px] font-mono font-bold mt-0.5">{{ slot.ratio }}</span>
+                  </div>
+
+                  <div class="flex-1 min-w-0 space-y-1">
+                    <div class="flex items-center justify-between">
+                      <span class="font-bold text-sky-200 text-xs flex items-center space-x-1">
+                        <span>{{ slot.label }}</span>
+                      </span>
+                      <span class="px-1.5 py-0.5 text-[9px] bg-sky-400/20 text-sky-300 font-bold rounded border border-sky-400/30">
+                        未生成
+                      </span>
+                    </div>
+                    <p class="text-[10px] text-slate-400 truncate">
+                      {{ slot.desc }}
+                    </p>
+                    <div class="text-[10px] text-slate-500">
+                      Seedream 5.0 Flash 极速净画通道
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    :disabled="restageLoadingSlot === slot.ratio"
+                    @click="handleGenerateRestageSlot(slot)"
+                    class="px-2.5 py-1.5 rounded-lg bg-studio-accent hover:bg-studio-accent/90 disabled:opacity-60 disabled:cursor-not-allowed text-white text-xs font-bold shrink-0 flex items-center space-x-1 shadow transition cursor-pointer"
+                    :title="`生成 ${slot.ratio} 画幅重构图`"
+                  >
+                    <span v-if="restageLoadingSlot === slot.ratio" class="w-3.5 h-3.5 rounded-full border-2 border-white border-t-transparent animate-spin mr-1"></span>
+                    <span>{{ restageLoadingSlot === slot.ratio ? '重构中…' : '+ 生成' }}</span>
+                  </button>
+                </div>
+
+                <!-- 错误提示 -->
+                <div v-if="restageSlotError" class="px-2.5 py-1.5 rounded-lg bg-rose-500/15 border border-rose-500/30 text-rose-300 text-[11px] font-bold">
+                  {{ restageSlotError }}
+                </div>
               </div>
             </div>
 
@@ -2612,7 +2657,8 @@ import {
   listCandidateUrls,
   setManualServer,
   getManualServer,
-  onServerStatusChange
+  onServerStatusChange,
+  triggerRestageDerivatives
 } from '../api.js';
 
 const props = defineProps({
@@ -4595,6 +4641,62 @@ const activeDerivativeObj = computed(() => {
   if (!availableDerivatives.value.length || !activeDerivativeId.value) return null;
   return availableDerivatives.value.find(d => d.id === activeDerivativeId.value) || availableDerivatives.value[0];
 });
+
+// 核心缺失画幅插槽 (3:4、9:16)：对没有相应衍生图的素材提供手动触发插槽
+const missingRestageSlots = computed(() => {
+  if (!activeModalAsset.value) return [];
+  const kind = activeModalAsset.value.kind || activeModalAsset.value.media_type || 'image';
+  if (kind !== 'image') return [];
+  const derivs = availableDerivatives.value || [];
+  const has916 = derivs.some(d => d.kind === 'restage_9_16');
+  const has34 = derivs.some(d => d.kind === 'restage_3_4');
+  const slots = [];
+  if (!has916) {
+    slots.push({
+      ratio: '9:16',
+      kind: 'restage_9_16',
+      label: '9:16 待重构',
+      desc: '手机竖屏满幅 · 智能净画补全',
+      icon: '📱'
+    });
+  }
+  if (!has34) {
+    slots.push({
+      ratio: '3:4',
+      kind: 'restage_3_4',
+      label: '3:4 待重构',
+      desc: '小红书/画报比例 · 构图优化',
+      icon: '📐'
+    });
+  }
+  return slots;
+});
+
+const restageLoadingSlot = ref('');
+const restageSlotError = ref('');
+
+async function handleGenerateRestageSlot(slot) {
+  if (!activeModalAsset.value?.fid || restageLoadingSlot.value) return;
+  const fid = activeModalAsset.value.fid;
+  restageLoadingSlot.value = slot.ratio;
+  restageSlotError.value = '';
+  try {
+    await triggerRestageDerivatives(fid, [slot.ratio]);
+    // 强制重新拉取素材详情以刷新衍生图版本
+    const detail = await fetchAssetDetail(fid);
+    currentDetail.value = detail;
+    if (detail?.derivatives?.length) {
+      const newly = detail.derivatives.find(d => d.kind === slot.kind);
+      if (newly) {
+        activeDerivativeId.value = newly.id;
+      }
+    }
+  } catch (err) {
+    restageSlotError.value = String(err?.message || '生成画幅重构失败，请稍后重试');
+  } finally {
+    restageLoadingSlot.value = '';
+  }
+}
 
 // =============================================================================
 // 核心交互与数据加载方法

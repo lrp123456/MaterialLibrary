@@ -471,7 +471,9 @@
             <div>
               <div class="text-xs text-slate-400">基材轨道与染色属性</div>
               <div class="text-xs text-slate-300 mt-1 leading-relaxed">
-                <span v-if="selectedMaterial.track === 'B' || !selectedMaterial.is_shell" class="text-amber-400 font-medium">轨道 B 具象材质</span><span>：轨道 B 的固有色在贴图里；要改色必须走预染色。</span>
+                <template v-if="selectedMaterial.track === 'B' || !selectedMaterial.is_shell">
+                  <span class="text-amber-400 font-medium">轨道 B 具象材质</span><span>：轨道 B 的固有色在贴图里；要改色必须走预染色。</span>
+                </template>
                 <span v-else class="text-slate-400">轨道 A 色彩与工艺：表面平整或微水泥工艺，以指定色号为准。</span>
               </div>
             </div>
