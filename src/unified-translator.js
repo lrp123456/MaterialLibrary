@@ -500,6 +500,11 @@ function compileModelDialect({
   const regionMode = dialect?.region_mode || 'coords_bbox';
   const negativeMode = dialect?.negative_mode || 'append_prompt';
 
+  // 0) 将自然语言口语化指代（如 图一、图二、图片一、第1张图、第2张图）规范化为统一 @图N
+  const chineseNumMap = { '一': '1', '二': '2', '两': '2', '三': '3', '四': '4', '五': '5', '六': '6', '七': '7', '八': '8', '九': '9', '十': '10' };
+  text = text.replace(/第\s*([一二两三四五六七八九十\d]+)\s*张\s*(?:图片|图)/g, (_, d) => `@图${chineseNumMap[d] || d}`);
+  text = text.replace(/(?:图片|图)\s*([一二两三四五六七八九十])(?!\w)/g, (_, d) => `@图${chineseNumMap[d] || d}`);
+
   // 1) 参考素材标记转译
   if (refSyntax === '<Picture N>') {
     text = text.replace(/@(?:图片|图)(\d+)(?:\[[^\]]*\])?/g, '<Picture $1>');

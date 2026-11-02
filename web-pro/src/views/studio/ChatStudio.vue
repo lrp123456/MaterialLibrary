@@ -849,6 +849,7 @@
               <template v-for="(item, idx) in referenceTray" :key="item.url || idx">
                 <button
                   type="button"
+                  @mousedown.prevent
                   @click="selectAtMention(item, idx)"
                   class="w-full px-2.5 py-1.5 rounded-lg hover:bg-studio-800 cursor-pointer text-xs text-slate-200 flex items-center space-x-2.5 transition-colors text-left"
                 >
@@ -873,6 +874,7 @@
                     v-for="reg in item.regions"
                     :key="reg.id"
                     type="button"
+                    @mousedown.prevent
                     @click="selectAtRegionMention(item, idx, reg)"
                     @mouseenter="hoveredRegionKey = `${idx}_${reg.id}`"
                     @mouseleave="hoveredRegionKey = null"
@@ -897,11 +899,12 @@
             <div class="pt-1 border-t border-studio-800">
               <button
                 type="button"
+                @mousedown.prevent
                 @click="openAssetSelectorModal(); showAtMenu = false"
                 class="w-full px-2.5 py-1.5 rounded-lg hover:bg-studio-800 cursor-pointer text-xs text-studio-accent hover:text-white flex items-center justify-center gap-1.5 transition-colors font-bold"
               >
                 <StudioIcon name="plus" :size="13" />
-                <span>从素材库添加...</span>
+                <span>从素材库挂载新参考图...</span>
               </button>
             </div>
           </div>
@@ -1138,7 +1141,8 @@
                     v-for="(item, idx) in referenceTray"
                     :key="item.url || idx"
                     type="button"
-                    @click="insertChipToEditor(item)"
+                    @mousedown.prevent
+                    @click="insertChipToEditor(item, `@图${idx + 1}`)"
                     class="px-1.5 py-0.5 rounded bg-studio-850 hover:bg-studio-800 border border-studio-700 hover:border-studio-cyan text-studio-cyan text-[10px] font-mono font-bold transition-all cursor-pointer shadow-sm flex items-center gap-0.5"
                     :title="`快捷插入 @图${idx + 1} (${item.name || '参考图'})`"
                   >
@@ -1249,11 +1253,22 @@
           <!-- 中间与右侧快捷工具与生成按钮 -->
           <div class="flex items-center space-x-2 text-xs">
             <button
-              @click="openAssetSelectorModal"
+              type="button"
+              @click="toggleAtMentionMenu"
               class="px-2.5 py-1.5 rounded-lg bg-studio-850 hover:bg-studio-800 text-studio-cyan text-xs font-bold border border-studio-750 flex items-center space-x-1 cursor-pointer"
-              title="选择私有素材库资产并作为图文混排标签插入"
+              title="在提示词中引用当前已挂载的参考图（@图1、@图2...）"
             >
-              <span>@ 素材引用</span>
+              <span>@ 引用图片</span>
+            </button>
+
+            <button
+              type="button"
+              @click="openAssetSelectorModal"
+              class="px-2.5 py-1.5 rounded-lg bg-studio-850 hover:bg-studio-800 text-slate-300 hover:text-white text-xs font-bold border border-studio-750 flex items-center space-x-1 cursor-pointer"
+              title="从素材库或本地挂载新参考图到托盘"
+            >
+              <StudioIcon name="plus" :size="12" />
+              <span>挂载素材</span>
             </button>
 
             <button
@@ -3560,10 +3575,22 @@ function getRegionOpDisplayName(op) {
   return '定制空间';
 }
 
+function toggleAtMentionMenu() {
+  if (referenceTray.value.length > 0) {
+    showAtMenu.value = !showAtMenu.value;
+    if (showAtMenu.value) {
+      saveEditorSelection();
+    }
+  } else {
+    // 托盘中尚无挂载图，直接唤起素材挂载器
+    openAssetSelectorModal();
+  }
+}
+
 function selectAtMention(item, idx) {
   showAtMenu.value = false;
   hoveredRegionKey.value = null;
-  insertChipToEditor(item);
+  insertChipToEditor(item, `@图${idx + 1}`);
 }
 
 function selectAtRegionMention(item, idx, reg) {
@@ -5500,12 +5527,16 @@ function reparseEditorChips(extraAssets) {
   const names = namesInPrompt(text);
   const pools = [...(extraAssets || []), ...referenceTray.value, ...sessionRefPool.value];
   const tray = names.map((name, index) => {
+    // 关键：挂载图是底座上下文，若当前托盘已有该序号的挂载图，必须优先保留，绝不抹除已有资产
+    if (referenceTray.value[index] && referenceTray.value[index].url) {
+      return { ...referenceTray.value[index], tag: `@图${index + 1}` };
+    }
     const hit = pools.find((asset) => asset && asset.url && (asset.name === name || asset.file_name === name)) || (extraAssets || [])[index];
     if (!hit || !hit.url) return { name: name || '未命名图片', url: '', tag: `@图${index + 1}`, resolved: false };
     return { ...hit, name: hit.name || name, tag: `@图${index + 1}`, resolved: true, origin: hit.origin || 'upload' };
   });
   reparsingEditor = true;
-  restorePromptContent(text, tray);
+  restorePromptContent(text, tray.length ? tray : referenceTray.value);
   syncTrayFromEditor();
   reparsingEditor = false;
 }
@@ -5780,7 +5811,9 @@ function insertChipToEditor(asset, customTag = null, regionKey = null) {
   const chip = document.createElement('span');
   chip.className = 'inline-asset-chip';
   chip.contentEditable = 'false';
-  const tag = customTag || asset.tag || `@图${referenceTray.value.indexOf(asset) + 1}`;
+  const foundIdx = referenceTray.value.findIndex(r => (r.url && r.url === asset.url) || (r.fid && r.fid === asset.fid) || r === asset);
+  const tuNum = foundIdx >= 0 ? (foundIdx + 1) : (referenceTray.value.length || 1);
+  const tag = customTag || asset.tag || `@图${tuNum}`;
   chip.setAttribute('data-tag', tag);
   chip.setAttribute('data-name', asset.name || '');
   chip.setAttribute('data-url', asset.url || '');
