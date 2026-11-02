@@ -1130,7 +1130,22 @@
                   <span>{{ isRecording ? `录音中 ${recordingDuration}s · 点击完成` : (isTranscribing ? '转写中...' : '语音输入') }}</span>
                 </button>
               </div>
-              <span class="text-[10px] text-slate-500 font-mono">输入 @ 引用图片，# 引用配方</span>
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] text-slate-500 font-mono">输入 @ 引用图片，# 引用配方</span>
+                <!-- 悬浮快捷 @ 标药丸：当看图区有图片时，直接展现快捷点击芯片 -->
+                <div v-if="referenceTray.length > 0" class="flex items-center gap-1">
+                  <button
+                    v-for="(item, idx) in referenceTray"
+                    :key="item.url || idx"
+                    type="button"
+                    @click="insertChipToEditor(item)"
+                    class="px-1.5 py-0.5 rounded bg-studio-850 hover:bg-studio-800 border border-studio-700 hover:border-studio-cyan text-studio-cyan text-[10px] font-mono font-bold transition-all cursor-pointer shadow-sm flex items-center gap-0.5"
+                    :title="`快捷插入 @图${idx + 1} (${item.name || '参考图'})`"
+                  >
+                    <span>@图{{ idx + 1 }}</span>
+                  </button>
+                </div>
+              </div>
             </div>
             <div
               ref="richEditorRef"
@@ -1141,6 +1156,8 @@
               @input="onEditorInput"
               @keyup="onEditorKeyup"
               @keydown="onEditorKeydown"
+              @click="saveEditorSelection"
+              @blur="saveEditorSelection"
             ></div>
 
             <div v-if="activeModality !== 'chat'" class="absolute top-6 right-0 flex items-center gap-1.5">
@@ -3546,34 +3563,12 @@ function getRegionOpDisplayName(op) {
 function selectAtMention(item, idx) {
   showAtMenu.value = false;
   hoveredRegionKey.value = null;
-  if (richEditorRef.value) {
-    const text = getRawEditorText();
-    if (text.endsWith('@')) {
-      const walker = document.createTreeWalker(richEditorRef.value, NodeFilter.SHOW_TEXT, null);
-      let lastNode = null;
-      while (walker.nextNode()) lastNode = walker.currentNode;
-      if (lastNode && lastNode.nodeValue && lastNode.nodeValue.endsWith('@')) {
-        lastNode.nodeValue = lastNode.nodeValue.slice(0, -1);
-      }
-    }
-  }
   insertChipToEditor(item);
 }
 
 function selectAtRegionMention(item, idx, reg) {
   showAtMenu.value = false;
   hoveredRegionKey.value = null;
-  if (richEditorRef.value) {
-    const text = getRawEditorText();
-    if (text.endsWith('@')) {
-      const walker = document.createTreeWalker(richEditorRef.value, NodeFilter.SHOW_TEXT, null);
-      let lastNode = null;
-      while (walker.nextNode()) lastNode = walker.currentNode;
-      if (lastNode && lastNode.nodeValue && lastNode.nodeValue.endsWith('@')) {
-        lastNode.nodeValue = lastNode.nodeValue.slice(0, -1);
-      }
-    }
-  }
   const tag = `@图${idx + 1}[${reg.name}]`;
   const regionKey = `${idx}_${reg.id}`;
   insertChipToEditor(item, tag, regionKey);
@@ -3668,6 +3663,16 @@ function stopVoiceRecording() {
   }
 }
 
+function normalizeSpeechRefMentions(str) {
+  if (!str) return '';
+  const numMap = { '一': '1', '二': '2', '两': '2', '三': '3', '四': '4', '五': '5', '六': '6', '七': '7', '八': '8', '九': '9', '十': '10' };
+  return str.replace(/(?:第\s*([一二两三四五六七八九十\d]+)\s*张\s*(?:图|图片)?|图片\s*([一二两三四五六七八九十\d]+)|图\s*([一二两三四五六七八九十\d]+))/g, (m, p1, p2, p3) => {
+    const raw = p1 || p2 || p3;
+    const n = numMap[raw] || raw;
+    return `@图${n}`;
+  });
+}
+
 async function submitVoiceAudio(blob) {
   isTranscribing.value = true;
   try {
@@ -3695,8 +3700,14 @@ async function submitVoiceAudio(blob) {
     const rawText = (data.raw_text || '').trim();
     const text = cleanedText || rawText || (data.result || data.transcription || (typeof data === 'string' ? data : '')).trim();
     if (text) {
+      // 智能把语音中的“图一/图1/图片一/第1张图”归一化为 @图N 标
+      const normalizedSpeechText = normalizeSpeechRefMentions(text);
       const current = richEditorRef.value ? richEditorRef.value.innerText.trim() : '';
-      appendRichSegmentText((current ? ' ' : '') + text);
+      appendRichSegmentText((current ? ' ' : '') + normalizedSpeechText);
+      // 若包含 @图N，即时触发实体芯片化解析
+      if (editorHasRawMention()) {
+        reparseEditorChips([]);
+      }
     }
   } catch (err) {
     console.error('语音转写异常:', err);
@@ -5199,9 +5210,20 @@ function fileNameFromUrl(url) {
 }
 function namesInPrompt(text) {
   const names = [];
-  const re = /@(?:图|图片|视频|音频)(\d+)\[([^\]]+)\]/g;
+  // 1. 优先提取带方括号的: @图1[xxx.jpg]
+  const reWithBrackets = /@(?:图|图片|视频|音频)(\d+)\[([^\]]+)\]/g;
   let match;
-  while ((match = re.exec(String(text || '')))) names[Number(match[1]) - 1] = match[2];
+  while ((match = reWithBrackets.exec(String(text || '')))) {
+    names[Number(match[1]) - 1] = match[2];
+  }
+  // 2. 兼容提取纯 @图1、@图2，自动使用 referenceTray 中已有图名称
+  const reSimple = /@(?:图|图片|视频|音频)(\d+)(?!\[)/g;
+  while ((match = reSimple.exec(String(text || '')))) {
+    const idx = Number(match[1]) - 1;
+    if (!names[idx] && referenceTray.value[idx]) {
+      names[idx] = referenceTray.value[idx].name || referenceTray.value[idx].file_name || `素材${idx + 1}`;
+    }
+  }
   return names;
 }
 function labelForRef(url, promptName) {
@@ -5447,10 +5469,24 @@ function syncTrayFromEditor() {
     }
   });
 }
+let savedSelectionRange = null;
+
+function saveEditorSelection() {
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount > 0 && richEditorRef.value) {
+    const range = sel.getRangeAt(0);
+    if (richEditorRef.value.contains(range.commonAncestorContainer)) {
+      savedSelectionRange = range.cloneRange();
+      return savedSelectionRange;
+    }
+  }
+  return null;
+}
+
 function editorHasRawMention() {
   if (!richEditorRef.value) return false;
   const walk = (node) => {
-    if (node.nodeType === Node.TEXT_NODE) return /@(?:图|图片|视频|音频)\d+\[[^\]]+\]/.test(node.nodeValue || '');
+    if (node.nodeType === Node.TEXT_NODE) return /@(?:图|图片|视频|音频)\d+/.test(node.nodeValue || '');
     if (node.nodeType === Node.ELEMENT_NODE && !(node.classList && node.classList.contains('inline-asset-chip'))) {
       return [...node.childNodes].some(walk);
     }
@@ -5474,20 +5510,35 @@ function reparseEditorChips(extraAssets) {
   reparsingEditor = false;
 }
 function onEditorInput() {
+  saveEditorSelection();
+  // 检查光标前刚刚输入的字符
+  const sel = window.getSelection();
+  let cursorChar = '';
+  if (sel && sel.rangeCount > 0 && richEditorRef.value) {
+    const range = sel.getRangeAt(0);
+    const container = range.startContainer;
+    const offset = range.startOffset;
+    if (container.nodeType === Node.TEXT_NODE && offset > 0) {
+      cursorChar = container.nodeValue.slice(offset - 1, offset);
+    }
+  }
   const text = getRawEditorText();
-  if (text.endsWith('#')) {
+
+  // 1. # 符号菜单触发：光标前为 # 或文本末尾为 #
+  if (cursorChar === '#' || text.endsWith('#')) {
     showHashMenu.value = true;
   } else if (!text.includes('#')) {
     showHashMenu.value = false;
   }
 
-  if (text.endsWith('@')) {
+  // 2. @ 符号菜单触发：光标前输入 @ 或全角 ＠，或者文本末尾为 @/＠ 时立即呼出！
+  if (cursorChar === '@' || cursorChar === '＠' || text.endsWith('@') || text.endsWith('＠')) {
     if (referenceTray.value.length > 0) {
       showAtMenu.value = true;
     } else {
       openAssetSelectorModal();
     }
-  } else if (!text.includes('@')) {
+  } else if (!cursorChar.includes('@') && !cursorChar.includes('＠') && !text.includes('@') && !text.includes('＠')) {
     showAtMenu.value = false;
   }
   if (reparsingEditor) return;
@@ -5726,10 +5777,6 @@ function getRawEditorText() {
 
 function insertChipToEditor(asset, customTag = null, regionKey = null) {
   if (!richEditorRef.value) return;
-  const last = richEditorRef.value.lastChild;
-  if (last && last.nodeType === Node.TEXT_NODE) {
-    last.nodeValue = String(last.nodeValue || '').replace(/@\s*$/, '');
-  }
   const chip = document.createElement('span');
   chip.className = 'inline-asset-chip';
   chip.contentEditable = 'false';
@@ -5765,9 +5812,52 @@ function insertChipToEditor(asset, customTag = null, regionKey = null) {
   chip.appendChild(textSpan);
   chip.appendChild(delBtn);
 
-  richEditorRef.value.appendChild(chip);
-  richEditorRef.value.appendChild(document.createTextNode(' '));
+  // 关键改进：如果在当前光标或已保存选区处有 @，就地替换 @；并在选区处插入芯片
+  let inserted = false;
+  const sel = window.getSelection();
+  let range = (sel && sel.rangeCount > 0 && richEditorRef.value.contains(sel.getRangeAt(0).commonAncestorContainer))
+    ? sel.getRangeAt(0)
+    : savedSelectionRange;
+
+  if (range && richEditorRef.value.contains(range.commonAncestorContainer)) {
+    const container = range.startContainer;
+    const offset = range.startOffset;
+    if (container.nodeType === Node.TEXT_NODE && offset > 0) {
+      const prevChar = container.nodeValue.slice(offset - 1, offset);
+      if (prevChar === '@' || prevChar === '＠') {
+        container.nodeValue = container.nodeValue.slice(0, offset - 1) + container.nodeValue.slice(offset);
+        range.setStart(container, offset - 1);
+        range.setEnd(container, offset - 1);
+      }
+    }
+    range.collapse(true);
+    range.insertNode(chip);
+    const spaceNode = document.createTextNode(' ');
+    if (chip.nextSibling) {
+      chip.parentNode.insertBefore(spaceNode, chip.nextSibling);
+    } else {
+      chip.parentNode.appendChild(spaceNode);
+    }
+    range.setStartAfter(spaceNode);
+    range.setEndAfter(spaceNode);
+    if (sel) {
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    inserted = true;
+  }
+
+  if (!inserted) {
+    const last = richEditorRef.value.lastChild;
+    if (last && last.nodeType === Node.TEXT_NODE) {
+      last.nodeValue = String(last.nodeValue || '').replace(/[@＠]\s*$/, '');
+    }
+    richEditorRef.value.appendChild(chip);
+    richEditorRef.value.appendChild(document.createTextNode(' '));
+  }
   richEditorRef.value.focus();
+  savedSelectionRange = null;
+  syncTrayFromEditor();
 }
 
 const localFileByUrl = new Map();
