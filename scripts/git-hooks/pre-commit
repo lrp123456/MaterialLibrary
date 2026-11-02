@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Pre-commit secret scanner —— 阻止密钥/私钥进入版本库。
+# 安装：git config core.hooksPath scripts/git-hooks （仓库根目录执行一次）
+# 紧急绕过（不推荐）：git commit --no-verify
+set -u
+
+# 只扫描暂存区里新增/修改的文本行（-U0：无上下文，减少误伤）
+PATCH="$(git diff --cached -U0 --no-color --diff-filter=ACM)"
+
+# 规则：名称|扩展正则（grep -E）
+RULES='
+火山/通用 AKLT|AKLT[A-Za-z0-9]{20,}
+阿里云 LTAI|LTAI[0-9A-Za-z]{12,}
+AWS AKIA|AKIA[0-9A-Z]{16}
+Google AIza|AIza[0-9A-Za-z_-]{35}
+Groq gsk_|gsk_[A-Za-z0-9]{20,}
+ModelScope|ms-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
+Typesafe apikey_|apikey_[0-9a-f]{30,}
+OpenAI 风格 sk-|sk-[A-Za-z0-9_-]{24,}
+方舟 ark-|ark-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
+GitHub token|ghp_[A-Za-z0-9]{30,}
+GitHub PAT|github_pat_[A-Za-z0-9_]{20,}
+私钥块|-----BEGIN (RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----
+JWT|eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}
+'
+
+fail=0
+hit_msg=""
+while IFS='|' read -r name pattern; do
+  [ -z "$name" ] && continue
+  # 只看新增行（+ 开头），且排除示例文件
+  matches="$(printf '%s\n' "$PATCH" | grep -E '^\+' | grep -vE '^\+\+\+' | grep -E -- "$pattern" \
+             | grep -vE '\.env\.example|env-secrets\.js|env-keys\.js' | head -3)"
+  if [ -n "$matches" ]; then
+    hit_msg="${hit_msg}
+[BLOCKED] ${name}:
+${matches}
+"
+    fail=1
+  fi
+done <<EOF
+$RULES
+EOF
+
+if [ "$fail" -ne 0 ]; then
+  echo "==========================================================" >&2
+  echo "pre-commit：检测到疑似密钥，已阻止提交。" >&2
+  echo "$hit_msg" >&2
+  echo "处理方式：" >&2
+  echo "  1. 真实密钥 → 移到 .env（已被 .gitignore 忽略），代码读 process.env" >&2
+  echo "  2. 确认是测试假值/文档占位 → 调整本钩子或使用更明显的占位符" >&2
+  echo "  3. 紧急绕过（风险自负）：git commit --no-verify" >&2
+  echo "==========================================================" >&2
+  exit 1
+fi
+exit 0

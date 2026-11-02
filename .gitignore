@@ -138,3 +138,20 @@ web/dist/
 
 # OSS 临时调试脚本（历史上写过明文凭据，禁止入库；现改为读 OSS_AK / OSS_SK）
 scripts/test_oss.js
+
+# ==========================================
+# AI 会话转录与随手笔记（历史上 sss123.md 含明文 NewAPI 密钥，禁止入库）
+# 根目录临时编号笔记/会话导出一律不入库；正式文档请放 docs/ 并使用描述性文件名
+# ==========================================
+/sss*.md
+/scratch*.md
+/notes*.md
+/tmp*.md
+/draft*.md
+
+# AI 编码工具的会话/状态导出
+*.session.md
+*.session.txt
+*.transcript.md
+claude-session*.md
+.cursor-session*
