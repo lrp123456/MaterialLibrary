@@ -11,7 +11,7 @@
 const http = require('http');
 const { URL } = require('url');
 
-const ASR_HTTP = (process.env.ASR_HTTP_URL || 'http://127.0.0.1:10095').replace(/\/$/, '');
+const ASR_HTTP = (process.env.ASR_HTTP_URL || 'http://192.168.1.107:9000').replace(/\/$/, '');
 const ASR_WS = process.env.ASR_WS_URL || 'ws://127.0.0.1:10096';
 const MAX_UPLOAD = 30 * 1024 * 1024;
 
@@ -29,18 +29,24 @@ function probeHealth({ force = false } = {}) {
     return Promise.resolve(healthCache.data);
   }
   return new Promise((resolve) => {
-    const u = new URL(`${ASR_HTTP}/health`);
+    const u = new URL(`${ASR_HTTP}/api/asr/health`);
     const req = http.get(
-      { hostname: u.hostname, port: u.port, path: u.pathname, timeout: 1500 },
+      { hostname: u.hostname, port: u.port, path: u.pathname, timeout: 2000 },
       (res) => {
         let text = '';
         res.on('data', (c) => { text += c; });
         res.on('end', () => {
-          let data = null;
-          try { data = JSON.parse(text); } catch (_) {}
-          const out = data
-            ? { ready: true, ...data, wsUrl: ASR_WS, httpUrl: ASR_HTTP }
-            : { ready: false, error: 'ASR 返回非 JSON' };
+          let ready = res.statusCode >= 200 && res.statusCode < 400;
+          try {
+            const j = JSON.parse(text);
+            if (j.status && j.status !== 'ok') ready = false;
+          } catch (_) {}
+          const out = {
+            ready,
+            model: 'sensevoice',
+            engine: 'FunASR',
+            httpUrl: ASR_HTTP
+          };
           healthCache = { at: Date.now(), data: out };
           resolve(out);
         });
@@ -57,8 +63,8 @@ async function handleAsrApi(services, req, res, pathname) {
     const body = JSON.stringify({
       ok: true,
       ...h,
-      streaming: !!h.ready,
-      hint: h.ready ? '' : '运行「启动语音识别.bat」后再试',
+      streaming: false,
+      hint: h.ready ? '' : '192.168.1.107:9000 FunASR 服务未响应',
     });
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(body);
@@ -72,12 +78,12 @@ async function handleAsrApi(services, req, res, pathname) {
       res.end(JSON.stringify({ error: '音频过大（上限 30MB）' }));
       return true;
     }
-    const u = new URL(`${ASR_HTTP}/transcribe`);
+    const u = new URL(`${ASR_HTTP}/api/asr/transcribe?model=sensevoice&language=zh&clean=1`);
     const upstream = http.request(
       {
         hostname: u.hostname,
         port: u.port,
-        path: u.pathname,
+        path: u.pathname + u.search,
         method: 'POST',
         timeout: 120000,
         headers: {
@@ -103,7 +109,7 @@ async function handleAsrApi(services, req, res, pathname) {
     upstream.on('error', (e) => {
       if (!res.headersSent) {
         res.writeHead(503, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ error: `语音服务不可用：${e.code || e.message}`, hint: '运行「启动语音识别.bat」' }));
+        res.end(JSON.stringify({ error: `语音服务不可用：${e.code || e.message}`, hint: '请检查 192.168.1.107:9000 FunASR 服务状态' }));
       }
     });
     req.pipe(upstream);

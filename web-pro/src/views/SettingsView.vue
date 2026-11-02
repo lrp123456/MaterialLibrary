@@ -141,6 +141,53 @@
         </div>
       </div>
 
+      <!-- 设置模块 1.2：New API 聚合网关 -->
+      <div class="p-6 rounded-2xl bg-studio-900 border border-studio-700 space-y-4 shadow-sm">
+        <div class="flex items-center justify-between">
+          <h3 class="text-sm font-bold text-white flex items-center gap-2 uppercase tracking-wide font-mono">
+            <StudioIcon name="sparkles" :size="16" class="text-studio-accent" />
+            New API 聚合网关（Gemini 4 / Gemini 3.1 图像）
+          </h3>
+          <span class="text-xs font-mono" :class="newapiError ? 'text-red-400' : 'text-slate-400'">
+            {{ newapiLoading ? '读取中…' : newapiError || (newapiCount ? `${newapiCount} 个模型` : '未检测') }}
+          </span>
+        </div>
+        <div class="grid grid-cols-2 gap-4 text-xs">
+          <div class="col-span-2">
+            <label class="text-slate-300 font-semibold block mb-1.5">NEWAPI_API_KEY（服务端保存，不回显明文）</label>
+            <div class="flex space-x-2.5">
+              <input
+                :value="newapiKeyMasked"
+                disabled
+                class="flex-1 bg-studio-950 border border-studio-700 rounded-lg p-2.5 text-white font-mono text-xs font-medium opacity-80"
+              />
+              <input
+                v-model="newapiKeyDraft"
+                type="password"
+                placeholder="输入新 New API Key"
+                class="flex-1 bg-studio-950 border border-studio-700 rounded-lg p-2.5 text-white font-mono text-xs font-medium outline-none focus:border-studio-accent"
+              />
+              <button
+                @click="updateNewapiKey"
+                :disabled="newapiSaving || !newapiKeyDraft.trim()"
+                class="px-4 py-2.5 rounded-lg bg-studio-800 hover:bg-studio-750 text-white text-xs font-bold border border-studio-700 cursor-pointer disabled:opacity-50"
+              >{{ newapiSaving ? '更新中…' : '更新密钥' }}</button>
+              <button
+                @click="loadNewapiModels"
+                :disabled="newapiLoading"
+                class="px-4 py-2.5 rounded-lg bg-studio-800 hover:bg-studio-750 text-white text-xs font-bold border border-studio-700 cursor-pointer disabled:opacity-50"
+              >测试/拉取模型</button>
+            </div>
+          </div>
+          <div v-if="newapiGeminiModels.length" class="col-span-2">
+            <label class="text-slate-300 font-semibold block mb-1.5">已接通的 Gemini 图像模型</label>
+            <div class="flex flex-wrap gap-1.5">
+              <span v-for="m in newapiGeminiModels" :key="m" class="px-2 py-1 rounded-lg bg-studio-950 border border-studio-700 text-slate-200 font-mono text-[11px]">{{ m }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- 设置模块 1.5：双通道灰度发布（灰测 30003/30000 → 正式 30002/30001） -->
       <div class="p-6 rounded-2xl bg-studio-900 border border-studio-700 space-y-4 shadow-sm">
         <div class="flex items-center justify-between">
@@ -599,6 +646,51 @@ const secrets = ref([]);
 const arkKeyDraft = ref('');
 const keySaving = ref(false);
 
+const newapiKeyDraft = ref('');
+const newapiKeyMasked = computed(() => {
+  const item = secrets.value.find((x) => (x.env || x.key) === 'NEWAPI_API_KEY');
+  return item && item.has_value ? item.masked : '未配置';
+});
+const newapiSaving = ref(false);
+const newapiLoading = ref(false);
+const newapiError = ref('');
+const newapiCount = ref(0);
+const newapiGeminiModels = ref([]);
+
+// ===== 换色预置状态 =====
+const colorSchemes = ref([]);
+const colorSchemesLoading = ref(false);
+const colorSchemesSaving = ref(false);
+const colorSchemesMsg = ref('');
+
+async function loadColorSchemes() {
+  colorSchemesLoading.value = true;
+  colorSchemesMsg.value = '';
+  try {
+    const list = await fetchColorSchemes();
+    colorSchemes.value = Array.isArray(list) ? list : [];
+  } catch (err) {
+    colorSchemesMsg.value = '读取换色预置失败: ' + (err.message || String(err));
+    colorSchemes.value = [];
+  } finally {
+    colorSchemesLoading.value = false;
+  }
+}
+
+async function handleSaveColorSchemes() {
+  colorSchemesSaving.value = true;
+  colorSchemesMsg.value = '';
+  try {
+    await saveColorSchemes(colorSchemes.value);
+    colorSchemesMsg.value = '换色预置保存成功';
+    setTimeout(() => { colorSchemesMsg.value = ''; }, 3000);
+  } catch (err) {
+    colorSchemesMsg.value = '保存失败: ' + (err.message || String(err));
+  } finally {
+    colorSchemesSaving.value = false;
+  }
+}
+
 // ===== 素材衍生图默认挂载（所有资产选择器共用这份设置）=====
 const slotPrefs = ref(readDerivativeSlotPrefs());
 const slotOptions = ALL_SLOT_PRESETS;
@@ -824,6 +916,43 @@ async function updateArkKey() {
   }
 }
 
+async function updateNewapiKey() {
+  const key = newapiKeyDraft.value.trim();
+  if (!key || newapiSaving.value) return;
+  newapiSaving.value = true;
+  try {
+    await saveEnvSecrets({ NEWAPI_API_KEY: key });
+    newapiKeyDraft.value = '';
+    const sec = await fetchEnvSecrets().catch(() => null);
+    if (sec && Array.isArray(sec.items)) secrets.value = sec.items;
+    await loadNewapiModels();
+    alert('New API Key 已更新并热生效');
+  } catch (e) {
+    alert('更新密钥失败: ' + e.message);
+  } finally {
+    newapiSaving.value = false;
+  }
+}
+
+async function loadNewapiModels() {
+  if (newapiLoading.value) return;
+  newapiLoading.value = true;
+  newapiError.value = '';
+  try {
+    const json = await authFetch('/api/providers/newapi/models').then((r) => r.json());
+    if (json.success === false) throw new Error(json.error || '读取失败');
+    newapiCount.value = json.data?.count || 0;
+    const models = Array.isArray(json.data?.models) ? json.data.models : [];
+    newapiGeminiModels.value = models.filter((m) => /gemini.*image/i.test(m));
+  } catch (e) {
+    newapiCount.value = 0;
+    newapiGeminiModels.value = [];
+    newapiError.value = e.message;
+  } finally {
+    newapiLoading.value = false;
+  }
+}
+
 async function submitPassword() {
   if (pwdSaving.value) return;
   pwdSaving.value = true;
@@ -878,6 +1007,7 @@ onMounted(() => {
   });
   loadColorSchemes();
   loadAdminSettings();
+  loadNewapiModels();
   loadGrayStatus();
   stopSlotPrefsWatch = onDerivativeSlotPrefsChange((next) => {
     slotPrefs.value = next;

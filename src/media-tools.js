@@ -112,7 +112,7 @@ async function extractFrames({ videoPath, destDir, mode = 'interval', intervalSe
 /**
  * 视频转码、格式转换、音频分离或智能压缩
  */
-async function convertVideo({ videoPath, destDir, targetFormat = 'mp4', crf = 23, extractAudio = false }) {
+async function convertVideo({ videoPath, destDir, targetFormat = 'mp4', crf = 23, extractAudio = false, cleanVocal = false }) {
   if (!fs.existsSync(videoPath)) {
     throw new Error(`视频文件不存在: ${videoPath}`);
   }
@@ -126,23 +126,92 @@ async function convertVideo({ videoPath, destDir, targetFormat = 'mp4', crf = 23
 
   if (extractAudio || fmt === 'mp3' || fmt === 'wav') {
     const ext = fmt === 'wav' ? 'wav' : 'mp3';
-    outName = `${basename}_audio_${runId}.${ext}`;
+    outName = cleanVocal ? `${basename}_vocal_${runId}.${ext}` : `${basename}_audio_${runId}.${ext}`;
     const outPath = path.join(destDir, outName);
+    
+    // cleanVocal 深度人声分离与降噪管线：
+    // 优先尝试 192.168.1.107:9000 GPU 服务端 MDX-Net (Kim_Vocal_2) + DNS64 微服务；
+    // 离线或忙碌时自适应降级为本地增强型频域声场抵消滤镜链 (dialoguenhance + afftdn + speechnorm)
+    let gpuSepSuccess = false;
+    if (cleanVocal) {
+      try {
+        const { acquireGpuSlot, releaseGpuSlot, GPU_PANEL_BASE } = require('./vram-arbiter');
+        const { lanFetch } = require('./gen/lan-fetch');
+        const probe = await lanFetch(`${GPU_PANEL_BASE}/api/sep/system`, { signal: AbortSignal.timeout(2000) });
+        if (probe.ok) {
+          await acquireGpuSlot('sepvoice', { minFreeVramMb: 4000 });
+          const fd = new FormData();
+          fd.append('file', new Blob([fs.readFileSync(videoPath)]), path.basename(videoPath));
+          fd.append('model', 'Kim_Vocal_2');
+          fd.append('denoise', 'dns64');
+          const subRes = await lanFetch(`${GPU_PANEL_BASE}/api/sep/separate`, { method: 'POST', body: fd, signal: AbortSignal.timeout(60000) });
+          if (subRes.ok) {
+            const subJson = await subRes.json();
+            const taskId = subJson.task_id;
+            for (let i = 0; i < 60; i++) {
+              await new Promise(r => setTimeout(r, 1500));
+              const tRes = await lanFetch(`${GPU_PANEL_BASE}/api/sep/tasks/${taskId}`);
+              if (tRes.ok) {
+                const tJson = await tRes.json();
+                if (tJson.status === 'success' && tJson.files) {
+                  const vocalItem = tJson.files.find(f => f.role === 'vocals') || tJson.files[0];
+                  if (vocalItem) {
+                    const down = await lanFetch(`${GPU_PANEL_BASE}/api/sep/file/${vocalItem.name}`);
+                    if (down.ok) {
+                      fs.writeFileSync(outPath, Buffer.from(await down.arrayBuffer()));
+                      gpuSepSuccess = true;
+                      break;
+                    }
+                  }
+                }
+              }
+            }
+          }
+          await releaseGpuSlot('sepvoice');
+        }
+      } catch (_) {
+        // GPU 面板不可达时自动降级
+      }
+    }
+
+    if (gpuSepSuccess && fs.existsSync(outPath) && fs.statSync(outPath).size > 0) {
+      return {
+        outputFile: outName,
+        outputPath: outPath,
+        size: fs.statSync(outPath).size,
+        format: ext,
+        type: 'audio',
+        isCleanVocal: true,
+        engine: 'mdx_net_kim_vocal_2'
+      };
+    }
+
+    // 本地降级：dialoguenhance 抑制伴奏 + afftdn 去底噪 + speechnorm
+    const audioFilters = cleanVocal
+      ? 'aformat=channel_layouts=stereo,dialoguenhance=original=0.08:enhance=2.8:voice=20,highpass=f=85,lowpass=f=7500,afftdn=nf=-25:tn=1,speechnorm=e=4:r=0.0001:l=1'
+      : '';
+
     args = [
       '-i', videoPath,
-      '-vn',
+      '-vn'
+    ];
+    if (audioFilters) {
+      args.push('-af', audioFilters);
+    }
+    args.push(
       ext === 'mp3' ? '-acodec' : '-acodec',
       ext === 'mp3' ? 'libmp3lame' : 'pcm_s16le',
       '-q:a', '2',
       outPath
-    ];
+    );
     await runFfmpeg(args);
     return {
       outputFile: outName,
       outputPath: outPath,
       size: fs.statSync(outPath).size,
       format: ext,
-      type: 'audio'
+      type: 'audio',
+      isCleanVocal: cleanVocal
     };
   }
 
@@ -268,9 +337,20 @@ async function sliceVideoScenes({
   };
 }
 
+async function extractCleanVocal({ videoPath, destDir, targetFormat = 'mp3' }) {
+  return convertVideo({
+    videoPath,
+    destDir,
+    targetFormat,
+    extractAudio: true,
+    cleanVocal: true
+  });
+}
+
 module.exports = {
   runFfmpeg,
   extractFrames,
   sliceVideoScenes,
   convertVideo,
+  extractCleanVocal,
 };

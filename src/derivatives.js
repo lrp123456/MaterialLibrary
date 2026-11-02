@@ -219,12 +219,14 @@ async function ensurePreviewJpeg(services, fid, derivative, filePath) {
  * 网格档缩略图 (256px)：App 列表专用。
  * 相比 1280px 预览图体积约小 30 倍，列表滚动不再拉大图。
  */
-async function ensureGridJpeg(services, fid, filePath) {
+async function ensureGridJpeg(services, fid, filePath, derivativeOrId) {
   const { config } = services;
   if (!fid || !filePath || !fs.existsSync(filePath)) return null;
   const gridDir = path.join(config.dataDir, 'cache', 'grid');
   fs.mkdirSync(gridDir, { recursive: true });
-  const dest = path.join(gridDir, `${fid}.jpg`);
+  const derivId = (derivativeOrId && typeof derivativeOrId === 'object') ? derivativeOrId.id : derivativeOrId;
+  const destName = derivId ? `${fid}_${derivId}.jpg` : `${fid}.jpg`;
+  const dest = path.join(gridDir, destName);
   if (!fs.existsSync(dest)) {
     const sharp = require('sharp');
     await sharp(filePath, { failOn: 'none' })
@@ -253,6 +255,77 @@ async function ensureGridFromThumb(thumbPath, gridPath) {
     return null;
   }
 }
+
+/**
+ * 预览档 WebP 格式 (1280px，质量 80)
+ */
+async function ensurePreviewWebp(services, fid, derivativeOrFilePath, maybeFilePath) {
+  const { config } = services;
+  let derivative = null;
+  let filePath = null;
+  if (typeof derivativeOrFilePath === 'string') {
+    filePath = derivativeOrFilePath;
+  } else {
+    derivative = derivativeOrFilePath;
+    filePath = maybeFilePath;
+  }
+  if (!filePath || !fs.existsSync(filePath)) return null;
+  if ((derivative?.mime || '').includes('video') || derivative?.kind === 'gen_video') return null;
+  const previewDir = path.join(config.dataDir, 'cache', 'preview');
+  fs.mkdirSync(previewDir, { recursive: true });
+  const destName = derivative?.id ? `${fid}_${derivative.id}.webp` : `${fid}.webp`;
+  const dest = path.join(previewDir, destName);
+  if (!fs.existsSync(dest)) {
+    const sharp = require('sharp');
+    await sharp(filePath, { failOn: 'none' })
+      .rotate()
+      .resize(1280, 1280, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 80 })
+      .toFile(dest);
+  }
+  return dest;
+}
+
+/**
+ * 网格档 WebP (256px，质量 75)：App / 现代浏览器专用
+ */
+async function ensureGridWebp(services, fid, filePath, derivativeOrId) {
+  const { config } = services;
+  if (!fid || !filePath || !fs.existsSync(filePath)) return null;
+  const gridDir = path.join(config.dataDir, 'cache', 'grid');
+  fs.mkdirSync(gridDir, { recursive: true });
+  const derivId = (derivativeOrId && typeof derivativeOrId === 'object') ? derivativeOrId.id : derivativeOrId;
+  const destName = derivId ? `${fid}_${derivId}.webp` : `${fid}.webp`;
+  const dest = path.join(gridDir, destName);
+  if (!fs.existsSync(dest)) {
+    const sharp = require('sharp');
+    await sharp(filePath, { failOn: 'none' })
+      .rotate()
+      .resize(256, 256, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 75 })
+      .toFile(dest);
+  }
+  return dest;
+}
+
+/** 从已有 512px thumb 或 256px jpeg 派生出 256px webp 网格图 */
+async function ensureGridWebpFromThumb(sourcePath, webpPath) {
+  if (!sourcePath || !fs.existsSync(sourcePath)) return null;
+  if (webpPath && fs.existsSync(webpPath)) return webpPath;
+  try {
+    if (webpPath) fs.mkdirSync(path.dirname(webpPath), { recursive: true });
+    const sharp = require('sharp');
+    await sharp(sourcePath, { failOn: 'none' })
+      .resize(256, 256, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 75 })
+      .toFile(webpPath);
+    return webpPath;
+  } catch (e) {
+    console.warn('[derivatives] WebP 网格档派生失败:', e && e.message);
+    return null;
+  }
+}
+
 
 async function resolveDerivativeFile(services, derivative) {
   const { config } = services;
@@ -344,5 +417,9 @@ module.exports = {
   resolveDerivativeFile,
   ensurePreviewJpeg,
   ensureGridJpeg,
-  ensureGridFromThumb
+  ensureGridFromThumb,
+  ensurePreviewWebp,
+  ensureGridWebp,
+  ensureGridWebpFromThumb
 };
+

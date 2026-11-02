@@ -17,9 +17,16 @@ const { calculateOriginOrientation } = require('./ratio');
 const VIDEO_EXTS = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.3gp', '.wmv', '.flv']);
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif', '.bmp', '.gif', '.tiff']);
 
+const AUDIO_EXTS = new Set(['.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg', '.wma', '.aiff']);
+
 function isVideoFile(fileName) {
   const ext = (path.extname(fileName || '') || '').toLowerCase();
   return VIDEO_EXTS.has(ext);
+}
+
+function isAudioFile(fileName) {
+  const ext = (path.extname(fileName || '') || '').toLowerCase();
+  return AUDIO_EXTS.has(ext);
 }
 
 function getChunkDir(config, uploadId) {
@@ -125,6 +132,7 @@ async function registerMediaAsset(services, {
 }) {
   const { db, config, logger, interpreter } = services;
   const isVideo = isVideoFile(fileName);
+  const isAudio = isAudioFile(fileName);
   const fid = `local_${sha256.slice(0, 24)}`;
   const now = Date.now();
 
@@ -142,8 +150,8 @@ async function registerMediaAsset(services, {
     if (e.code === 'blacklisted') throw e;
   }
 
-  // 0a. 非室内素材/截图 UI
-  {
+  // 0a. 非室内素材/截图 UI（音频不检查）
+  if (!isAudio) {
     const fn = String(fileName || '');
     if (/^(screen[_-]|current_screen|install_ui)/i.test(fn) || /^Screenshot_/i.test(fn) || /_emu\.png$/i.test(fn)) {
       logger?.info?.(`[stream-upload] 非室内/UI 截图拒绝入库 name=${fileName}`);
@@ -226,7 +234,7 @@ async function registerMediaAsset(services, {
   const existing = db.prepare('SELECT fid, client_asset_id FROM assets WHERE sha256 = ?').get(sha256);
   // 1b. 指纹去重（MD5 + pHash），覆盖已在库的 9:16/3:4 衍生
   let streamFp = null;
-  if (!existing && !isVideo) {
+  if (!existing && !isVideo && !isAudio) {
     try {
       const fpApi = require('./fingerprint');
       fpApi.ensureFingerprintColumns(db);
@@ -303,6 +311,23 @@ async function registerMediaAsset(services, {
   let height = null;
   let orientation = null;
 
+  let duration_s = null;
+  if (isAudio || isVideo) {
+    try {
+      const { spawnSync } = require('child_process');
+      const ffprobeRes = spawnSync('ffprobe', [
+        '-v', 'error',
+        '-show_entries', 'format=duration',
+        '-of', 'default=noprint_wrappers=1:nokey=1',
+        nasInfo.fullPath
+      ], { encoding: 'utf-8', timeout: 5000 });
+      const dur = parseFloat(ffprobeRes.stdout);
+      if (!isNaN(dur) && dur > 0) {
+        duration_s = Math.round(dur);
+      }
+    } catch (_) {}
+  }
+
   if (isVideo) {
     // 优先使用前端上传的客户端本地快速缩略图
     if (clientThumbBuffer && clientThumbBuffer.length > 0) {
@@ -313,6 +338,13 @@ async function registerMediaAsset(services, {
     // 若尚未生成缩略图，调用 ffmpeg 截取
     if (!fs.existsSync(thumbPath)) {
       await extractVideoThumbnail(nasInfo.fullPath, thumbPath);
+    }
+  } else if (isAudio) {
+    // 音频资产免除 sharp 缩略图处理，前端使用专属音频封面波形渲染
+    if (clientThumbBuffer && clientThumbBuffer.length > 0) {
+      try {
+        await sharp(clientThumbBuffer).jpeg({ quality: 80 }).toFile(thumbPath);
+      } catch {}
     }
   } else {
     // 图片文件：读取 metadata 并生成 512 缩略图
@@ -338,28 +370,35 @@ async function registerMediaAsset(services, {
   }
 
   const originOrientation = calculateOriginOrientation(width, height);
-  const mediaKind = isVideo ? 'video' : 'image';
+  const mediaKind = isVideo ? 'video' : (isAudio ? 'audio' : 'image');
   const takenAt = dateModified ? (Number(dateModified) < 1e12 ? Number(dateModified) * 1000 : Number(dateModified)) : now;
-  const isDirectAppUpload = source === 'app_upload' || source === 'manual' || source === 'upload';
+  const isDirectAppUpload = source === 'app_upload' || source === 'manual' || source === 'upload' || source === 'edit';
   const { normalizeCategory } = require('./gate-route');
   const normalizedCategory = normalizeCategory(category);
-  const targetCategory = isVideo
-    ? 'video'
-    : (normalizedCategory && normalizedCategory !== 'none' ? normalizedCategory : 'interior');
-  const isFinished = targetCategory === 'finished';
-  const initialStatus = (isVideo || isDirectAppUpload || isFinished) ? 'ready' : 'discovered';
+  let targetCategory;
+  if (isAudio) {
+    const catLower = String(category || '').toLowerCase();
+    targetCategory = (catLower === 'voice' || catLower === 'vocal') ? 'voice' : 'music';
+  } else if (isVideo) {
+    targetCategory = 'video';
+  } else {
+    targetCategory = (normalizedCategory && normalizedCategory !== 'none' ? normalizedCategory : 'interior');
+  }
+  const isFinished = targetCategory === 'finished' || isAudio;
+  const initialStatus = (isVideo || isAudio || isDirectAppUpload || isFinished) ? 'ready' : 'discovered';
 
   // 3. 写入 assets 表
   db.prepare(`
     INSERT INTO assets (
-      fid, kind, category, file_name, size, width, height, orientation, origin_orientation,
+      fid, kind, category, file_name, size, width, height, orientation, origin_orientation, duration_s,
       status, source, sha256, client_asset_id, thumb_url,
       auth_state, auth_matched_at,
       created_at, discovered_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'live', ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'live', ?, ?, ?, ?)
     ON CONFLICT(fid) DO UPDATE SET
       category=COALESCE(excluded.category, assets.category),
       file_name=excluded.file_name, size=excluded.size,
+      duration_s=COALESCE(excluded.duration_s, assets.duration_s),
       status=CASE WHEN excluded.status='ready' THEN 'ready' ELSE assets.status END,
       updated_at=excluded.updated_at
   `).run(
@@ -372,6 +411,7 @@ async function registerMediaAsset(services, {
     height,
     orientation,
     originOrientation,
+    duration_s,
     initialStatus,
     source,
     sha256,
@@ -386,7 +426,19 @@ async function registerMediaAsset(services, {
 
   // 4. 插入 derivatives 表
   const ext = (path.extname(nasInfo.fileName) || '').toLowerCase();
-  const mime = isVideo ? `video/${ext.slice(1) || 'mp4'}` : (ext === '.png' ? 'image/png' : 'image/jpeg');
+  let mime = 'image/jpeg';
+  if (isVideo) {
+    mime = `video/${ext.slice(1) || 'mp4'}`;
+  } else if (isAudio) {
+    if (ext === '.wav') mime = 'audio/wav';
+    else if (ext === '.m4a') mime = 'audio/mp4';
+    else if (ext === '.flac') mime = 'audio/flac';
+    else if (ext === '.aac') mime = 'audio/aac';
+    else if (ext === '.ogg') mime = 'audio/ogg';
+    else mime = 'audio/mpeg';
+  } else if (ext === '.png') {
+    mime = 'image/png';
+  }
 
   const deriv = await createDerivative(services, {
     assetFid: fid,
@@ -424,7 +476,7 @@ async function registerMediaAsset(services, {
   }
 
   // 像素级质量分析：把真实锐度写回 assets.sharpness，并落 9 维分（只读评估）
-  if (!isVideo) {
+  if (!isVideo && !isAudio) {
     try {
       await require('./quality-score').analyzeAndPersist(services, fid, nasInfo.fullPath);
     } catch (e) {
@@ -496,7 +548,7 @@ async function registerMediaAsset(services, {
 
   // 5. 触发 AI 工作流解释器（成品库不打标）
   let queued = null;
-  if (interpreter && !isVideo && !isFinished) {
+  if (interpreter && !isVideo && !isAudio && !isFinished) {
     try {
       queued = await interpreter.triggerRun({
         workflowId: 'default',
@@ -730,7 +782,46 @@ async function handleCompleteChunkUpload(services, {
   });
 }
 
+
+/**
+ * 媒体工具纯临时上传：供格式转换 / 音频提炼等独立工具使用
+ * 仅落地到 cache/temp/uploads/，绝对不写入素材库 assets、不校验黑名单、不触发同步
+ */
+async function handleToolTempUpload(services, req) {
+  const { config } = services;
+  const ct = (req && req.headers && req.headers['content-type']) || '';
+  const uploadDir = path.join(config.dataDir, 'cache', 'temp', 'uploads');
+  fs.mkdirSync(uploadDir, { recursive: true });
+
+  let targetFileName = (req && req.headers && req.headers['x-filename']) || 'media_tool_source.mp4';
+  try { targetFileName = decodeURIComponent(targetFileName); } catch {}
+  const safeName = path.basename(targetFileName).replace(/[^a-zA-Z0-9_.一-龥-]/g, '_');
+  const tempPath = path.join(uploadDir, `tool_${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safeName}`);
+
+  let size = 0;
+  if (ct.includes('multipart/form-data')) {
+    const { parseMultipart, readRequestBuffer } = require('./ingest');
+    const buf = await readRequestBuffer(req, 2048 * 1024 * 1024);
+    const { fields, files } = parseMultipart(buf, ct);
+    const file = files.find(f => f.name === 'file') || files[0];
+    if (!file) throw new Error('缺少 file 字段');
+    fs.writeFileSync(tempPath, file.data);
+    size = file.data.length;
+    targetFileName = file.filename || fields.filename || targetFileName;
+  } else {
+    const streamRes = await streamToTempFile(req, tempPath);
+    size = streamRes.size;
+  }
+
+  return {
+    videoPath: tempPath,
+    fileName: targetFileName,
+    size
+  };
+}
+
 module.exports = {
+  handleToolTempUpload,
   handleDirectUpload,
   handleChunkUpload,
   handleCompleteChunkUpload,

@@ -1,7 +1,9 @@
 <template>
   <div
     v-if="visible"
-    class="fixed inset-x-0 bottom-0 top-14 z-50 bg-studio-950 flex flex-col font-sans select-none animate-in fade-in duration-150"
+    :class="cropOnly
+      ? 'absolute inset-0 z-10 bg-studio-950 flex flex-col font-sans select-none'
+      : 'fixed inset-x-0 bottom-0 top-14 z-50 bg-studio-950 flex flex-col font-sans select-none animate-in fade-in duration-150'"
     @keydown.esc="onEscPress"
     tabindex="0"
     ref="layerContainerRef"
@@ -83,6 +85,7 @@
         <div class="h-4 w-px bg-studio-750 mx-1"></div>
 
         <button
+          v-if="!cropOnly"
           type="button"
           @click="handleCancel"
           class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-studio-800 cursor-pointer transition-colors"
@@ -143,6 +146,7 @@
         </button>
 
         <button
+          v-if="!cropOnly"
           type="button"
           @click="setTool('brush')"
           :class="[
@@ -155,12 +159,13 @@
           <span class="text-[9px]">画笔</span>
         </button>
 
-        <div class="w-8 h-px bg-studio-800 my-1.5"></div>
+        <div v-if="!cropOnly" class="w-8 h-px bg-studio-800 my-1.5"></div>
 
         <!-- 分组 2：即时标绘工具 (所见即所得，即画即显) -->
-        <div class="text-[10px] font-mono font-bold text-slate-500 uppercase mb-0.5">标绘</div>
+        <div v-if="!cropOnly" class="text-[10px] font-mono font-bold text-slate-500 uppercase mb-0.5">标绘</div>
 
         <button
+          v-if="!cropOnly"
           type="button"
           @click="setTool('arrow')"
           :class="[
@@ -174,6 +179,7 @@
         </button>
 
         <button
+          v-if="!cropOnly"
           type="button"
           @click="setTool('text')"
           :class="[
@@ -187,6 +193,7 @@
         </button>
 
         <button
+          v-if="!cropOnly"
           type="button"
           @click="setTool('mosaic')"
           :class="[
@@ -199,10 +206,25 @@
           <span class="text-[9px]">马赛克</span>
         </button>
 
-        <div class="w-8 h-px bg-studio-800 my-1.5"></div>
+        <button
+          v-if="!cropOnly"
+          type="button"
+          @click="setTool('crop')"
+          :class="[
+            'w-11 h-11 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer',
+            activeTool === 'crop' ? 'bg-amber-400 text-slate-950 font-bold shadow-md' : 'text-slate-400 hover:bg-studio-800 hover:text-white'
+          ]"
+          title="裁剪当前参考图，确认后才替换"
+        >
+          <StudioIcon name="crop" :size="16" />
+          <span class="text-[9px]">裁剪</span>
+        </button>
+
+        <div v-if="!cropOnly" class="w-8 h-px bg-studio-800 my-1.5"></div>
 
         <!-- 分组 3：专有扩图 -->
         <button
+          v-if="!cropOnly"
           type="button"
           @click="setTool('outpaint')"
           :class="[
@@ -224,6 +246,47 @@
         @wheel="onMainWheel"
         @mousedown="onMainMouseDown"
       >
+        <!-- B. 全画幅裁剪专用顶部 HUD -->
+        <div
+          v-if="activeTool === 'crop'"
+          class="absolute top-4 z-40 flex items-center gap-2.5 bg-studio-900/95 border border-studio-700 px-4 py-2 rounded-2xl backdrop-blur-md shadow-2xl"
+        >
+          <span class="text-xs font-bold text-amber-400 flex items-center gap-1">
+            <StudioIcon name="crop" :size="14" />
+            画幅比例:
+          </span>
+          <div class="flex items-center gap-1">
+            <button
+              v-for="r in [
+                { key: 'free', label: '自由' },
+                { key: 'original', label: '原比' },
+                { key: '1:1', label: '1:1' },
+                { key: '16:9', label: '16:9' },
+                { key: '9:16', label: '9:16' },
+                { key: '4:3', label: '4:3' },
+                { key: '3:4', label: '3:4' }
+              ]"
+              :key="r.key"
+              type="button"
+              @click="setCropRatio(r.key)"
+              :class="[
+                'px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition-colors cursor-pointer',
+                cropRatio === r.key ? 'bg-amber-400 text-slate-950 shadow-sm' : 'bg-studio-800 text-slate-300 hover:bg-studio-750'
+              ]"
+            >
+              {{ r.label }}
+            </button>
+          </div>
+          <div class="h-4 w-px bg-studio-750 mx-1"></div>
+          <button
+            type="button"
+            @click="initCropBox"
+            class="px-2 py-1 rounded-lg bg-studio-800 hover:bg-studio-750 text-slate-300 text-xs font-bold transition-colors cursor-pointer"
+          >
+            重置全图
+          </button>
+        </div>
+
         <!-- A. 智能扩图专用画布视图 (严格保持原图比例，无裁切，实时数据HUD) -->
         <template v-if="activeTool === 'outpaint'">
           <div class="relative w-full h-full flex flex-col items-center justify-center">
@@ -244,6 +307,20 @@
                   {{ r }}
                 </button>
               </div>
+
+              <div class="h-4 w-px bg-studio-750 mx-1"></div>
+
+              <span class="text-xs font-bold text-slate-300">原图占比</span>
+              <input
+                type="range"
+                min="40"
+                max="90"
+                step="5"
+                v-model.number="outpaintOccupancy"
+                class="w-24 accent-emerald-400 cursor-pointer"
+                @input="resetOutpaintOffset()"
+              />
+              <span class="text-xs font-mono font-bold text-emerald-300 w-10">{{ outpaintOccupancy }}%</span>
 
               <div class="h-4 w-px bg-studio-750 mx-1"></div>
 
@@ -648,7 +725,50 @@
                 @click.stop="finishPolygon"
               />
 
-              <!-- 正在拉的矩形选区预览 -->
+              <!-- 全画幅裁剪暗化遮罩与手柄 -->
+              <template v-if="activeTool === 'crop' && cropBox">
+                <!-- 4 个四周暗化遮罩 -->
+                <rect :x="0" :y="0" :width="canvasDisplaySize.w" :height="Math.max(0, cropBox.y)" fill="rgba(0, 0, 0, 0.65)" />
+                <rect :x="0" :y="cropBox.y + cropBox.h" :width="canvasDisplaySize.w" :height="Math.max(0, canvasDisplaySize.h - (cropBox.y + cropBox.h))" fill="rgba(0, 0, 0, 0.65)" />
+                <rect :x="0" :y="cropBox.y" :width="Math.max(0, cropBox.x)" :height="cropBox.h" fill="rgba(0, 0, 0, 0.65)" />
+                <rect :x="cropBox.x + cropBox.w" :y="cropBox.y" :width="Math.max(0, canvasDisplaySize.w - (cropBox.x + cropBox.w))" :height="cropBox.h" fill="rgba(0, 0, 0, 0.65)" />
+
+                <!-- 裁剪框本体边框与移动触发区 -->
+                <rect
+                  :x="cropBox.x"
+                  :y="cropBox.y"
+                  :width="cropBox.w"
+                  :height="cropBox.h"
+                  fill="rgba(251, 191, 36, 0.05)"
+                  stroke="#FBBF24"
+                  stroke-width="2"
+                  class="cursor-move"
+                  @mousedown.stop="onCropMoveDown"
+                />
+
+                <!-- 九宫格辅助线 -->
+                <line :x1="cropBox.x + cropBox.w / 3" :y1="cropBox.y" :x2="cropBox.x + cropBox.w / 3" :y2="cropBox.y + cropBox.h" stroke="rgba(255, 255, 255, 0.4)" stroke-width="1" stroke-dasharray="3 3" />
+                <line :x1="cropBox.x + cropBox.w * 2 / 3" :y1="cropBox.y" :x2="cropBox.x + cropBox.w * 2 / 3" :y2="cropBox.y + cropBox.h" stroke="rgba(255, 255, 255, 0.4)" stroke-width="1" stroke-dasharray="3 3" />
+                <line :x1="cropBox.x" :y1="cropBox.y + cropBox.h / 3" :x2="cropBox.x + cropBox.w" :y2="cropBox.y + cropBox.h / 3" stroke="rgba(255, 255, 255, 0.4)" stroke-width="1" stroke-dasharray="3 3" />
+                <line :x1="cropBox.x" :y1="cropBox.y + cropBox.h * 2 / 3" :x2="cropBox.x + cropBox.w" :y2="cropBox.y + cropBox.h * 2 / 3" stroke="rgba(255, 255, 255, 0.4)" stroke-width="1" stroke-dasharray="3 3" />
+
+                <!-- 8 个控制手柄 (4角 + 4边中点) -->
+                <rect
+                  v-for="h in getCropHandles()"
+                  :key="h.key"
+                  :x="h.x - 5"
+                  :y="h.y - 5"
+                  width="10"
+                  height="10"
+                  rx="2"
+                  fill="#FFFFFF"
+                  stroke="#FBBF24"
+                  stroke-width="2"
+                  :style="{ cursor: h.cursor }"
+                  @mousedown.stop="onCropHandleDown(h.key, $event)"
+                />
+              </template>
+
               <rect
                 v-if="isDraggingNewRect && currentDraftRect"
                 :x="currentDraftRect.x"
@@ -766,12 +886,12 @@
               >
                 <span class="w-1.5 h-1.5 rounded-full" :style="{ backgroundColor: reg.color?.border || '#3B82F6' }"></span>
                 <span>{{ reg.name }}</span>
-                <span class="opacity-75">({{ getOpDisplayName(reg.op) }}{{ reg.op === 'recolor' && (reg.params?.materialName || reg.params?.colorName) ? ': ' + (reg.params.materialName || reg.params.colorName) : '' }})</span>
+                <span class="opacity-75">({{ getOpDisplayName(reg.op) }}{{ reg.guide?.materialName ? ': ' + reg.guide.materialName : '' }})</span>
               </div>
 
               <!-- 基础属性：如果在选区配置了材质贴图或色彩，在选区内渲染智能材质贴合图层 -->
               <div
-                v-if="reg.op === 'recolor' && (reg.params?.materialTextureUrl || reg.params?.colorHex)"
+                v-if="reg.guide?.type === 'resurface' && reg.guide?.colorHex"
                 class="absolute z-10 overflow-hidden rounded transition-all pointer-events-none"
                 :style="{
                   left: getRegionBox(reg).x + 'px',
@@ -780,25 +900,19 @@
                   height: getRegionBox(reg).h + 'px',
                   borderColor: reg.type === 'polygon' ? 'transparent' : (reg.color?.border || '#3B82F6'),
                   borderWidth: reg.type === 'polygon' ? '0px' : (reg.id === activeRegionId ? '2.5px' : '1.5px'),
-                  backgroundColor: reg.params.colorHex ? hexToRgba(reg.params.colorHex, 0.35) : 'rgba(59, 130, 246, 0.15)',
+                  backgroundColor: hexToRgba(reg.guide.colorHex, 0.35),
                   ...getPolygonLocalClipStyle(reg),
                 }"
               >
-                <img
-                  v-if="reg.params?.materialTextureUrl"
-                  :src="reg.params.materialTextureUrl"
-                  class="w-full h-full object-cover mix-blend-multiply opacity-80"
-                  alt="材质贴图"
-                />
                 <div class="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/65 backdrop-blur text-[9px] text-white font-mono flex items-center gap-1 shadow">
-                  <span class="w-2 h-2 rounded-full border border-white/30" :style="{ backgroundColor: reg.params.colorHex || '#CBD5E1' }"></span>
-                  <span class="truncate max-w-[100px]">{{ reg.params.materialName || reg.params.colorName || '基础属性' }}</span>
+                  <span class="w-2 h-2 rounded-full border border-white/30" :style="{ backgroundColor: reg.guide.colorHex }"></span>
+                  <span class="truncate max-w-[100px]">{{ reg.guide.materialName || reg.guide.colorHex }}</span>
                 </div>
               </div>
 
               <!-- 3D 家具视口：每一个替换/增加区域均持续展示，采用纯色背景遮蔽原图杂乱陈设 -->
               <div
-                v-if="['replace', 'add'].includes(reg.op)"
+                v-if="['replace', 'add'].includes(reg.op) && (reg.guide?.objectUrl || reg.params?.glbUrl)"
                 class="absolute z-20 overflow-hidden rounded transition-all"
                 :class="[
                   reg.id === activeRegionId
@@ -810,7 +924,7 @@
                   top: getRegionBox(reg).y + 'px',
                   width: getRegionBox(reg).w + 'px',
                   height: getRegionBox(reg).h + 'px',
-                  backgroundColor: '#F8FAFC',
+                  backgroundColor: reg.params?.transparentBg !== false ? 'transparent' : '#F8FAFC',
                   borderColor: reg.type === 'polygon' ? 'transparent' : (reg.color?.border || '#3B82F6'),
                   borderWidth: reg.type === 'polygon' ? '0px' : (reg.id === activeRegionId ? '2.5px' : '1.5px'),
                   ...getPolygonLocalClipStyle(reg),
@@ -820,14 +934,19 @@
               >
                 <model-viewer
                   :ref="el => registerModelViewer(reg.id, el)"
-                  :src="reg.params.glbUrl || '/models/sofa_electric_single.glb'"
+                  :src="reg.guide?.objectUrl || reg.params.glbUrl"
                   alt="3D 家具模型"
                   shadow-intensity="1.2"
                   shadow-softness="0.8"
                   environment-image="neutral"
                   interaction-prompt="none"
-                  style="width: 100%; height: 100%; background-color: #F8FAFC; pointer-events: none;"
-                  :orientation="`0deg 0deg ${reg.params.yaw || 0}deg`"
+                  :style="{
+                    width: '100%',
+                    height: '100%',
+                    backgroundColor: reg.params?.transparentBg !== false ? 'transparent' : '#F8FAFC',
+                    pointerEvents: 'none'
+                  }"
+                  :orientation="`0deg 0deg ${reg.guide?.yaw || reg.params.yaw || 0}deg`"
                   disable-zoom
                   disable-pan
                   camera-controls="false"
@@ -906,8 +1025,12 @@
         </div>
       </main>
 
-      <!-- 2.3 右侧配置面板 (宽 350px) -->
-      <aside class="w-88 bg-studio-900 border-l border-studio-700 flex flex-col shrink-0 select-none">
+      <!-- 2.3 右侧配置面板 (物理绝对硬锁定 380px，彻底防撑爆) -->
+      <aside
+        v-if="!cropOnly"
+        class="w-[380px] min-w-[380px] max-w-[380px] bg-studio-900 border-l border-studio-700 flex flex-col shrink-0 overflow-hidden select-none"
+        style="width: 380px; min-width: 380px; max-width: 380px;"
+      >
         <!-- 面板顶栏 -->
         <div class="p-3 border-b border-studio-800 flex items-center justify-between shrink-0">
           <div class="flex items-center gap-2">
@@ -1007,6 +1130,19 @@
                 &lt;bbox&gt;{{ getNormalizedBboxStr(activeRegion) }}&lt;/bbox&gt;
               </span>
             </div>
+
+            <!-- 局部切片提取入口 (支持矩形、多边形不规则扣图、画笔) -->
+            <div class="flex items-center justify-between pt-1">
+              <span class="text-[10px] text-slate-400">局部切片提取:</span>
+              <button
+                type="button"
+                @click="extractRegionSlice(activeRegion)"
+                class="px-2.5 py-1 rounded-lg bg-studio-800 hover:bg-studio-750 text-studio-cyan font-bold text-xs flex items-center gap-1.5 transition border border-studio-700 cursor-pointer shadow-xs"
+              >
+                <StudioIcon name="crop" :size="12" />
+                <span>✂️ 提取透明切片</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1020,443 +1156,87 @@
             <span class="text-[10px] text-slate-400 font-mono">当前配置: {{ activeRegion.name }}</span>
           </div>
 
-          <!-- 操作方案选择 (Grid) -->
-          <div class="grid grid-cols-2 gap-1.5">
-            <button
-              type="button"
-              @click="activeRegion.op = 'replace'"
-              :class="[
-                'px-2.5 py-2 rounded-lg border text-xs font-bold text-center cursor-pointer transition-all flex items-center justify-center gap-1.5',
-                activeRegion.op === 'replace' ? 'bg-studio-accent/20 border-studio-accent text-studio-accent' : 'bg-studio-950 border-studio-800 text-slate-400 hover:text-white'
-              ]"
-            >
-              <span>🛋️ 3D陈设替换</span>
-            </button>
-            <button
-              type="button"
-              @click="activeRegion.op = 'add'"
-              :class="[
-                'px-2.5 py-2 rounded-lg border text-xs font-bold text-center cursor-pointer transition-all flex items-center justify-center gap-1.5',
-                activeRegion.op === 'add' ? 'bg-studio-accent/20 border-studio-accent text-studio-accent' : 'bg-studio-950 border-studio-800 text-slate-400 hover:text-white'
-              ]"
-            >
-              <span>➕ 空间增加</span>
-            </button>
-            <button
-              type="button"
-              @click="activeRegion.op = 'erase'"
-              :class="[
-                'px-2.5 py-2 rounded-lg border text-xs font-bold text-center cursor-pointer transition-all flex items-center justify-center gap-1.5',
-                activeRegion.op === 'erase' ? 'bg-studio-accent/20 border-studio-accent text-studio-accent' : 'bg-studio-950 border-studio-800 text-slate-400 hover:text-white'
-              ]"
-            >
-              <span>🧹 杂物消除</span>
-            </button>
-            <button
-              type="button"
-              @click="activeRegion.op = 'recolor'"
-              :class="[
-                'px-2.5 py-2 rounded-lg border text-xs font-bold text-center cursor-pointer transition-all flex items-center justify-center gap-1.5',
-                activeRegion.op === 'recolor' ? 'bg-studio-accent/20 border-studio-accent text-studio-accent' : 'bg-studio-950 border-studio-800 text-slate-400 hover:text-white'
-              ]"
-            >
-              <span>🎨 基础属性</span>
-            </button>
-            <button
-              type="button"
-              @click="activeRegion.op = 'custom'"
-              :class="[
-                'px-2.5 py-2 rounded-lg border text-xs font-bold text-center cursor-pointer transition-all flex items-center justify-center gap-1.5',
-                activeRegion.op === 'custom' ? 'bg-studio-cyan/20 border-studio-cyan text-studio-cyan' : 'bg-studio-950 border-studio-800 text-slate-400 hover:text-white'
-              ]"
-            >
-              <span>✏️ 自定义描述</span>
-            </button>
-            <button
-              type="button"
-              @click="activeRegion.op = 'blank'"
-              :class="[
-                'px-2.5 py-2 rounded-lg border text-xs font-bold text-center cursor-pointer transition-all flex items-center justify-center gap-1.5',
-                activeRegion.op === 'blank' ? 'bg-studio-accent/20 border-studio-accent text-studio-accent' : 'bg-studio-950 border-studio-800 text-slate-400 hover:text-white'
-              ]"
-            >
-              <span>⬜ 选区留白</span>
+          <div class="grid grid-cols-3 gap-1.5">
+            <button v-for="item in guideTypes" :key="item.type" type="button" @click="setGuideType(activeRegion, item.type)" :class="guideButtonClass(activeRegion, item.type)">
+              {{ item.label }}
             </button>
           </div>
 
-          <!-- A. 自定义方案面板 -->
-          <div v-if="activeRegion.op === 'custom'" class="p-3 rounded-xl bg-studio-950 border border-studio-800 space-y-2.5 animate-in fade-in">
-            <div class="text-[11px] font-bold text-slate-300">自定义空间提示词指令</div>
-            <textarea
-              v-model="activeRegion.params.customDesc"
-              rows="3"
-              placeholder="描述该区域如何修改，例如：区域1中的物品加大 20%，保持周围空间光影统一"
-              class="w-full px-3 py-2 rounded-lg bg-studio-900 border border-studio-750 text-xs text-slate-100 outline-none focus:border-studio-cyan resize-none scrollbar-thin"
-            ></textarea>
-            <div class="text-[10px] font-mono text-slate-500">大面语义聚焦 (一键框选全图即可指定修改):</div>
-            <div class="flex flex-wrap gap-1.5">
-              <button
-                v-for="chip in [
-                  { label: '更换木地板', desc: '更换原木纹理木地板，保持原有陈设与动线完好' },
-                  { label: '大理石地砖通铺', desc: '通铺现代大理石抛光地砖，保持家具陈设位置不变' },
-                  { label: '现代平顶/无主灯', desc: '改造为现代极简平顶无主灯吊顶设计，预留磁吸轨道灯槽' },
-                  { label: '墙面重刷质感漆', desc: '墙面重新粉刷雅致艺术质感微水泥涂料，保持软装完好' }
-                ]"
-                :key="chip.label"
-                type="button"
-                @click="activeRegion.params.customDesc = (activeRegion.params.customDesc ? activeRegion.params.customDesc + '；' : '') + chip.desc"
-                class="px-2 py-0.5 rounded-full bg-studio-800 hover:bg-studio-750 text-studio-cyan text-[10px] border border-studio-700 hover:border-studio-cyan/40 cursor-pointer transition-colors"
-              >
-                + {{ chip.label }}
-              </button>
-            </div>
-
-            <div class="text-[10px] font-mono text-slate-500 pt-1">高频意图快捷标签:</div>
-            <div class="flex flex-wrap gap-1.5">
-              <button
-                v-for="chip in ['物品加大', '物品缩小', '沿箭头迁移至此处', '无中生有落地灯', '提升光泽质感', '消除杂物']"
-                :key="chip"
-                type="button"
-                @click="activeRegion.params.customDesc = (activeRegion.params.customDesc ? activeRegion.params.customDesc + '，' : '') + chip"
-                class="px-2 py-0.5 rounded-full bg-studio-800 hover:bg-studio-750 text-slate-300 text-[10px] border border-studio-700 cursor-pointer transition-colors"
-              >
-                + {{ chip }}
-              </button>
-            </div>
+          <div v-if="activeGuide.type === 'remove' || activeGuide.type === 'blank'" class="p-3 rounded-xl bg-studio-950 border border-studio-800 space-y-2">
+            <div class="text-[11px] font-bold text-slate-200">{{ activeGuide.type === 'remove' ? '删' : '留白' }}</div>
+            <textarea :value="activeGuide.text || builtinGuideText(activeGuide.type)" rows="3" class="w-full px-3 py-2 rounded-lg bg-studio-900 border border-studio-750 text-xs text-slate-100 outline-none" @input="setGuideText(activeRegion, $event.target.value)"></textarea>
           </div>
 
-          <!-- B. 3D 陈设替换 / 增加面板 -->
-          <div v-else-if="['replace', 'add'].includes(activeRegion.op)" class="p-3 rounded-xl bg-studio-950 border border-studio-800 space-y-3 animate-in fade-in">
-            <div class="text-[11px] font-bold text-slate-300">3D 模型陈设与朝向</div>
-            <div class="space-y-1.5">
-              <label class="block text-[11px] font-mono text-slate-400">选择家具模型</label>
-              <select
-                v-model="activeRegion.params.glbUrl"
-                @change="onModelSelectChange"
-                class="w-full px-3 py-1.5 rounded-lg bg-studio-900 border border-studio-750 text-xs font-bold text-white outline-none"
-              >
-                <option value="/models/sofa_electric_single.glb">单人电动科技沙发</option>
-                <option value="/models/sofa_model.glb">意式极简双人沙发</option>
-                <option value="/models/sofa_default.glb">北欧布艺现代沙发</option>
-                <option value="/models/user_model.glb">空间落地收纳柜</option>
-              </select>
-            </div>
-
-            <!-- 偏航角滑块 -->
-            <div class="space-y-1.5">
-              <div class="flex items-center justify-between text-xs font-mono">
-                <span class="text-slate-400">偏航角 (Yaw):</span>
-                <span class="text-studio-accent font-bold">{{ activeRegion.params.yaw || 0 }}°</span>
-              </div>
-              <input
-                type="range"
-                min="-180"
-                max="180"
-                step="5"
-                v-model.number="activeRegion.params.yaw"
-                class="w-full accent-studio-accent cursor-pointer"
-              />
-              <div class="flex justify-between text-[10px] font-mono text-slate-500">
-                <span>-180°</span>
-                <span>0° (正对)</span>
-                <span>+180°</span>
-              </div>
-            </div>
-            <div class="text-[11px] text-slate-500 leading-relaxed bg-studio-900/60 p-2 rounded-lg border border-studio-800">
-              💡 纯色背景已遮盖原图旧陈设，手势动画已移除。切换其他选区时该 3D 模型依然保持可见。
-            </div>
+          <div v-else-if="activeGuide.type === 'custom'" class="p-3 rounded-xl bg-studio-950 border border-studio-800 space-y-2">
+            <input :value="activeGuide.name" class="w-full px-3 py-1.5 rounded-lg bg-studio-900 border border-studio-750 text-xs text-white outline-none" placeholder="指南名称" @input="activeGuide.name = $event.target.value" />
+            <textarea :value="activeGuide.text" rows="3" class="w-full px-3 py-2 rounded-lg bg-studio-900 border border-studio-750 text-xs text-slate-100 outline-none" placeholder="写下这一框要做的事" @input="setGuideText(activeRegion, $event.target.value)"></textarea>
           </div>
 
-          <!-- C. 杂物消除面板 -->
-          <div v-else-if="activeRegion.op === 'erase'" class="p-3 rounded-xl bg-studio-950 border border-studio-800 space-y-2.5 animate-in fade-in">
-            <div class="text-[11px] font-bold text-slate-300">消除修复描述</div>
-            <input
-              v-model="activeRegion.params.eraseDesc"
-              placeholder="例如：平整自然纹理、平整白墙、木地板"
-              class="w-full px-3 py-1.5 rounded-lg bg-studio-900 border border-studio-750 text-xs text-white outline-none"
+          <div v-else-if="activeGuide.type === 'add' || activeGuide.type === 'replace'" class="p-3 rounded-xl bg-studio-950 border border-studio-800 space-y-3">
+            <div class="flex flex-wrap gap-1">
+              <button v-for="cat in objectCatalog" :key="cat.key" type="button" class="px-2 py-1 rounded text-[10px] cursor-pointer" :class="activeGuide.objectCategory === cat.key ? 'bg-amber-500 text-black font-bold' : 'bg-studio-850 text-slate-300'" @click="setObjectCategory(activeRegion, cat.key)">{{ cat.label }}</button>
+            </div>
+            <div v-if="currentObjects.length === 0" class="text-[11px] text-slate-500">这一类还没有单品。</div>
+            <div v-else class="space-y-1">
+              <button v-for="item in currentObjects" :key="item.url" type="button" class="w-full text-left px-2 py-1.5 rounded-lg border text-[11px] cursor-pointer" :class="activeGuide.objectUrl === item.url ? 'border-amber-400 text-white' : 'border-studio-800 text-slate-300'" @click="setGuideObject(activeRegion, item)">{{ item.name }}</button>
+            </div>
+            <button v-if="activeGuide.suggestion && !suggestionAccepted(activeGuide)" type="button" class="w-full text-left px-2 py-1.5 rounded-lg bg-studio-cyan/10 border border-studio-cyan/40 text-[11px] text-studio-cyan cursor-pointer" @click="acceptSuggestion(activeRegion)">
+              建议 {{ activeGuide.suggestion.label }}<span v-if="activeGuide.suggestion.hex"> {{ activeGuide.suggestion.hex }}</span>
+            </button>
+            <div class="flex flex-wrap gap-1">
+              <button v-for="skin in skinChoices" :key="skin.key" type="button" class="px-2 py-1 rounded text-[10px] cursor-pointer" :class="activeGuide.subclass === skin.key ? 'bg-studio-accent text-white' : 'bg-studio-850 text-slate-300'" @click="setGuideSkin(activeRegion, skin)">{{ skin.label }}</button>
+            </div>
+            <label class="flex items-center justify-between text-[11px] text-slate-300">
+              <span>自定义颜色</span>
+              <input type="color" :value="activeGuide.colorHex || '#d8cbb7'" class="w-8 h-8 bg-transparent cursor-pointer" @input="setGuideColor(activeRegion, $event.target.value)" />
+            </label>
+            <label class="block text-[11px] text-slate-300">
+              朝向 {{ activeGuide.yaw || 0 }}°
+              <input type="range" min="-180" max="180" step="5" :value="activeGuide.yaw || 0" class="w-full" @change="setGuideYaw(activeRegion, $event.target.value)" />
+            </label>
+          </div>
+
+          <div v-else-if="activeGuide.type === 'resurface'" class="p-3 rounded-xl bg-studio-950 border border-studio-800">
+            <ResurfaceDrawer
+              :guide="activeGuide"
+              :surface="activeGuide.part || activeGuide.surface"
+              :subclass="activeGuide.subclass"
+              :inferred-prob="activeRegion.inferredProb || 0"
+              @update:guide="Object.assign(activeGuide, $event)"
+              @change="Object.assign(activeGuide, $event)"
+              @surface="onGuideSurface"
+              @subclass="onGuideSubclass"
+              @material="onGuideMaterial"
+              @color="onGuideColor"
+              @finish="onGuideFinish"
+              @roughness="onGuideRoughness"
+              @aging="onGuideAging"
             />
           </div>
 
-          <!-- D. 基础属性面板（垂直平铺流：材质种类 → 色彩调色 → 表面光泽与粗糙度 → 做旧年代感） -->
-          <div v-else-if="activeRegion.op === 'recolor'" class="space-y-3 animate-in fade-in pb-4">
-            <!-- 1. 基础材质类别 (Base Material) -->
-            <div class="p-3 rounded-xl bg-studio-950 border border-studio-800 space-y-2.5">
-              <div class="flex items-center justify-between">
-                <div class="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
-                  <span>🧱 基础材质类别</span>
-                  <span v-if="activeRegion.params.materialName" class="px-1.5 py-0.2 rounded bg-studio-cyan/20 text-studio-cyan text-[10px] font-mono">
-                    {{ activeRegion.params.materialName }}
-                  </span>
-                </div>
-                <span class="text-[10px] text-slate-500 font-mono">品类与纹理</span>
-              </div>
+          <div v-else class="text-[11px] text-slate-500 px-1">先选一种操作指南。槽位是空的，选过的内容才会写进配方。</div>
 
-              <!-- 品类标签切换 -->
-              <div class="flex items-center gap-1 bg-studio-900 p-1 rounded-lg border border-studio-800">
-                <button
-                  v-for="cat in materialCategories"
-                  :key="cat.id"
-                  type="button"
-                  @click="activeMaterialCategoryTab = cat.id"
-                  :class="[
-                    'flex-1 py-1 text-[10px] font-bold rounded cursor-pointer transition-colors text-center',
-                    activeMaterialCategoryTab === cat.id ? 'bg-studio-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
-                  ]"
-                >
-                  {{ cat.name }}
-                </button>
-              </div>
-
-              <!-- PR7: 改读四仓库基础属性选择器 -->
-              <div class="rounded-xl border border-studio-800 bg-studio-950 overflow-hidden">
-                <BaseAttrPicker
-                  v-model="activeRegion.params.baseAttr"
-                  :inferredSurface="activeRegion.inferredSurface"
-                  @change="onBaseAttrChange"
-                />
-              </div>
-
-              <!-- 自定义材质名称输入框 -->
-              <div class="space-y-1">
-                <input
-                  v-model="activeRegion.params.materialName"
-                  placeholder="或自由输入材质名称，如：罗马洞石、极简微水泥、夯土墙"
-                  class="w-full px-2.5 py-1.5 rounded-lg bg-studio-900 border border-studio-750 text-xs text-white placeholder-slate-500 outline-none focus:border-studio-cyan"
-                />
-              </div>
-
-              <!-- 材质小样贴图工具栏（从素材库挑选 / 本地上传 / 预览） -->
-              <div class="pt-1 border-t border-studio-850 space-y-2">
-                <div class="flex items-center justify-between text-[10px] text-slate-400 font-mono">
-                  <span>材质实拍小样切片:</span>
-                  <span class="text-slate-500">{{ activeRegion.params.materialTextureUrl ? '已挂载实拍贴图' : '未挂载 (走文字语义)' }}</span>
-                </div>
-
-                <!-- 已挂载贴图卡片 -->
-                <div v-if="activeRegion.params.materialTextureUrl" class="p-2 rounded-lg bg-studio-900 border border-studio-750 flex items-center justify-between gap-2">
-                  <div class="flex items-center gap-2 min-w-0">
-                    <img :src="activeRegion.params.materialTextureUrl" class="w-8 h-8 rounded object-cover border border-studio-700 shrink-0" alt="贴图" />
-                    <div class="min-w-0">
-                      <div class="text-xs font-bold text-white truncate max-w-[170px]">{{ activeRegion.params.materialTextureName || '材质贴图切片' }}</div>
-                      <div class="text-[10px] text-studio-cyan font-mono">将写入参考指令</div>
-                    </div>
-                  </div>
-                  <button type="button" @click="removeMaterialTexture" class="p-1 rounded text-slate-400 hover:text-rose-400 cursor-pointer" title="移除贴图">✕</button>
-                </div>
-
-                <!-- 挑选与上传按钮 -->
-                <div class="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    @click="openMaterialLibraryPicker"
-                    class="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-studio-850 hover:bg-studio-800 text-slate-200 text-xs font-bold border border-studio-700 cursor-pointer transition-colors"
-                  >
-                    <span>🏛️ 从素材库挑选</span>
-                  </button>
-                  <button
-                    type="button"
-                    @click="triggerLocalTextureUpload"
-                    class="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-studio-850 hover:bg-studio-800 text-slate-200 text-xs font-bold border border-studio-700 cursor-pointer transition-colors"
-                  >
-                    <span>☁️ 本地上传贴图</span>
-                  </button>
-                </div>
-              </div>
+          <div class="p-3 rounded-xl bg-studio-950 border border-studio-800 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] font-bold text-slate-200">我的指南</span>
+              <button type="button" class="text-[11px] text-studio-cyan cursor-pointer" @click="saveCurrentGuide">收成方案</button>
             </div>
-
-            <!-- 2. 色彩系统与调色 (Color & Palette) -->
-            <div class="p-3 rounded-xl bg-studio-950 border border-studio-800 space-y-2.5">
-              <div class="flex items-center justify-between">
-                <div class="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
-                  <span>🎨 色彩方案与微调</span>
-                  <span v-if="activeRegion.params.colorName" class="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 text-[10px] font-mono">
-                    {{ activeRegion.params.colorName }}
-                  </span>
-                </div>
-                <span class="text-[10px] text-slate-500 font-mono">室内经典色卡</span>
-              </div>
-
-              <!-- 经典色卡预设 -->
-              <div class="grid grid-cols-3 gap-1.5">
-                <button
-                  v-for="c in interiorPalettes"
-                  :key="c.id"
-                  type="button"
-                  @click="selectPresetColor(c)"
-                  :class="[
-                    'px-2 py-1.5 rounded-lg border text-left cursor-pointer transition-all flex items-center gap-1.5',
-                    activeRegion.params.colorHex === c.hex
-                      ? 'border-studio-accent bg-studio-accent/20 ring-1 ring-studio-accent'
-                      : 'border-studio-800 bg-studio-900/80 hover:border-studio-700'
-                  ]"
-                  :title="c.desc"
-                >
-                  <span class="w-3.5 h-3.5 rounded-full border border-white/20 shrink-0" :style="{ backgroundColor: c.hex }"></span>
-                  <span class="text-[10px] font-bold text-slate-300 truncate">{{ c.name }}</span>
-                </button>
-              </div>
-
-              <!-- 自定义调色行 -->
-              <div class="flex items-center gap-2 pt-1 border-t border-studio-850">
-                <input
-                  type="color"
-                  v-model="activeRegion.params.colorHex"
-                  class="w-8 h-8 rounded-lg bg-studio-900 border border-studio-700 cursor-pointer p-0.5 shrink-0"
-                  title="自由拾色器"
-                />
-                <input
-                  v-model="activeRegion.params.colorName"
-                  placeholder="色彩名称，如：奶油米杏"
-                  class="flex-1 px-2.5 py-1.5 rounded-lg bg-studio-900 border border-studio-750 text-xs text-white placeholder-slate-500 outline-none focus:border-studio-cyan"
-                />
-                <input
-                  v-model="activeRegion.params.colorHex"
-                  placeholder="#EAE3DC"
-                  class="w-20 px-2 py-1.5 rounded-lg bg-studio-900 border border-studio-750 text-xs font-mono text-slate-300 outline-none text-center"
-                />
-              </div>
-
-              <!-- 明度与饱和度双偏移滑块 -->
-              <div class="space-y-2 pt-1">
-                <!-- 明度 -->
-                <div class="space-y-1">
-                  <div class="flex items-center justify-between text-[10px] font-mono text-slate-400">
-                    <span>明暗调性 (Brightness):</span>
-                    <span :class="(activeRegion.params.brightnessOffset || 0) > 0 ? 'text-amber-300' : ((activeRegion.params.brightnessOffset || 0) < 0 ? 'text-slate-400' : 'text-slate-500')">
-                      {{ (activeRegion.params.brightnessOffset || 0) > 0 ? '+' : '' }}{{ activeRegion.params.brightnessOffset || 0 }}%
-                      ({{ (activeRegion.params.brightnessOffset || 0) > 15 ? '高调明亮' : ((activeRegion.params.brightnessOffset || 0) < -15 ? '暗调深邃' : '标准均衡') }})
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min="-50"
-                    max="50"
-                    step="5"
-                    v-model.number="activeRegion.params.brightnessOffset"
-                    class="w-full accent-amber-400 cursor-pointer"
-                  />
-                  <div class="flex justify-between text-[9px] font-mono text-slate-500">
-                    <span>暗调深邃 (-50%)</span>
-                    <span>均衡 (0)</span>
-                    <span>高调透亮 (+50%)</span>
-                  </div>
-                </div>
-
-                <!-- 饱和度 -->
-                <div class="space-y-1">
-                  <div class="flex items-center justify-between text-[10px] font-mono text-slate-400">
-                    <span>色彩浓度 (Saturation):</span>
-                    <span :class="(activeRegion.params.saturationOffset || 0) > 0 ? 'text-rose-400' : ((activeRegion.params.saturationOffset || 0) < 0 ? 'text-cyan-400' : 'text-slate-500')">
-                      {{ (activeRegion.params.saturationOffset || 0) > 0 ? '+' : '' }}{{ activeRegion.params.saturationOffset || 0 }}%
-                      ({{ (activeRegion.params.saturationOffset || 0) > 15 ? '浓郁醇厚' : ((activeRegion.params.saturationOffset || 0) < -15 ? '低饱灰调' : '自然适中') }})
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min="-50"
-                    max="50"
-                    step="5"
-                    v-model.number="activeRegion.params.saturationOffset"
-                    class="w-full accent-rose-400 cursor-pointer"
-                  />
-                  <div class="flex justify-between text-[9px] font-mono text-slate-500">
-                    <span>素淡灰调 (-50%)</span>
-                    <span>中性 (0)</span>
-                    <span>浓郁醇厚 (+50%)</span>
-                  </div>
-                </div>
-              </div>
+            <div v-if="guideNotice" class="text-[11px] text-amber-200">{{ guideNotice }}</div>
+            <div v-if="savedGuides.length === 0" class="text-[11px] text-slate-500">还没有保存的指南。填完就能生图，想下次再用再收成方案。</div>
+            <div v-for="item in savedGuides" :key="item.id" class="flex items-center gap-2 text-[11px]">
+              <button type="button" class="flex-1 text-left truncate text-slate-200 cursor-pointer" @click="requestApplyGuide(item)">{{ item.name }}</button>
+              <span class="text-slate-500 shrink-0">{{ guideTypeLabel(item.type) }}</span>
+              <button type="button" class="text-rose-300 cursor-pointer" @click="removeSavedGuide(item.id)">删除</button>
             </div>
-
-            <!-- 3. 表面物理属性与肌理粗糙度 (Finish & Roughness) -->
-            <div class="p-3 rounded-xl bg-studio-950 border border-studio-800 space-y-2.5">
-              <div class="flex items-center justify-between">
-                <div class="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
-                  <span>✨ 表面物理属性 (PBR)</span>
-                  <span class="px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 text-[10px] font-mono">
-                    {{ getFinishName(activeRegion.params.finish) }}
-                  </span>
-                </div>
-                <span class="text-[10px] text-slate-500 font-mono">光泽与反射</span>
-              </div>
-
-              <!-- 4 档表面光泽单选胶囊 -->
-              <div class="grid grid-cols-2 gap-1.5">
-                <button
-                  v-for="f in finishOptions"
-                  :key="f.id"
-                  type="button"
-                  @click="activeRegion.params.finish = f.id"
-                  :class="[
-                    'px-2 py-1.5 rounded-lg border text-left cursor-pointer transition-all',
-                    activeRegion.params.finish === f.id
-                      ? 'bg-purple-500/20 border-purple-500 text-white shadow-sm'
-                      : 'bg-studio-900 border-studio-800 text-slate-300 hover:border-studio-700'
-                  ]"
-                  :title="f.desc"
-                >
-                  <div class="text-[11px] font-bold leading-tight">{{ f.name }}</div>
-                  <div class="text-[9px] text-slate-400 font-mono">{{ f.en }}</div>
-                </button>
-              </div>
-
-              <!-- 肌理粗糙度连续滑块 (0% ~ 100%) -->
-              <div class="space-y-1.5 pt-1 border-t border-studio-850">
-                <div class="flex items-center justify-between text-[10px] font-mono text-slate-400">
-                  <span>表面肌理粗糙度:</span>
-                  <span class="text-studio-cyan font-bold">
-                    {{ activeRegion.params.roughness ?? 45 }}%
-                    ({{ (activeRegion.params.roughness ?? 45) <= 20 ? '平滑丝光细腻' : ((activeRegion.params.roughness ?? 45) >= 65 ? '粗粝凹凸微孔' : '自然细腻肌理') }})
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="5"
-                  v-model.number="activeRegion.params.roughness"
-                  class="w-full accent-studio-cyan cursor-pointer"
-                />
-                <div class="flex justify-between text-[9px] font-mono text-slate-500">
-                  <span>0% (丝滑无纹)</span>
-                  <span>50% (自然肌理)</span>
-                  <span>100% (粗粝多孔)</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- 4. 做旧与年代感 (Aging & Patina) -->
-            <div class="p-3 rounded-xl bg-studio-950 border border-studio-800 space-y-2.5">
-              <div class="flex items-center justify-between">
-                <div class="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
-                  <span>⏳ 做旧与时间痕迹</span>
-                  <span class="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-mono">
-                    {{ getAgingName(activeRegion.params.aging) }}
-                  </span>
-                </div>
-                <span class="text-[10px] text-slate-500 font-mono">年代质感</span>
-              </div>
-
-              <div class="grid grid-cols-2 gap-1.5">
-                <button
-                  v-for="a in agingOptions"
-                  :key="a.id"
-                  type="button"
-                  @click="activeRegion.params.aging = a.id"
-                  :class="[
-                    'px-2 py-1.5 rounded-lg border text-left cursor-pointer transition-all',
-                    activeRegion.params.aging === a.id
-                      ? 'bg-emerald-500/20 border-emerald-500 text-white shadow-sm'
-                      : 'bg-studio-900 border-studio-800 text-slate-300 hover:border-studio-700'
-                  ]"
-                  :title="a.desc"
-                >
-                  <div class="text-[11px] font-bold leading-tight">{{ a.name }}</div>
-                  <div class="text-[9px] text-slate-400 font-mono">{{ a.en }}</div>
-                </button>
+            <div v-if="pendingGuideApply" class="rounded-lg border border-amber-500/40 p-2 space-y-2">
+              <div class="text-[11px] text-amber-100">这条指南是{{ surfaceLabel(pendingGuideApply.slots.surface) }}，当前框是{{ surfaceLabel(activeGuide.surface) }}。确认后才换面。</div>
+              <div class="flex gap-2">
+                <button type="button" class="px-2 py-1 rounded bg-studio-accent text-white cursor-pointer" @click="confirmPendingGuide">确认换上</button>
+                <button type="button" class="px-2 py-1 rounded bg-studio-800 text-slate-200 cursor-pointer" @click="pendingGuideApply = null">先不换</button>
               </div>
             </div>
           </div>
+
         </div>
 
         <!-- 标绘统计展示 -->
@@ -1470,11 +1250,11 @@
     </div>
 
     <!-- 3. 底栏 (高度 64px)：多行配方汇总只读预览 + 取消 + 完成并应用 -->
-    <footer class="h-16 px-6 border-t border-studio-700/80 bg-studio-900/95 flex items-center justify-between shrink-0">
+    <footer v-if="!cropOnly" class="h-16 px-6 border-t border-studio-700/80 bg-studio-900/95 flex items-center justify-between shrink-0">
       <div class="flex-1 min-w-0 mr-6">
         <div class="text-[10px] font-mono text-slate-500 uppercase tracking-wider">配方句实时汇总预览</div>
         <div class="text-xs text-slate-200 truncate font-medium mt-0.5">
-          {{ formattedRecipeSummary || '未配置空间操作，纯即时标绘将生成视觉参考图交付' }}
+          {{ activeTool === 'crop' ? '裁剪只替换当前参考图，不改配方句' : (formattedRecipeSummary || '未配置空间操作，纯即时标绘将生成视觉参考图交付') }}
         </div>
       </div>
 
@@ -1490,10 +1270,11 @@
         <button
           type="button"
           @click="openConfirmModal"
-          class="px-6 py-2 rounded-xl bg-studio-accent hover:bg-studio-accent/90 text-white text-xs font-bold shadow-lg shadow-studio-accent/20 cursor-pointer transition-all flex items-center gap-2"
+          :disabled="activeTool === 'crop' && !cropBox"
+          class="px-6 py-2 rounded-xl bg-studio-accent hover:bg-studio-accent/90 text-white text-xs font-bold shadow-lg shadow-studio-accent/20 cursor-pointer transition-all flex items-center gap-2 disabled:opacity-40"
         >
           <StudioIcon name="check" :size="15" />
-          <span>完成并应用</span>
+          <span>{{ activeTool === 'crop' ? '确认裁剪' : '完成并应用' }}</span>
         </button>
       </div>
     </footer>
@@ -1583,38 +1364,76 @@
       </div>
     </div>
 
-    <!-- 5. DAM 素材库材质与色板挑选浮层 -->
-    <AssetPickerModal
-      :visible="showMaterialPickerModal"
-      context="edit"
-      initialSub="material"
-      commitOnVersion
-      title="从 DAM 素材库挑选材质切片与实拍贴图"
-      submitLabel="应用为当前选区材质贴图"
-      :maxSelect="1"
-      :uploadEnabled="true"
-      @confirm="onMaterialPickerConfirm"
-      @close="showMaterialPickerModal = false"
-    />
+    <!-- 5. 局部切片预览与保存模态弹窗 -->
+    <div
+      v-if="showSliceModal"
+      class="fixed inset-0 z-60 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm"
+    >
+      <div class="w-full max-w-md bg-studio-900 border border-studio-700 rounded-2xl shadow-2xl p-5 space-y-4">
+        <div class="flex items-center justify-between border-b border-studio-800 pb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-studio-cyan"></span>
+            <h3 class="text-sm font-bold text-white">局部选区切片已提取 (带透明通道)</h3>
+          </div>
+          <button type="button" @click="showSliceModal = false" class="text-slate-400 hover:text-white cursor-pointer">
+            <StudioIcon name="close" :size="15" />
+          </button>
+        </div>
 
-    <!-- 本地材质贴图隐藏上传输入 -->
-    <input
-      ref="textureFileInputRef"
-      type="file"
-      accept="image/*"
-      class="hidden"
-      @change="onLocalTextureFileSelected"
-    />
+        <!-- 棋盘格透明背景预览 -->
+        <div class="w-full aspect-video rounded-xl border border-studio-750 bg-[repeating-conic-gradient(#1e293b_0%_25%,#0f172a_0%_50%)] bg-[length:16px_16px] flex items-center justify-center overflow-hidden p-3 shadow-inner">
+          <img :src="slicePreviewDataUrl" class="max-w-full max-h-full object-contain drop-shadow-xl" />
+        </div>
+
+        <div class="flex items-center justify-between text-xs text-slate-400 px-1">
+          <span>分辨率: <strong class="text-white font-mono">{{ sliceMetadata.w }} × {{ sliceMetadata.h }}</strong></span>
+          <span class="text-studio-cyan font-bold">{{ sliceMetadata.isTransparent ? '✨ 不规则边缘透明抠图' : '矩形切片' }}</span>
+        </div>
+
+        <!-- 操作按钮组 -->
+        <div class="grid grid-cols-2 gap-2 pt-2 border-t border-studio-800">
+          <button
+            type="button"
+            @click="downloadSlicePng"
+            class="py-2 px-3 rounded-xl bg-studio-800 hover:bg-studio-750 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer border border-studio-700"
+          >
+            <StudioIcon name="download" :size="14" />
+            <span>下载透明 PNG</span>
+          </button>
+          <button
+            type="button"
+            @click="addSliceToReference"
+            class="py-2 px-3 rounded-xl bg-studio-accent hover:bg-studio-accent/90 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md"
+          >
+            <StudioIcon name="plus" :size="14" />
+            <span>设为生图参考图</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
   </div>
 </template>
 
 <script setup>
 import { ref, computed, reactive, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import StudioIcon from '../../components/StudioIcon.vue';
-import AssetPickerModal from '../../components/AssetPickerModal.vue';
+import { computeOutpaintNorm } from '../../../../src/outpaint-layout.mjs';
+import ResurfaceDrawer from '../../components/studio/ResurfaceDrawer.vue';
 import BaseAttrPicker from '../../components/BaseAttrPicker.vue';
-import { authFetch } from '../../api';
-import { REGION_COLORS, calculateNormalizedBbox } from '../../utils/model-protocol';
+import { authFetch, getToken } from '../../api';
+import { mapSchemeToRegions } from '../../../../src/base-library/scheme-apply.mjs';
+import { REGION_COLORS, calculateNormalizedBbox, computeImageEntityBbox, getNearestCanonicalRatio, extractDominantScenePalette } from '../../utils/model-protocol';
+import { buildStructuredPrompt } from '../../utils/prompt-engine';
+import {
+  BUILTIN_GUIDE_TEXT,
+  GUIDE_TYPE_TO_OP,
+  emptyGuide,
+  formatGuideRecipe,
+  applyGuide,
+  commitGuide,
+  skinLabel
+} from '../../utils/guide-sentence';
 import {
   MATERIAL_CATEGORIES,
   INTERIOR_COLOR_PALETTES,
@@ -1629,6 +1448,8 @@ const props = defineProps({
   imageIndex: { type: Number, default: 0 },
   targetTag: { type: String, default: '@图1' },
   totalReferenceCount: { type: Number, default: 1 },
+  cropOnly: { type: Boolean, default: false },
+  selectedRatio: { type: String, default: '' }
 });
 
 const emit = defineEmits([
@@ -1659,13 +1480,180 @@ const imgNaturalSize = reactive({ w: 0, h: 0 });
 const canvasDisplaySize = reactive({ w: 800, h: 600 });
 
 // 当前激活工具
-// 'select' | 'rect' | 'polygon' | 'brush' | 'arrow' | 'text' | 'mosaic' | 'outpaint'
+// 'select' | 'rect' | 'polygon' | 'brush' | 'arrow' | 'text' | 'mosaic' | 'crop' | 'outpaint'
 const activeTool = ref('select');
+const cropRect = ref(null);
+
+// 全画幅标准裁剪系统状态
+const cropBox = ref({ x: 0, y: 0, w: 800, h: 600 });
+const cropRatio = ref('free'); // 'free' | 'original' | '1:1' | '16:9' | '9:16' | '4:3' | '3:4'
+const activeCropDrag = ref(null); // { mode: 'handle' | 'move', handleKey, startX, startY, startBox }
+
+function initCropBox() {
+  const dw = canvasDisplaySize.w || 800;
+  const dh = canvasDisplaySize.h || 600;
+  cropBox.value = { x: 0, y: 0, w: dw, h: dh };
+}
+
+function setCropRatio(ratio) {
+  cropRatio.value = ratio;
+  const dw = canvasDisplaySize.w || 800;
+  const dh = canvasDisplaySize.h || 600;
+  if (ratio === 'free') return;
+  let targetAspect = 1;
+  if (ratio === 'original') {
+    targetAspect = dw / dh;
+  } else {
+    const [rw, rh] = ratio.split(':').map(Number);
+    targetAspect = rw / rh;
+  }
+  let newW = cropBox.value.w;
+  let newH = newW / targetAspect;
+  if (newH > dh) {
+    newH = dh;
+    newW = newH * targetAspect;
+  }
+  if (newW > dw) {
+    newW = dw;
+    newH = newW / targetAspect;
+  }
+  const centerX = cropBox.value.x + cropBox.value.w / 2;
+  const centerY = cropBox.value.y + cropBox.value.h / 2;
+  const newX = Math.max(0, Math.min(dw - newW, centerX - newW / 2));
+  const newY = Math.max(0, Math.min(dh - newH, centerY - newH / 2));
+  cropBox.value = { x: Math.round(newX), y: Math.round(newY), w: Math.round(newW), h: Math.round(newH) };
+}
+
+function getCropHandles() {
+  const b = cropBox.value || { x: 0, y: 0, w: 0, h: 0 };
+  return [
+    { key: 'nw', x: b.x, y: b.y, cursor: 'nwse-resize' },
+    { key: 'n', x: b.x + b.w / 2, y: b.y, cursor: 'ns-resize' },
+    { key: 'ne', x: b.x + b.w, y: b.y, cursor: 'nesw-resize' },
+    { key: 'e', x: b.x + b.w, y: b.y + b.h / 2, cursor: 'ew-resize' },
+    { key: 'se', x: b.x + b.w, y: b.y + b.h, cursor: 'nwse-resize' },
+    { key: 's', x: b.x + b.w / 2, y: b.y + b.h, cursor: 'ns-resize' },
+    { key: 'sw', x: b.x, y: b.y + b.h, cursor: 'nesw-resize' },
+    { key: 'w', x: b.x, y: b.y + b.h / 2, cursor: 'ew-resize' }
+  ];
+}
+
+function onCropHandleDown(key, e) {
+  e.stopPropagation();
+  activeCropDrag.value = {
+    mode: 'handle',
+    handleKey: key,
+    startClientX: e.clientX,
+    startClientY: e.clientY,
+    startBox: { ...cropBox.value }
+  };
+}
+
+function onCropMoveDown(e) {
+  e.stopPropagation();
+  activeCropDrag.value = {
+    mode: 'move',
+    startClientX: e.clientX,
+    startClientY: e.clientY,
+    startBox: { ...cropBox.value }
+  };
+}
+
+// 局部切片预览弹窗状态与提取逻辑
+const showSliceModal = ref(false);
+const slicePreviewDataUrl = ref('');
+const sliceMetadata = ref({ w: 0, h: 0, name: '', isTransparent: false });
+
+async function extractRegionSlice(reg) {
+  if (!reg || !baseImageRef.value) return;
+  const img = baseImageRef.value;
+  const dw = canvasDisplaySize.w || img.clientWidth || img.naturalWidth;
+  const dh = canvasDisplaySize.h || img.clientHeight || img.naturalHeight;
+  const scaleX = img.naturalWidth / dw;
+  const scaleY = img.naturalHeight / dh;
+
+  let minX, minY, maxX, maxY;
+  if (reg.type === 'rect') {
+    minX = reg.x;
+    minY = reg.y;
+    maxX = reg.x + reg.w;
+    maxY = reg.y + reg.h;
+  } else if (reg.type === 'polygon' && reg.points?.length >= 3) {
+    minX = Math.min(...reg.points.map(p => p.x));
+    maxX = Math.max(...reg.points.map(p => p.x));
+    minY = Math.min(...reg.points.map(p => p.y));
+    maxY = Math.max(...reg.points.map(p => p.y));
+  } else {
+    minX = reg.x || 0;
+    minY = reg.y || 0;
+    maxX = (reg.x || 0) + (reg.w || 100);
+    maxY = (reg.y || 0) + (reg.h || 100);
+  }
+
+  const cropW = Math.max(1, Math.round((maxX - minX) * scaleX));
+  const cropH = Math.max(1, Math.round((maxY - minY) * scaleY));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = cropW;
+  canvas.height = cropH;
+  const ctx = canvas.getContext('2d');
+
+  ctx.save();
+  ctx.scale(scaleX, scaleY);
+  ctx.translate(-minX, -minY);
+
+  if (reg.type === 'polygon' && reg.points?.length >= 3) {
+    ctx.beginPath();
+    reg.points.forEach((pt, i) => {
+      if (i === 0) ctx.moveTo(pt.x, pt.y);
+      else ctx.lineTo(pt.x, pt.y);
+    });
+    ctx.closePath();
+    ctx.clip(); // 不规则扣图：选区外部为完全透明
+  }
+
+  ctx.drawImage(img, 0, 0, dw, dh);
+  ctx.restore();
+
+  const dataUrl = canvas.toDataURL('image/png');
+  slicePreviewDataUrl.value = dataUrl;
+  sliceMetadata.value = {
+    w: cropW,
+    h: cropH,
+    name: reg.name || '选区切片',
+    isTransparent: reg.type === 'polygon'
+  };
+  showSliceModal.value = true;
+}
+
+function downloadSlicePng() {
+  if (!slicePreviewDataUrl.value) return;
+  const a = document.createElement('a');
+  a.href = slicePreviewDataUrl.value;
+  a.download = `${sliceMetadata.value.name}_${Date.now()}.png`;
+  a.click();
+}
+
+function addSliceToReference() {
+  if (!slicePreviewDataUrl.value) return;
+  emit('apply-custom-image', {
+    imageIndex: props.totalReferenceCount,
+    dataUrl: slicePreviewDataUrl.value,
+    asNewReference: true
+  });
+  showSliceModal.value = false;
+  alert('已将该切片加入参考图栏！');
+}
 
 function setTool(tool) {
   activeTool.value = tool;
   if (tool === 'polygon') {
     polyDraftPoints.value = [];
+  }
+  if (tool === 'crop') {
+    initCropBox();
+  } else {
+    activeCropDrag.value = null;
   }
   if (tool !== 'select') {
     selectedAnnotationIndex.value = null;
@@ -1675,78 +1663,368 @@ function setTool(tool) {
 // 选区体系数据结构 (用于写回配方句，默认纯净起手无选区)
 const regions = ref([]);
 const activeRegionId = ref(null);
+const schemeStyles = ref([]);
+const schemeList = ref([]);
+const schemeStyleId = ref('');
+const schemeId = ref('');
+const schemeSpace = ref('living');
+const schemeApplyNote = ref('');
 
 const activeRegion = computed(() => {
   return regions.value.find((r) => r.id === activeRegionId.value) || null;
 });
 
+const guideTypes = [
+  { type: 'add', label: '增' },
+  { type: 'remove', label: '删' },
+  { type: 'replace', label: '改物件' },
+  { type: 'resurface', label: '改表皮' },
+  { type: 'blank', label: '留白' },
+  { type: 'custom', label: '自定义文字' }
+];
+const skinChoices = [
+  { key: 'soft_leather', label: '真皮' },
+  { key: 'soft_fabric', label: '织物' },
+  { key: 'soft_veneer', label: '木皮' },
+  { key: 'soft_metal', label: '金属' }
+];
+const objectCatalog = [
+  { key: 'sofa', label: '沙发', items: [
+    { name: '单人电动科技沙发', url: '/models/sofa_electric_single.glb' },
+    { name: '意式极简双人沙发', url: '/models/sofa_model.glb' },
+    { name: '北欧布艺现代沙发', url: '/models/sofa_default.glb' }
+  ] },
+  { key: 'chair', label: '椅', items: [] },
+  { key: 'table', label: '桌', items: [
+    { name: '空间落地收纳柜', url: '/models/user_model.glb' }
+  ] },
+  { key: 'light', label: '灯', items: [] },
+  { key: 'fixture', label: '洁具', items: [] }
+];
+const savedGuides = ref([]);
+const guideNotice = ref('');
+const pendingGuideApply = ref(null);
+const activeGuide = computed(() => activeRegion.value?.guide || emptyGuide());
+const currentObjects = computed(() => objectCatalog.find((item) => item.key === activeGuide.value.objectCategory)?.items || []);
+
+function surfaceLabel(key) {
+  const labels = { ceiling: '天花', wall: '墙面', floor: '地面', millwork: '全屋定制', furniture: '活动家具', soft: '软装', lighting: '灯具', fixture: '卫浴五金' };
+  return labels[key] || '未识别';
+}
+function guideTypeLabel(type) {
+  return guideTypes.find((item) => item.type === type)?.label || type;
+}
+function guideButtonClass(reg, type) {
+  const on = reg?.guide?.type === type;
+  return on
+    ? 'px-2 py-2 rounded-lg border text-xs font-bold bg-studio-accent/20 border-studio-accent text-studio-accent cursor-pointer'
+    : 'px-2 py-2 rounded-lg border text-xs font-bold bg-studio-950 border-studio-800 text-slate-300 cursor-pointer';
+}
+function builtinGuideText(type) {
+  return BUILTIN_GUIDE_TEXT[type] || '';
+}
+function ensureGuide(reg) {
+  if (!reg.guide) reg.guide = emptyGuide();
+  if (!reg.params) reg.params = {};
+  return reg.guide;
+}
+function sampleSceneHex(img) {
+  if (!img || !img.naturalWidth) return '';
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = 24;
+    canvas.height = 24;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, 24, 24);
+    const data = ctx.getImageData(0, 0, 24, 24).data;
+    let r = 0; let g = 0; let b = 0; let n = 0;
+    for (let i = 0; i < data.length; i += 16) {
+      r += data[i]; g += data[i + 1]; b += data[i + 2]; n += 1;
+    }
+    const hex = (value) => Math.max(0, Math.min(255, Math.round(value / (n || 1)))).toString(16).padStart(2, '0');
+    return `#${hex(r)}${hex(g)}${hex(b)}`;
+  } catch (_) {
+    return '';
+  }
+}
+function suggestionFor(category) {
+  const key = category === 'table' ? 'soft_veneer' : ((category === 'light' || category === 'fixture') ? 'soft_metal' : 'soft_fabric');
+  return { subclass: key, label: skinLabel(key), hex: sampleSceneHex(baseImageRef.value), accepted: false };
+}
+function setGuideType(reg, type) {
+  const guide = ensureGuide(reg);
+  guide.type = type;
+  reg.op = GUIDE_TYPE_TO_OP[type] || '';
+  if ((type === 'add' || type === 'replace') && !guide.suggestion) {
+    if (!guide.objectCategory) guide.objectCategory = 'sofa';
+    guide.suggestion = suggestionFor(guide.objectCategory);
+  }
+}
+function setGuideText(reg, value) {
+  ensureGuide(reg).text = value;
+}
+function setObjectCategory(reg, key) {
+  const guide = ensureGuide(reg);
+  guide.objectCategory = key;
+  guide.suggestion = suggestionFor(key);
+}
+function setGuideObject(reg, item) {
+  const guide = ensureGuide(reg);
+  guide.objectName = item.name;
+  guide.objectUrl = item.url;
+  reg.params.glbUrl = item.url;
+  reg.params.modelName = item.name;
+}
+function setGuideSkin(reg, skin) {
+  const guide = ensureGuide(reg);
+  guide.subclass = skin.key;
+  guide.materialName = skin.label;
+}
+function setGuideColor(reg, hex) {
+  ensureGuide(reg).colorHex = hex;
+}
+function setGuideYaw(reg, value) {
+  const guide = ensureGuide(reg);
+  guide.yaw = Number(value) || 0;
+  guide.yawTouched = true;
+  reg.params.yaw = guide.yaw;
+}
+function suggestionAccepted(guide) {
+  return Boolean(guide?.suggestion?.accepted);
+}
+function acceptSuggestion(reg) {
+  const guide = ensureGuide(reg);
+  if (!guide.suggestion) return;
+  guide.subclass = guide.suggestion.subclass;
+  guide.materialName = guide.suggestion.label;
+  if (guide.suggestion.hex) guide.colorHex = guide.suggestion.hex;
+  guide.suggestion = { ...guide.suggestion, accepted: true };
+}
+function onGuideSurface(key) {
+  if (!activeRegion.value) return;
+  const guide = ensureGuide(activeRegion.value);
+  guide.surface = key;
+  guide.surfaceSource = 'manual';
+  guide.subclass = '';
+  guide.materialName = '';
+  guide.assetId = '';
+  guide.colorHex = '';
+}
+function shortMaterialLabel(label) {
+  const text = String(label || '').trim();
+  const idx = text.lastIndexOf('-');
+  return idx >= 0 ? text.slice(idx + 1).trim() : text;
+}
+function onGuideSubclass(key, sub) {
+  if (!activeRegion.value) return;
+  const guide = ensureGuide(activeRegion.value);
+  const warehouses = Array.isArray(sub?.warehouses) ? sub.warehouses : [];
+  const paintOnly = warehouses.length > 0 && warehouses.every((item) => item === 'paint');
+  guide.subclass = key;
+  guide.assetId = '';
+  guide.materialName = paintOnly ? '' : shortMaterialLabel(sub?.label);
+  guide.colorHex = '';
+  guide.finish = '';
+  guide.roughness = null;
+  guide.aging = '';
+}
+function onGuideMaterial(item) {
+  if (!activeRegion.value) return;
+  const guide = ensureGuide(activeRegion.value);
+  guide.assetId = item.id;
+  guide.materialName = item.name_cn;
+}
+function onGuideColor(hex) {
+  if (!activeRegion.value) return;
+  ensureGuide(activeRegion.value).colorHex = hex;
+}
+function onGuideFinish(id) {
+  if (!activeRegion.value) return;
+  ensureGuide(activeRegion.value).finish = id;
+}
+function onGuideRoughness(value) {
+  if (!activeRegion.value) return;
+  ensureGuide(activeRegion.value).roughness = Number(value);
+}
+function onGuideAging(id) {
+  if (!activeRegion.value) return;
+  ensureGuide(activeRegion.value).aging = id;
+}
+function guideSlots(reg) {
+  const guide = ensureGuide(reg);
+  return { ...guide, suggestion: guide.suggestion ? { ...guide.suggestion } : null };
+}
+async function loadSavedGuides() {
+  try {
+    const res = await authFetch('/api/base-library/guides');
+    const json = await res.json();
+    savedGuides.value = json?.data || [];
+  } catch (_) {
+    savedGuides.value = [];
+  }
+}
+async function saveCurrentGuide() {
+  const reg = activeRegion.value;
+  if (!reg?.guide?.type) {
+    guideNotice.value = '先选一种指南';
+    return;
+  }
+  const name = (reg.guide.name || '').trim() || `${guideTypeLabel(reg.guide.type)} ${reg.name || ''}`.trim();
+  try {
+    const res = await authFetch('/api/base-library/guides', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, type: reg.guide.type, slots: guideSlots(reg) })
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      guideNotice.value = json.error || '没有保存';
+      return;
+    }
+    guideNotice.value = `已收成「${name}」`;
+    await loadSavedGuides();
+  } catch (_) {
+    guideNotice.value = '没有保存';
+  }
+}
+function requestApplyGuide(item) {
+  const reg = activeRegion.value;
+  if (!reg) return;
+  const saved = { ...(item.slots || {}), type: item.type, name: item.name };
+  const result = applyGuide(reg.guide || emptyGuide(), saved);
+  if (result.needsConfirm) {
+    pendingGuideApply.value = item;
+    return;
+  }
+  reg.guide = result.guide;
+  reg.op = GUIDE_TYPE_TO_OP[result.guide.type] || '';
+  if (result.guide.objectUrl) {
+    reg.params = reg.params || {};
+    reg.params.glbUrl = result.guide.objectUrl;
+    reg.params.modelName = result.guide.objectName;
+    reg.params.yaw = result.guide.yaw || 0;
+  }
+  pendingGuideApply.value = null;
+}
+function confirmPendingGuide() {
+  const reg = activeRegion.value;
+  const item = pendingGuideApply.value;
+  if (!reg || !item) return;
+  reg.guide = commitGuide({ ...(item.slots || {}), type: item.type, name: item.name });
+  reg.op = GUIDE_TYPE_TO_OP[reg.guide.type] || '';
+  pendingGuideApply.value = null;
+}
+async function removeSavedGuide(id) {
+  await authFetch(`/api/base-library/guides/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  await loadSavedGuides();
+}
+
 // 基础属性状态与配置
-const materialCategories = MATERIAL_CATEGORIES;
-const interiorPalettes = INTERIOR_COLOR_PALETTES;
 const finishOptions = FINISH_OPTIONS;
 const agingOptions = AGING_OPTIONS;
 
-const activeMaterialCategoryTab = ref('stone');
-const showMaterialPickerModal = ref(false);
-const textureFileInputRef = ref(null);
+async function loadSchemeStyles() {
+  try {
+    const res = await authFetch('/api/base-library/styles');
+    const json = await res.json();
+    if (!json.success) {
+      schemeApplyNote.value = json.error || '风格列表加载失败';
+      return;
+    }
+    schemeStyles.value = json.data || [];
+    if (!schemeStyleId.value) {
+      const ready = schemeStyles.value.find((style) => style.scheme_count > 0) || schemeStyles.value[0];
+      if (ready) {
+        schemeStyleId.value = ready.id;
+        await loadSchemesForStyle();
+      }
+    }
+  } catch (err) {
+    schemeApplyNote.value = '风格列表加载失败';
+  }
+}
 
-const currentCategoryMaterials = computed(() => {
-  const cat = materialCategories.find((c) => c.id === activeMaterialCategoryTab.value);
-  return cat ? cat.items : materialCategories[0].items;
-});
+async function loadSchemesForStyle() {
+  schemeList.value = [];
+  schemeId.value = '';
+  if (!schemeStyleId.value) return;
+  try {
+    const res = await authFetch(`/api/base-library/schemes?style_id=${encodeURIComponent(schemeStyleId.value)}`);
+    const json = await res.json();
+    if (!json.success) {
+      schemeApplyNote.value = json.error || '方案列表加载失败';
+      return;
+    }
+    schemeList.value = json.data || [];
+    if (schemeList.value[0]) schemeId.value = schemeList.value[0].id;
+    schemeApplyNote.value = schemeList.value.length ? '' : '这个风格还没有方案';
+  } catch (err) {
+    schemeApplyNote.value = '方案列表加载失败';
+  }
+}
+
+function itemPreviewUrl(slot) {
+  const token = getToken();
+  const base = `/api/base-library/items/${encodeURIComponent(slot.item_id)}/preview`;
+  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+}
+
+function applySelectedScheme() {
+  const scheme = schemeList.value.find((row) => row.id === schemeId.value);
+  if (!scheme) {
+    schemeApplyNote.value = '请先选择一套方案';
+    return;
+  }
+  const result = mapSchemeToRegions(regions.value, scheme, {
+    spaceKey: schemeSpace.value,
+    previewUrl: itemPreviewUrl
+  });
+  regions.value = result.regions;
+  if (result.applied[0]) activeRegionId.value = result.applied[0].id;
+  const written = result.applied.map((row) => `${row.name || '选区'}→${row.materialName}`).join('、');
+  const missed = result.skipped.map((row) => `${row.name || '选区'}（${row.reason}）`).join('、');
+  const parts = [];
+  if (written) parts.push(`已写入 ${result.applied.length} 个选区：${written}`);
+  if (missed) parts.push(`未写入：${missed}`);
+  schemeApplyNote.value = parts.join('。') || '没有可写入的选区';
+}
 
 function onBaseAttrChange(val) {
-  if (!activeRegion.value) return;
+  if (!activeRegion.value || !val) return;
   if (!activeRegion.value.params) activeRegion.value.params = {};
+  activeRegion.value.params.baseAttr = val;
   activeRegion.value.params.surface = val.surface;
   activeRegion.value.params.subclass = val.subclass;
-  activeRegion.value.params.warehouse = val.warehouse;
-  activeRegion.value.params.asset_id = val.asset_id;
-  activeRegion.value.params.use_shell = val.use_shell;
-  if (val.hex) activeRegion.value.params.colorHex = val.hex;
-  if (val.finish) activeRegion.value.params.finish = val.finish;
-  if (val.roughness !== undefined) activeRegion.value.params.roughness = val.roughness;
-  // 清空可能残留的旧 SVG 贴图
-  if (activeRegion.value.params.materialTextureUrl && String(activeRegion.value.params.materialTextureUrl).endsWith('.svg')) {
-    activeRegion.value.params.materialTextureUrl = null;
+  activeRegion.value.params.warehouse = val.warehouse || (val.mode === 'model' ? 'model' : 'material');
+  activeRegion.value.params.asset_id = val.asset_id || null;
+  activeRegion.value.params.item_id = val.item_id || null;
+  activeRegion.value.params.model_id = val.model_id || null;
+
+  if (val.material_name) {
+    activeRegion.value.params.materialName = val.material_name;
   }
-}
-
-function selectPresetMaterial(item) {
-  if (!activeRegion.value) return;
-  activeRegion.value.params.materialId = item.id;
-  activeRegion.value.params.materialName = item.name;
-  if (!activeRegion.value.params.colorHex || activeRegion.value.params.colorHex === '#FFFFFF') {
-    activeRegion.value.params.colorHex = item.color;
+  if (val.hex) {
+    activeRegion.value.params.colorHex = val.hex;
+    activeRegion.value.params.colorName = val.hex;
   }
-  const textureMap = {
-    roman_travertine: { url: '/textures/travertine_stone.svg', name: '罗马洞石实拍切片' },
-    black_walnut: { url: '/textures/black_walnut.svg', name: '北美黑胡桃实木切片' },
-    micro_cement: { url: '/textures/micro_cement.svg', name: '极简微水泥批刮切片' },
-    boucle: { url: '/textures/boucle_fabric.svg', name: '羊羔绒颗粒面料切片' },
-    brushed_brass: { url: '/textures/brushed_brass.svg', name: '拉丝黄铜金属切片' },
-    terrazzo: { url: '/textures/terrazzo.svg', name: '复古水磨石石料切片' },
-  };
-  if (textureMap[item.id]) {
-    activeRegion.value.params.materialTextureUrl = textureMap[item.id].url;
-    activeRegion.value.params.materialTextureName = textureMap[item.id].name;
+  if (val.craft) {
+    activeRegion.value.params.craft = val.craft;
   }
-}
-
-function selectPresetColor(c) {
-  if (!activeRegion.value) return;
-  activeRegion.value.params.colorName = c.name;
-  activeRegion.value.params.colorHex = c.hex;
-}
-
-function getFinishName(id) {
-  const f = finishOptions.find((it) => it.id === id);
-  return f ? f.name : '温润柔抛';
-}
-
-function getAgingName(id) {
-  const a = agingOptions.find((it) => it.id === id);
-  return a ? a.name : '全新无瑕';
+  if (val.prompt_craft) {
+    activeRegion.value.params.prompt_craft = val.prompt_craft;
+  }
+  if (val.finish) {
+    activeRegion.value.params.finish = val.finish;
+  }
+  if (val.roughness !== undefined) {
+    activeRegion.value.params.roughness = val.roughness;
+  }
+  if (val.aging) {
+    activeRegion.value.params.aging = val.aging;
+  }
+  if (val.custom_texture_url) {
+    activeRegion.value.params.materialTextureUrl = val.custom_texture_url;
+  }
 }
 
 function hexToRgba(hex = '#3B82F6', alpha = 0.3) {
@@ -1761,44 +2039,6 @@ function hexToRgba(hex = '#3B82F6', alpha = 0.3) {
   const g = (num >> 8) & 255;
   const b = num & 255;
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
-
-function openMaterialLibraryPicker() {
-  showMaterialPickerModal.value = true;
-}
-
-function onMaterialPickerConfirm(selectedItems) {
-  showMaterialPickerModal.value = false;
-  if (Array.isArray(selectedItems) && selectedItems.length > 0 && activeRegion.value) {
-    const item = selectedItems[0];
-    activeRegion.value.params.materialTextureUrl = item.url || item.imgUrl || item.thumbUrl;
-    activeRegion.value.params.materialTextureName = item.name || item.fileName || '素材库材质切片';
-    if (item.material) {
-      activeRegion.value.params.materialName = item.material;
-    }
-  }
-}
-
-function triggerLocalTextureUpload() {
-  textureFileInputRef.value?.click();
-}
-
-function onLocalTextureFileSelected(e) {
-  const file = e.target.files?.[0];
-  if (!file || !activeRegion.value) return;
-  const reader = new FileReader();
-  reader.onload = (event) => {
-    activeRegion.value.params.materialTextureUrl = event.target?.result;
-    activeRegion.value.params.materialTextureName = file.name || '本地材质切片';
-  };
-  reader.readAsDataURL(file);
-  e.target.value = '';
-}
-
-function removeMaterialTexture() {
-  if (!activeRegion.value) return;
-  activeRegion.value.params.materialTextureUrl = null;
-  activeRegion.value.params.materialTextureName = '';
 }
 
 // 计算归一化坐标字符串 (符合火山 Seedream 0~999 规范)
@@ -1950,12 +2190,38 @@ watch(() => props.visible, (val) => {
       }
       nextTick(renderMosaicCanvas);
     });
-    setTool('select');
+    setTool(props.cropOnly ? 'rect' : 'select');
+    schemeApplyNote.value = '';
+    if (!props.cropOnly && !schemeStyles.value.length) loadSchemeStyles();
   }
 });
 
+function getCropNorm() {
+  const list = regions.value || [];
+  const reg = list.find((row) => row.id === activeRegionId.value) || list[list.length - 1];
+  if (!reg) return null;
+  if (reg.type === 'polygon' && Array.isArray(reg.normPoints) && reg.normPoints.length >= 3) {
+    const xs = reg.normPoints.map((point) => point.x);
+    const ys = reg.normPoints.map((point) => point.y);
+    const x0 = Math.min(...xs);
+    const y0 = Math.min(...ys);
+    return {
+      x: x0,
+      y: y0,
+      w: Math.max(...xs) - x0,
+      h: Math.max(...ys) - y0,
+      poly: reg.normPoints.map((point) => ({ x: point.x, y: point.y }))
+    };
+  }
+  const norm = reg.norm || (reg.normW ? { x: reg.normX, y: reg.normY, w: reg.normW, h: reg.normH } : null);
+  if (!norm || !(norm.w > 0.02) || !(norm.h > 0.02)) return null;
+  return { x: norm.x, y: norm.y, w: norm.w, h: norm.h, poly: null };
+}
+
+defineExpose({ getCropNorm });
+
 async function triggerRegionClassification(reg) {
-  if (!reg) return;
+  if (props.cropOnly || !reg) return;
   let selection = null;
   if (reg.type === 'polygon' && reg.normPoints && reg.normPoints.length >= 3) {
     selection = {
@@ -1987,8 +2253,30 @@ async function triggerRegionClassification(reg) {
     }
   }
 
+  // 尝试前端提取切片纯净 JPEG Base64 (极速直传后端，消除跨域与大图开销)
   try {
-    const token = localStorage.getItem('token') || '';
+    const img = baseImageRef.value;
+    if (img && img.naturalWidth) {
+      const dw = canvasDisplaySize.w || img.clientWidth || img.naturalWidth;
+      const dh = canvasDisplaySize.h || img.clientHeight || img.naturalHeight;
+      const scaleX = img.naturalWidth / dw;
+      const scaleY = img.naturalHeight / dh;
+      const minX = Math.max(0, Math.round(reg.x * scaleX));
+      const minY = Math.max(0, Math.round(reg.y * scaleY));
+      const w = Math.max(1, Math.min(img.naturalWidth - minX, Math.round(reg.w * scaleX)));
+      const h = Math.max(1, Math.min(img.naturalHeight - minY, Math.round(reg.h * scaleY)));
+
+      const c = document.createElement('canvas');
+      c.width = Math.min(512, Math.max(280, w));
+      c.height = Math.min(512, Math.max(280, h));
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, minX, minY, w, h, 0, 0, c.width, c.height);
+      payload.crop_base64 = c.toDataURL('image/jpeg', 0.88);
+    }
+  } catch (_) {}
+
+  try {
+    const token = getToken();
     const res = await fetch('/api/base-library/classify-region', {
       method: 'POST',
       headers: {
@@ -1999,18 +2287,24 @@ async function triggerRegionClassification(reg) {
     });
     if (!res.ok) return;
     const json = await res.json();
-    if (json.success && json.data && !json.data.uncertain && json.data.surface && json.data.probability >= 0.75) {
-      reg.inferredSurface = json.data.surface;
+    if (!json.success || !json.data) return;
+    if (!reg.guide) reg.guide = emptyGuide();
+    if (reg.guide.surfaceSource === 'manual') return;
+    if (!json.data.uncertain && (json.data.part || json.data.surface) && (json.data.probability >= 0.75)) {
+      const part = json.data.part || json.data.surface;
+      reg.inferredSurface = json.data.surface || part;
       reg.inferredProb = json.data.probability;
-      if (!reg.params?.baseAttr?.subclass && !reg.params?.baseAttr?.asset_id) {
-        if (reg.op === 'custom') {
-          reg.op = 'recolor';
-        }
-        if (!reg.params) reg.params = {};
-        if (!reg.params.baseAttr) reg.params.baseAttr = {};
-        if (!reg.params.baseAttr.surface) {
-          reg.params.baseAttr.surface = json.data.surface;
-        }
+      reg.guide.part = part;
+      reg.guide.surface = part;
+      reg.guide.materialFamily = json.data.material_family || '';
+      reg.guide.surfaceSource = 'auto';
+    } else {
+      reg.inferredSurface = '';
+      reg.inferredProb = 0;
+      if (reg.guide.surfaceSource !== 'manual') {
+        reg.guide.part = '';
+        reg.guide.surface = '';
+        reg.guide.materialFamily = '';
       }
     }
   } catch (_) {}
@@ -2127,27 +2421,9 @@ function addNewRegion() {
     h: 160,
     points: [],
     color,
-    op: 'custom',
-    params: {
-      modelName: '单人电动科技沙发',
-      glbUrl: '/models/sofa_electric_single.glb',
-      yaw: 0,
-      materialCategory: 'stone',
-      materialId: 'roman_travertine',
-      materialName: '罗马洞石',
-      materialTextureUrl: '/textures/travertine_stone.svg',
-      materialTextureName: '罗马洞石实拍切片',
-      colorName: '奶油米杏',
-      colorHex: '#EAE3DC',
-      brightnessOffset: 0,
-      saturationOffset: 0,
-      finish: 'satin',
-      roughness: 45,
-      aging: 'brand_new',
-      customDesc: '优化此区域空间结构与软装质感',
-      eraseDesc: '修复为平整自然纹理',
-      snapshotUrl: null
-    }
+    op: '',
+    guide: emptyGuide(),
+    params: blankRegionParams()
   };
   syncRegionPercentages(newReg);
   regions.value.push(newReg);
@@ -2164,14 +2440,25 @@ function removeRegion(id) {
 
 function getOpDisplayName(op) {
   const map = {
-    custom: '自定义',
-    replace: '3D替换',
-    add: '3D增加',
-    erase: '消除',
-    recolor: '基础属性',
+    custom: '自定义文字',
+    replace: '改物件',
+    add: '增',
+    erase: '删',
+    recolor: '改表皮',
     blank: '留白'
   };
-  return map[op] || '操作';
+  return map[op] || '未选指南';
+}
+
+function blankRegionParams() {
+  return {
+    modelName: '',
+    glbUrl: '',
+    yaw: 0,
+    customDesc: '',
+    eraseDesc: '',
+    snapshotUrl: null
+  };
 }
 
 function onModelSelectChange() {
@@ -2214,6 +2501,7 @@ const cursorStyle = computed(() => {
   if (activeTool.value === 'rect') return 'crosshair';
   if (activeTool.value === 'polygon') return 'crosshair';
   if (activeTool.value === 'mosaic') return 'crosshair';
+  if (activeTool.value === 'crop') return 'crosshair';
   return 'default';
 });
 
@@ -2313,6 +2601,86 @@ function onCanvasMouseDown(e) {
 
 function onCanvasMouseMove(e) {
   const { x, y } = getCanvasCoords(e);
+
+  // -1. 全画幅裁剪框手柄拖拽缩放与框内平移
+  if (activeCropDrag.value) {
+    const { mode, handleKey, startClientX, startClientY, startBox } = activeCropDrag.value;
+    const dx = (e.clientX - startClientX) / canvasZoom.value;
+    const dy = (e.clientY - startClientY) / canvasZoom.value;
+    const dw = canvasDisplaySize.w || 800;
+    const dh = canvasDisplaySize.h || 600;
+
+    if (mode === 'move') {
+      const nx = Math.max(0, Math.min(dw - startBox.w, startBox.x + dx));
+      const ny = Math.max(0, Math.min(dh - startBox.h, startBox.y + dy));
+      cropBox.value.x = Math.round(nx);
+      cropBox.value.y = Math.round(ny);
+    } else if (mode === 'handle') {
+      let x = startBox.x;
+      let y = startBox.y;
+      let w = startBox.w;
+      let h = startBox.h;
+
+      if (handleKey === 'se') {
+        w = Math.max(40, Math.min(dw - x, startBox.w + dx));
+        h = Math.max(40, Math.min(dh - y, startBox.h + dy));
+      } else if (handleKey === 's') {
+        h = Math.max(40, Math.min(dh - y, startBox.h + dy));
+      } else if (handleKey === 'e') {
+        w = Math.max(40, Math.min(dw - x, startBox.w + dx));
+      } else if (handleKey === 'sw') {
+        w = Math.max(40, Math.min(startBox.x + startBox.w, startBox.w - dx));
+        x = startBox.x + (startBox.w - w);
+        h = Math.max(40, Math.min(dh - y, startBox.h + dy));
+      } else if (handleKey === 'w') {
+        w = Math.max(40, Math.min(startBox.x + startBox.w, startBox.w - dx));
+        x = startBox.x + (startBox.w - w);
+      } else if (handleKey === 'ne') {
+        w = Math.max(40, Math.min(dw - x, startBox.w + dx));
+        h = Math.max(40, Math.min(startBox.y + startBox.h, startBox.h - dy));
+        y = startBox.y + (startBox.h - h);
+      } else if (handleKey === 'n') {
+        h = Math.max(40, Math.min(startBox.y + startBox.h, startBox.h - dy));
+        y = startBox.y + (startBox.h - h);
+      } else if (handleKey === 'nw') {
+        w = Math.max(40, Math.min(startBox.x + startBox.w, startBox.w - dx));
+        x = startBox.x + (startBox.w - w);
+        h = Math.max(40, Math.min(startBox.y + startBox.h, startBox.h - dy));
+        y = startBox.y + (startBox.h - h);
+      }
+
+      // 画幅比例约束
+      if (cropRatio.value !== 'free') {
+        let ratio = 1;
+        if (cropRatio.value === 'original') ratio = dw / dh;
+        else {
+          const [rw, rh] = cropRatio.value.split(':').map(Number);
+          ratio = rw / rh;
+        }
+        if (['se', 'nw', 'ne', 'sw', 'e', 'w'].includes(handleKey)) {
+          h = w / ratio;
+          if (y + h > dh) {
+            h = dh - y;
+            w = h * ratio;
+          }
+        } else {
+          w = h * ratio;
+          if (x + w > dw) {
+            w = dw - x;
+            h = w / ratio;
+          }
+        }
+      }
+
+      cropBox.value = {
+        x: Math.round(x),
+        y: Math.round(y),
+        w: Math.round(w),
+        h: Math.round(h)
+      };
+    }
+    return;
+  }
 
   // 0. 拖动标绘项（文字平移、箭头端点/箭身拖拽、马赛克平移/四角缩放）
   if (activeDraggingAnnotation.value) {
@@ -2478,6 +2846,11 @@ function onCanvasMouseMove(e) {
 }
 
 function onCanvasMouseUp() {
+  if (activeCropDrag.value) {
+    activeCropDrag.value = null;
+    return;
+  }
+
   if (activeDraggingAnnotation.value) {
     activeDraggingAnnotation.value = null;
     return;
@@ -2505,7 +2878,9 @@ function onCanvasMouseUp() {
     if (w > 20 && h > 20) {
       const dw = Math.max(1, canvasDisplaySize.w || 800);
       const dh = Math.max(1, canvasDisplaySize.h || 600);
-      if (activeTool.value === 'mosaic') {
+      if (activeTool.value === 'crop') {
+        cropRect.value = { x, y, w, h };
+      } else if (activeTool.value === 'mosaic') {
         annotations.value.push({
           type: 'mosaic',
           x, y, w, h,
@@ -2531,16 +2906,9 @@ function onCanvasMouseUp() {
           h,
           points: [],
           color,
-          op: 'custom',
-          params: {
-            customDesc: '优化此区域空间结构与软装质感',
-            modelName: '单人电动科技沙发',
-            glbUrl: '/models/sofa_electric_single.glb',
-            yaw: 0,
-            eraseDesc: '修复为平整纹理',
-            colorName: '原木色',
-            snapshotUrl: null
-          }
+          op: '',
+          guide: emptyGuide(),
+          params: blankRegionParams()
         };
         syncRegionPercentages(newReg);
         regions.value.push(newReg);
@@ -2573,16 +2941,9 @@ function onCanvasMouseUp() {
       h: Math.max(30, maxY - minY),
       points: [...brushPoints.value],
       color,
-      op: 'custom',
-      params: {
-        customDesc: `在涂抹选区中无中生有新增陈设`,
-        modelName: '单人电动科技沙发',
-        glbUrl: '/models/sofa_electric_single.glb',
-        yaw: 0,
-        eraseDesc: '消除该涂抹区域杂物',
-        colorName: '原木色',
-        snapshotUrl: null
-      }
+      op: '',
+      guide: emptyGuide(),
+      params: blankRegionParams()
     };
     syncRegionPercentages(newReg);
     regions.value.push(newReg);
@@ -2647,16 +3008,9 @@ function finishPolygon() {
     h: 0,
     points: [...polyDraftPoints.value],
     color,
-    op: 'custom',
-    params: {
-      customDesc: `针对区域${nextIdx}定制空间操作`,
-      modelName: '单人电动科技沙发',
-      glbUrl: '/models/sofa_electric_single.glb',
-      yaw: 0,
-      eraseDesc: '消除该多边形内杂物',
-      colorName: '原木色',
-      snapshotUrl: null
-    }
+    op: '',
+    guide: emptyGuide(),
+    params: blankRegionParams()
   };
   syncRegionPercentages(newReg);
   regions.value.push(newReg);
@@ -2972,71 +3326,44 @@ function renderMosaicCanvas() {
 // 智能扩图完全修正：保持原生宽高比绝不裁剪 + 扩大量数据HUD
 // -------------------------------------------------------------
 const targetExpandRatio = ref('16:9');
+const outpaintOccupancy = ref(70);
 const isOutpainting = ref(false);
-const outpaintOffset = reactive({ x: 0, y: 0 });
+const outpaintNormOffset = reactive({ x: 0, y: 0 });
 const isDraggingOutpaintImg = ref(false);
 const dragStartMouse = reactive({ x: 0, y: 0 });
 const dragStartOffset = reactive({ x: 0, y: 0 });
 
-// 计算目标比例数值
-const targetRatioNumber = computed(() => {
-  const [w, h] = targetExpandRatio.value.split(':').map(Number);
-  return w / h;
-});
+const outpaintModel = computed(() => computeOutpaintNorm({
+  nativeW: imgNaturalSize.w || 800,
+  nativeH: imgNaturalSize.h || 600,
+  targetRatio: targetExpandRatio.value,
+  occupancy: outpaintOccupancy.value / 100,
+  offsetX: outpaintNormOffset.x,
+  offsetY: outpaintNormOffset.y
+}));
 
-// 计算原图自身原生比例 (例如 576 / 931 ≈ 0.6186)
-const nativeRatioNumber = computed(() => {
-  const w = imgNaturalSize.w || 800;
-  const h = imgNaturalSize.h || 600;
-  return w / h;
-});
-
-// 计算画布与内部原图几何尺寸（严格保持原生宽高比，绝不拉伸、绝不裁剪！）
+// 预览只负责塞进窗口。提交用的百分比来自 outpaintModel，不看窗口像素。
 const outpaintLayout = computed(() => {
+  const norm = outpaintModel.value;
   const maxCanvasW = typeof window !== 'undefined' ? Math.max(860, window.innerWidth - 440) : 1000;
   const maxCanvasH = typeof window !== 'undefined' ? Math.max(520, window.innerHeight - 240) : 600;
-  const tRatio = targetRatioNumber.value;
-  const nRatio = nativeRatioNumber.value;
-
-  let innerW, innerH, canvasW, canvasH;
-
-  if (tRatio >= nRatio) {
-    // 目标画布相对更宽（如 9:16 扩到 16:9）
-    innerH = Math.min(maxCanvasH * 0.85, maxCanvasH - 60);
-    innerW = innerH * nRatio;
-    canvasH = innerH / 0.82;
-    canvasW = canvasH * tRatio;
-    if (canvasW > maxCanvasW) {
-      const scale = maxCanvasW / canvasW;
-      canvasW = maxCanvasW;
-      canvasH *= scale;
-      innerH *= scale;
-      innerW *= scale;
-    }
-  } else {
-    // 目标画布相对更高（如 16:9 扩到 9:16）
-    innerW = Math.min(maxCanvasW * 0.85, maxCanvasW - 60);
-    innerH = innerW / nRatio;
-    canvasW = innerW / 0.82;
-    canvasH = canvasW / tRatio;
-    if (canvasH > maxCanvasH) {
-      const scale = maxCanvasH / canvasH;
-      canvasH = maxCanvasH;
-      canvasW *= scale;
-      innerW *= scale;
-      innerH *= scale;
-    }
+  const aspect = norm.canvasW / norm.canvasH;
+  let canvasW = maxCanvasW;
+  let canvasH = canvasW / aspect;
+  if (canvasH > maxCanvasH) {
+    canvasH = maxCanvasH;
+    canvasW = canvasH * aspect;
   }
-
-  innerW = Math.round(innerW);
-  innerH = Math.round(innerH);
-  canvasW = Math.round(canvasW);
-  canvasH = Math.round(canvasH);
-
-  const initLeft = Math.round((canvasW - innerW) / 2);
-  const initTop = Math.round((canvasH - innerH) / 2);
-
-  return { innerW, innerH, canvasW, canvasH, initLeft, initTop };
+  const sx = canvasW / norm.canvasW;
+  const sy = canvasH / norm.canvasH;
+  return {
+    canvasW: Math.round(canvasW),
+    canvasH: Math.round(canvasH),
+    innerW: Math.max(1, Math.round(norm.innerW * sx)),
+    innerH: Math.max(1, Math.round(norm.innerH * sy)),
+    left: Math.round(norm.left * sx),
+    top: Math.round(norm.top * sy)
+  };
 });
 
 const outpaintCanvasComputedStyle = computed(() => {
@@ -3051,9 +3378,7 @@ const outpaintCanvasComputedStyle = computed(() => {
 });
 
 const outpaintInnerImageStyle = computed(() => {
-  const { innerW, innerH, initLeft, initTop } = outpaintLayout.value;
-  const left = initLeft + outpaintOffset.x;
-  const top = initTop + outpaintOffset.y;
+  const { innerW, innerH, left, top } = outpaintLayout.value;
   return {
     width: `${innerW}px`,
     height: `${innerH}px`,
@@ -3062,23 +3387,22 @@ const outpaintInnerImageStyle = computed(() => {
   };
 });
 
-// 实时计算各方向扩展量数据与百分比
 const outpaintMargins = computed(() => {
-  const { innerW, innerH, canvasW, canvasH, initLeft, initTop } = outpaintLayout.value;
-  const left = Math.max(0, initLeft + outpaintOffset.x);
-  const top = Math.max(0, initTop + outpaintOffset.y);
-  const right = Math.max(0, canvasW - (left + innerW));
-  const bottom = Math.max(0, canvasH - (top + innerH));
-
-  const leftPct = Math.round((left / innerW) * 100);
-  const rightPct = Math.round((right / innerW) * 100);
-  const topPct = Math.round((top / innerH) * 100);
-  const bottomPct = Math.round((bottom / innerH) * 100);
-
-  return { left, top, right, bottom, leftPct, rightPct, topPct, bottomPct };
+  const m = outpaintModel.value;
+  const nw = imgNaturalSize.w || 800;
+  const nh = imgNaturalSize.h || 600;
+  return {
+    left: Math.round(nw * m.leftPct / 100),
+    right: Math.round(nw * m.rightPct / 100),
+    top: Math.round(nh * m.topPct / 100),
+    bottom: Math.round(nh * m.bottomPct / 100),
+    leftPct: m.leftPct,
+    rightPct: m.rightPct,
+    topPct: m.topPct,
+    bottomPct: m.bottomPct
+  };
 });
 
-// 预估输出分辨率
 const outpaintEstimatedRes = computed(() => {
   const nw = imgNaturalSize.w || 800;
   const nh = imgNaturalSize.h || 600;
@@ -3089,23 +3413,30 @@ const outpaintEstimatedRes = computed(() => {
 });
 
 function resetOutpaintOffset() {
-  outpaintOffset.x = 0;
-  outpaintOffset.y = 0;
+  outpaintNormOffset.x = 0;
+  outpaintNormOffset.y = 0;
 }
 
 function alignOutpaint(mode) {
-  const { innerW, innerH, canvasW, canvasH, initLeft, initTop } = outpaintLayout.value;
+  const centered = computeOutpaintNorm({
+    nativeW: imgNaturalSize.w || 800,
+    nativeH: imgNaturalSize.h || 600,
+    targetRatio: targetExpandRatio.value,
+    occupancy: outpaintOccupancy.value / 100
+  });
+  const slackX = (centered.canvasW - centered.innerW) / 2;
+  const slackY = (centered.canvasH - centered.innerH) / 2;
   if (mode === 'center') {
-    outpaintOffset.x = 0;
-    outpaintOffset.y = 0;
+    outpaintNormOffset.x = 0;
+    outpaintNormOffset.y = 0;
   } else if (mode === 'top') {
-    outpaintOffset.y = -initTop;
+    outpaintNormOffset.y = -slackY;
   } else if (mode === 'bottom') {
-    outpaintOffset.y = canvasH - innerH - initTop;
+    outpaintNormOffset.y = slackY;
   } else if (mode === 'left') {
-    outpaintOffset.x = -initLeft;
+    outpaintNormOffset.x = -slackX;
   } else if (mode === 'right') {
-    outpaintOffset.x = canvasW - innerW - initLeft;
+    outpaintNormOffset.x = slackX;
   }
 }
 
@@ -3113,26 +3444,19 @@ function onOutpaintDragStart(e) {
   isDraggingOutpaintImg.value = true;
   dragStartMouse.x = e.clientX;
   dragStartMouse.y = e.clientY;
-  dragStartOffset.x = outpaintOffset.x;
-  dragStartOffset.y = outpaintOffset.y;
+  dragStartOffset.x = outpaintNormOffset.x;
+  dragStartOffset.y = outpaintNormOffset.y;
 }
 
 function onOutpaintDragMove(e) {
   if (!isDraggingOutpaintImg.value) return;
-  const { innerW, innerH, canvasW, canvasH, initLeft, initTop } = outpaintLayout.value;
-  const dx = e.clientX - dragStartMouse.x;
-  const dy = e.clientY - dragStartMouse.y;
-
-  // 限制原图不出画布边界
-  const targetX = dragStartOffset.x + dx;
-  const targetY = dragStartOffset.y + dy;
-  const minX = -initLeft;
-  const maxX = canvasW - innerW - initLeft;
-  const minY = -initTop;
-  const maxY = canvasH - innerH - initTop;
-
-  outpaintOffset.x = Math.max(minX, Math.min(maxX, targetX));
-  outpaintOffset.y = Math.max(minY, Math.min(maxY, targetY));
+  const layout = outpaintLayout.value;
+  const norm = outpaintModel.value;
+  if (!layout.canvasW || !layout.canvasH) return;
+  const dx = ((e.clientX - dragStartMouse.x) / layout.canvasW) * norm.canvasW;
+  const dy = ((e.clientY - dragStartMouse.y) / layout.canvasH) * norm.canvasH;
+  outpaintNormOffset.x = dragStartOffset.x + dx;
+  outpaintNormOffset.y = dragStartOffset.y + dy;
 }
 
 function onOutpaintDragEnd() {
@@ -3182,88 +3506,119 @@ async function executeOutpainting() {
 const showConfirmModal = ref(false);
 const pendingNewRefs = ref([]);
 
-function buildAggregatedRecipeLines(regionsList = [], tag = '@图1') {
-  if (!regionsList || regionsList.length === 0) return [];
-  const groups = [];
-  for (const reg of regionsList) {
-    const colorName = reg.color?.name || '蓝色';
-    const colorTag = `${colorName}线框`;
-    const op = reg.op || 'custom';
-    let paramSig = '';
-    if (op === 'recolor') {
-      paramSig = [
-        reg.params?.materialName || '',
-        reg.params?.colorName || '',
-        reg.params?.colorHex || '',
-        reg.params?.finish || '',
-        reg.params?.roughness ?? '',
-        reg.params?.aging || '',
-        reg.params?.materialTextureUrl || '',
-        reg.params?.materialTextureName || '',
-      ].join('::');
-    } else if (op === 'replace' || op === 'add') {
-      paramSig = `${reg.params?.modelName || ''}::${reg.params?.yaw || 0}`;
-    } else if (op === 'erase') {
-      paramSig = reg.params?.eraseDesc || '';
-    } else if (op === 'custom') {
-      paramSig = (reg.params?.customDesc || '').trim();
+const formattedRecipeSummary = computed(() => formatGuideRecipe(regions.value));
+
+const isFittingModel = ref(false);
+
+// 一键根据 3D 模型的实际 2D 轮廓外接矩形，自动收紧选区边界，消除多余空白并对齐地面
+async function autoFitRegionToModel(reg) {
+  if (!reg || !['replace', 'add'].includes(reg.op) || isFittingModel.value) return;
+  const el = modelViewerMap.get(reg.id);
+  if (!el) return;
+
+  isFittingModel.value = true;
+  try {
+    // 强制临时透明背景以抓取纯粹的物体实体 Alpha 通道
+    const prevBg = el.style.backgroundColor;
+    el.style.backgroundColor = 'transparent';
+    let dataUrl = null;
+    try {
+      if (typeof el.toDataURL === 'function') {
+        dataUrl = el.toDataURL('image/png');
+      } else if (typeof el.toBlob === 'function') {
+        const blob = await el.toBlob({ mimeType: 'image/png' });
+        dataUrl = await new Promise((res) => {
+          const reader = new FileReader();
+          reader.onloadend = () => res(reader.result);
+          reader.readAsDataURL(blob);
+        });
+      }
+    } finally {
+      el.style.backgroundColor = prevBg;
     }
-    const sig = `${colorName}##${op}##${paramSig}`;
-    const found = groups.find((g) => g.sig === sig);
-    if (found) {
-      found.regions.push(reg);
+    if (!dataUrl) return;
+
+    const img = new Image();
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+      img.src = dataUrl;
+    });
+
+    const offCanvas = document.createElement('canvas');
+    offCanvas.width = img.naturalWidth || img.width;
+    offCanvas.height = img.naturalHeight || img.height;
+    const ctx = offCanvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+
+    const imgData = ctx.getImageData(0, 0, offCanvas.width, offCanvas.height);
+    const data = imgData.data;
+    let minX = offCanvas.width, minY = offCanvas.height, maxX = 0, maxY = 0;
+    let found = false;
+
+    // 扫描实体像素 (排除高透明度或浅灰色遮底卡片底色)
+    for (let y = 0; y < offCanvas.height; y++) {
+      for (let x = 0; x < offCanvas.width; x++) {
+        const idx = (y * offCanvas.width + x) * 4;
+        const r = data[idx];
+        const g = data[idx + 1];
+        const b = data[idx + 2];
+        const a = data[idx + 3];
+        const isWhiteOrSlateBg = r >= 244 && g >= 246 && b >= 249;
+        if (a > 20 && !isWhiteOrSlateBg) {
+          found = true;
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+
+    if (!found || maxX <= minX || maxY <= minY) return;
+
+    const currentBox = getRegionBox(reg);
+    const scaleX = currentBox.w / offCanvas.width;
+    const scaleY = currentBox.h / offCanvas.height;
+
+    // 留出 8px 安全缓冲边距，防止贴合太紧切掉沙发扶手边缘或地面轻微柔和阴影
+    const pad = 8;
+    const newLeft = Math.max(0, currentBox.x + minX * scaleX - pad);
+    const newTop = Math.max(0, currentBox.y + minY * scaleY - pad);
+    const newW = Math.max(60, (maxX - minX) * scaleX + pad * 2);
+    const newH = Math.max(60, (maxY - minY) * scaleY + pad * 2);
+
+    if (reg.type === 'polygon' && Array.isArray(reg.points) && reg.points.length > 0) {
+      reg.points = [
+        { x: Math.round(newLeft), y: Math.round(newTop) },
+        { x: Math.round(newLeft + newW), y: Math.round(newTop) },
+        { x: Math.round(newLeft + newW), y: Math.round(newTop + newH) },
+        { x: Math.round(newLeft), y: Math.round(newTop + newH) }
+      ];
     } else {
-      groups.push({ sig, colorName, colorTag, op, params: reg.params || {}, regions: [reg] });
+      reg.x = Math.round(newLeft);
+      reg.y = Math.round(newTop);
+      reg.w = Math.round(newW);
+      reg.h = Math.round(newH);
     }
+
+    // 贴合后稍微延时刷新抓取清晰的透视快照
+    setTimeout(async () => {
+      const newSnap = await captureViewerSnapshot(reg.id);
+      if (newSnap) {
+        reg.params.snapshotUrl = newSnap;
+        try {
+          const refBbox = await computeImageEntityBbox(newSnap);
+          if (refBbox) reg.params.refBbox = refBbox;
+        } catch (_) {}
+      }
+    }, 150);
+  } catch (err) {
+    console.warn('自动贴合 3D 模型轮廓失败:', err);
+  } finally {
+    isFittingModel.value = false;
   }
-
-  return groups.map((g) => {
-    const targetsStr = g.regions.map((r) => `${tag}[${r.name}]`).join('、');
-    const colorDesc = `（${g.colorTag}）`;
-    if (g.op === 'custom') {
-      const customText = (g.params?.customDesc || '').trim();
-      if (!customText) return `• ${targetsStr}${colorDesc}：局部空间优化微调`;
-      return `• ${targetsStr}${colorDesc}：${customText}`;
-    }
-    if (g.op === 'replace') {
-      return `• ${targetsStr}${colorDesc}：替换为${g.params?.modelName || '指定家具'}（朝向 ${g.params?.yaw || 0}°，参考3D模型透视）`;
-    }
-    if (g.op === 'add') {
-      return `• ${targetsStr}${colorDesc}：增加${g.params?.modelName || '指定陈设'}（朝向 ${g.params?.yaw || 0}°，参考3D模型透视）`;
-    }
-    if (g.op === 'erase') {
-      return `• ${targetsStr}${colorDesc}：消除杂物，${g.params?.eraseDesc || '修复为平整纹理'}`;
-    }
-    if (g.op === 'recolor') {
-      const baseRec = buildBaseAttributesRecipe({
-        tag: '',
-        regName: targetsStr,
-        colorTag: g.colorTag,
-        materialName: g.params?.materialName,
-        colorName: g.params?.colorName,
-        colorHex: g.params?.colorHex,
-        finish: g.params?.finish || 'satin',
-        roughness: g.params?.roughness ?? 45,
-        aging: g.params?.aging || 'brand_new',
-        textureUrl: g.params?.materialTextureUrl,
-        textureName: g.params?.materialTextureName,
-        isCustomTargetStr: true,
-      });
-      return `• ${baseRec}`;
-    }
-    if (g.op === 'blank') {
-      return `• ${targetsStr}${colorDesc}：移除并留白，保持背景纯净`;
-    }
-    return `• ${targetsStr}${colorDesc}：局部微调`;
-  });
 }
-
-const formattedRecipeSummary = computed(() => {
-  const tag = props.targetTag || '@图1';
-  if (regions.value.length === 0) return '';
-  const lines = buildAggregatedRecipeLines(regions.value, tag);
-  return `【空间局部编辑方案】\n${lines.join('\n')}\n要求：保持空间整体结构、主要动线与光影一致。`;
-});
 
 async function captureViewerSnapshot(regId) {
   const el = modelViewerMap.get(regId);
@@ -3314,6 +3669,55 @@ async function captureWireframeSnapshot() {
 
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(tc, 0, 0, tinyW, tinyH, sx, sy, sw, sh);
+  }
+
+  // 1.5 绘制 3D 实体透视投影 (对 replace/add 选区，直接将已定位朝向的 3D 模型合成在底图选区中作为真实视觉引导，杜绝 AI 把空线框撑满放大)
+  for (const reg of regions.value) {
+    if (['replace', 'add'].includes(reg.op)) {
+      let snapUrl = reg.params?.snapshotUrl;
+      if (!snapUrl) {
+        snapUrl = await captureViewerSnapshot(reg.id);
+        if (snapUrl) reg.params.snapshotUrl = snapUrl;
+      }
+      if (snapUrl) {
+        const box = getRegionBox(reg);
+        const rx = box.x * scaleX;
+        const ry = box.y * scaleY;
+        const rw = box.w * scaleX;
+        const rh = box.h * scaleY;
+
+        try {
+          const modelImg = new Image();
+          modelImg.crossOrigin = 'anonymous';
+          await new Promise((resolve) => {
+            modelImg.onload = resolve;
+            modelImg.onerror = resolve;
+            modelImg.src = snapUrl;
+          });
+          if (modelImg.complete && modelImg.naturalWidth > 0) {
+            ctx.save();
+            if (reg.type === 'polygon' && Array.isArray(reg.points) && reg.points.length >= 3) {
+              ctx.beginPath();
+              ctx.moveTo(reg.points[0].x * scaleX, reg.points[0].y * scaleY);
+              for (let i = 1; i < reg.points.length; i++) {
+                ctx.lineTo(reg.points[i].x * scaleX, reg.points[i].y * scaleY);
+              }
+              ctx.closePath();
+              ctx.clip();
+            }
+            // 纯色遮底模式先绘制遮挡底板
+            if (reg.params?.transparentBg === false) {
+              ctx.fillStyle = '#F8FAFC';
+              ctx.fillRect(rx, ry, rw, rh);
+            }
+            ctx.drawImage(modelImg, rx, ry, rw, rh);
+            ctx.restore();
+          }
+        } catch (e) {
+          console.warn('合成 3D 模型至指示图失败:', e);
+        }
+      }
+    }
   }
 
   // 2. 绘制纯彩色线框 (0% 内部底色填充，仅 stroke 3.5px 纯线框)
@@ -3386,9 +3790,38 @@ async function captureWireframeSnapshot() {
 const captureAnnotatedCanvasSnapshot = captureWireframeSnapshot;
 
 // 打开极简确认浮层
+async function applyCrop() {
+  const box = cropBox.value || cropRect.value;
+  const img = baseImageRef.value;
+  if (!box || !img || !img.naturalWidth) return;
+  const dw = canvasDisplaySize.w || img.clientWidth || img.naturalWidth;
+  const dh = canvasDisplaySize.h || img.clientHeight || img.naturalHeight;
+  const sx = Math.max(0, Math.round(box.x / dw * img.naturalWidth));
+  const sy = Math.max(0, Math.round(box.y / dh * img.naturalHeight));
+  const sw = Math.max(1, Math.min(img.naturalWidth - sx, Math.round(box.w / dw * img.naturalWidth)));
+  const sh = Math.max(1, Math.min(img.naturalHeight - sy, Math.round(box.h / dh * img.naturalHeight)));
+  const canvas = document.createElement('canvas');
+  canvas.width = sw;
+  canvas.height = sh;
+  try {
+    canvas.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+    emit('apply-custom-image', {
+      imageIndex: props.imageIndex,
+      dataUrl: canvas.toDataURL('image/jpeg', 0.92)
+    });
+    setTool('select');
+  } catch {
+    alert('这张图不能在本地裁剪。请换一张已经保存在素材库里的图片。');
+  }
+}
+
 async function openConfirmModal() {
   if (activeTool.value === 'outpaint') {
     await executeOutpainting();
+    return;
+  }
+  if (activeTool.value === 'crop') {
+    await applyCrop();
     return;
   }
 
@@ -3401,27 +3834,23 @@ async function openConfirmModal() {
       const snap = await captureViewerSnapshot(reg.id);
       if (snap) {
         reg.params.snapshotUrl = snap;
+        try {
+          const refBbox = await computeImageEntityBbox(snap);
+          if (refBbox) reg.params.refBbox = refBbox;
+        } catch (_) {}
         const nextRefIdx = (props.totalReferenceCount || 1) + 1 + silentRefs.length;
+        const snapTag = `@图${nextRefIdx}`;
+        reg.params.snapshotRefTag = snapTag;
         silentRefs.push({
           name: `${reg.name}_3D朝向图`,
           url: snap,
-          tag: `@图${nextRefIdx}`,
-          origin: '3d_snapshot'
+          tag: snapTag,
+          origin: '3d_snapshot',
+          isRefObject: true,
+          targetRegionId: reg.id,
+          sourceImageIndex: props.imageIndex
         });
       }
-    }
-  }
-
-  // 材质贴图静默参考挂载
-  for (const reg of regions.value) {
-    if (reg.op === 'recolor' && reg.params?.materialTextureUrl) {
-      const nextRefIdx = (props.totalReferenceCount || 1) + 1 + silentRefs.length;
-      silentRefs.push({
-        name: `${reg.name}_${reg.params.materialName || '材质'}贴图`,
-        url: reg.params.materialTextureUrl,
-        tag: `@图${nextRefIdx}`,
-        origin: 'material_texture'
-      });
     }
   }
 
@@ -3459,38 +3888,71 @@ async function executeUnifiedApply() {
   }
 
   // 检查是否有基础属性选区
-  const baseAttrRegions = regions.value.filter(r => r.op === 'recolor' || r.params?.baseAttr);
+  const baseAttrRegions = regions.value.filter(r => r.guide?.type === 'resurface' || r.op === 'recolor' || r.params?.baseAttr);
   let baseAttrRefs = null;
   let compiledPrompt = null;
   if (baseAttrRegions.length > 0) {
     try {
-      const token = localStorage.getItem('token') || '';
+      const token = getToken();
+      const compilePayload = {
+        regions: baseAttrRegions.map(r => {
+          let bbox = null;
+          const bStr = calculateNormalizedBbox(r, canvasDisplaySize.w || 800, canvasDisplaySize.h || 600);
+          if (bStr) {
+            const nums = bStr.split(/\s+/).map(Number);
+            if (nums.length === 4 && nums.every(n => Number.isFinite(n))) {
+              bbox = { x1: nums[0], y1: nums[1], x2: nums[2], y2: nums[3] };
+            }
+          }
+          const p = r.guide?.part || r.params?.baseAttr?.surface || r.inferredSurface || 'wall';
+          const isRematerial = r.guide?.mode === 'rematerial' || r.guide?.track === 'B' || r.params?.baseAttr?.warehouse === 'material';
+          return {
+            region_id: r.id,
+            bbox,
+            part: p,
+            surface: p,
+            mode: isRematerial ? 'rematerial' : 'recolor',
+            track: isRematerial ? 'B' : 'A',
+            subclass: r.guide?.subclass || r.params?.baseAttr?.subclass || '',
+            warehouse: isRematerial ? 'material' : 'paint',
+            asset_id: r.guide?.assetId || r.params?.baseAttr?.asset_id || null,
+            item_id: r.params?.baseAttr?.item_id || null,
+            color_name: r.guide?.displayName || r.params?.baseAttr?.colorName || null,
+            hex: r.guide?.hex || r.params?.baseAttr?.colorHex || r.params?.baseAttr?.hex || null,
+            process: r.guide?.process || r.params?.baseAttr?.process || null,
+            gloss: r.guide?.gloss || r.params?.baseAttr?.finish || null,
+            finish: r.guide?.gloss || r.params?.baseAttr?.finish || null,
+            roughness: r.params?.baseAttr?.roughness ?? null
+          };
+        }),
+        baseImageTag: (props.targetTag || '@图1').replace('@', ''),
+        firstRefIndex: (props.totalReferenceCount || 1) + 1,
+        light_mode: null
+      };
+
       const compileRes = await fetch('/api/base-library/compile', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({
-          regions: baseAttrRegions.map(r => ({
-            region_id: r.id,
-            surface: r.params?.baseAttr?.surface,
-            subclass: r.params?.baseAttr?.subclass,
-            warehouse: r.params?.baseAttr?.warehouse,
-            asset_id: r.params?.baseAttr?.asset_id,
-            use_shell: r.params?.baseAttr?.use_shell,
-            finish: r.params?.baseAttr?.finish,
-            roughness: r.params?.baseAttr?.roughness,
-            tint: r.params?.baseAttr?.tint
-          })),
-          light_mode: null
-        })
+        body: JSON.stringify(compilePayload)
       });
       if (compileRes.ok) {
         const cJson = await compileRes.json();
-        if (cJson.success && Array.isArray(cJson.references)) {
-          baseAttrRefs = cJson.references;
+        if (cJson.success) {
+          if (Array.isArray(cJson.references)) baseAttrRefs = cJson.references;
           compiledPrompt = cJson.prompt;
+          // 按 region_id 替换对应选区提示词（Patch 4，保留其他 op）
+          if (Array.isArray(cJson.clauses)) {
+            for (const clause of cJson.clauses) {
+              const targetReg = regions.value.find(reg => reg.id === clause.region_id);
+              if (targetReg) {
+                if (!targetReg.params) targetReg.params = {};
+                targetReg.params.compiledClause = clause.text;
+              }
+            }
+          }
         }
       }
     } catch (_) {}
@@ -3513,17 +3975,21 @@ async function executeUnifiedApply() {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token') || ''}`
+          Authorization: `Bearer ${getToken()}`
         },
         body: JSON.stringify({
           regions: baseAttrRegions.map(r => ({
             region_id: r.id,
-            surface: r.params?.baseAttr?.surface,
-            subclass: r.params?.baseAttr?.subclass,
-            warehouse: r.params?.baseAttr?.warehouse,
-            asset_id: r.params?.baseAttr?.asset_id,
-            use_shell: r.params?.baseAttr?.use_shell,
-            finish: r.params?.baseAttr?.finish,
+            part: r.guide?.part || r.params?.baseAttr?.surface || 'wall',
+            surface: r.guide?.part || r.params?.baseAttr?.surface || 'wall',
+            mode: r.guide?.mode || (r.guide?.track === 'B' ? 'rematerial' : 'recolor'),
+            track: r.guide?.track || (r.guide?.assetId ? 'B' : 'A'),
+            subclass: r.guide?.subclass || r.params?.baseAttr?.subclass,
+            warehouse: r.guide?.track === 'B' ? 'material' : (r.params?.baseAttr?.warehouse || 'paint'),
+            asset_id: r.guide?.assetId || r.params?.baseAttr?.asset_id,
+            item_id: r.params?.baseAttr?.item_id,
+            hex: r.guide?.hex || r.params?.baseAttr?.colorHex || r.params?.baseAttr?.hex,
+            finish: r.guide?.gloss || r.params?.baseAttr?.finish,
             roughness: r.params?.baseAttr?.roughness
           })),
           light_mode: null
@@ -3532,22 +3998,46 @@ async function executeUnifiedApply() {
     } catch (_) {}
   }
 
-  const finalRecipe = compiledPrompt ? (`【空间局部编辑方案】\n${compiledPrompt}\n要求：保持空间整体结构、主要动线与光影一致。`) : formattedRecipeSummary.value;
+  const tag = props.targetTag || '@图1';
+  const effectiveRatio = props.selectedRatio || (
+    (imgNaturalSize.w && imgNaturalSize.h)
+      ? getNearestCanonicalRatio(imgNaturalSize.w, imgNaturalSize.h)
+      : null
+  );
+  const paletteHint = extractDominantScenePalette(baseImageRef.value);
+
+  const structuredPrompt = buildStructuredPrompt({
+    regions: regions.value,
+    imageIndex: props.imageIndex,
+    totalReferenceCount: props.totalReferenceCount || 1,
+    imgW: imgNaturalSize.w || canvasDisplaySize.w || 800,
+    imgH: imgNaturalSize.h || canvasDisplaySize.h || 600,
+    targetTag: tag,
+    aspectRatio: effectiveRatio,
+    colorPaletteHint: paletteHint
+  });
+  // 优先使用完整包含 <bbox> 归一化坐标、线框标签与机位透视的结构化提示词
+  let finalRecipe = structuredPrompt || formattedRecipeSummary.value;
+  if (!finalRecipe && compiledPrompt) {
+    finalRecipe = `【空间局部编辑方案】\n${compiledPrompt}\n要求：保持空间整体结构、主要动线与光影一致。`;
+  }
 
   emit('apply-regions-to-image', {
     imageIndex: props.imageIndex,
     regions: JSON.parse(JSON.stringify(regions.value)),
     recipe: finalRecipe,
     silentRefs: baseAttrRefs ? [] : pendingNewRefs.value,
+    newRefs: baseAttrRefs ? [] : pendingNewRefs.value.filter(r => r.origin === '3d_snapshot'),
     baseAttrRefs: baseAttrRefs || null,
     annotations: JSON.parse(JSON.stringify(annotations.value)),
-    wireframeDataUrl
+    wireframeDataUrl,
+    naturalWidth: imgNaturalSize.w || 0,
+    naturalHeight: imgNaturalSize.h || 0,
+    canonicalRatio: effectiveRatio,
+    colorPaletteHint: paletteHint,
+    is3DFurniture: regions.value.some(r => ['replace', 'add'].includes(r.op))
   });
 
-  emit('apply-recipe-with-refs', {
-    recipe: formattedRecipeSummary.value,
-    newRefs: []
-  });
   emit('close');
 }
 
@@ -3575,6 +4065,7 @@ function syncDisplaySize() {
 }
 
 onMounted(async () => {
+  loadSavedGuides();
   window.addEventListener('resize', () => {
     syncDisplaySize();
     const dw = canvasDisplaySize.w;
@@ -3584,7 +4075,7 @@ onMounted(async () => {
     }
     renderMosaicCanvas();
   });
-  if (typeof window !== 'undefined' && window.customElements && !window.customElements.get('model-viewer')) {
+  if (!props.cropOnly && typeof window !== 'undefined' && window.customElements && !window.customElements.get('model-viewer')) {
     try {
       await import('@google/model-viewer');
     } catch (err) {

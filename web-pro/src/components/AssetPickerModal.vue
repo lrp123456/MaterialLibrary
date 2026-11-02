@@ -1,10 +1,10 @@
 <template>
   <div
     v-if="visible"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-150"
+    class="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md p-0 animate-in fade-in duration-150"
     @click.self="close"
   >
-    <div class="relative w-full max-w-[1280px] h-[90vh] rounded-2xl bg-studio-900 border border-studio-750 shadow-2xl flex flex-col overflow-hidden">
+    <div class="relative w-screen h-screen max-w-none rounded-none bg-studio-900 border-0 shadow-2xl flex flex-col overflow-hidden">
       <!-- 顶栏 -->
       <div class="flex items-center justify-between px-6 py-4 border-b border-studio-750 shrink-0 bg-studio-950/40">
         <div class="flex items-center space-x-3">
@@ -70,16 +70,18 @@
       <!-- 素材库 -->
       <div v-if="tab === 'library'" class="flex-1 flex min-h-0">
         <aside class="picker-pane w-72 shrink-0 overflow-y-auto border-r border-studio-800 p-3 space-y-2">
-          <div class="lib-plates" style="padding: 0">
-            <button
-              v-for="plate in shelfPlates"
-              :key="plate.key"
-              type="button"
-              class="lib-plate"
-              :class="{ 'is-on': shelf === plate.key }"
-              @click="shelf = plate.key; loadAssets(1)"
-            >
-              <span class="lib-mark"></span>{{ plate.label }}
+          <div class="space-y-1.5 pt-1">
+            <button type="button" class="filter-switch w-full" :class="{ 'is-on': onlyFav }" @click="toggleFav">
+              <span>只看收藏</span>
+              <span class="filter-switch-knob"></span>
+            </button>
+            <button type="button" class="filter-switch w-full" :class="{ 'is-on': onlyRetouched }" @click="toggleRetouched">
+              <span>只看精修</span>
+              <span class="filter-switch-knob"></span>
+            </button>
+            <button type="button" class="filter-switch w-full" :class="{ 'is-on': onlyFinished }" @click="toggleFinished">
+              <span>只看成品</span>
+              <span class="filter-switch-knob"></span>
             </button>
           </div>
           <button
@@ -102,10 +104,6 @@
           >
             {{ subItem.label }}
           </button>
-          <button type="button" class="filter-switch" :class="{ 'is-on': onlyFav }" @click="onlyFav = !onlyFav; loadAssets(1)">
-            <span>只看收藏</span>
-            <span class="filter-switch-knob"></span>
-          </button>
           <div v-if="main === 'image'" class="space-y-1">
             <section class="lib-group">
               <button type="button" class="lib-group-head" @click="openGroups.ratio = !openGroups.ratio"><span>画幅</span><span class="lib-meta">{{ openGroups.ratio ? '收起' : '展开' }}</span></button>
@@ -113,7 +111,7 @@
                 <button v-for="item in orientations" :key="item.key" type="button" class="lib-chip" :class="{ 'is-on': orientation === item.key }" @click="orientation = orientation === item.key ? '' : item.key; loadAssets(1)">{{ item.label }}</button>
               </div>
             </section>
-            <section v-if="sub === 'interior_exterior' || sub === 'material'" class="lib-group">
+            <section v-if="sub === 'interior_exterior'" class="lib-group">
               <button type="button" class="lib-group-head" @click="openGroups.space = !openGroups.space"><span>空间</span><span class="lib-meta">{{ openGroups.space ? '收起' : '展开' }}</span></button>
               <div v-if="openGroups.space" class="lib-chips">
                 <button v-for="item in filterSpaces" :key="item.dir" type="button" class="lib-chip" :class="{ 'is-on': space === item.dir }" @click="space = space === item.dir ? '' : item.dir; loadAssets(1)">{{ item.label }}</button>
@@ -172,7 +170,7 @@
               <span class="text-3xl">🏜️</span>
               <span>该筛选条件下暂无素材资产，请尝试其他关键词或分类</span>
             </div>
-            <div v-else class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5">
+            <div v-else class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
               <div
                 v-for="item in libraryItems"
                 :key="item.fid || item.id"
@@ -206,7 +204,11 @@
                 <div class="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-transparent flex flex-col justify-end p-2 pointer-events-none">
                   <span class="text-[11px] font-bold text-white truncate w-full">{{ item.name }}</span>
                   <div class="flex items-center justify-between text-[10px] text-slate-400 mt-0.5">
-                    <span class="font-mono text-studio-cyan">{{ item.kind === 'video' ? '🎬 视频' : (item.kind === 'audio' ? '🎵 音频' : '🖼️ 图片') }}</span>
+                    <span class="flex items-center gap-1 min-w-0">
+                      <span class="font-mono text-studio-cyan shrink-0">{{ item.kind === 'video' ? '🎬 视频' : (item.kind === 'audio' ? '🎵 音频' : '🖼️ 图片') }}</span>
+                      <span v-if="item.library_shelf === 'retouched'" class="px-1 py-px rounded bg-cyan-400 text-cyan-950 font-bold shrink-0">精修</span>
+                      <span v-else-if="item.library_shelf === 'finished'" class="px-1 py-px rounded bg-amber-400 text-amber-950 font-bold shrink-0">成品</span>
+                    </span>
                     <span v-if="selectedLabel(item)" class="text-studio-cyan font-bold font-mono truncate max-w-[60%]">{{ selectedLabel(item) }}</span>
                   </div>
                 </div>
@@ -487,10 +489,11 @@ const emit = defineEmits(['close', 'confirm', 'upload']);
 
 const tab = ref('library');
 const loading = ref(false);
-const shelf = ref('original');
 const main = ref('image');
 const sub = ref('all');
 const onlyFav = ref(false);
+const onlyRetouched = ref(false);
+const onlyFinished = ref(false);
 const orientation = ref('');
 const space = ref('');
 const style = ref('');
@@ -524,20 +527,6 @@ const slotErrorByFid = ref({});
 // 生成成功后回显实际走的通道，被降级到本机模型时用户看得见
 const slotChannelByFid = ref({});
 
-const PRESET_LIBRARY_TEXTURES = [
-  { fid: 'mat_travertine', name: '罗马洞石天然肌理切片', material: '罗马洞石', url: '/textures/travertine_stone.svg', category: 'material', kind: 'image' },
-  { fid: 'mat_black_walnut', name: '北美黑胡桃木纹切片', material: '北美黑胡桃', url: '/textures/black_walnut.svg', category: 'material', kind: 'image' },
-  { fid: 'mat_micro_cement', name: '极简无缝微水泥切片', material: '极简微水泥', url: '/textures/micro_cement.svg', category: 'material', kind: 'image' },
-  { fid: 'mat_boucle', name: '羊羔绒颗粒卷毛切片', material: '羊羔绒', url: '/textures/boucle_fabric.svg', category: 'material', kind: 'image' },
-  { fid: 'mat_brushed_brass', name: '拉丝黄铜金属微槽切片', material: '拉丝黄铜', url: '/textures/brushed_brass.svg', category: 'material', kind: 'image' },
-  { fid: 'mat_terrazzo', name: '复古水磨石石料骨料切片', material: '复古水磨石', url: '/textures/terrazzo.svg', category: 'material', kind: 'image' },
-];
-
-const shelfPlates = [
-  { key: 'original', label: '原素材' },
-  { key: 'retouched', label: '精修素材' },
-  { key: 'finished', label: '成品素材' },
-];
 const mainTabs = computed(() => [
   { key: 'image', label: '图片' },
   { key: 'video', label: '视频' },
@@ -546,7 +535,6 @@ const mainTabs = computed(() => [
 const subMap = {
   image: [
     { key: 'all', label: '全部图片' },
-    { key: 'material', label: '🧱 材质与色板库' },
     { key: 'interior_exterior', label: '室内外设计' },
     { key: 'portrait', label: '空间人像' },
     { key: 'clothing', label: '服装服饰' },
@@ -674,12 +662,19 @@ function resetPicker() {
   slotErrorByFid.value = {};
   slotChannelByFid.value = {};
   tab.value = 'library';
+  onlyFav.value = false;
+  onlyRetouched.value = false;
+  onlyFinished.value = false;
+  orientation.value = '';
+  space.value = '';
+  style.value = '';
+  material.value = '';
+  color.value = '';
+  keyword.value = '';
   const nextMain = props.mediaTypes.includes(props.initialMain) ? props.initialMain : (props.mediaTypes[0] || 'image');
   main.value = nextMain;
   if (props.initialSub && (subMap[nextMain] || []).some((s) => s.key === props.initialSub)) {
     sub.value = props.initialSub;
-  } else if (props.context === 'edit' && nextMain === 'image') {
-    sub.value = 'material';
   } else {
     sub.value = nextMain === 'image' ? 'interior_exterior' : 'all';
   }
@@ -707,6 +702,19 @@ function setMain(key) {
   loadAssets(1);
 }
 
+function toggleFav() {
+  onlyFav.value = !onlyFav.value;
+  loadAssets(1);
+}
+function toggleRetouched() {
+  onlyRetouched.value = !onlyRetouched.value;
+  loadAssets(1);
+}
+function toggleFinished() {
+  onlyFinished.value = !onlyFinished.value;
+  loadAssets(1);
+}
+
 async function loadAssets(targetPage = 1) {
   page.value = Math.max(1, targetPage);
   loading.value = true;
@@ -723,7 +731,10 @@ async function loadAssets(targetPage = 1) {
       params.media_type = 'image';
       if (sub.value !== 'all') params.category = sub.value;
     }
-    if (shelf.value) params.shelf = shelf.value;
+    const shelves = [];
+    if (onlyRetouched.value) shelves.push('retouched');
+    if (onlyFinished.value) shelves.push('finished');
+    if (shelves.length) params.shelf = shelves.join(',');
     if (onlyFav.value) params.only_favorite = 1;
     if (orientation.value) params.orientation = orientation.value;
     if (color.value) params.color = color.value;
@@ -747,30 +758,14 @@ async function loadAssets(targetPage = 1) {
       url: getAssetImageUrl(it.fid, it.mediaToken),
       category: it.category,
       kind: it.kind || it.media_type || 'image',
+      library_shelf: it.library_shelf || 'original',
     }));
-    if (sub.value === 'material') {
-      const kw = keyword.value.trim().toLowerCase();
-      const presets = PRESET_LIBRARY_TEXTURES.filter(
-        (p) => !kw || p.name.toLowerCase().includes(kw) || (p.material && p.material.toLowerCase().includes(kw))
-      );
-      mapped = [...presets, ...mapped];
-      libraryTotal.value += presets.length;
-    }
     libraryItems.value = mapped;
   } catch (e) {
     console.warn('加载素材库资产失败:', e);
-    if (sub.value === 'material') {
-      const kw = keyword.value.trim().toLowerCase();
-      const presets = PRESET_LIBRARY_TEXTURES.filter(
-        (p) => !kw || p.name.toLowerCase().includes(kw) || (p.material && p.material.toLowerCase().includes(kw))
-      );
-      libraryItems.value = presets;
-      libraryTotal.value = presets.length;
-    } else {
-      libraryItems.value = [];
-      libraryTotal.value = 0;
-      notice.value = '素材库读取失败，请稍后重试';
-    }
+    libraryItems.value = [];
+    libraryTotal.value = 0;
+    notice.value = '素材库读取失败，请稍后重试';
   } finally {
     loading.value = false;
   }

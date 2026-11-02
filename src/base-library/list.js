@@ -37,7 +37,7 @@ function getAllFlags(db) {
   }
 }
 
-function listMaterials(db, { surface, subclass, source, is_shell, q, limit = 60, offset = 0 } = {}) {
+function listMaterials(db, { surface, subclass, source, is_shell, q, track = 'B', tone, layout, limit = 60, offset = 0 } = {}) {
   const lim = Math.max(1, Math.min(Number(limit) || 60, 200));
   const off = Math.max(0, Number(offset) || 0);
 
@@ -47,6 +47,24 @@ function listMaterials(db, { surface, subclass, source, is_shell, q, limit = 60,
     WHERE m.deleted_at IS NULL
   `;
   const params = [];
+
+  // 轨道过滤：默认只取轨道 B 且必须有 preview_rel 真实预览球
+  if (track === 'B') {
+    sql += " AND m.track = 'B' AND m.preview_rel IS NOT NULL AND m.preview_rel != ''";
+  } else if (track && track !== 'all') {
+    sql += ' AND m.track = ?';
+    params.push(String(track).trim());
+  }
+
+  if (tone && String(tone).trim()) {
+    sql += ' AND m.tone = ?';
+    params.push(String(tone).trim());
+  }
+
+  if (layout && String(layout).trim()) {
+    sql += ' AND m.layout = ?';
+    params.push(String(layout).trim());
+  }
 
   if (surface && isValidSurface(surface)) {
     sql += ` AND m.id IN (
@@ -80,7 +98,16 @@ function listMaterials(db, { surface, subclass, source, is_shell, q, limit = 60,
     params.push(kw, kw, kw);
   }
 
-  sql += ' ORDER BY m.updated_at DESC LIMIT ? OFFSET ?';
+  if (track === 'B') {
+    sql += ` ORDER BY 
+      CASE m.tone WHEN 'light' THEN 1 WHEN 'medium' THEN 2 WHEN 'dark' THEN 3 ELSE 4 END,
+      m.layout,
+      m.name_cn,
+      m.updated_at DESC
+      LIMIT ? OFFSET ?`;
+  } else {
+    sql += ' ORDER BY m.updated_at DESC LIMIT ? OFFSET ?';
+  }
   params.push(lim, off);
 
   const rows = db.prepare(sql).all(...params);
@@ -111,15 +138,7 @@ function listMaterials(db, { surface, subclass, source, is_shell, q, limit = 60,
       credit = r.license_note;
     }
 
-    let roughness_label = '标准物理质感';
-    if (r.id === 'mat_white_oak') roughness_label = '半哑光木纹 (微导管)';
-    else if (r.id === 'mat_black_walnut') roughness_label = '哑光木纹 (天然山纹)';
-    else if (r.id === 'mat_roman_travertine') roughness_label = '漫反射 (天然孔洞肌理)';
-    else if (r.id === 'mat_calacatta_marble') roughness_label = '高光镜面 (天然灰脉)';
-    else if (r.id === 'mat_micro_cement') roughness_label = '哑光磨砂 (微水泥颗粒壳)';
-    else if (r.id === 'mat_linen_fabric') roughness_label = '柔光布艺 (高支经纬线)';
-    else if (r.id === 'mat_terrazzo_gray') roughness_label = '半抛光面 (细腻水磨骨料)';
-    else if (r.id === 'mat_gypsum_cornice') roughness_label = '超哑光面 (精细石膏质感)';
+    const roughness_label = r.roughness_label || (r.tone ? `${r.tone === 'light' ? '浅色' : (r.tone === 'dark' ? '深色' : '中性')}自然纹理` : '天然物理纹理');
 
     const previewUrl = r.preview_rel ? `/api/base-library/materials/${encodeURIComponent(r.id)}/preview` : null;
     const basecolorUrl = `/api/base-library/materials/${encodeURIComponent(r.id)}/basecolor`;
@@ -127,6 +146,9 @@ function listMaterials(db, { surface, subclass, source, is_shell, q, limit = 60,
     return {
       id: r.id,
       name_cn: r.name_cn,
+      track: r.track || 'B',
+      tone: r.tone || null,
+      layout: r.layout || null,
       tags: tagMap.get(r.id) || [],
       thumb_url: previewUrl || basecolorUrl,
       preview_url: previewUrl,
@@ -144,7 +166,7 @@ function listMaterials(db, { surface, subclass, source, is_shell, q, limit = 60,
   });
 }
 
-function listPaints(db, { brand, family, subclass, q, pinned, limit = 60, offset = 0 } = {}) {
+function listPaints(db, { brand, family, family_key, subclass, q, pinned, curated = 1, min_lrv, limit = 60, offset = 0 } = {}) {
   // 标志检查：若色号关闭则返回空
   if (getFlag(db, 'base_library_paints', 1) === 0) {
     return [];
@@ -155,6 +177,23 @@ function listPaints(db, { brand, family, subclass, q, pinned, limit = 60, offset
 
   let sql = 'SELECT * FROM ba_paints WHERE 1=1';
   const params = [];
+
+  // 策展集过滤：默认只展示 curated=1 精选色卡；管理端传 curated=0 或 curated='all'
+  if (curated === 1 || curated === true || curated === '1') {
+    sql += ' AND curated = 1';
+  } else if (curated === 0 || curated === false || curated === '0') {
+    sql += ' AND curated = 0';
+  }
+
+  if (family_key && String(family_key).trim()) {
+    sql += ' AND family_key = ?';
+    params.push(String(family_key).trim());
+  }
+
+  if (min_lrv !== undefined && min_lrv !== null && min_lrv !== '') {
+    sql += ' AND lrv >= ?';
+    params.push(Number(min_lrv));
+  }
 
   if (brand && String(brand).trim()) {
     sql += ' AND brand = ?';
@@ -172,11 +211,7 @@ function listPaints(db, { brand, family, subclass, q, pinned, limit = 60, offset
   }
 
   if (subclass && isValidSubclass(subclass)) {
-    // 规则：无标签且 interior=1 的色号对所有子类可见；或有明确标签
-    sql += ` AND (
-      id IN (SELECT asset_id FROM ba_asset_tags WHERE asset_kind='paint' AND subclass=?)
-      OR (interior=1 AND id NOT IN (SELECT asset_id FROM ba_asset_tags WHERE asset_kind='paint'))
-    )`;
+    sql += ` AND id IN (SELECT asset_id FROM ba_asset_tags WHERE asset_kind='paint' AND subclass=?)`;
     params.push(subclass);
   }
 
@@ -187,12 +222,33 @@ function listPaints(db, { brand, family, subclass, q, pinned, limit = 60, offset
       LOWER(COALESCE(name_en, '')) LIKE ? OR 
       LOWER(COALESCE(name_zh, '')) LIKE ? OR 
       LOWER(COALESCE(alias_zh, '')) LIKE ? OR 
+      LOWER(COALESCE(display_name, '')) LIKE ? OR 
+      LOWER(COALESCE(family_key, '')) LIKE ? OR 
       LOWER(COALESCE(family, '')) LIKE ?
     )`;
-    params.push(kw, kw, kw, kw, kw);
+    params.push(kw, kw, kw, kw, kw, kw, kw);
   }
 
-  sql += ' ORDER BY pinned DESC, updated_at DESC LIMIT ? OFFSET ?';
+  if (curated === 1 || curated === true || curated === '1') {
+    sql += ` ORDER BY
+      CASE family_key
+        WHEN 'warm_white' THEN 1
+        WHEN 'cream' THEN 2
+        WHEN 'ivory' THEN 3
+        WHEN 'greige' THEN 4
+        WHEN 'earth' THEN 5
+        WHEN 'cool_gray' THEN 6
+        WHEN 'morandi' THEN 7
+        WHEN 'caramel' THEN 8
+        WHEN 'ink' THEN 9
+        ELSE 99
+      END,
+      lrv DESC,
+      display_name
+      LIMIT ? OFFSET ?`;
+  } else {
+    sql += ' ORDER BY pinned DESC, updated_at DESC LIMIT ? OFFSET ?';
+  }
   params.push(lim, off);
 
   const rows = db.prepare(sql).all(...params);
@@ -204,6 +260,10 @@ function listPaints(db, { brand, family, subclass, q, pinned, limit = 60, offset
     name_en: r.name_en,
     name_zh: r.name_zh,
     alias_zh: r.alias_zh,
+    display_name: r.display_name || r.alias_zh || r.name_zh || r.code,
+    curated: Boolean(r.curated),
+    family_key: r.family_key,
+    role_hint: r.role_hint,
     alt_code: r.alt_code,
     hex: r.hex,
     family: r.family,

@@ -41,6 +41,9 @@ function cleanupExpiredDrafts(db, now = Date.now(), fsModule = null, dataDir = n
       db.prepare('DELETE FROM ba_drafts WHERE created_at < ?').run(cutoff);
     }
   } catch (e) {}
+  if (fsModule && dataDir) {
+    try { require('./pretint').cleanupExpiredTintFiles(dataDir, now, fsModule); } catch (e) {}
+  }
 }
 
 /**
@@ -79,6 +82,9 @@ function ensureBaseLibrarySchema(db) {
       basecolor_rel TEXT NOT NULL,   -- cache/base-library/materials/{id}/basecolor.jpg
       width INTEGER NOT NULL,
       height INTEGER NOT NULL,
+      track TEXT NOT NULL DEFAULT 'B', -- 'A' | 'B'
+      tone TEXT,                     -- light | medium | dark
+      layout TEXT,                   -- plain | chevron | herringbone | tiles | grid
       deleted_at INTEGER,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
@@ -87,15 +93,51 @@ function ensureBaseLibrarySchema(db) {
       ON ba_materials(source, source_id) WHERE source_id IS NOT NULL AND deleted_at IS NULL;
     CREATE INDEX IF NOT EXISTS idx_ba_mat_deleted
       ON ba_materials(deleted_at, updated_at DESC);
+  `);
 
-    -- 补齐列 preview_rel (幂等升级)
-    try {
-      const matCols = db.pragma('table_info(ba_materials)').map(c => c.name);
-      if (!matCols.includes('preview_rel')) {
-        db.prepare('ALTER TABLE ba_materials ADD COLUMN preview_rel TEXT').run();
-      }
-    } catch (e) {}
+  // 补齐列 preview_rel, is_pinned, use_count, track, tone, layout (幂等升级)
+  try {
+    const matCols = db.pragma('table_info(ba_materials)').map(c => c.name);
+    if (!matCols.includes('preview_rel')) {
+      db.prepare('ALTER TABLE ba_materials ADD COLUMN preview_rel TEXT').run();
+    }
+    if (!matCols.includes('is_pinned')) {
+      db.prepare('ALTER TABLE ba_materials ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0').run();
+    }
+    if (!matCols.includes('use_count')) {
+      db.prepare('ALTER TABLE ba_materials ADD COLUMN use_count INTEGER NOT NULL DEFAULT 0').run();
+    }
+    if (!matCols.includes('track')) {
+      db.prepare("ALTER TABLE ba_materials ADD COLUMN track TEXT NOT NULL DEFAULT 'B'").run();
+    }
+    if (!matCols.includes('tone')) {
+      db.prepare('ALTER TABLE ba_materials ADD COLUMN tone TEXT').run();
+    }
+    if (!matCols.includes('layout')) {
+      db.prepare('ALTER TABLE ba_materials ADD COLUMN layout TEXT').run();
+    }
+  } catch (e) {}
 
+  try {
+    const paintCols = db.pragma('table_info(ba_paints)').map(c => c.name);
+    if (!paintCols.includes('use_count')) {
+      db.prepare('ALTER TABLE ba_paints ADD COLUMN use_count INTEGER NOT NULL DEFAULT 0').run();
+    }
+    if (!paintCols.includes('curated')) {
+      db.prepare('ALTER TABLE ba_paints ADD COLUMN curated INTEGER NOT NULL DEFAULT 0').run();
+    }
+    if (!paintCols.includes('family_key')) {
+      db.prepare('ALTER TABLE ba_paints ADD COLUMN family_key TEXT').run();
+    }
+    if (!paintCols.includes('display_name')) {
+      db.prepare('ALTER TABLE ba_paints ADD COLUMN display_name TEXT').run();
+    }
+    if (!paintCols.includes('role_hint')) {
+      db.prepare('ALTER TABLE ba_paints ADD COLUMN role_hint TEXT').run();
+    }
+  } catch (e) {}
+
+  db.exec(`
     -- 色号仓库
     CREATE TABLE IF NOT EXISTS ba_paints (
       id TEXT PRIMARY KEY,
@@ -113,12 +155,18 @@ function ensureBaseLibrarySchema(db) {
       shell_material_id TEXT,
       swatch_rel TEXT,
       source_url TEXT,
+      curated INTEGER NOT NULL DEFAULT 0,
+      family_key TEXT,
+      display_name TEXT,
+      role_hint TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       UNIQUE(brand, code)
     );
     CREATE INDEX IF NOT EXISTS idx_ba_paints_pinned_brand
       ON ba_paints(pinned DESC, brand, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_ba_paints_curated
+      ON ba_paints(curated DESC, family_key, lrv DESC);
 
     -- 货架标签 (一个资产可挂多个装修面/子类)
     CREATE TABLE IF NOT EXISTS ba_asset_tags (
@@ -187,6 +235,19 @@ function ensureBaseLibrarySchema(db) {
       created_at INTEGER NOT NULL
     );
 
+    -- 账号下的操作指南。内置的删和留白不写入这张表。
+    CREATE TABLE IF NOT EXISTS ba_operation_guides (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      slots_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ba_guides_user
+      ON ba_operation_guides(user_id, updated_at);
+
     -- 基础属性库控制标志开关
     CREATE TABLE IF NOT EXISTS ba_flags (
       key TEXT PRIMARY KEY,
@@ -231,7 +292,12 @@ function ensureBaseLibrarySchema(db) {
     VALUES (?, ?, ?)
   `);
   insFlag.run('base_library_paints', 1, now);
-  insFlag.run('base_library_jev', 0, now);
+  insFlag.run('base_library_jev', 1, now);
+  const jevMigrated = db.prepare(`SELECT value FROM ba_flags WHERE key = 'base_library_jev_migrated'`).get();
+  if (!jevMigrated) {
+    db.prepare(`UPDATE ba_flags SET value = 1, updated_at = ? WHERE key = 'base_library_jev'`).run(now);
+    insFlag.run('base_library_jev_migrated', 1, now);
+  }
   insFlag.run('base_library_compile', 0, now);
   insFlag.run('creation_tpl_incremental', 1, now);
   insFlag.run('base_library_write', 1, now);
@@ -239,6 +305,7 @@ function ensureBaseLibrarySchema(db) {
   // 7. 启动清理
   cleanupExpiredTombstones(db, now);
   cleanupExpiredDrafts(db, now);
+  try { require('./items').ensureItems(db); } catch (e) { console.warn('[base-library] ensureItems error:', e.message); }
 }
 
 module.exports = {

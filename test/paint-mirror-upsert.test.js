@@ -30,7 +30,7 @@ async function runTests() {
   assert.strictEqual(deriveChineseName(null, 'beige'), '米色');
   console.log('✅ 中文名称派生正确');
 
-  console.log('=== 2. 测试首次镜像单页入库与前 36 条置顶 ===');
+  console.log('=== 2. 测试首次镜像单页入库（不再自动置顶前 36 条） ===');
   // 模拟第一批 40 条数据
   const batch1 = [];
   for (let i = 1; i <= 40; i++) {
@@ -52,8 +52,8 @@ async function runTests() {
   assert.strictEqual(totalInDb, 40);
 
   const pinnedCount = db.prepare('SELECT COUNT(*) as c FROM ba_paints WHERE brand=? AND pinned=1').get('nippon-paint').c;
-  assert.strictEqual(pinnedCount, 36, '首次插入前 36 条必须自动置顶');
-  console.log('✅ 首次镜像与 36 条置顶通过');
+  assert.strictEqual(pinnedCount, 0, '前 36 条不再自动置顶，默认浏览序由策展集与 LRV 控制');
+  console.log('✅ 首次镜像与取消自动置顶验证通过');
 
   console.log('=== 3. 测试二次镜像重跑：不改写 alias_zh, pinned, shell_material_id ===');
   // 人工给 NP_1 设置别名和壳

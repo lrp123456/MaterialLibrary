@@ -1,127 +1,112 @@
 <template>
-  <header
-    class="h-14 border-b border-studio-800 bg-studio-950/80 backdrop-blur-md px-4 flex items-center gap-3 shrink-0 select-none z-30 transition-all flex-wrap"
-    role="banner"
-  >
-    <!-- 左侧 Logo 与品牌标识 -->
-    <div class="flex items-center space-x-3 shrink-0">
-      <div class="w-8 h-8 rounded-xl bg-gradient-to-tr from-studio-accent to-emerald-400 flex items-center justify-center text-white shadow-lg shadow-studio-accent/20">
+  <header class="top-bar" role="banner">
+    <div class="top-brand">
+      <div class="top-logo" aria-hidden="true">
         <StudioIcon name="sparkles" :size="18" />
       </div>
-      <div>
-        <h1 class="text-sm font-bold text-slate-100 tracking-wide flex items-center space-x-1.5">
-          <span>灵感空间 · 室内设计素材库</span>
-          <span class="text-[10px] px-1.5 py-0.5 rounded bg-studio-800 text-studio-accent font-mono">PRO</span>
-        </h1>
-      </div>
+      <span class="sr-only">灵感空间</span>
     </div>
 
     <!-- 顶部主板块导航胶囊 (滑块平移跟随) -->
-    <nav
-      ref="sectionNav"
-      class="relative ml-2 flex items-center rounded-2xl bg-studio-900/90 p-1 border border-studio-800 shrink-0"
-      aria-label="主要板块导航"
-    >
-      <div
-        class="nav-indicator pointer-events-none absolute rounded-xl bg-studio-800 border border-studio-700/80 shadow-md shadow-black/40 transition-all duration-300 ease-out"
-        :style="indicatorStyle"
-        aria-hidden="true"
-      />
-      <button
-        v-for="s in sections"
-        :key="s.key"
-        :ref="(el) => setSectionEl(s.key, el)"
-        type="button"
-        @click="chooseTab(s.key)"
-        :class="[
-          'relative z-10 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer select-none',
-          activeTab === s.key ? 'text-white' : 'text-slate-400 hover:text-slate-200'
-        ]"
-      >
-        {{ s.label }}
-      </button>
-    </nav>
+    <div class="top-nav-slot">
+      <nav ref="sectionNav" class="top-nav" aria-label="主要板块导航">
+        <div class="nav-indicator" :style="indicatorStyle" aria-hidden="true" />
+        <template v-for="s in sections" :key="s.key">
+          <div
+            v-if="s.key === 'library'"
+            class="lane-anchor"
+            @mouseenter="openLaneMenu"
+            @mouseleave="scheduleCloseLaneMenu"
+          >
+            <button
+              :ref="(el) => setSectionEl(s.key, el)"
+              type="button"
+              class="section-tab"
+              :class="{ 'is-on': activeTab === 'library' }"
+              aria-haspopup="menu"
+              :aria-expanded="laneMenuOpen"
+              @click="chooseTab('library')"
+            >
+              素材库
+            </button>
+            <div
+              v-show="laneMenuOpen"
+              class="lane-panel"
+              role="menu"
+              aria-label="素材库一级"
+              @mouseenter="openLaneMenu"
+              @mouseleave="scheduleCloseLaneMenu"
+            >
+              <div v-for="col in laneColumns" :key="col.title" class="lane-col">
+                <p class="lane-col-title">{{ col.title }}</p>
+                <button
+                  v-for="lane in col.items"
+                  :key="lane.key"
+                  type="button"
+                  role="menuitem"
+                  class="lane-item"
+                  :class="{ 'is-on': libraryLane === lane.key }"
+                  @click="chooseLane(lane.key)"
+                >
+                  <span class="lane-item-title">{{ lane.label }}</span>
+                  <span class="lane-item-desc">{{ lane.desc }}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <button
+            v-else
+            :ref="(el) => setSectionEl(s.key, el)"
+            type="button"
+            class="section-tab"
+            :class="{ 'is-on': activeTab === s.key }"
+            @click="chooseTab(s.key)"
+          >
+            {{ s.label }}
+          </button>
+        </template>
+      </nav>
+    </div>
 
     <!-- 右侧系统运行指标与状态 -->
-    <div class="ml-auto flex items-center gap-2 text-sm shrink-0 relative">
-      <!-- 适老关怀开关：只放大字号与控件（整页 zoom 缩放已于 2026-10-22 下架） -->
+    <div class="top-tools">
       <button
         type="button"
+        class="top-icon-btn"
+        :class="{ 'is-on': seniorMode }"
+        :aria-pressed="seniorMode"
+        :title="seniorMode ? '适老关怀已开启，点击关闭' : '开启适老关怀'"
         @click="toggleSeniorMode"
-        :title="seniorMode ? '适老关怀已开启，点击关闭' : '开启适老关怀大字模式'"
-        :class="[
-          'flex items-center rounded-xl border bg-studio-850 border-studio-700 shrink-0 px-3 py-1.5 cursor-pointer font-bold text-xs transition-all shadow-xs',
-          seniorMode ? 'text-studio-accent' : 'text-slate-400 hover:text-slate-200'
-        ]"
       >
-        <span>适老{{ seniorMode ? '开' : '关' }}</span>
+        <StudioIcon name="a11y" :size="20" />
+        <span class="sr-only">适老关怀</span>
       </button>
 
-      <!-- 主题切换下拉胶囊 (暗黑 / 明朗 / 护眼) -->
-      <div class="relative group">
+      <div ref="themeNav" class="theme-switch" role="radiogroup" aria-label="主题">
+        <div class="nav-indicator" :style="themeIndicator" aria-hidden="true" />
         <button
-          class="px-2.5 py-1.5 rounded-xl border bg-studio-850 border-studio-700 hover:border-studio-600 transition-all flex items-center space-x-1.5 text-slate-300 hover:text-white cursor-pointer"
-          title="切换界面主题配色"
+          v-for="theme in themes"
+          :key="theme.key"
+          :ref="(el) => setThemeEl(theme.key, el)"
+          type="button"
+          role="radio"
+          class="section-tab theme-tab"
+          :class="{ 'is-on': currentTheme === theme.key }"
+          :aria-checked="currentTheme === theme.key"
+          @click="setTheme(theme.key)"
         >
-          <span class="flex items-center gap-1.5 text-xs">
-            <template v-if="currentTheme === 'dark'">
-              <StudioIcon name="moon" :size="13" class="text-indigo-400" />
-              <span>暗黑</span>
-            </template>
-            <template v-else-if="currentTheme === 'light'">
-              <StudioIcon name="sun" :size="13" class="text-amber-400" />
-              <span>明朗</span>
-            </template>
-            <template v-else>
-              <StudioIcon name="palette" :size="13" class="text-emerald-400" />
-              <span>护眼</span>
-            </template>
-          </span>
-          <StudioIcon name="chevronDown" :size="10" class="text-slate-400" />
+          {{ theme.label }}
         </button>
-
-        <div class="absolute right-0 top-full mt-1.5 w-28 py-1 bg-studio-850 border border-studio-700 rounded-xl shadow-xl opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all z-50">
-          <button
-            @click="setTheme('dark')"
-            class="w-full px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-studio-750 hover:text-white flex items-center space-x-2 cursor-pointer"
-          >
-            <StudioIcon name="moon" :size="13" class="text-indigo-400" />
-            <span>暗黑模式</span>
-          </button>
-          <button
-            @click="setTheme('light')"
-            class="w-full px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-studio-750 hover:text-white flex items-center space-x-2 cursor-pointer"
-          >
-            <StudioIcon name="sun" :size="13" class="text-amber-400" />
-            <span>明朗模式</span>
-          </button>
-          <button
-            @click="setTheme('eye-care')"
-            class="w-full px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-studio-750 hover:text-white flex items-center space-x-2 cursor-pointer"
-          >
-            <StudioIcon name="palette" :size="13" class="text-emerald-400" />
-            <span>护眼模式</span>
-          </button>
-        </div>
       </div>
 
-      <!-- 后台网关连通性指示器 -->
-      <div
-        class="flex items-center space-x-2 px-2.5 py-1 rounded-xl border bg-studio-850 border-studio-700/80"
-        :title="`候选网关: ${candidatesText}`"
+      <button
+        type="button"
+        class="user-btn"
+        :title="username ? '退出登录' : '登录'"
+        @click="emit('logout')"
       >
-        <span
-          class="w-2 h-2 rounded-full transition-colors"
-          :class="{
-            'bg-emerald-400 shadow-sm shadow-emerald-400/50': online && !probing,
-            'bg-amber-400 animate-pulse': probing,
-            'bg-rose-500 shadow-sm shadow-rose-500/50': !online && !probing
-          }"
-        />
-        <span class="text-[11px] font-mono text-slate-300">
-          {{ serverLabelText }}
-        </span>
-      </div>
+        {{ username || '未登录' }}
+      </button>
     </div>
   </header>
 </template>
@@ -138,13 +123,72 @@ import {
 } from '../server-resolve.js';
 
 const props = defineProps({
-  activeTab: {
-    type: String,
-    default: 'studio'
-  }
+  activeTab: { type: String, default: 'studio' },
+  libraryLane: { type: String, default: 'image' },
+  username: { type: String, default: '' }
 });
 
-const emit = defineEmits(['update:activeTab']);
+const emit = defineEmits(['update:activeTab', 'update:libraryLane', 'logout']);
+
+const laneColumns = [
+  {
+    title: '浏览',
+    items: [
+      { key: 'image', label: '图片', desc: '室内外、人像、服装和单品' },
+      { key: 'video', label: '视频', desc: '漫游、展示、特写和短片' },
+      { key: 'audio', label: '音频', desc: '背景乐和环境音' }
+    ]
+  },
+  {
+    title: '库',
+    items: [
+      { key: 'base', label: '基础素材', desc: '材质、做法、选品和风格方案' },
+      { key: 'clip', label: '剪辑工程', desc: '工程引用和导出成片' },
+      { key: 'trash', label: '回收站', desc: '闸门拦截和人工删除' }
+    ]
+  }
+];
+const laneMenuOpen = ref(false);
+let laneCloseTimer = null;
+function openLaneMenu() {
+  clearTimeout(laneCloseTimer);
+  laneMenuOpen.value = true;
+}
+function scheduleCloseLaneMenu() {
+  clearTimeout(laneCloseTimer);
+  laneCloseTimer = setTimeout(() => { laneMenuOpen.value = false; }, 400);
+}
+const themes = [
+  { key: 'dark', label: '暗黑' },
+  { key: 'light', label: '明朗' },
+  { key: 'eye-care', label: '护眼' }
+];
+const themeNav = ref(null);
+const themeEls = {};
+const themeIndicator = ref({ opacity: 0 });
+function setThemeEl(key, el) {
+  if (el) themeEls[key] = el;
+}
+function placeThemeIndicator() {
+  const nav = themeNav.value;
+  const el = themeEls[currentTheme.value];
+  if (!nav || !el) return;
+  const parent = nav.getBoundingClientRect();
+  const rect = el.getBoundingClientRect();
+  themeIndicator.value = {
+    opacity: 1,
+    width: `${rect.width}px`,
+    height: `${rect.height}px`,
+    transform: `translate(${rect.left - parent.left}px, ${rect.top - parent.top}px)`
+  };
+}
+function chooseLane(key) {
+  clearTimeout(laneCloseTimer);
+  laneMenuOpen.value = false;
+  emit('update:libraryLane', key);
+  emit('update:activeTab', 'library');
+  nextTick(placeIndicator);
+}
 
 const sections = [
   { key: 'studio', label: '空间创作' },
@@ -200,8 +244,8 @@ onMounted(() => {
   localStorage.setItem('ml_senior_mode', seniorMode.value ? 'true' : 'false');
 
   applySeniorMode(seniorMode.value);
-  nextTick(placeIndicator);
-  window.addEventListener('resize', placeIndicator);
+  nextTick(() => { placeIndicator(); placeThemeIndicator(); });
+  window.addEventListener('resize', placeNavIndicators);
 
   stopStatusWatch = onServerStatusChange((detail) => {
     online.value = !detail.allDown;
@@ -215,8 +259,14 @@ onMounted(() => {
     .finally(() => { probing.value = false; });
 });
 
+function placeNavIndicators() {
+  placeIndicator();
+  placeThemeIndicator();
+}
+
 onUnmounted(() => {
-  window.removeEventListener('resize', placeIndicator);
+  clearTimeout(laneCloseTimer);
+  window.removeEventListener('resize', placeNavIndicators);
   if (stopStatusWatch) stopStatusWatch();
 });
 
@@ -228,6 +278,7 @@ function setTheme(theme) {
   const el = document.documentElement;
   el.classList.remove('dark', 'light', 'eye-care');
   el.classList.add(theme);
+  nextTick(placeThemeIndicator);
 }
 
 function toggleSeniorMode() {

@@ -358,6 +358,10 @@ function softDeleteAsset(services, fid, { deletedBy = '', reason = 'user_delete'
   }
 
   logger?.info?.(`[assets-delete] 软删 ${fid} by=${deletedBy} keys=${keys.length}`);
+  try {
+    const { eventBus, EVENTS } = require('./events');
+    eventBus.emit(EVENTS.ASSET_DELETED, { fid, fileName: asset.file_name });
+  } catch (_) {}
   return { fid, deleted: true, blacklistKeys: keys.length, trashRel };
 }
 
@@ -659,6 +663,10 @@ function restoreTrashAssetOne(services, fid) {
   })();
 
   logger?.info?.(`[assets-delete] 已从回收站恢复 ${fid}`);
+  try {
+    const { eventBus, EVENTS } = require('./events');
+    eventBus.emit(EVENTS.ASSET_INGESTED, { fid });
+  } catch (_) {}
   return { fid, restored: true };
 }
 

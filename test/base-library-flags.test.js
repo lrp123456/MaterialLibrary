@@ -91,7 +91,7 @@ async function runTests() {
     assert.strictEqual(flagsRes.status, 200);
     const flags = flagsRes.body.data;
     assert.strictEqual(flags.base_library_paints, 1);
-    assert.strictEqual(flags.base_library_jev, 0);
+    assert.strictEqual(flags.base_library_jev, 1);
     assert.strictEqual(flags.base_library_compile, 0);
     assert.strictEqual(flags.creation_tpl_incremental, 1);
     assert.strictEqual(flags.base_library_write, 1);
@@ -105,9 +105,9 @@ async function runTests() {
     console.log('=== 3. 测试管理员关闭 base_library_paints ===');
     const now = Date.now();
     db.prepare(`
-      INSERT OR REPLACE INTO ba_paints (id, brand, code, name_en, hex, interior, pinned, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run('paint_test_flag', 'nippon-paint', 'NN999', 'Test Gray', '#888888', 1, 1, now, now);
+      INSERT OR REPLACE INTO ba_paints (id, brand, code, name_en, hex, interior, pinned, curated, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('paint_test_flag', 'nippon-paint', 'NN999', 'Test Gray', '#888888', 1, 1, 1, now, now);
 
     // 管理员设为 0
     const putRes = await request('PUT', '/api/base-library/flags/base_library_paints', { value: 0 }, adminToken);

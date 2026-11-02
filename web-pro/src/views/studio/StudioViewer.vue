@@ -1,5 +1,20 @@
 <template>
-  <div class="studio-viewer relative flex-1 min-h-[380px] bg-studio-950 p-4 flex flex-col select-none overflow-hidden">
+  <div
+    class="studio-viewer relative flex-1 min-h-[380px] bg-studio-950 p-4 flex flex-col select-none overflow-hidden transition-colors"
+    :class="{ 'ring-2 ring-studio-accent bg-studio-900/60': isDragging }"
+    @dragover.prevent="isDragging = true"
+    @dragleave.prevent="isDragging = false"
+    @drop.prevent="onDropFiles"
+  >
+    <!-- 拖拽高亮遮罩 -->
+    <div
+      v-if="isDragging"
+      class="absolute inset-0 z-30 bg-studio-accent/20 backdrop-blur-xs border-2 border-dashed border-studio-accent rounded-2xl m-3 flex flex-col items-center justify-center pointer-events-none"
+    >
+      <StudioIcon name="wand" :size="32" class="text-white animate-bounce mb-2" />
+      <span class="text-sm font-bold text-white">松开鼠标，直接挂载为新参考图</span>
+    </div>
+
     <!-- 顶部辅助栏：画廊视图状态与收缩切换 -->
     <div class="h-8 flex items-center justify-between shrink-0 mb-3 text-xs text-slate-400">
       <div class="flex items-center gap-2">
@@ -34,12 +49,15 @@
       </div>
     </div>
 
-    <!-- 空状态：仅有一句提示 -->
+    <!-- 空状态：仅有一句提示，支持点击唤起添加，也支持拖拽 -->
     <div
       v-if="images.length === 0"
-      class="flex-1 flex flex-col items-center justify-center rounded-2xl border border-dashed border-studio-700/80 bg-studio-900/40 text-slate-400"
+      @click="$emit('open-picker')"
+      class="flex-1 flex flex-col items-center justify-center rounded-2xl border border-dashed border-studio-700/80 hover:border-studio-accent bg-studio-900/40 hover:bg-studio-900/60 text-slate-400 hover:text-white transition-all cursor-pointer group"
     >
+      <StudioIcon name="plus" :size="24" customClass="text-slate-500 group-hover:text-studio-accent transition-colors mb-2" />
       <span class="text-sm font-semibold tracking-wide">添加参考图</span>
+      <span class="text-[11px] text-slate-500 mt-1">支持点击选择，或直接从桌面拖拽图片至此处</span>
     </div>
 
     <!-- 1 张图布局：居中尽量大，不裁切 -->
@@ -171,10 +189,11 @@
                   <span class="opacity-80">({{ getOpName(reg.op) }}{{ reg.op === 'recolor' && (reg.params?.materialName || reg.params?.colorName) ? ': ' + (reg.params.materialName || reg.params.colorName) : '' }})</span>
                 </div>
 
-                <!-- 3D 替换/增加：直接在选区内渲染纯色背景 + 3D 快照！ -->
+                <!-- 3D 替换/增加：支持透明背景或浅色遮底渲染 -->
                 <div
                   v-if="['replace', 'add'].includes(reg.op) && reg.params?.snapshotUrl"
-                  class="w-full h-full bg-[#F8FAFC] flex items-center justify-center overflow-hidden rounded p-0.5"
+                  class="w-full h-full flex items-center justify-center overflow-hidden rounded p-0.5"
+                  :class="reg.params?.transparentBg !== false ? 'bg-transparent' : 'bg-[#F8FAFC]'"
                   :style="getPolygonClipPathStyle(reg, images[0])"
                 >
                   <img
@@ -404,7 +423,8 @@
 
                 <div
                   v-if="['replace', 'add'].includes(reg.op) && reg.params?.snapshotUrl"
-                  class="w-full h-full bg-[#F8FAFC] flex items-center justify-center overflow-hidden rounded p-0.5"
+                  class="w-full h-full flex items-center justify-center overflow-hidden rounded p-0.5"
+                  :class="reg.params?.transparentBg !== false ? 'bg-transparent' : 'bg-[#F8FAFC]'"
                   :style="getPolygonClipPathStyle(reg, img)"
                 >
                   <img :src="reg.params.snapshotUrl" class="w-full h-full object-contain pointer-events-none drop-shadow" alt="" />
@@ -470,6 +490,7 @@
               <span>{{ img?.outpainted ? '已扩图(撤回)' : '已标注(撤回)' }}</span>
             </button>
             <button v-if="!isSubRefImage(img, idx)" @click.stop="$emit('open-edit', idx)" class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-studio-800 cursor-pointer" title="进入主图编辑"><StudioIcon name="edit" :size="15" hoverMorph /></button>
+            <button v-else @click.stop="onImageClick(idx)" class="px-2 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[10px] font-bold cursor-pointer flex items-center gap-1" title="调整或替换 3D 模型"><StudioIcon name="wand" :size="12" /><span>替换模型</span></button>
             <button @click.stop="$emit('remove', idx)" class="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-studio-800 cursor-pointer"><StudioIcon name="trash" :size="15" /></button>
           </div>
         </div>
@@ -606,7 +627,8 @@
                 </div>
                 <div
                   v-if="['replace', 'add'].includes(reg.op) && reg.params?.snapshotUrl"
-                  class="w-full h-full bg-[#F8FAFC] flex items-center justify-center overflow-hidden rounded p-0.5"
+                  class="w-full h-full flex items-center justify-center overflow-hidden rounded p-0.5"
+                  :class="reg.params?.transparentBg !== false ? 'bg-transparent' : 'bg-[#F8FAFC]'"
                   :style="getPolygonClipPathStyle(reg, img)"
                 >
                   <img :src="reg.params.snapshotUrl" class="w-full h-full object-contain pointer-events-none drop-shadow" alt="" />
@@ -794,7 +816,8 @@
                 </div>
                 <div
                   v-if="['replace', 'add'].includes(reg.op) && reg.params?.snapshotUrl"
-                  class="w-full h-full bg-[#F8FAFC] flex items-center justify-center overflow-hidden rounded p-0.5"
+                  class="w-full h-full flex items-center justify-center overflow-hidden rounded p-0.5"
+                  :class="reg.params?.transparentBg !== false ? 'bg-transparent' : 'bg-[#F8FAFC]'"
                   :style="getPolygonClipPathStyle(reg, img)"
                 >
                   <img :src="reg.params.snapshotUrl" class="w-full h-full object-contain pointer-events-none drop-shadow" alt="" />
@@ -855,7 +878,7 @@
 </template>
 
 <script setup>
-import { computed, reactive } from 'vue';
+import { computed, reactive, ref } from 'vue';
 import StudioIcon from '../../components/StudioIcon.vue';
 
 const props = defineProps({
@@ -872,7 +895,19 @@ const emit = defineEmits([
   'suggest-prompts',
   'revert-annotation',
   'region-hover',
+  'open-picker',
+  'upload-files',
 ]);
+
+const isDragging = ref(false);
+
+function onDropFiles(e) {
+  isDragging.value = false;
+  const files = e.dataTransfer?.files;
+  if (files && files.length) {
+    emit('upload-files', Array.from(files));
+  }
+}
 
 const hiddenRegionOverlayMap = reactive(new Set());
 
@@ -1070,7 +1105,9 @@ function getRegionOverlayStyle(reg, idx) {
     border: isPoly ? 'none' : (isHovered ? `3px solid ${border}` : `2px solid ${border}`),
     backgroundColor: isPoly
       ? 'transparent'
-      : (['replace', 'add'].includes(reg.op) && reg.params?.snapshotUrl ? '#F8FAFC' : lightBg),
+      : (['replace', 'add'].includes(reg.op) && reg.params?.snapshotUrl
+          ? (reg.params?.transparentBg !== false ? 'transparent' : '#F8FAFC')
+          : lightBg),
     boxShadow: isPoly
       ? 'none'
       : (isHovered ? `0 0 0 4px ${border}50, 0 8px 24px rgba(0,0,0,0.6)` : '0 2px 8px rgba(0,0,0,0.3)'),
@@ -1085,6 +1122,13 @@ function onRegionClick(imgIdx, reg) {
 }
 
 function onImageClick(idx) {
+  const img = props.images[idx];
+  if (isSubRefImage(img, idx)) {
+    const targetIdx = typeof img?.relatedImageIndex === 'number' ? img.relatedImageIndex : 0;
+    emit('select', targetIdx);
+    emit('open-edit', targetIdx);
+    return;
+  }
   emit('select', idx);
   emit('open-edit', idx);
 }
@@ -1125,4 +1169,29 @@ const aspectDiff2 = computed(() => {
   if (a1 > 1.3 * a0 && a1 > 1.1) return { verticalIdx: 1 };
   return { verticalIdx: -1 };
 });
+
+// 3D 朝向参考图 / 次级参考图专属判断与视觉辅助
+function isSubRefImage(img, idx) {
+  if (!img) return false;
+  return Boolean(img.isRefObject || img.origin === '3d_snapshot' || img.isSubRef);
+}
+
+function getSubRefLabel(img, idx) {
+  if (isSubRefImage(img, idx)) {
+    return `3D参考 (图${idx + 1})`;
+  }
+  return `图${idx + 1}`;
+}
+
+function getSubRefBorderClass(img, idx) {
+  const isSelected = props.selectedIndex === idx;
+  if (isSubRefImage(img, idx)) {
+    return isSelected
+      ? 'border-amber-400 ring-2 ring-amber-400/50 shadow-md shadow-amber-400/10'
+      : 'border-amber-500/40 hover:border-amber-400 bg-amber-500/5';
+  }
+  return isSelected
+    ? 'border-studio-accent ring-1 ring-studio-accent'
+    : 'border-studio-700 hover:border-studio-600';
+}
 </script>

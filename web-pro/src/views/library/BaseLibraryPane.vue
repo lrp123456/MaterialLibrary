@@ -141,10 +141,16 @@
                 :alt="mat.name_cn"
                 loading="lazy"
               />
-              <div v-if="mat.is_shell" class="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-amber-500/90 text-black text-[10px] font-bold shadow-xs">
-                底色壳
-              </div>
               <div class="absolute top-1.5 right-1.5 flex items-center space-x-1">
+                <button
+                  type="button"
+                  class="w-6 h-6 rounded-full flex items-center justify-center transition shadow backdrop-blur-md cursor-pointer"
+                  :class="mat.is_pinned ? 'bg-amber-500 text-black shadow-amber-500/40 font-bold' : 'bg-black/60 text-slate-300 hover:text-amber-400 hover:bg-black/80 border border-white/20'"
+                  :title="mat.is_pinned ? '已置顶收藏 (点击取消)' : '收藏置顶'"
+                  @click.stop="toggleMaterialPin(mat)"
+                >
+                  <StudioIcon name="star" :size="12" />
+                </button>
                 <button
                   v-if="mat.preview_url"
                   type="button"
@@ -222,9 +228,15 @@
             <!-- 动态生成的 256x256 色块 -->
             <div class="relative aspect-4/3 bg-studio-950 flex items-center justify-center overflow-hidden">
               <img :src="authedUrl(p.swatch_url)" class="w-full h-full object-cover" />
-              <div v-if="p.pinned" class="absolute top-1.5 right-1.5 px-1 py-0.5 rounded bg-amber-500 text-black text-[9px] font-bold">
-                置顶
-              </div>
+              <button
+                type="button"
+                class="absolute top-1.5 right-1.5 w-6 h-6 rounded-full flex items-center justify-center transition shadow backdrop-blur-md cursor-pointer z-10"
+                :class="p.pinned ? 'bg-amber-500 text-black shadow-amber-500/40 font-bold' : 'bg-black/60 text-slate-300 hover:text-amber-400 hover:bg-black/80 border border-white/20'"
+                :title="p.pinned ? '已置顶收藏 (点击取消)' : '收藏置顶'"
+                @click.stop="togglePaintPin(p)"
+              >
+                <StudioIcon name="star" :size="12" />
+              </button>
             </div>
             <div class="p-2 flex-1 flex flex-col justify-between">
               <div>
@@ -457,10 +469,10 @@
             </div>
 
             <div>
-              <div class="text-xs text-slate-400">材质底色壳 (Shell) 属性</div>
+              <div class="text-xs text-slate-400">基材轨道与染色属性</div>
               <div class="text-xs text-slate-300 mt-1 leading-relaxed">
-                <span v-if="selectedMaterial.is_shell" class="text-amber-400 font-bold">✓ 支持作为底色壳</span><span v-if="selectedMaterial.is_shell">：具备微观颗粒感与粗糙度，可叠加任意立邦/多乐士涂料色号上色。</span>
-                <span v-else class="text-slate-400">天然纹理材质：自带专属纹理与固有色，直接作为贴图使用。</span>
+                <span v-if="selectedMaterial.track === 'B' || !selectedMaterial.is_shell" class="text-amber-400 font-medium">轨道 B 具象材质</span><span>：轨道 B 的固有色在贴图里；要改色必须走预染色。</span>
+                <span v-else class="text-slate-400">轨道 A 色彩与工艺：表面平整或微水泥工艺，以指定色号为准。</span>
               </div>
             </div>
 
@@ -591,13 +603,15 @@ const paints = ref([]);
 const lights = ref({ directions: [], ccts: [] });
 
 const PAINT_FAMILIES = [
-  { key: 'off-white', label: '米白珍珠' },
-  { key: 'beige', label: '暖调米咖' },
+  { key: 'warm_white', label: '暖白' },
+  { key: 'cream', label: '奶油' },
+  { key: 'ivory', label: '象牙' },
   { key: 'greige', label: '原麻灰米' },
-  { key: 'gray', label: '现代冷灰' },
-  { key: 'green', label: '复古草绿' },
-  { key: 'ivory', label: '中性象牙' },
-  { key: 'white', label: '纯净雪域' }
+  { key: 'earth', label: '大地侘寂' },
+  { key: 'cool_gray', label: '现代冷灰' },
+  { key: 'morandi', label: '莫兰迪' },
+  { key: 'caramel', label: '焦糖' },
+  { key: 'ink', label: '静谧深色' }
 ];
 
 // 模型库标准化资产范畴规范数据 (解答用户关于模型库包含哪些的核心疑问)
@@ -824,7 +838,7 @@ const searchPlaceholderText = computed(() => {
   }
 });
 
-// 计算过滤后的材质列表
+// 计算过滤后的材质列表（置顶优先 -> 常用优先 -> 时间倒序）
 const filteredMaterials = computed(() => {
   let list = materials.value;
   if (localMatSource.value) {
@@ -833,16 +847,29 @@ const filteredMaterials = computed(() => {
   if (localShellOnly.value) {
     list = list.filter(m => m.is_shell);
   }
-  return list;
+  return [...list].sort((a, b) => {
+    const pinA = a.is_pinned ? 1 : 0;
+    const pinB = b.is_pinned ? 1 : 0;
+    if (pinB !== pinA) return pinB - pinA;
+    const useA = Number(a.use_count || 0);
+    const useB = Number(b.use_count || 0);
+    if (useB !== useA) return useB - useA;
+    return (b.updated_at || 0) - (a.updated_at || 0);
+  });
 });
 
-// 计算过滤后的色号列表
+// 计算过滤后的色号列表（置顶优先）
 const filteredPaints = computed(() => {
   let list = paints.value;
   if (localFamily.value) {
     list = list.filter(p => p.family === localFamily.value);
   }
-  return list;
+  return [...list].sort((a, b) => {
+    const pinA = a.pinned ? 1 : 0;
+    const pinB = b.pinned ? 1 : 0;
+    if (pinB !== pinA) return pinB - pinA;
+    return (b.updated_at || 0) - (a.updated_at || 0);
+  });
 });
 
 // 计算灯具方向过滤
@@ -899,7 +926,9 @@ async function refreshList() {
     } else if (props.warehouse === 'paint') {
       const q = new URLSearchParams();
       if (localBrand.value) q.set('brand', localBrand.value);
-      if (localFamily.value) q.set('family', localFamily.value);
+      if (localFamily.value) {
+        q.set('family_key', localFamily.value);
+      }
       if (localPinnedOnly.value) q.set('pinned', '1');
       if (localSearchQuery.value) q.set('q', localSearchQuery.value);
       const res = await fetch(`/api/base-library/paints?${q.toString()}`, {
@@ -946,6 +975,54 @@ function onPinnedChange() {
 function onImported() {
   showSearchModal.value = false;
   refreshList();
+}
+
+async function toggleMaterialPin(mat) {
+  if (!mat) return;
+  const nextPinned = mat.is_pinned ? 0 : 1;
+  const oldPinned = mat.is_pinned;
+  mat.is_pinned = nextPinned;
+  try {
+    const token = getToken();
+    const res = await fetch(`/api/base-library/materials/${encodeURIComponent(mat.id)}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ is_pinned: nextPinned })
+    });
+    const json = await res.json();
+    if (!json.success) {
+      mat.is_pinned = oldPinned;
+    }
+  } catch (e) {
+    mat.is_pinned = oldPinned;
+  }
+}
+
+async function togglePaintPin(p) {
+  if (!p) return;
+  const nextPinned = p.pinned ? 0 : 1;
+  const oldPinned = p.pinned;
+  p.pinned = nextPinned;
+  try {
+    const token = getToken();
+    const res = await fetch(`/api/base-library/paints/${encodeURIComponent(p.id)}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ pinned: nextPinned })
+    });
+    const json = await res.json();
+    if (!json.success) {
+      p.pinned = oldPinned;
+    }
+  } catch (e) {
+    p.pinned = oldPinned;
+  }
 }
 
 // 监听外部 Props 变化并与局部变量同步

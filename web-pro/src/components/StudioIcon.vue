@@ -110,6 +110,8 @@ const ICONS = {
   play: 'M8 5v14l11-7z',
   // pause 暂停
   pause: 'M6 19h4V5H6v14zm8-14v14h4V5h-4z',
+  // upload 上传
+  upload: 'M5 20h14v-2H5v2zm0-10h4v6h6v-6h4l-7-7-7 7z',
   // download 下载
   download: 'M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z',
   // copy 复制
@@ -132,6 +134,7 @@ const ICONS = {
   user: 'M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z',
   // star 收藏/星标
   star: 'M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z',
+  a11y: 'M12 2a2 2 0 1 1 0 4 2 2 0 0 1 0-4zM4 9h4l1.2 2.2L8 18h2v4h2v-4h0l1.2-4.2L16 18h2l-1.5-7H20v-2H4v2zm7 2.2V20h2v-8.2l-1-.6-1 .6z',
   // arrowUp 向上
   arrowUp: 'M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z',
   // arrowDown 向下

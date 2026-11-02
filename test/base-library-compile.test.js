@@ -38,8 +38,9 @@ async function runTests() {
 
   assert.strictEqual(resPaint.success, true);
   assert.strictEqual(resPaint.clauses.length, 1);
-  assert.strictEqual(resPaint.clauses[0].reference.kind, 'swatch');
-  assert.ok(resPaint.clauses[0].reference.rel.includes('paint_nippon_warm_beige'));
+  assert.strictEqual(resPaint.clauses[0].reference, null);
+  assert.ok(resPaint.prompt.includes('不要添加色块'));
+  assert.ok(!/swatch\.png/.test(resPaint.prompt));
   assert.ok(resPaint.prompt.includes('暖调米色'));
   assert.ok(resPaint.prompt.includes('立邦'));
   assert.ok(resPaint.prompt.includes('NP N 2034P'));
@@ -70,8 +71,9 @@ async function runTests() {
     }]
   });
 
-  assert.strictEqual(resShell.clauses[0].reference.kind, 'basecolor');
-  assert.strictEqual(resShell.clauses[0].reference.rel, 'cache/base-library/materials/mat_micro_cement/basecolor.jpg');
+  assert.strictEqual(resShell.clauses[0].reference, null);
+  assert.ok(!resShell.prompt.includes('basecolor.jpg'));
+  assert.ok((resShell.warnings || []).some((item) => item.includes('shell_ignored')));
   assert.ok(resShell.prompt.includes('微距触感极平滑丝光细腻'));
   console.log('✅ 底色壳联动引用与细腻粗糙度校验通过');
 
@@ -144,7 +146,7 @@ async function runTests() {
   const resTrunc = compileBaseAttributes(db, {
     regions: [
       { region_id: 'r1', warehouse: 'material', asset_id: 'mat_oak_floor' },
-      { region_id: 'r2', warehouse: 'paint', asset_id: 'paint_nippon_warm_beige' },
+      { region_id: 'r2', warehouse: 'material', asset_id: 'mat_oak_floor' },
       { region_id: 'r3', warehouse: 'material', asset_id: 'mat_oak_floor' }
     ],
     maxRefs: 2
@@ -165,6 +167,26 @@ async function runTests() {
   assert.ok(resFlagOff.prompt.includes('暖调米色'), '文本提示词依然保留');
   console.log('✅ 色号标志关闭平稳降级通过');
 
+  console.log('=== 9. 测试参考图编号跳过轨道 A ===');
+  const resTags = compileBaseAttributes(db, {
+    regions: [
+      { region_id: 'floor', warehouse: 'material', asset_id: 'mat_oak_floor', bbox: { x1: 0, y1: 700, x2: 999, y2: 999 } },
+      { region_id: 'wall', warehouse: 'paint', asset_id: 'paint_nippon_warm_beige', bbox: { x1: 0, y1: 0, x2: 400, y2: 400 } },
+      { region_id: 'stone', warehouse: 'material', asset_id: 'mat_oak_floor', bbox: { x1: 400, y1: 0, x2: 900, y2: 500 } }
+    ],
+    firstRefIndex: 3,
+    maxRefs: 4
+  });
+  assert.strictEqual(resTags.references.length, 2);
+  assert.strictEqual(resTags.references[0].refImageTag, '图3');
+  assert.strictEqual(resTags.references[1].refImageTag, '图4');
+  assert.ok(resTags.clauses[0].text.includes('图3'));
+  assert.ok(!resTags.clauses[1].text.includes('图3'));
+  assert.ok(resTags.clauses[1].reference === null);
+  assert.ok(resTags.clauses[2].text.includes('图4'));
+  assert.ok(!resTags.prompt.includes('对齐图2'));
+  console.log('✅ 参考图编号按实际出图递增');
+
   console.log('=== 8. 测试价签持久化 (ba_image_bindings) ===');
   assert.strictEqual(isValidImageKey('fid:asset_12345'), true);
   assert.strictEqual(isValidImageKey('img:abcdef0123456789'), true);
@@ -183,6 +205,22 @@ async function runTests() {
   assert.strictEqual(saved.light_mode, 'left');
   assert.strictEqual(saved.kelvin, 4000);
   console.log('✅ 价签存储与读取校验通过');
+
+  console.log('=== 10. 测试部位白名单强拦截（沙发拒绝乳胶漆） ===');
+  const resUphReject = compileBaseAttributes(db, {
+    regions: [
+      {
+        region_id: 'sofa_reg',
+        part: 'upholstery',
+        warehouse: 'paint',
+        asset_id: 'paint_nippon_warm_beige'
+      }
+    ]
+  });
+  assert.strictEqual(resUphReject.clauses[0].reference, null);
+  assert.ok(resUphReject.clauses[0].text.includes('保持原样'));
+  assert.ok(resUphReject.warnings.some(w => w.includes('part_asset_rejected')));
+  console.log('✅ 沙发部位拒绝乳胶漆强门禁校验通过');
 
   console.log('\n🎉 base-library-compile 全部测试通过！');
 }

@@ -18,7 +18,9 @@ const SURFACES = [
     label: '墙面',
     subclasses: [
       { key: 'wall_paint', label: '墙面-乳胶漆', warehouses: ['paint'] },
+      { key: 'wall_microcement', label: '墙面-微水泥', warehouses: ['material'] },
       { key: 'wall_paper', label: '墙面-墙纸', warehouses: ['material'] },
+      { key: 'wall_cloth', label: '墙面-墙布', warehouses: ['material'] },
       { key: 'wall_paneling', label: '墙面-护墙', warehouses: ['material'] },
       { key: 'wall_tile', label: '墙面-背景墙砖', warehouses: ['material'] }
     ]
@@ -30,6 +32,7 @@ const SURFACES = [
       { key: 'floor_wood', label: '地面-木地板', warehouses: ['material'] },
       { key: 'floor_stone', label: '地面-瓷砖石材', warehouses: ['material'] },
       { key: 'floor_carpet', label: '地面-地毯', warehouses: ['material'] },
+      { key: 'floor_microcement', label: '地面-微水泥', warehouses: ['material'] },
       { key: 'floor_epoxy', label: '地面-地坪漆', warehouses: ['paint'] }
     ]
   },
@@ -56,7 +59,10 @@ const SURFACES = [
     key: 'soft',
     label: '软装',
     subclasses: [
+      { key: 'soft_leather', label: '真皮', warehouses: ['material'] },
       { key: 'soft_fabric', label: '织物', warehouses: ['material'] },
+      { key: 'soft_veneer', label: '木皮', warehouses: ['material'] },
+      { key: 'soft_metal', label: '金属', warehouses: ['material'] },
       { key: 'soft_model', label: '挂画/摆件/绿植等', warehouses: ['model'] }
     ]
   },
@@ -99,8 +105,15 @@ function getSubclassMeta(subclass) {
   return SUBCLASS_MAP.get(subclass) || null;
 }
 
+const SKIN_SUBCLASSES = [
+  { key: 'soft_leather', label: '真皮', warehouses: ['material'] },
+  { key: 'soft_fabric', label: '织物', warehouses: ['material'] },
+  { key: 'soft_veneer', label: '木皮', warehouses: ['material'] },
+  { key: 'soft_metal', label: '金属', warehouses: ['material'] }
+];
+
 function getTaxonomy() {
-  return { surfaces: SURFACES };
+  return { surfaces: SURFACES, skins: SKIN_SUBCLASSES };
 }
 
 module.exports = {
@@ -110,5 +123,6 @@ module.exports = {
   isValidSurface,
   isValidSubclass,
   getSubclassMeta,
-  getTaxonomy
+  getTaxonomy,
+  SKIN_SUBCLASSES
 };

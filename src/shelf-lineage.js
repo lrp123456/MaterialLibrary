@@ -210,8 +210,10 @@ async function registerGenerated(services, input = {}) {
     ? db.prepare('SELECT category, kind FROM assets WHERE fid=?').get(parentFid)
     : null;
   const ext = path.extname(src).toLowerCase();
-  const kind = ext === '.mp4' || ext === '.webm' || ext === '.mov' ? 'video'
-    : (ext === '.mp3' || ext === '.wav' || ext === '.m4a' ? 'audio' : 'image');
+  const kind = input.kind || (
+    ext === '.mp4' || ext === '.webm' || ext === '.mov' ? 'video'
+    : (ext === '.mp3' || ext === '.wav' || ext === '.m4a' ? 'audio' : 'image')
+  );
   const fid = `gen_${sha.slice(0, 24)}`;
   record.thumbFid = fid;
   let width = null;
@@ -232,7 +234,7 @@ async function registerGenerated(services, input = {}) {
       duration = Number(meta.duration) || null;
     } catch { /* 尺寸缺失不影响入库 */ }
   }
-  const category = parent?.category || (kind === 'audio' ? 'music' : kind === 'video' ? 'video' : 'interior');
+  const category = input.category || (kind === 'audio' ? 'music' : (parent?.category || (kind === 'video' ? 'video' : 'interior')));
   const orientation = width && height
     ? (height > width * 1.05 ? 'portrait' : (width > height * 1.05 ? 'landscape' : 'square'))
     : null;

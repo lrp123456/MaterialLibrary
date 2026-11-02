@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const sharp = require('sharp');
 const { generateSwatchBuffer } = require('./swatch');
+const { CURATED_PAINTS } = require('./curated-paints');
 
 const SEED_PAINTS = [
   {
@@ -158,6 +159,9 @@ const SEED_MATERIALS = [
     source_id: 'WoodFloor041',
     license_note: 'ambientCG, CC0',
     is_shell: 0,
+    track: 'B',
+    tone: 'light',
+    layout: 'plain',
     hex: '#C8A882',
     tags: [
       { surface: 'floor', subclass: 'floor_wood' },
@@ -171,6 +175,9 @@ const SEED_MATERIALS = [
     source_id: 'Wood049',
     license_note: 'ambientCG, CC0',
     is_shell: 0,
+    track: 'B',
+    tone: 'dark',
+    layout: 'plain',
     hex: '#4A3525',
     tags: [
       { surface: 'wall', subclass: 'wall_paneling' },
@@ -184,6 +191,9 @@ const SEED_MATERIALS = [
     source_id: 'Travertine001',
     license_note: 'ambientCG, CC0',
     is_shell: 0,
+    track: 'B',
+    tone: 'light',
+    layout: 'plain',
     hex: '#D9CDBB',
     tags: [
       { surface: 'floor', subclass: 'floor_stone' },
@@ -198,6 +208,9 @@ const SEED_MATERIALS = [
     source_id: 'marble_01',
     license_note: 'Poly Haven, CC0',
     is_shell: 0,
+    track: 'B',
+    tone: 'light',
+    layout: 'plain',
     hex: '#EBEBEB',
     tags: [
       { surface: 'floor', subclass: 'floor_stone' },
@@ -207,14 +220,16 @@ const SEED_MATERIALS = [
   },
   {
     id: 'mat_micro_cement',
-    name_cn: '浅灰一体微水泥 (艺术漆壳)',
+    name_cn: '浅灰一体微水泥 (艺术漆)',
     source: 'ambientcg',
     source_id: 'Concrete034',
     license_note: 'ambientCG, CC0',
-    is_shell: 1,
+    is_shell: 0,
+    track: 'A',
+    tone: 'medium',
+    layout: 'plain',
     hex: '#C2BEB6',
     tags: [
-      { surface: 'wall', subclass: 'wall_paint' },
       { surface: 'floor', subclass: 'floor_epoxy' }
     ]
   },
@@ -225,6 +240,9 @@ const SEED_MATERIALS = [
     source_id: 'Fabric045',
     license_note: 'ambientCG, CC0',
     is_shell: 0,
+    track: 'B',
+    tone: 'medium',
+    layout: 'plain',
     hex: '#D6CEBE',
     tags: [
       { surface: 'soft', subclass: 'soft_fabric' },
@@ -238,6 +256,9 @@ const SEED_MATERIALS = [
     source_id: 'Terrazzo012',
     license_note: 'ambientCG, CC0',
     is_shell: 0,
+    track: 'B',
+    tone: 'medium',
+    layout: 'plain',
     hex: '#BAB6AF',
     tags: [
       { surface: 'floor', subclass: 'floor_stone' },
@@ -251,6 +272,9 @@ const SEED_MATERIALS = [
     source_id: 'Plaster001',
     license_note: 'ambientCG, CC0',
     is_shell: 0,
+    track: 'B',
+    tone: 'light',
+    layout: 'plain',
     hex: '#F0EEEB',
     tags: [
       { surface: 'ceiling', subclass: 'ceiling_panel' },
@@ -262,7 +286,7 @@ const SEED_MATERIALS = [
 async function seedBaseLibraryData(db, dataDir) {
   const now = Date.now();
 
-  // 1. 种子化色号
+  // 1. 种子化色号 (SEED_PAINTS 归档)
   const insPaint = db.prepare(`
     INSERT OR IGNORE INTO ba_paints (
       id, brand, code, name_en, name_zh, alias_zh, hex, family, lrv,
@@ -277,38 +301,81 @@ async function seedBaseLibraryData(db, dataDir) {
     const swatchRel = `cache/base-library/paints/${p.id}/swatch.png`;
     insPaint.run({
       ...p,
-      shell_material_id: 'mat_micro_cement',
+      shell_material_id: null,
+      swatch_rel: swatchRel,
+      created_at: now,
+      updated_at: now
+    });
+  }
+
+  // 2. 种子化 9 大色系策展色卡 (CURATED_PAINTS)
+  const upsertCurated = db.prepare(`
+    INSERT INTO ba_paints (
+      id, brand, code, name_en, name_zh, alias_zh, hex, family, lrv,
+      interior, pinned, shell_material_id, swatch_rel, source_url,
+      curated, family_key, display_name, role_hint, created_at, updated_at
+    ) VALUES (
+      @id, @brand, @code, @name_en, @display_name, @display_name, @hex, @family_key, @lrv,
+      @interior, 0, NULL, @swatch_rel, @source_url,
+      1, @family_key, @display_name, @role_hint, @created_at, @updated_at
+    )
+    ON CONFLICT(brand, code) DO UPDATE SET
+      curated = 1,
+      family_key = excluded.family_key,
+      display_name = excluded.display_name,
+      role_hint = excluded.role_hint,
+      hex = excluded.hex,
+      lrv = excluded.lrv,
+      interior = excluded.interior,
+      updated_at = excluded.updated_at
+  `);
+
+  for (const cp of CURATED_PAINTS) {
+    const swatchRel = `cache/base-library/paints/${cp.id}/swatch.png`;
+    upsertCurated.run({
+      ...cp,
       swatch_rel: swatchRel,
       created_at: now,
       updated_at: now
     });
 
-    // 确保本地色块文件存在
     if (dataDir) {
       const fullPath = path.resolve(dataDir, swatchRel);
       if (!fs.existsSync(fullPath)) {
-        fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-        const buf = await generateSwatchBuffer(p.hex);
-        fs.writeFileSync(fullPath, buf);
+        try {
+          fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+          const buf = await generateSwatchBuffer(cp.hex);
+          fs.writeFileSync(fullPath, buf);
+        } catch (_) {}
       }
     }
   }
 
-  // 2. 种子化材质
+  // 3. 种子化材质
   const insMat = db.prepare(`
-    INSERT OR IGNORE INTO ba_materials (
+    INSERT INTO ba_materials (
       id, name_cn, source, source_id, license_note, is_shell,
-      preview_rel, basecolor_rel, width, height, created_at, updated_at
+      preview_rel, basecolor_rel, width, height, track, tone, layout, created_at, updated_at
     ) VALUES (
       @id, @name_cn, @source, @source_id, @license_note, @is_shell,
-      @preview_rel, @basecolor_rel, @width, @height, @created_at, @updated_at
+      @preview_rel, @basecolor_rel, @width, @height, @track, @tone, @layout, @created_at, @updated_at
     )
+    ON CONFLICT(id) DO UPDATE SET
+      is_shell = excluded.is_shell,
+      track = excluded.track,
+      tone = excluded.tone,
+      layout = excluded.layout,
+      updated_at = excluded.updated_at
   `);
 
   const insTag = db.prepare(`
     INSERT OR IGNORE INTO ba_asset_tags (asset_kind, asset_id, surface, subclass)
     VALUES (?, ?, ?, ?)
   `);
+
+  // 确保微水泥从 wall_paint 标签中摘除，且 is_shell 置 0
+  db.prepare(`UPDATE ba_materials SET is_shell = 0 WHERE id = 'mat_micro_cement'`).run();
+  db.prepare(`DELETE FROM ba_asset_tags WHERE asset_id = 'mat_micro_cement' AND subclass = 'wall_paint'`).run();
 
   for (const m of SEED_MATERIALS) {
     const ext = m.id === 'mat_calacatta_marble' ? '.png' : '.jpg';
@@ -320,11 +387,14 @@ async function seedBaseLibraryData(db, dataDir) {
       source: m.source,
       source_id: m.source_id,
       license_note: m.license_note,
-      is_shell: m.is_shell,
+      is_shell: m.is_shell || 0,
       preview_rel: previewRel,
       basecolor_rel: basecolorRel,
       width: 1024,
       height: 1024,
+      track: m.track || 'B',
+      tone: m.tone || 'medium',
+      layout: m.layout || 'plain',
       created_at: now,
       updated_at: now
     });
@@ -351,7 +421,7 @@ async function seedBaseLibraryData(db, dataDir) {
     }
   }
 
-  // 3. 关联常用芯片槽位
+  // 4. 关联常用芯片槽位
   const updateSlot = db.prepare('UPDATE ba_preset_slots SET material_id = ?, updated_at = ? WHERE id = ?');
   updateSlot.run('mat_white_oak', now, 'white_oak');
   updateSlot.run('mat_black_walnut', now, 'black_walnut');

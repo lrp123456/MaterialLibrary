@@ -98,6 +98,48 @@ function apiBoxFromBounds(minX, minY, maxX, maxY, sw, sh) {
   };
 }
 
+/** 绑定区域上的 bbox 约定为 0–999。unit:'px' 时按像素解读。 */
+function selectionFromNormBBox(bbox, sw, sh) {
+  if (!bbox || bbox.x1 == null || bbox.y1 == null || bbox.x2 == null || bbox.y2 == null) return null;
+  if (bbox.unit === 'px') {
+    return {
+      left: Math.min(bbox.x1, bbox.x2),
+      top: Math.min(bbox.y1, bbox.y2),
+      right: Math.max(bbox.x1, bbox.x2),
+      bottom: Math.max(bbox.y1, bbox.y2),
+      unit: 'px',
+    };
+  }
+  const x1 = Math.round(Number(bbox.x1) / 999 * sw);
+  const y1 = Math.round(Number(bbox.y1) / 999 * sh);
+  const x2 = Math.round(Number(bbox.x2) / 999 * sw);
+  const y2 = Math.round(Number(bbox.y2) / 999 * sh);
+  if (![x1, y1, x2, y2].every(Number.isFinite)) return null;
+  return {
+    left: Math.max(0, Math.min(x1, x2)),
+    top: Math.max(0, Math.min(y1, y2)),
+    right: Math.min(sw, Math.max(x1, x2)),
+    bottom: Math.min(sh, Math.max(y1, y2)),
+    unit: 'px',
+  };
+}
+
+function unionPixelSelection(selections, sw, sh) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const sel of selections) {
+    const b = selectionBounds(sel, sw, sh);
+    minX = Math.min(minX, b.minX);
+    minY = Math.min(minY, b.minY);
+    maxX = Math.max(maxX, b.maxX);
+    maxY = Math.max(maxY, b.maxY);
+  }
+  if (!Number.isFinite(minX)) return null;
+  return { left: minX, top: minY, right: maxX, bottom: maxY, unit: 'px' };
+}
+
 function normalizeSelection(region, sw, sh) {
   if (!region) return null;
   if (Array.isArray(region.strokes) && region.strokes.length) {
@@ -649,9 +691,10 @@ ${promptExtra ? `${promptExtra}\n` : ''}
     };
   }
 
-  // base_attr：基础属性重绘（精准编辑读取四仓库，单选区唯一参考图）
+  // base_attr：按部位编译。轨道 A 不发参考图。画幅跟随原图时把框外贴回。
   if (op === 'base_attr') {
     const { compileBaseAttributes } = require('../base-library/compile');
+    const { ensureTintedFile } = require('../base-library/pretint');
     const path = require('path');
     const fs = require('fs');
     const dataDir = (services && services.config && services.config.dataDir) ||
@@ -666,6 +709,32 @@ ${promptExtra ? `${promptExtra}\n` : ''}
         kelvin: typeof opts.kelvin === 'number' ? opts.kelvin : null
       };
     }
+    const sourceRegions = Array.isArray(bindingsPayload.regions) ? bindingsPayload.regions : [];
+    const fallbackSel = normalizeSelection(opts.region, sw, sh);
+    if (!sourceRegions.length && !fallbackSel) throw new Error('未指定有效选区');
+    const workRegions = sourceRegions.length ? sourceRegions : [{}];
+
+    const located = [];
+    for (const reg of workRegions) {
+      const own = selectionFromNormBBox(reg && (reg.bbox || reg.selection), sw, sh);
+      const sel = own || fallbackSel;
+      if (!sel) throw new Error('未指定有效选区');
+      const clause = await regionClause({
+        modelId: opts.model,
+        selection: sel,
+        natW: sw,
+        natH: sh,
+        services,
+        objName: (reg && (reg.part || reg.surface)) || '',
+        maskId: opts.maskId,
+      });
+      located.push({
+        ...(reg || {}),
+        locationClause: clause.areaPhrase || clause.text || '',
+        selection: sel,
+        mask: clause.mask || null,
+      });
+    }
 
     let maxRefs = 4;
     try {
@@ -677,41 +746,71 @@ ${promptExtra ? `${promptExtra}\n` : ''}
       }
     } catch {}
 
+    const firstRefIndex = Number.isInteger(opts.firstRefIndex)
+      ? opts.firstRefIndex
+      : (Number.isInteger(opts.totalReferenceCount) ? opts.totalReferenceCount + 1 : 2);
+
     const compiled = compileBaseAttributes(services && services.db, {
       ...bindingsPayload,
-      maxRefs
+      regions: located,
+      maxRefs,
+      baseImageTag: opts.baseImageTag || '图1',
+      firstRefIndex,
     });
+    const reconciled = reconcilePrompt(compiled.prompt, { kind: routeFor(opts.model).kind, text: located[0].locationClause });
+    const finalPrompt = reconciled.prompt || compiled.prompt;
 
     const imageBuffers = [sceneImageBuffer];
     for (const ref of compiled.references) {
-      if (ref && ref.rel) {
-        const fullPath = path.resolve(dataDir, ref.rel);
-        if (fs.existsSync(fullPath)) {
-          const buf = fs.readFileSync(fullPath);
-          imageBuffers.push(buf);
-        }
+      if (!ref || !ref.rel) continue;
+      const fullPath = path.resolve(dataDir, ref.rel);
+      if (!fs.existsSync(fullPath)) continue;
+      let buf = fs.readFileSync(fullPath);
+      if (ref.tinted && ref.hex && ref.assetId) {
+        const tinted = await ensureTintedFile(dataDir, ref.assetId, ref.hex, buf);
+        buf = tinted.buffer;
       }
+      imageBuffers.push(buf);
     }
 
-    const generated = await runAdapter(services, imageBuffers, compiled.prompt, opts.model, {
+    const maskPath = located.length === 1 && located[0].mask ? located[0].mask.destPath : null;
+    const generated = await runAdapter(services, imageBuffers, finalPrompt, opts.model, {
       size: outSpec.sizeField,
       ratio: outSpec.ratioField,
+      maskPath: maskPath || undefined,
     });
 
+    const union = unionPixelSelection(located.map((row) => row.selection), sw, sh);
+    const wantPasteback = pastebackAllowed && opts.pasteback !== false;
+    let finalBuf = generated;
+    if (wantPasteback) {
+      finalBuf = await pastebackToTarget(sceneImageBuffer, generated, {
+        selection: union,
+        outW: outSpec.outW,
+        outH: outSpec.outH,
+      });
+    }
+    const diff = await untouchedDiff(sceneImageBuffer, finalBuf, union);
+    if (!wantPasteback) {
+      diff.note = sizeNote || '画幅不跟随原图，框外像素不再逐像素保留';
+    }
+
     if (opts.assetFid && services && services.db) {
-      await persistEditDerivative(services, opts.assetFid, 'base_attr', generated, {
-        prompt: compiled.prompt,
+      await persistEditDerivative(services, opts.assetFid, 'base_attr', finalBuf, {
+        prompt: finalPrompt,
         light_clause: compiled.light_clause
       });
     }
 
+    const bounds = selectionBounds(union, sw, sh);
     return {
-      buffer: generated,
-      apiBox: { x1: 0, y1: 0, x2: 999, y2: 999 },
-      untouchedDiff: { unchangedRatio: null, note: '基础属性全图重绘' },
-      prompt: compiled.prompt,
-      outSize: publicOutSize(outSpec, false),
-      refDropped: compiled.ref_dropped || []
+      buffer: finalBuf,
+      apiBox: apiBoxFromBounds(bounds.minX, bounds.minY, bounds.maxX, bounds.maxY, sw, sh),
+      untouchedDiff: diff,
+      prompt: finalPrompt,
+      outSize: publicOutSize(outSpec, wantPasteback),
+      refDropped: compiled.ref_dropped || [],
+      regionNote: [sizeNote, reconciled.sanitized ? reconciled.note : ''].filter(Boolean).join('；'),
     };
   }
 

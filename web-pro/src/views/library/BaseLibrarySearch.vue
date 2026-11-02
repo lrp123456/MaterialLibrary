@@ -133,6 +133,29 @@ async function doSearch() {
 async function importItem(item) {
   importingId.value = item.id;
   try {
+    let surface = 'floor';
+    let subclass = 'floor_wood';
+    const textLower = `${item.title || ''} ${item.id || ''}`.toLowerCase();
+    if (textLower.includes('tile') || textLower.includes('brick')) {
+      surface = 'wall';
+      subclass = 'wall_tile';
+    } else if (textLower.includes('marble') || textLower.includes('travertine') || textLower.includes('granite')) {
+      surface = 'floor';
+      subclass = 'floor_stone';
+    } else if (textLower.includes('leather')) {
+      surface = 'upholstery';
+      subclass = 'uph_leather';
+    } else if (textLower.includes('fabric') || textLower.includes('cloth') || textLower.includes('velvet')) {
+      surface = 'upholstery';
+      subclass = 'uph_fabric';
+    } else if (textLower.includes('carpet') || textLower.includes('rug')) {
+      surface = 'rug';
+      subclass = 'soft_rug';
+    } else if (textLower.includes('wood') || textLower.includes('parquet') || textLower.includes('plank')) {
+      surface = 'floor';
+      subclass = 'floor_wood';
+    }
+
     const res = await fetch('/api/base-library/materials/confirm', {
       method: 'POST',
       headers: {
@@ -143,7 +166,8 @@ async function importItem(item) {
         source: item.source,
         source_id: item.id,
         name_cn: item.title || item.id,
-        tags: [{ surface: 'floor', subclass: 'floor_wood' }]
+        track: 'B',
+        tags: [{ surface, subclass }]
       })
     });
     const json = await res.json();

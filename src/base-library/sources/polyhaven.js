@@ -81,24 +81,25 @@ async function resolvePolyHavenDownloadUrl(assetId, { timeoutMs = 8000 } = {}) {
   if (!res.ok) throw new Error(`Poly Haven files API HTTP ${res.status}`);
   const json = await res.json();
 
-  // 寻觅 1k -> Diffuse / diff / Color 的 jpg
-  const root = json['1k'] || json['1K'] || json.diffuse || json.Diffuse || {};
+  // Poly Haven 的真实结构是：
+  // { Diffuse: { '1k': { jpg: { url }, png: { url } } }, Rough: { ... } }
+  // 旧实现误把顶层 json['1k'] 当根节点，导致永远找不到 1K diffuse。
+  const channels = [json.Diffuse, json.diffuse, json.Color, json.color, json.BaseColor, json.basecolor];
   let downloadUrl = null;
-
-  // 1k 结构通常为 { diffuse: { jpg: { url: ... } }, ... }
-  if (root.diffuse?.jpg?.url) downloadUrl = root.diffuse.jpg.url;
-  else if (root.Diffuse?.jpg?.url) downloadUrl = root.Diffuse.jpg.url;
-  else if (root.color?.jpg?.url) downloadUrl = root.color.jpg.url;
-  else if (root.Color?.jpg?.url) downloadUrl = root.Color.jpg.url;
-  else if (root.basecolor?.jpg?.url) downloadUrl = root.basecolor.jpg.url;
+  for (const channel of channels) {
+    if (!channel) continue;
+    const level = channel['1k'] || channel['1K'] || channel;
+    if (level?.jpg?.url) { downloadUrl = level.jpg.url; break; }
+    if (level?.png?.url) { downloadUrl = level.png.url; break; }
+  }
 
   if (!downloadUrl) {
-    // 深度搜索符合条件的 1k jpg
-    for (const [key, val] of Object.entries(root)) {
-      if (/diff|color|base/i.test(key) && val?.jpg?.url) {
-        downloadUrl = val.jpg.url;
-        break;
-      }
+    // 兜底：深度搜索 1k jpg/png
+    for (const [key, val] of Object.entries(json)) {
+      if (!/diff|color|base/i.test(key)) continue;
+      const level = val?.['1k'] || val?.['1K'] || val;
+      if (level?.jpg?.url) { downloadUrl = level.jpg.url; break; }
+      if (level?.png?.url) { downloadUrl = level.png.url; break; }
     }
   }
 

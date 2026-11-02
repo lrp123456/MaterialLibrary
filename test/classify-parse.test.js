@@ -106,7 +106,7 @@ async function runTests() {
 
   const fakeJpeg = Buffer.from('fake_jpeg_content');
 
-  // 默认 base_library_jev = 0 (关闭)
+  setFlag(db, 'base_library_jev', 0);
   const resDisabled = await classifyRegionSurface(db, fakeJpeg);
   assert.strictEqual(resDisabled.success, true);
   assert.strictEqual(resDisabled.data.uncertain, true);
@@ -116,7 +116,9 @@ async function runTests() {
   // 开启 base_library_jev，但未配置 TYPESAFE_API_KEY
   setFlag(db, 'base_library_jev', 1);
   const oldKey = process.env.TYPESAFE_API_KEY;
+  const oldJevKey = process.env.JEV_API_KEY;
   delete process.env.TYPESAFE_API_KEY;
+  delete process.env.JEV_API_KEY;
 
   const resNoKey = await classifyRegionSurface(db, fakeJpeg);
   assert.strictEqual(resNoKey.success, true);

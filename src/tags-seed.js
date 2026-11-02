@@ -32,6 +32,7 @@ const DIMENSIONS = [
   { dimKey: 'season',             label: '季节',         multi: false, isPrimary: true, isClothing: true },
   { dimKey: 'mood',               label: '情绪',         multi: false, isPrimary: true },
   { dimKey: 'video_purpose',      label: '成片用途',     multi: false, isPrimary: true },
+  { dimKey: 'audio_role',         label: '音频角色',     multi: false, isPrimary: true },
 
   { dimKey: 'color_style',        label: '色系',         multi: true,  deprecated: true },
   { dimKey: 'flags',              label: '标记',         multi: true,  deprecated: true },
@@ -176,6 +177,9 @@ const VALUES = [
   ['ad','商业短片','video_purpose', null, ['广告','宣传片']],
   ['portrait','人像动态','video_purpose', null, ['人物动态']],
   ['other','其他','video_purpose'],
+
+  ['bgm','氛围背景乐','audio_role', null, ['背景乐','纯音乐']],
+  ['sfx','环境音效','audio_role', null, ['音效','环境声']],
 
   // 旧值（deprecated，仅迁移/兼容）
   ['european_light_luxury','欧式轻奢','style_atom', null, ['法式轻奢','意式极简','意式轻奢']],

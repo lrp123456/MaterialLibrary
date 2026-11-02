@@ -60,6 +60,20 @@ function deltaE2000Approx(l1, l2) {
   return Math.sqrt(dL * dL + da * da + db * db);
 }
 
+function deltaE(hex1, hex2) {
+  if (!hex1 || !hex2) return 999;
+  try {
+    const c1 = hexToRgb(String(hex1).trim());
+    const c2 = hexToRgb(String(hex2).trim());
+    if (!c1 || isNaN(c1.r) || !c2 || isNaN(c2.r)) return 999;
+    const l1 = rgbToLab(c1.r, c1.g, c1.b);
+    const l2 = rgbToLab(c2.r, c2.g, c2.b);
+    return deltaE2000Approx(l1, l2);
+  } catch (_) {
+    return 999;
+  }
+}
+
 function kmeans(points, k, maxIter = 12) {
   if (!points.length) return [];
   const centroids = [];
@@ -340,4 +354,4 @@ async function extractColorRoles(bufferOrPath) {
   return { dominantColor: main?.basic || '', colors: roles, colorStyles: styles, basicCounts };
 }
 
-module.exports = { extractColorRoles, basicColorOfHex, nearestColorName, BASIC_COLORS, rgbToHsl, rgbToHex };
+module.exports = { extractColorRoles, basicColorOfHex, nearestColorName, BASIC_COLORS, rgbToHsl, rgbToHex, hexToRgb, rgbToLab, deltaE2000Approx, deltaE };

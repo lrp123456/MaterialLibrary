@@ -20,11 +20,17 @@
     <div class="px-4 py-2.5 bg-studio-950/80 border-b border-studio-800 flex items-center justify-between text-xs">
       <div class="flex items-center gap-2 min-w-0">
         <span class="text-slate-400 font-bold shrink-0">当前目标:</span>
-        <span class="px-2 py-0.5 rounded bg-studio-cyan/15 text-studio-cyan font-mono font-bold text-xs shrink-0">
+        <span v-if="hasTargetImage" class="px-2 py-0.5 rounded bg-studio-cyan/15 text-studio-cyan font-mono font-bold text-xs shrink-0">
           {{ targetTag || '@图1' }}
+        </span>
+        <span v-else class="px-2 py-0.5 rounded bg-rose-500/15 text-rose-300 font-bold text-xs shrink-0 flex items-center gap-1">
+          <StudioIcon name="alert-circle" :size="12" /> 未选参考图
         </span>
         <span v-if="targetImageName" class="text-slate-400 truncate text-[11px]" :title="targetImageName">
           {{ targetImageName }}
+        </span>
+        <span v-else-if="!hasTargetImage" class="text-rose-400/90 text-[11px] truncate">
+          请先上传空间主图
         </span>
       </div>
       <div v-if="targetImageThumb" class="w-7 h-7 rounded border border-studio-700 overflow-hidden shrink-0">
@@ -32,34 +38,48 @@
       </div>
     </div>
 
-    <!-- 顶部 3 个功能 Tab 切换 -->
+    <!-- 顶部 4 个功能 Tab 切换：风格、换空间、超分、去水印 -->
     <div class="p-3 border-b border-studio-800 shrink-0">
-      <div class="grid grid-cols-3 gap-1 bg-studio-950 p-1 rounded-xl border border-studio-800 text-xs font-bold">
+      <div class="grid grid-cols-4 gap-1 bg-studio-950 p-1 rounded-xl border border-studio-800 text-xs font-bold">
         <button
           type="button"
           @click="selectTab('style')"
           :class="[
-            'py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer',
+            'py-2 rounded-lg flex items-center justify-center gap-1 transition-all cursor-pointer',
             currentTab === 'style'
               ? 'bg-studio-850 text-white shadow-sm border border-studio-700'
               : 'text-slate-400 hover:text-slate-200'
           ]"
         >
-          <StudioIcon name="palette" :size="14" />
+          <StudioIcon name="palette" :size="13" />
           <span>风格</span>
+        </button>
+
+        <button
+          type="button"
+          @click="selectTab('space')"
+          :class="[
+            'py-2 rounded-lg flex items-center justify-center gap-1 transition-all cursor-pointer',
+            currentTab === 'space'
+              ? 'bg-studio-850 text-white shadow-sm border border-studio-700'
+              : 'text-slate-400 hover:text-slate-200'
+          ]"
+        >
+          <StudioIcon name="refresh" :size="13" />
+          <span>换空间</span>
         </button>
 
         <button
           type="button"
           @click="selectTab('upscale')"
           :class="[
-            'py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer',
+            'py-2 rounded-lg flex items-center justify-center gap-1 transition-all cursor-pointer',
             currentTab === 'upscale'
               ? 'bg-studio-850 text-white shadow-sm border border-studio-700'
               : 'text-slate-400 hover:text-slate-200'
           ]"
         >
-          <StudioIcon name="maximize" :size="14" />
+          <StudioIcon name="maximize" :size="13" />
           <span>超分</span>
         </button>
 
@@ -67,13 +87,13 @@
           type="button"
           @click="selectTab('watermark')"
           :class="[
-            'py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer',
+            'py-2 rounded-lg flex items-center justify-center gap-1 transition-all cursor-pointer',
             currentTab === 'watermark'
               ? 'bg-studio-850 text-white shadow-sm border border-studio-700'
               : 'text-slate-400 hover:text-slate-200'
           ]"
         >
-          <StudioIcon name="trash" :size="14" />
+          <StudioIcon name="trash" :size="13" />
           <span>去水印</span>
         </button>
       </div>
@@ -81,248 +101,328 @@
 
     <!-- 中部滚动区 -->
     <div class="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin">
-      <!-- ================= Tab 1: 风格转换 ================= -->
+      <!-- ================= Tab 1: 风格转换 (基础素材 21 个精细风格) ================= -->
       <div v-if="currentTab === 'style'" class="space-y-3">
         <div class="flex items-center justify-between text-xs">
-          <span class="font-bold text-slate-300">官方标准空间风格 (6 款)</span>
-          <span class="text-[10px] text-slate-500 font-mono">点击即写配方</span>
+          <span class="font-bold text-slate-300">基础素材精细风格 (21 款)</span>
+          <span class="text-[10px] text-slate-500 font-mono">有方案即带真材质</span>
         </div>
 
-        <!-- 6 个官方风格卡片 -->
+        <!-- 21 风格列表 -->
         <div class="grid grid-cols-1 gap-2.5">
           <div
-            v-for="st in OFFICIAL_STYLES"
-            :key="st.name"
-            @click="selectStyle(st)"
+            v-for="st in fineStyles"
+            :key="st.id"
+            @click="selectFineStyle(st)"
             :class="[
               'rounded-xl border p-3 cursor-pointer transition-all space-y-2 select-none relative overflow-hidden',
-              activeStyleName === st.name
+              activeStyleId === st.id
                 ? 'border-studio-accent bg-studio-accent/10 shadow-md ring-1 ring-studio-accent/30'
                 : 'border-studio-800 bg-studio-950/70 hover:border-studio-700 hover:bg-studio-950'
             ]"
           >
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-2">
-                <span class="w-2.5 h-2.5 rounded-full" :class="st.dotClass"></span>
-                <span class="font-bold text-xs text-white">{{ st.name }}</span>
+                <span class="w-2.5 h-2.5 rounded-full" :class="st.scheme_count > 0 ? 'bg-emerald-400' : 'bg-slate-500'"></span>
+                <span class="font-bold text-xs text-white">{{ st.name_zh }}</span>
               </div>
-              <span class="text-[10px] px-2 py-0.5 rounded-full bg-studio-900 border border-studio-800 text-slate-400 font-mono">
-                {{ st.tag }}
+              <span
+                v-if="st.scheme_count > 0"
+                class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-mono font-bold"
+              >
+                {{ st.scheme_count }} 套真实方案
+              </span>
+              <span
+                v-else
+                class="text-[10px] px-2 py-0.5 rounded-full bg-studio-900 border border-studio-800 text-slate-500 font-mono"
+              >
+                暂无方案
               </span>
             </div>
 
-            <p class="text-[11px] text-slate-400 leading-snug line-clamp-1">
-              {{ st.summary }}
+            <p class="text-[11px] text-slate-400 leading-snug">
+              {{ st.description || '保持原有空间结构、构图和主要家具位置。' }}
             </p>
 
-            <!-- 选中展开：2 行可微调的锚定描述 -->
+            <!-- 选中展开区域 -->
             <div
-              v-if="activeStyleName === st.name"
-              class="pt-2 border-t border-studio-800/80 space-y-1.5 animate-in fade-in duration-200"
+              v-if="activeStyleId === st.id"
+              class="pt-2 border-t border-studio-800/80 space-y-2 animate-in fade-in duration-150"
               @click.stop
             >
-              <div class="flex items-center justify-between text-[10px] text-slate-400">
-                <span class="font-bold text-studio-cyan">风格锚定描述（可微调）:</span>
-                <button
-                  type="button"
-                  @click="resetStyleDesc(st)"
-                  class="text-[10px] text-slate-500 hover:text-slate-300 underline cursor-pointer"
-                >
-                  恢复默认
-                </button>
+              <!-- 若该风格有真方案，列出方案卡片 -->
+              <div v-if="st.scheme_count > 0 && styleSchemes[st.id]?.length" class="space-y-1.5">
+                <span class="text-[11px] font-bold text-studio-cyan">选择落地方案:</span>
+                <div class="space-y-1.5">
+                  <div
+                    v-for="scheme in styleSchemes[st.id]"
+                    :key="scheme.id"
+                    @click="applyScheme(st, scheme, false)"
+                    :class="[
+                      'p-2.5 rounded-lg border cursor-pointer transition-all flex flex-col gap-1.5',
+                      activeSchemeId === scheme.id
+                        ? 'border-studio-accent bg-studio-accent/20 text-white font-bold'
+                        : 'border-studio-800 bg-studio-900/80 hover:border-studio-700 text-slate-300'
+                    ]"
+                  >
+                    <div class="flex items-center justify-between">
+                      <div class="text-xs">{{ scheme.name_zh }}</div>
+                      <span v-if="activeSchemeId === scheme.id" class="text-studio-accent text-xs">✓ 已应用</span>
+                    </div>
+                    <div class="text-[10px] text-slate-400 leading-tight">{{ scheme.description || '各表面材质匹配方案' }}</div>
+                    
+                    <!-- 双模切换开关：纯文本轻量生图 vs 多图材质精准生图 -->
+                    <div
+                      v-if="activeSchemeId === scheme.id"
+                      class="mt-1 pt-1.5 border-t border-studio-700/60 flex items-center justify-between text-[11px]"
+                      @click.stop
+                    >
+                      <span class="text-slate-400 flex items-center gap-1 font-normal">
+                        模式:
+                        <span :class="schemeMountRefsMap[scheme.id] ? 'text-amber-300 font-bold' : 'text-studio-cyan font-bold'">
+                          {{ schemeMountRefsMap[scheme.id] ? '多图参考 (精准质感)' : '纯文本配方 (轻量极速)' }}
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        @click="toggleMountRefs(st, scheme)"
+                        class="px-2 py-0.5 rounded border text-[10px] font-bold transition-all cursor-pointer shadow-sm active:scale-95"
+                        :class="schemeMountRefsMap[scheme.id]
+                          ? 'border-amber-500/50 bg-amber-500/20 text-amber-200 hover:bg-amber-500/30'
+                          : 'border-studio-cyan/50 bg-studio-cyan/20 text-studio-cyan hover:bg-studio-cyan/30'"
+                      >
+                        {{ schemeMountRefsMap[scheme.id] ? '切回纯文本' : '+ 引入材质参考图' }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <textarea
-                v-model="customizedStyleDesc"
-                rows="2"
-                @input="onStyleDescInput(st.name)"
-                class="w-full bg-studio-900 border border-studio-700 rounded-lg p-2 text-xs text-slate-100 font-sans outline-none focus:border-studio-accent leading-relaxed resize-none scrollbar-thin"
-              ></textarea>
+
+              <!-- 若该风格没有方案，明确提示，不编造方案 -->
+              <div v-else-if="st.scheme_count === 0" class="p-2 rounded-lg bg-studio-900/60 border border-studio-800 text-[11px] text-slate-400 leading-relaxed">
+                <span class="text-amber-400/90 font-bold">这个风格还没有方案。</span>
+                已写入风格基础意向描述，不挂载空参考图。
+              </div>
+
+              <!-- 可微调的描述文本框 -->
+              <div class="space-y-1">
+                <div class="flex items-center justify-between text-[10px] text-slate-400">
+                  <span class="font-bold text-slate-300">配方说明微调:</span>
+                  <button
+                    type="button"
+                    @click="resetStyleDesc(st)"
+                    class="text-[10px] text-slate-500 hover:text-slate-300 underline cursor-pointer"
+                  >
+                    恢复默认
+                  </button>
+                </div>
+                <textarea
+                  v-model="customizedStyleDesc"
+                  rows="2"
+                  @input="onStyleDescInput(st)"
+                  class="w-full bg-studio-900 border border-studio-700 rounded-lg p-2 text-xs text-slate-100 font-sans outline-none focus:border-studio-accent leading-relaxed resize-none scrollbar-thin"
+                ></textarea>
+              </div>
             </div>
           </div>
         </div>
+      </div>
 
-        <!-- 自定义风格折叠卡 -->
-        <div class="pt-2 border-t border-studio-800 space-y-2">
-          <div
-            @click="showCustomStyleForm = !showCustomStyleForm"
-            class="flex items-center justify-between p-3 rounded-xl border border-dashed border-studio-700 bg-studio-950/40 hover:bg-studio-950 cursor-pointer transition-colors"
-          >
-            <div class="flex items-center gap-2 text-xs font-bold text-studio-cyan">
-              <StudioIcon name="plus" :size="13" />
-              <span>添加自定义空间风格</span>
-            </div>
-            <StudioIcon :name="showCustomStyleForm ? 'chevronDown' : 'chevronRight'" :size="14" class="text-slate-400" />
-          </div>
+      <!-- ================= Tab 2: 换空间 (结构化识别与 Lab 色差材质推荐) ================= -->
+      <div v-else-if="currentTab === 'space'" class="space-y-3.5">
+        <div class="flex items-center justify-between text-xs">
+          <span class="font-bold text-slate-300">换空间 (沿用材质与配色)</span>
+          <span class="text-[10px] text-studio-cyan font-mono">互斥清空风格</span>
+        </div>
 
-          <!-- 自定义风格表单 -->
-          <div
-            v-if="showCustomStyleForm"
-            class="p-3 rounded-xl border border-studio-700 bg-studio-950 space-y-2.5 animate-in fade-in duration-150"
-          >
-            <div class="space-y-1">
-              <label class="text-[11px] font-bold text-slate-300">风格名称</label>
-              <input
-                v-model="newStyleName"
-                type="text"
-                placeholder="例如: 赛博朋克原木、新岭南新中式"
-                class="w-full bg-studio-900 border border-studio-750 rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-studio-accent"
-              />
-            </div>
-
-            <div class="space-y-1">
-              <label class="text-[11px] font-bold text-slate-300">风格锚定描述</label>
-              <textarea
-                v-model="newStyleDesc"
-                rows="2"
-                placeholder="详细特征描述，如色彩、主材质、光影形态等"
-                class="w-full bg-studio-900 border border-studio-750 rounded-lg p-2 text-xs text-slate-200 outline-none focus:border-studio-accent resize-none scrollbar-thin leading-relaxed"
-              ></textarea>
-            </div>
-
-            <div class="flex items-center justify-end gap-2 pt-1">
-              <button
-                type="button"
-                @click="applyCustomStyleOnly"
-                :disabled="!newStyleName.trim()"
-                class="px-3 py-1.5 rounded-lg bg-studio-800 hover:bg-studio-750 text-slate-200 text-xs font-bold cursor-pointer disabled:opacity-40 transition-colors"
-              >
-                仅写入配方
-              </button>
-              <button
-                type="button"
-                @click="saveAndApplyCustomStyle"
-                :disabled="!newStyleName.trim()"
-                class="px-3 py-1.5 rounded-lg bg-studio-accent hover:brightness-110 text-white text-xs font-bold cursor-pointer disabled:opacity-40 transition-all shadow-sm"
-              >
-                保存并写入
-              </button>
-            </div>
-          </div>
-
-          <!-- 已保存的个人自定义风格列表 -->
-          <div v-if="savedCustomStyles.length" class="space-y-1.5 pt-1">
-            <span class="text-[11px] font-bold text-slate-400">已保存的个人风格 ({{ savedCustomStyles.length }})</span>
-            <div
-              v-for="(cs, idx) in savedCustomStyles"
-              :key="idx"
-              @click="selectCustomStyle(cs)"
+        <!-- 目标空间类型选择 -->
+        <div class="space-y-1">
+          <label class="text-[11px] font-bold text-slate-400">目标空间类型</label>
+          <div class="grid grid-cols-4 gap-1.5">
+            <button
+              v-for="sp in SPACE_OPTIONS"
+              :key="sp.key"
+              type="button"
+              @click="targetSpaceKey = sp.key"
               :class="[
-                'p-2.5 rounded-lg border flex items-center justify-between cursor-pointer transition-colors',
-                activeStyleName === cs.name
-                  ? 'border-studio-accent bg-studio-accent/15 text-white'
-                  : 'border-studio-800 bg-studio-950/60 text-slate-300 hover:border-studio-700'
+                'py-1.5 px-1 rounded-lg text-xs font-bold text-center cursor-pointer transition-colors truncate',
+                targetSpaceKey === sp.key
+                  ? 'bg-studio-accent text-white shadow-xs'
+                  : 'bg-studio-950 border border-studio-800 text-slate-400 hover:text-slate-200'
               ]"
             >
-              <div class="min-w-0 pr-2">
-                <div class="text-xs font-bold truncate">{{ cs.name }}</div>
-                <div class="text-[10px] text-slate-400 truncate">{{ cs.desc }}</div>
+              {{ sp.label }}
+            </button>
+          </div>
+        </div>
+
+        <!-- 原图结构化识别动作卡 -->
+        <div class="p-3 rounded-xl bg-studio-950 border border-studio-800 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-white flex items-center gap-1.5">
+              <span>🔍 整图结构化表面读取</span>
+            </span>
+            <button
+              type="button"
+              @click="extractSurfacesFromImage"
+              :disabled="extractingSurfaces"
+              class="px-2.5 py-1 rounded-lg bg-studio-cyan/20 hover:bg-studio-cyan/30 text-studio-cyan border border-studio-cyan/40 text-xs font-bold cursor-pointer disabled:opacity-40 transition-colors flex items-center gap-1"
+            >
+              <StudioIcon v-if="extractingSurfaces" name="refresh" :size="12" class="animate-spin" />
+              <span>{{ surfacesExtracted ? '重新识别' : '开始识别' }}</span>
+            </button>
+          </div>
+          <p class="text-[11px] text-slate-400 leading-snug">
+            自动读取原图的墙、顶、地、木作、软装、金属种类与色彩，按 Lab 色差给出推荐材质。
+          </p>
+        </div>
+
+        <!-- 6 面材质推荐列表 (识别后展示) -->
+        <div v-if="surfacesExtracted" class="space-y-3">
+          <div
+            v-for="item in spaceSurfaces"
+            :key="item.key"
+            class="p-2.5 rounded-xl bg-studio-950 border border-studio-800 space-y-2"
+          >
+            <!-- 表面标题行与识别信息 -->
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1.5">
+                <span class="w-2.5 h-2.5 rounded-full border border-white/20" :style="{ backgroundColor: item.hex }"></span>
+                <span class="font-bold text-xs text-white">{{ item.label }}</span>
+                <span class="text-[10px] text-slate-400">({{ item.desc || item.kind_key }})</span>
               </div>
+              <span class="text-[10px] font-mono text-slate-400">{{ item.hex }}</span>
+            </div>
+
+            <!-- 子类切换行 -->
+            <div class="flex items-center gap-1 overflow-x-auto pb-1 scrollbar-none">
               <button
+                v-for="k in item.kinds"
+                :key="k"
                 type="button"
-                @click.stop="deleteSavedStyle(idx)"
-                class="p-1 text-slate-500 hover:text-rose-400 cursor-pointer shrink-0"
-                title="删除此风格"
+                @click="changeSurfaceKind(item, k)"
+                :class="[
+                  'px-2 py-0.5 rounded text-[10px] font-medium shrink-0 cursor-pointer transition-colors',
+                  item.kind_key === k
+                    ? 'bg-studio-cyan/20 text-studio-cyan border border-studio-cyan/40 font-bold'
+                    : 'bg-studio-900 text-slate-400 hover:text-slate-200'
+                ]"
               >
-                <StudioIcon name="trash" :size="12" />
+                {{ kindLabel(k) }}
               </button>
             </div>
+
+            <!-- Lab 色差推荐材质条 -->
+            <div class="space-y-1">
+              <div class="text-[10px] text-slate-500 font-mono">建议采用 (色差最小):</div>
+              <div class="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                <div
+                  v-for="rec in (spaceRecommendations[item.key] || [])"
+                  :key="rec.id"
+                  @click="item.selected = rec"
+                  :class="[
+                    'p-1.5 rounded-lg border shrink-0 w-24 cursor-pointer transition-all space-y-1',
+                    item.selected?.id === rec.id
+                      ? 'border-studio-accent bg-studio-accent/20 ring-1 ring-studio-accent'
+                      : 'border-studio-800 bg-studio-900 hover:border-studio-700'
+                  ]"
+                  :title="`${rec.name_zh} (ΔE: ${rec.delta_e})`"
+                >
+                  <div class="w-full h-12 rounded bg-studio-950 overflow-hidden relative">
+                    <img v-if="rec.preview_rel" :src="authedUrl(rec.preview_rel)" class="w-full h-full object-cover" />
+                    <div v-else class="w-full h-full" :style="{ backgroundColor: rec.hex || '#666' }"></div>
+                    <span v-if="rec.delta_e != null" class="absolute bottom-0.5 right-0.5 px-1 rounded bg-black/60 text-[9px] font-mono text-emerald-300">
+                      ΔE {{ rec.delta_e }}
+                    </span>
+                  </div>
+                  <div class="text-[10px] font-bold text-white truncate">{{ rec.name_zh }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 确认写入配方按钮 -->
+          <div class="pt-2">
+            <button
+              type="button"
+              @click="confirmSpaceTransferRecipe"
+              class="w-full py-2.5 rounded-xl bg-studio-accent hover:brightness-110 text-white text-xs font-bold shadow-md cursor-pointer transition-all flex items-center justify-center gap-2"
+            >
+              <StudioIcon name="check" :size="14" />
+              <span>确认换空间配方并挂载材质图</span>
+            </button>
           </div>
         </div>
       </div>
 
-      <!-- ================= Tab 2: 超分辨率提升 ================= -->
-      <div v-else-if="currentTab === 'upscale'" class="space-y-4">
-        <div class="space-y-1">
-          <div class="font-bold text-xs text-slate-200">超分辨率清晰度提升</div>
-          <p class="text-[11px] text-slate-400 leading-relaxed">
-            提升目标参考图的视觉精度与纹理细节，锁定构图与家具陈设不变。
-          </p>
+      <!-- ================= Tab 3: 超分辨率 ================= -->
+      <div v-else-if="currentTab === 'upscale'" class="space-y-3">
+        <div class="flex items-center justify-between text-xs">
+          <span class="font-bold text-slate-300">图像细节放大增强</span>
+          <span class="text-[10px] text-slate-500 font-mono">保持像素内容不变</span>
         </div>
 
-        <div class="grid grid-cols-3 gap-2">
-          <button
-            v-for="scale in ['2K', '4K', '8K']"
+        <div class="grid grid-cols-1 gap-2.5">
+          <div
+            v-for="scale in ['2K 高清增强', '4K 空间出版级', '8K 巨幕级']"
             :key="scale"
-            type="button"
             @click="selectUpscale(scale)"
             :class="[
-              'p-3.5 rounded-xl border flex flex-col items-center justify-center gap-1 cursor-pointer transition-all',
+              'p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-between',
               activeUpscale === scale
-                ? 'border-studio-accent bg-studio-accent/15 text-white shadow-md ring-1 ring-studio-accent/30'
-                : 'border-studio-800 bg-studio-950/70 text-slate-300 hover:border-studio-700 hover:bg-studio-950'
+                ? 'border-studio-accent bg-studio-accent/15 text-white ring-1 ring-studio-accent'
+                : 'border-studio-800 bg-studio-950/70 hover:border-studio-700 text-slate-300'
             ]"
           >
-            <span class="font-mono text-base font-extrabold">{{ scale }}</span>
-            <span class="text-[10px] text-slate-400">
-              {{ scale === '2K' ? '日常高清' : (scale === '4K' ? '精修汇报' : '印刷画册') }}
-            </span>
-          </button>
-        </div>
-
-        <div class="p-3 rounded-xl bg-studio-950 border border-studio-800 space-y-1.5 text-xs">
-          <span class="font-bold text-studio-cyan flex items-center gap-1.5">
-            <StudioIcon name="sliders" :size="13" />
-            超分配方公式
-          </span>
-          <p class="font-mono text-[11px] text-slate-300 leading-relaxed">
-            将{{ targetTag || '@图1' }}的清晰度提升到{{ activeUpscale || '4K' }}。只增强清晰度，不改变构图、物体、材质和颜色。
-          </p>
+            <div>
+              <div class="text-xs font-bold">{{ scale }}</div>
+              <div class="text-[10px] text-slate-500 font-mono">增强清晰度与材质微肌理</div>
+            </div>
+            <span v-if="activeUpscale === scale" class="text-studio-accent font-bold text-xs">✓ 已选</span>
+          </div>
         </div>
       </div>
 
-      <!-- ================= Tab 3: 一键去水印 ================= -->
-      <div v-else-if="currentTab === 'watermark'" class="space-y-4">
-        <div class="space-y-1">
-          <div class="font-bold text-xs text-slate-200">一键去除水印与标识</div>
-          <p class="text-[11px] text-slate-400 leading-relaxed">
-            自动消除画面中的台标、Logo、拍摄日期等水印覆层，精准修复底图背景。
-          </p>
+      <!-- ================= Tab 4: 去水印 ================= -->
+      <div v-else-if="currentTab === 'watermark'" class="space-y-3">
+        <div class="flex items-center justify-between text-xs">
+          <span class="font-bold text-slate-300">画面无损去水印</span>
+          <span class="text-[10px] text-slate-500 font-mono">智能擦除字样</span>
         </div>
 
-        <button
-          type="button"
+        <div
           @click="selectWatermark"
-          class="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-studio-accent to-studio-indigo hover:brightness-110 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-studio-accent/20 cursor-pointer transition-all"
+          class="p-4 rounded-xl border border-studio-800 bg-studio-950/70 hover:border-studio-accent cursor-pointer transition-all text-center space-y-1.5"
         >
-          <StudioIcon name="sparkles" :size="15" />
-          <span>生成一键去水印配方</span>
-        </button>
-
-        <div class="p-3 rounded-xl bg-studio-950 border border-studio-800 space-y-1.5 text-xs">
-          <span class="font-bold text-studio-cyan flex items-center gap-1.5">
-            <StudioIcon name="check" :size="13" />
-            去水印配方公式
-          </span>
-          <p class="font-mono text-[11px] text-slate-300 leading-relaxed">
-            去除{{ targetTag || '@图1' }}中的水印和标识。其余画面保持不变。
-          </p>
+          <div class="text-xs font-bold text-white">去除当前目标图的所有水印与杂标</div>
+          <div class="text-[11px] text-slate-400">保留空间原构图与全部材质质感，仅擦除水印标识</div>
         </div>
       </div>
 
-      <!-- ================= 整图光线控制 (全 Tab 通用附加子句) ================= -->
+      <!-- ================= 底部光照微调 (全局通用) ================= -->
       <div class="pt-3 border-t border-studio-800/80 space-y-3">
         <div class="flex items-center justify-between text-xs">
-          <span class="font-bold text-slate-300">整图光线控制</span>
-          <label class="flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer">
-            <input type="checkbox" v-model="globalLightKeep" @change="onLightChange" class="rounded border-studio-700 bg-studio-900 text-studio-accent" />
-            <span>保持原图光线</span>
+          <span class="font-bold text-slate-300">光照一致性</span>
+          <label class="flex items-center gap-1.5 cursor-pointer text-[11px] text-slate-400">
+            <input type="checkbox" v-model="globalLightKeep" @change="onLightChange" class="accent-studio-accent" />
+            <span>保持原图光照</span>
           </label>
         </div>
 
-        <div v-if="!globalLightKeep" class="space-y-3 p-3 rounded-xl bg-studio-950/70 border border-studio-800 text-xs">
-          <div>
-            <span class="text-[11px] text-slate-400 block mb-1.5">主光来向（屏幕方向）：</span>
-            <div class="grid grid-cols-5 gap-1 text-[10px]">
+        <div v-if="!globalLightKeep" class="space-y-2.5 animate-in fade-in duration-150">
+          <div class="space-y-1">
+            <span class="text-[10px] text-slate-400 font-mono">屏幕主光方向:</span>
+            <div class="grid grid-cols-5 gap-1">
               <button
                 v-for="d in lightDirections"
                 :key="d.key"
                 type="button"
                 @click="selectLightDir(d.key)"
                 :class="[
-                  'py-1.5 rounded-lg border text-center transition cursor-pointer',
+                  'py-1 text-[10px] rounded border font-medium cursor-pointer transition-colors text-center truncate',
                   globalLightDir === d.key
-                    ? 'bg-studio-accent border-studio-accent text-white font-bold'
-                    : 'border-studio-800 bg-studio-900 text-slate-400 hover:text-slate-200'
+                    ? 'bg-studio-accent/20 border-studio-accent text-studio-cyan font-bold'
+                    : 'bg-studio-950 border-studio-800 text-slate-400 hover:text-slate-200'
                 ]"
               >
                 {{ d.label }}
@@ -330,10 +430,10 @@
             </div>
           </div>
 
-          <div>
-            <div class="flex items-center justify-between text-[11px] text-slate-400 mb-1">
-              <span>色温微调：</span>
-              <span class="font-mono text-studio-cyan font-bold">{{ globalKelvin }}K</span>
+          <div class="space-y-1">
+            <div class="flex items-center justify-between text-[10px] text-slate-400 font-mono">
+              <span>色温 (Kelvin):</span>
+              <span class="text-amber-300 font-bold">{{ globalKelvin }}K</span>
             </div>
             <input
               type="range"
@@ -342,15 +442,8 @@
               step="100"
               v-model.number="globalKelvin"
               @input="onLightChange"
-              class="w-full accent-studio-accent cursor-pointer"
+              class="w-full accent-amber-400 cursor-pointer"
             />
-            <div class="flex justify-between text-[9px] text-slate-500 font-mono mt-1">
-              <span @click="selectKelvin(2700)" class="cursor-pointer hover:text-slate-300">2700K 暖黄</span>
-              <span @click="selectKelvin(3000)" class="cursor-pointer hover:text-slate-300">3000K 暖白</span>
-              <span @click="selectKelvin(4000)" class="cursor-pointer hover:text-slate-300">4000K 自然</span>
-              <span @click="selectKelvin(5000)" class="cursor-pointer hover:text-slate-300">5000K 冷白</span>
-              <span @click="selectKelvin(6500)" class="cursor-pointer hover:text-slate-300">6500K 日光</span>
-            </div>
           </div>
         </div>
       </div>
@@ -375,24 +468,87 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue';
+import { ref, watch, onMounted, computed, reactive } from 'vue';
 import StudioIcon from '@/components/StudioIcon.vue';
+import { getToken } from '@/api';
 
 const props = defineProps({
   recipePrompt: { type: String, default: '' },
   targetTag: { type: String, default: '@图1' },
   targetImageThumb: { type: String, default: '' },
   targetImageName: { type: String, default: '' },
+  targetImageUrl: { type: String, default: '' },
   initialTab: { type: String, default: 'style' }
 });
 
-const emit = defineEmits(['update:recipePrompt', 'close']);
+const emit = defineEmits(['update:recipePrompt', 'close', 'mount-refs', 'unmount-material-refs']);
+
+const hasTargetImage = computed(() => {
+  return Boolean(
+    props.targetImageUrl ||
+    props.targetImageThumb ||
+    (props.targetImageName && props.targetImageName !== '未选择' && props.targetImageName !== '未上传' && props.targetImageName !== '空间原图')
+  );
+});
 
 const currentTab = ref(props.initialTab || 'style');
+const activeStyleId = ref('');
 const activeStyleName = ref('');
+const activeSchemeId = ref('');
 const customizedStyleDesc = ref('');
 const activeUpscale = ref('');
 
+// 21 个精细风格数据
+const fineStyles = ref([]);
+const styleSchemes = ref({});
+const schemeMountRefsMap = reactive({});
+const schemeDataCache = reactive({});
+
+// 换空间相关
+const targetSpaceKey = ref('living');
+const extractingSurfaces = ref(false);
+const surfacesExtracted = ref(false);
+const spaceSurfaces = ref([]);
+const spaceRecommendations = ref({});
+
+const SPACE_OPTIONS = [
+  { key: 'living', label: '客厅' },
+  { key: 'bedroom', label: '主卧' },
+  { key: 'second_bedroom', label: '次卧' },
+  { key: 'dining', label: '餐厅' },
+  { key: 'study', label: '书房' },
+  { key: 'tea_room', label: '茶室' },
+  { key: 'bathroom', label: '卫生间' },
+  { key: 'balcony', label: '阳台' }
+];
+
+const KIND_LABELS = {
+  latex: '乳胶漆',
+  wallpaper: '墙纸/布',
+  microcement: '微水泥',
+  wood: '木纹',
+  wood_flooring: '木地板',
+  tile: '瓷砖',
+  stone: '大理石',
+  fabric: '布艺',
+  leather: '皮革',
+  metal_finish: '金属',
+  carpet: '地毯',
+  furniture: '家具',
+  fixture: '五金配件'
+};
+
+function kindLabel(k) {
+  return KIND_LABELS[k] || k;
+}
+
+function authedUrl(url) {
+  if (!url) return '';
+  const token = getToken();
+  return token ? `${url}?token=${encodeURIComponent(token)}` : url;
+}
+
+// 光照控制
 const globalLightKeep = ref(true);
 const globalLightDir = ref('top');
 const globalKelvin = ref(4000);
@@ -409,11 +565,6 @@ function selectLightDir(dirKey) {
   onLightChange();
 }
 
-function selectKelvin(k) {
-  globalKelvin.value = k;
-  onLightChange();
-}
-
 function getLightSentence() {
   if (globalLightKeep.value) {
     return '保持原图的主光方向和阴影形状。';
@@ -426,7 +577,7 @@ function getLightSentence() {
     right: '画面右侧'
   };
   const dirLabel = dirMap[globalLightDir.value] || '正上';
-  return `主光来自${dirLabel}，阴影落向相反的一侧。这是这张照片的屏幕方向，不是罗盘方位。色温约 ${globalKelvin.value}K。`;
+  return `主光来自${dirLabel}，阴影落向相反的一侧。色温约 ${globalKelvin.value}K。`;
 }
 
 function onLightChange() {
@@ -439,149 +590,223 @@ function onLightChange() {
   }
 }
 
-// 6 款官方风格定义
-const OFFICIAL_STYLES = [
-  {
-    name: '日式侘寂',
-    tag: '质朴 · 留白',
-    summary: '质朴素雅、留白禅意、自然原生质感',
-    desc: '采用粗粝微水泥、自然未打磨木材与素色棉麻软装，低饱和大地色系，强调光影留白与自然残缺之美。',
-    dotClass: 'bg-stone-400'
-  },
-  {
-    name: '极简原木',
-    tag: '温润 · 通透',
-    summary: '温暖温润、天然木纹、清爽明亮',
-    desc: '大面积使用白橡木或原木材质，搭配暖白色乳胶漆与米白布艺，线条简约干净，采光充沛通透。',
-    dotClass: 'bg-amber-400'
-  },
-  {
-    name: '微水泥极简',
-    tag: '一体 · 雕塑',
-    summary: '无缝一体、克制高级、纯粹几何',
-    desc: '墙面与地面采用浅灰微水泥无缝包裹，极窄踢脚线与内嵌隐形灯带，家具造型极具雕塑感与建筑感。',
-    dotClass: 'bg-slate-400'
-  },
-  {
-    name: '包豪斯工业',
-    tag: '结构 · 机能',
-    summary: '结构理性、金属线条、硬朗机能',
-    desc: '裸露清水混凝土与深色钢结构，搭配经典镀铬钢管皮椅与几何明快色块，强调形式追随功能。',
-    dotClass: 'bg-neutral-400'
-  },
-  {
-    name: '现代轻奢',
-    tag: '奢华 · 大理石',
-    summary: '精致奢华、大理石金属、品质细节',
-    desc: '选用高光鱼肚白大理石、拉丝香槟金金属饰条与丝绒面料，隐藏式高级泛光照明，营造优雅高级格调。',
-    dotClass: 'bg-amber-300'
-  },
-  {
-    name: '北欧斯堪的纳维亚',
-    tag: '亲和 · 宜居',
-    summary: '舒适惬意、明亮色彩、自然亲和',
-    desc: '明快浅木搭配粉灰、鼠尾草绿等柔和点缀，几何图案地毯与蓬松羊毛织物，注重温馨宜居的生活氛围。',
-    dotClass: 'bg-emerald-400'
-  }
-];
-
-// 自定义风格相关
-const showCustomStyleForm = ref(false);
-const newStyleName = ref('');
-const newStyleDesc = ref('');
-const savedCustomStyles = ref([]);
-
-function loadSavedCustomStyles() {
-  try {
-    const raw = localStorage.getItem('studio_custom_styles');
-    if (raw) savedCustomStyles.value = JSON.parse(raw);
-  } catch (e) {
-    savedCustomStyles.value = [];
-  }
-}
-
-function persistCustomStyles() {
-  try {
-    localStorage.setItem('studio_custom_styles', JSON.stringify(savedCustomStyles.value));
-  } catch (e) {
-    console.warn('保存个人风格失败:', e);
-  }
-}
-
-function saveAndApplyCustomStyle() {
-  const name = newStyleName.value.trim();
-  const desc = newStyleDesc.value.trim() || '保持原有空间结构、构图和主要家具位置。';
-  if (!name) return;
-
-  const existingIdx = savedCustomStyles.value.findIndex(s => s.name === name);
-  if (existingIdx >= 0) {
-    savedCustomStyles.value[existingIdx].desc = desc;
-  } else {
-    savedCustomStyles.value.push({ name, desc });
-  }
-  persistCustomStyles();
-
-  activeStyleName.value = name;
-  customizedStyleDesc.value = desc;
-  writeStyleRecipe(name, desc);
-  showCustomStyleForm.value = false;
-  newStyleName.value = '';
-  newStyleDesc.value = '';
-}
-
-function applyCustomStyleOnly() {
-  const name = newStyleName.value.trim();
-  const desc = newStyleDesc.value.trim() || '保持原有空间结构、构图和主要家具位置。';
-  if (!name) return;
-  activeStyleName.value = name;
-  customizedStyleDesc.value = desc;
-  writeStyleRecipe(name, desc);
-  showCustomStyleForm.value = false;
-}
-
-function selectCustomStyle(cs) {
-  activeStyleName.value = cs.name;
-  customizedStyleDesc.value = cs.desc;
-  writeStyleRecipe(cs.name, cs.desc);
-}
-
-function deleteSavedStyle(idx) {
-  savedCustomStyles.value.splice(idx, 1);
-  persistCustomStyles();
-}
-
+// Tab 切换（换空间与风格同级、互斥）
 function selectTab(tab) {
   currentTab.value = tab;
-  if (tab === 'upscale' && activeUpscale.value) {
+  if (tab === 'space') {
+    // 选换空间清掉风格句
+    activeStyleId.value = '';
+    activeStyleName.value = '';
+    activeSchemeId.value = '';
+    emit('update:recipePrompt', '');
+  } else if (tab === 'style') {
+    // 选风格清掉换空间句
+    emit('update:recipePrompt', '');
+    if (activeStyleName.value) {
+      writeStyleRecipe(activeStyleName.value, customizedStyleDesc.value);
+    }
+  } else if (tab === 'upscale' && activeUpscale.value) {
     selectUpscale(activeUpscale.value);
-  } else if (tab === 'watermark') {
+  } else if (currentTab.value === 'watermark') {
     selectWatermark();
-  } else if (tab === 'style' && activeStyleName.value) {
-    writeStyleRecipe(activeStyleName.value, customizedStyleDesc.value);
   }
 }
 
-function selectStyle(st) {
-  activeStyleName.value = st.name;
-  customizedStyleDesc.value = st.desc;
-  writeStyleRecipe(st.name, st.desc);
+// 风格列表加载与操作
+async function loadStyles() {
+  try {
+    const token = getToken();
+    const res = await fetch('/api/base-library/styles', {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const json = await res.json();
+    if (json.success && Array.isArray(json.data)) {
+      fineStyles.value = json.data;
+    }
+  } catch (e) {
+    console.warn('加载风格列表失败:', e);
+  }
+}
+
+async function selectFineStyle(st) {
+  activeStyleId.value = st.id;
+  activeStyleName.value = st.name_zh;
+  activeSchemeId.value = '';
+  customizedStyleDesc.value = st.description || '保持原有空间结构、构图和主要家具位置。';
+
+  // 1. 如果该风格有方案，拉取真实方案列表
+  if (st.scheme_count > 0 && !styleSchemes.value[st.id]) {
+    try {
+      const token = getToken();
+      const res = await fetch(`/api/base-library/schemes?style_id=${encodeURIComponent(st.id)}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        styleSchemes.value[st.id] = json.data;
+        // 如果有且仅有方案，先默认选中第一个
+        if (json.data.length > 0) {
+          applyScheme(st, json.data[0]);
+          return;
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 2. 如果该风格没有方案：只写风格名和风格说明，不挂空参考图
+  writeStyleRecipe(st.name_zh, customizedStyleDesc.value);
+}
+
+async function applyScheme(st, scheme, forceMount = false) {
+  if (!hasTargetImage.value) {
+    alert('请先在看图区上传或选择一张室内空间主图作为参考图（图1）');
+    return;
+  }
+  activeSchemeId.value = scheme.id;
+  try {
+    const token = getToken();
+    const tag = props.targetTag || '@图1';
+    let data = schemeDataCache[scheme.id];
+    if (!data) {
+      const res = await fetch(`/api/base-library/schemes/${encodeURIComponent(scheme.id)}/compile?target_tag=${encodeURIComponent(tag)}&start_ref_index=2`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const json = await res.json();
+      if (json.success && json.data) {
+        data = json.data;
+        schemeDataCache[scheme.id] = data;
+      }
+    }
+
+    if (data) {
+      const light = getLightSentence();
+      const isMount = Boolean(forceMount);
+      schemeMountRefsMap[scheme.id] = isMount;
+
+      if (isMount) {
+        // 多图参考模式 (精准质感)
+        const sentence = `${data.prompt_multimodal || data.prompt}${light ? `\n${light}` : ''}`;
+        emit('update:recipePrompt', sentence);
+        if (Array.isArray(data.refs) && data.refs.length > 0) {
+          emit('mount-refs', data.refs.map(r => ({
+            name: r.name || `${scheme.name_zh}_材质`,
+            url: r.url || r.rel
+          })));
+        }
+      } else {
+        // 纯文本轻量配方模式 (默认快速)
+        const sentence = `${data.prompt_text || data.prompt}${light ? `\n${light}` : ''}`;
+        emit('update:recipePrompt', sentence);
+        emit('unmount-material-refs');
+      }
+    }
+  } catch (e) {
+    console.warn('编译方案失败:', e);
+  }
+}
+
+function toggleMountRefs(st, scheme) {
+  const current = Boolean(schemeMountRefsMap[scheme.id]);
+  applyScheme(st, scheme, !current);
 }
 
 function resetStyleDesc(st) {
-  customizedStyleDesc.value = st.desc;
-  writeStyleRecipe(st.name, st.desc);
+  customizedStyleDesc.value = st.description || '';
+  writeStyleRecipe(st.name_zh, customizedStyleDesc.value);
 }
 
-function onStyleDescInput(styleName) {
-  writeStyleRecipe(styleName, customizedStyleDesc.value);
+function onStyleDescInput(st) {
+  writeStyleRecipe(st.name_zh, customizedStyleDesc.value);
 }
 
 function writeStyleRecipe(styleName, desc) {
   const tag = props.targetTag || '@图1';
   const cleanDesc = (desc || '').trim();
   const light = getLightSentence();
-  const sentence = `将${tag}改为${styleName}。${cleanDesc}保持原有空间结构、构图和主要家具位置。${light ? `\n${light}` : ''}`;
+  const sentence = `将${tag}改为${styleName}。${cleanDesc ? `${cleanDesc}。` : ''}保持原有空间结构、构图和主要家具位置。${light ? `\n${light}` : ''}`;
   emit('update:recipePrompt', sentence);
+}
+
+// 换空间：整图结构化识别与 Lab 色差推荐
+async function extractSurfacesFromImage() {
+  extractingSurfaces.value = true;
+  try {
+    const token = getToken();
+    const res = await fetch('/api/base-library/space/extract', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        image_base64: props.targetImageUrl || props.targetImageThumb || null
+      })
+    });
+    const json = await res.json();
+    if (json.success && json.data) {
+      const { surfaces, recommendations, specs } = json.data;
+      spaceRecommendations.value = recommendations || {};
+      const list = [];
+      for (const spec of specs) {
+        const s = surfaces[spec.key] || { surface: spec.key, label: spec.label, kind_key: spec.defaultKind, hex: '#CCCCCC' };
+        const recs = recommendations[spec.key] || [];
+        list.push({
+          key: spec.key,
+          label: spec.label,
+          kind_key: s.kind_key,
+          hex: s.hex || '#E0E0E0',
+          desc: s.desc || '',
+          kinds: spec.kinds || [s.kind_key],
+          selected: recs.length ? recs[0] : null
+        });
+      }
+      spaceSurfaces.value = list;
+      surfacesExtracted.value = true;
+    }
+  } catch (e) {
+    console.warn('换空间识别失败:', e);
+  } finally {
+    extractingSurfaces.value = false;
+  }
+}
+
+async function changeSurfaceKind(item, newKind) {
+  item.kind_key = newKind;
+  try {
+    const token = getToken();
+    const res = await fetch(`/api/base-library/space/recommend?surface=${encodeURIComponent(item.key)}&kind_key=${encodeURIComponent(newKind)}&hex=${encodeURIComponent(item.hex || '')}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const json = await res.json();
+    if (json.success && Array.isArray(json.data)) {
+      spaceRecommendations.value[item.key] = json.data;
+      item.selected = json.data.length ? json.data[0] : null;
+    }
+  } catch (_) {}
+}
+
+function confirmSpaceTransferRecipe() {
+  const tag = props.targetTag || '@图1';
+  const spaceObj = SPACE_OPTIONS.find(s => s.key === targetSpaceKey.value) || { label: '目标空间' };
+  const lines = spaceSurfaces.value.map(item => {
+    const sel = item.selected;
+    const name = sel ? sel.name_zh : (item.desc || kindLabel(item.kind_key));
+    return `${item.label}：${name}`;
+  });
+  const light = getLightSentence();
+  const sentence = `将${tag}转换为${spaceObj.label}。不要照拷原图的门窗、构图和主要家具位置，在新空间中沿用原图各表面的材质与色彩：${lines.join('；')}。${light ? `\n${light}` : ''}`;
+  emit('update:recipePrompt', sentence);
+
+  // 把确认选中的材质图挂进看图区托盘
+  const chosenRefs = spaceSurfaces.value
+    .filter(it => it.selected && it.selected.preview_rel)
+    .map(it => ({
+      name: `${it.label}_${it.selected.name_zh}`,
+      url: it.selected.preview_rel
+    }));
+  if (chosenRefs.length > 0) {
+    emit('mount-refs', chosenRefs);
+  }
 }
 
 function selectUpscale(scale) {
@@ -601,22 +826,13 @@ function selectWatermark() {
 
 function clearRecipe() {
   emit('update:recipePrompt', '');
+  activeStyleId.value = '';
   activeStyleName.value = '';
+  activeSchemeId.value = '';
   activeUpscale.value = '';
 }
 
-// 当目标图标号改变时，如已选定了操作，自动更新配方里的 @图N
-watch(() => props.targetTag, (newTag) => {
-  if (currentTab.value === 'style' && activeStyleName.value) {
-    writeStyleRecipe(activeStyleName.value, customizedStyleDesc.value);
-  } else if (currentTab.value === 'upscale' && activeUpscale.value) {
-    selectUpscale(activeUpscale.value);
-  } else if (currentTab.value === 'watermark') {
-    selectWatermark();
-  }
-});
-
 onMounted(() => {
-  loadSavedCustomStyles();
+  loadStyles();
 });
 </script>

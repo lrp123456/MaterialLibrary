@@ -3,7 +3,10 @@
     <!-- 顶置全局导航栏 (四大核心板块) -->
     <TopNav
       :activeTab="activeTab"
+      :libraryLane="libraryLane"
+      :username="currentUser?.username || ''"
       @update:activeTab="onTabChange"
+      @update:libraryLane="libraryLane = $event"
       @logout="handleLogout"
     />
 
@@ -13,7 +16,8 @@
       <!-- 1. 素材库板块 (DAM) -->
       <LibraryView
         v-if="activeTab === 'library'"
-        :key="'library-' + sessionTick"
+        :key="'library-' + sessionTick + '-' + libraryLane"
+        :libraryLane="libraryLane"
         @sendToChat="handleSendToChat"
         @sendToEdit="handleSendToEdit"
         @sendToClip="handleSendToClip"
@@ -25,6 +29,7 @@
         :key="'studio-' + sessionTick"
         :initialPayload="studioPayload"
         @sendToClip="handleSendToClip"
+        @payload-consumed="studioPayload = null"
       />
 
       <!-- 3. 媒体剪辑与工具板块 (多轨剪辑 + FFmpeg工具箱) -->
@@ -46,29 +51,103 @@
       @login-success="handleLoginSuccess"
     />
 
-    <!-- 全局语音输入：右侧悬浮麦克风，结果写回最后聚焦的输入框（登录后才挂载） -->
-    <VoiceInputButton v-if="currentUser" />
+
+
 
     <!-- 旧页签跑的是上一版构建：不提示的话，每次改完都是「还是没变化」 -->
-    <div v-if="updateAvailable" class="fixed bottom-5 left-5 z-[9999] flex items-center gap-2 rounded-xl border border-studio-cyan/40 bg-studio-900/95 px-4 py-3 text-xs shadow-2xl backdrop-blur">
-      <span class="text-slate-200">工作台已发布新版本。</span>
-      <button type="button" class="font-bold text-studio-cyan underline cursor-pointer" @click="reloadForUpdate">刷新加载</button>
+    <div v-if="updateAvailable" class="fixed bottom-6 left-6 z-[9999] flex items-center gap-3 rounded-2xl border border-studio-cyan/60 bg-studio-900/98 px-5 py-3.5 text-xs shadow-2xl backdrop-blur-lg animate-pulse">
+      <div class="w-2 h-2 rounded-full bg-studio-cyan"></div>
+      <span class="text-slate-100 font-medium">工作台已发布新版本。</span>
+      <button type="button" class="px-3 py-1 rounded-lg bg-studio-cyan text-studio-950 font-bold hover:brightness-110 cursor-pointer shadow transition-all" @click="reloadForUpdate">立即刷新加载</button>
+    </div>
+
+    <div v-if="crashError" class="fixed inset-0 z-[99999] flex flex-col items-center justify-center bg-studio-950/90 backdrop-blur-md p-6 text-center">
+      <div class="max-w-lg w-full p-6 rounded-2xl bg-studio-900 border border-red-500/30 shadow-2xl text-left">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center text-red-400 text-xl font-bold shrink-0">!</div>
+          <div>
+            <h3 class="text-base font-bold text-slate-100">
+              {{ isChunkLoadError ? '视图加载遇到版本缓存冲突' : '工作台遇到运行时异常' }}
+            </h3>
+            <p class="text-xs text-slate-400">
+              {{ isChunkLoadError ? '检测到静态资源版本更新，请刷新加载最新构建' : '组件渲染或数据处理时捕获到未处理异常' }}
+            </p>
+          </div>
+        </div>
+
+        <div class="p-3 mb-4 rounded-xl bg-studio-950 border border-studio-800 font-mono text-xs text-red-300 max-h-36 overflow-y-auto break-all select-all">
+          {{ crashError }}
+        </div>
+
+        <p class="text-xs text-slate-300 mb-6">
+          <template v-if="isChunkLoadError">
+            服务后台已构建并发布最新修复版本，请点击下方按钮强制刷新以加载最新工作台。
+          </template>
+          <template v-else>
+            您可以尝试重置工作台会话、复制错误详情排查，或先返回素材库继续工作，避免页面死锁。
+          </template>
+        </p>
+
+        <!-- Chunk 加载异常：只提供刷新更新 -->
+        <div v-if="isChunkLoadError" class="flex items-center justify-end gap-3">
+          <button
+            type="button"
+            class="px-5 py-2.5 rounded-xl bg-studio-cyan text-studio-950 font-bold hover:brightness-110 active:scale-95 transition-all text-sm cursor-pointer shadow-lg shadow-studio-cyan/20"
+            @click="reloadForUpdate"
+          >
+            立即刷新加载新版本
+          </button>
+        </div>
+
+        <!-- 运行时异常：提供 重置会话、复制错误、返回素材库、重新加载 -->
+        <div v-else class="flex flex-wrap items-center justify-end gap-2.5">
+          <button
+            type="button"
+            class="px-4 py-2 rounded-xl bg-studio-800 text-slate-300 border border-studio-700 hover:text-white hover:bg-studio-750 transition-all text-xs cursor-pointer"
+            @click="copyCrashError"
+          >
+            {{ copySuccess ? '✓ 已复制到剪贴板' : '复制错误信息' }}
+          </button>
+          <button
+            type="button"
+            class="px-4 py-2 rounded-xl bg-studio-800 text-slate-300 border border-studio-700 hover:text-white hover:bg-studio-750 transition-all text-xs cursor-pointer"
+            @click="backToLibrary"
+          >
+            返回素材库
+          </button>
+          <button
+            type="button"
+            class="px-4 py-2 rounded-xl bg-red-500/20 text-red-300 border border-red-500/40 hover:bg-red-500/30 transition-all text-xs cursor-pointer font-medium"
+            @click="resetStudioSession"
+          >
+            重置工作台会话
+          </button>
+          <button
+            type="button"
+            class="px-4 py-2 rounded-xl bg-studio-cyan text-studio-950 font-bold hover:brightness-110 active:scale-95 transition-all text-xs cursor-pointer shadow-lg shadow-studio-cyan/20"
+            @click="reloadForUpdate"
+          >
+            刷新页面
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, onErrorCaptured } from 'vue';
 import TopNav from './components/TopNav.vue';
 import LoginModal from './components/LoginModal.vue';
-import VoiceInputButton from './components/VoiceInputButton.vue';
+
 import LibraryView from './views/LibraryView.vue';
 import StudioView from './views/StudioView.vue';
 import MediaHubView from './views/MediaHubView.vue';
 import SettingsView from './views/SettingsView.vue';
-import { getCurrentUser, verifySession } from './api.js';
+import { getCurrentUser, logout, verifySession } from './api.js';
 
 const activeTab = ref('library'); // 默认展示素材库板块 (DAM)
+const libraryLane = ref('image');
 const studioPayload = ref(null);
 const clipPayload = ref(null);
 const mediaSub = ref('opencut');
@@ -92,6 +171,7 @@ function handleLoginSuccess(user) {
 }
 
 function handleLogout() {
+  logout();
   currentUser.value = null;
   sessionTick.value += 1;
   activeTab.value = 'library';
@@ -117,6 +197,76 @@ async function guardSession() {
 // 30002 的 index.html 是 no-store，刷新即拿到新包；问题是没人知道自己该刷新——
 // 于是每次改完都有人回报「还是没变化」。这里比对磁盘上 index.html 引用的入口指纹，变了就提示。
 const updateAvailable = ref(false);
+const crashError = ref(null);
+const crashStack = ref('');
+const copySuccess = ref(false);
+
+const isChunkLoadError = computed(() => {
+  const s = String(crashError.value || '');
+  return /Failed to fetch dynamically imported module|error loading dynamically imported module|Importing a module script failed|Loading (?:CSS )?chunk/i.test(s);
+});
+
+async function copyCrashError() {
+  const text = crashStack.value ? `${crashError.value}\n\nStack:\n${crashStack.value}` : String(crashError.value || '');
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    copySuccess.value = true;
+    setTimeout(() => {
+      copySuccess.value = false;
+    }, 2000);
+  } catch (e) {
+    console.error('复制错误信息失败:', e);
+  }
+}
+
+function resetStudioSession() {
+  try {
+    localStorage.removeItem('ml_studio_persistent_draft_v1');
+    sessionStorage.clear();
+  } catch {}
+  studioPayload.value = null;
+  crashError.value = null;
+  crashStack.value = '';
+  sessionTick.value += 1;
+}
+
+function backToLibrary() {
+  crashError.value = null;
+  crashStack.value = '';
+  studioPayload.value = null;
+  activeTab.value = 'library';
+}
+
+function handleGlobalChunkError(event) {
+  const err = event?.error || event?.reason;
+  const msg = err?.message || event?.message || String(err || '');
+  if (/Failed to fetch dynamically imported module|error loading dynamically imported module|Importing a module script failed|Loading (?:CSS )?chunk/i.test(msg)) {
+    console.warn('[Global Chunk Error Captured]', msg);
+    crashError.value = msg;
+    crashStack.value = err?.stack ? String(err.stack) : '';
+    checkForUpdate();
+  }
+}
+
+onErrorCaptured((err, instance, info) => {
+  console.error('[App Crash Captured]', err, info);
+  crashError.value = err?.message || String(err);
+  crashStack.value = (err?.stack ? String(err.stack) : '') + (info ? `\n\nComponent Hook / Info: ${info}` : '');
+  checkForUpdate();
+  return false;
+});
 let loadedEntry = '';
 let updateTimer = 0;
 
@@ -138,7 +288,9 @@ async function checkForUpdate() {
 }
 
 function reloadForUpdate() {
-  location.reload();
+  const u = new URL(window.location.href);
+  u.searchParams.set('_v', Date.now());
+  window.location.href = u.toString();
 }
 
 function onTabChange(tab) {
@@ -179,6 +331,8 @@ window.addEventListener('ml_auth_required', onAuthRequired);
 onMounted(() => {
   loadedEntry = entryHash(Array.from(document.querySelectorAll('script[src]')).map((s) => s.getAttribute('src')).join(' '));
   document.addEventListener('visibilitychange', onVisibilityChange);
+  window.addEventListener('unhandledrejection', handleGlobalChunkError);
+  window.addEventListener('error', handleGlobalChunkError);
   updateTimer = setInterval(checkForUpdate, 5 * 60 * 1000);
   // 本地有没有 token 字符串不作数：新设备没 token 要登录，有 token 也得让服务端认账。
   // 两条都走 guardSession，区别只在登录框上那行原因。
@@ -188,6 +342,8 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('ml_auth_required', onAuthRequired);
   document.removeEventListener('visibilitychange', onVisibilityChange);
+  window.removeEventListener('unhandledrejection', handleGlobalChunkError);
+  window.removeEventListener('error', handleGlobalChunkError);
   if (updateTimer) clearInterval(updateTimer);
 });
 </script>

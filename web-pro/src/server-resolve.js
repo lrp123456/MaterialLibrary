@@ -228,6 +228,7 @@ export function onStatusChange(fn) {
 export function resolveApiUrl(origPath) {
   const p = String(origPath || '');
   if (/^https?:\/\//i.test(p)) return p;
+  if (typeof window !== 'undefined' && window.location?.protocol === 'https:') { return p.startsWith('/') ? p : '/' + p; }
   const base = currentBase();
   return base ? `${base}${p.startsWith('/') ? '' : '/'}${p}` : p;
 }

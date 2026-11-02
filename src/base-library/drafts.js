@@ -131,6 +131,12 @@ async function confirmMaterialDraft(services, { draftId, nameCn, tags = [], isSh
   fs.copyFileSync(tempFullPath, targetFullPath);
   try { fs.unlinkSync(tempFullPath); } catch {}
 
+  const previewRel = path.posix.join('cache', 'base-library', 'materials', matId, 'sphere.jpg');
+  const previewFullPath = path.resolve(dataDir, previewRel);
+  try {
+    await sharp(targetFullPath).resize(512, 512, { fit: 'cover' }).jpeg({ quality: 85 }).toFile(previewFullPath);
+  } catch (_) {}
+
   const meta = await sharp(targetFullPath).metadata();
   const width = meta.width || 1024;
   const height = meta.height || 1024;
@@ -138,8 +144,8 @@ async function confirmMaterialDraft(services, { draftId, nameCn, tags = [], isSh
 
   const confirmTx = db.transaction(() => {
     db.prepare(`
-      INSERT INTO ba_materials (id, name_cn, source, source_id, license_note, is_shell, basecolor_rel, width, height, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO ba_materials (id, name_cn, source, source_id, license_note, is_shell, preview_rel, basecolor_rel, width, height, track, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'B', ?, ?)
     `).run(
       matId,
       finalName,
@@ -147,6 +153,7 @@ async function confirmMaterialDraft(services, { draftId, nameCn, tags = [], isSh
       draft.source_id,
       draft.license_note,
       finalShell,
+      previewRel,
       targetRel,
       width,
       height,

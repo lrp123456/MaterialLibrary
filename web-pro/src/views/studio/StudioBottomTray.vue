@@ -2,8 +2,21 @@
   <!-- 纵向模式：作为看图区右侧的窄长槽位 (展开状态) -->
   <div
     v-if="mode === 'vertical'"
-    class="studio-tray-vertical w-[76px] shrink-0 h-full bg-studio-900 border-l border-studio-700 py-3 px-2 flex flex-col items-center select-none overflow-y-auto scrollbar-thin"
+    class="studio-tray-vertical relative w-[76px] shrink-0 h-full bg-studio-900 border-l border-studio-700 py-3 px-2 flex flex-col items-center select-none overflow-y-auto scrollbar-thin transition-colors"
+    :class="{ 'ring-2 ring-studio-accent bg-studio-800/80': isDragging }"
+    @dragover.prevent="isDragging = true"
+    @dragleave.prevent="isDragging = false"
+    @drop.prevent="onDropFiles"
   >
+    <!-- 拖拽提示遮罩 -->
+    <div
+      v-if="isDragging"
+      class="absolute inset-0 z-20 bg-studio-accent/20 backdrop-blur-xs flex flex-col items-center justify-center p-2 text-center pointer-events-none"
+    >
+      <StudioIcon name="wand" :size="20" class="text-white animate-bounce mb-1" />
+      <span class="text-[10px] font-bold text-white leading-tight">松手挂载</span>
+    </div>
+
     <div class="text-[10px] font-bold text-slate-500 mb-2 uppercase tracking-wider font-mono">
       参考 ({{ images.length }})
     </div>
@@ -36,12 +49,12 @@
         </div>
       </div>
 
-      <!-- 末尾虚线「添加」素材卡片 -->
+      <!-- 末尾虚线「添加」素材卡片：直接点击呼出素材选择器 -->
       <button
         type="button"
         @click="$emit('open-picker')"
         class="w-[58px] h-[64px] rounded-xl border-2 border-dashed border-studio-700 hover:border-studio-accent hover:bg-studio-800/60 transition-all flex flex-col items-center justify-center gap-1 text-slate-400 hover:text-white cursor-pointer group shrink-0"
-        title="添加参考图"
+        title="添加参考图（支持点击打开选择器或直接拖拽图片）"
       >
         <StudioIcon name="plus" :size="16" customClass="group-hover:text-studio-accent transition-colors" />
         <span class="text-[10px] font-bold">添加</span>
@@ -49,11 +62,23 @@
     </div>
   </div>
 
-  <!-- 横向模式：看图区收缩时回归顶部作为紧凑条 -->
+  <!-- 横向模式：看图区收缩时贴底停留在输入框正上方作为紧凑条 -->
   <div
     v-else
-    class="studio-tray-horizontal h-[56px] w-full bg-studio-900 border-b border-studio-700 px-4 flex items-center shrink-0 select-none overflow-x-auto scrollbar-thin"
+    class="studio-tray-horizontal relative h-[56px] w-full bg-studio-900/95 backdrop-blur border-t border-studio-700/80 px-4 flex items-center shrink-0 select-none overflow-x-auto scrollbar-thin transition-colors"
+    :class="{ 'ring-2 ring-studio-accent bg-studio-800/80': isDragging }"
+    @dragover.prevent="isDragging = true"
+    @dragleave.prevent="isDragging = false"
+    @drop.prevent="onDropFiles"
   >
+    <!-- 拖拽高亮提示 -->
+    <div
+      v-if="isDragging"
+      class="absolute inset-0 z-20 bg-studio-accent/20 backdrop-blur-xs flex items-center justify-center text-white text-xs font-bold pointer-events-none"
+    >
+      松手立即挂载参考图
+    </div>
+
     <div class="flex items-center gap-2.5">
       <div class="text-[11px] font-mono text-slate-400 font-bold mr-1 shrink-0 flex items-center gap-1">
         <span>参考图</span>
@@ -109,6 +134,7 @@
 </template>
 
 <script setup>
+import { ref } from 'vue';
 import StudioIcon from '../../components/StudioIcon.vue';
 
 defineProps({
@@ -117,5 +143,15 @@ defineProps({
   mode: { type: String, default: 'vertical' }, // 'vertical' | 'horizontal'
 });
 
-defineEmits(['select', 'open-picker', 'expand-viewer']);
+const emit = defineEmits(['select', 'open-picker', 'expand-viewer', 'upload-files']);
+
+const isDragging = ref(false);
+
+function onDropFiles(e) {
+  isDragging.value = false;
+  const files = e.dataTransfer?.files;
+  if (files && files.length) {
+    emit('upload-files', Array.from(files));
+  }
+}
 </script>

@@ -2402,18 +2402,34 @@ async function runExecute() {
       };
       let targetOp = opMapping[selectedMode.value] || selectedMode.value;
       let bindingsPayload = null;
-      if (quickBaseAttr.value && (quickBaseAttr.value.asset_id || quickBaseAttr.value.subclass === 'millwork_carcass')) {
+      if (quickBaseAttr.value && (quickBaseAttr.value.asset_id || quickBaseAttr.value.assetId || quickBaseAttr.value.hex || quickBaseAttr.value.colorHex || quickBaseAttr.value.subclass === 'millwork_carcass')) {
         targetOp = 'base_attr';
+        const p = quickBaseAttr.value.part || quickBaseAttr.value.surface || inferredSurface.value || 'wall';
+        let bbox = null;
+        if (regionPayload && [regionPayload.x1, regionPayload.y1, regionPayload.x2, regionPayload.y2].every(n => Number.isFinite(Number(n)))) {
+          bbox = {
+            x1: Math.round(Number(regionPayload.x1)),
+            y1: Math.round(Number(regionPayload.y1)),
+            x2: Math.round(Number(regionPayload.x2)),
+            y2: Math.round(Number(regionPayload.y2))
+          };
+        }
         bindingsPayload = {
           regions: [{
             region_id: 'qs_reg_' + Date.now(),
-            surface: quickBaseAttr.value.surface,
-            subclass: quickBaseAttr.value.subclass,
-            warehouse: quickBaseAttr.value.warehouse,
-            asset_id: quickBaseAttr.value.asset_id,
-            use_shell: quickBaseAttr.value.use_shell,
-            finish: quickBaseAttr.value.finish,
-            roughness: quickBaseAttr.value.roughness
+            bbox,
+            part: p,
+            surface: p,
+            mode: quickBaseAttr.value.mode || (quickBaseAttr.value.track === 'B' ? 'rematerial' : 'recolor'),
+            track: quickBaseAttr.value.track || (quickBaseAttr.value.assetId || quickBaseAttr.value.asset_id ? 'B' : 'A'),
+            subclass: quickBaseAttr.value.subclass || '',
+            warehouse: quickBaseAttr.value.warehouse || (quickBaseAttr.value.track === 'B' ? 'material' : 'paint'),
+            asset_id: quickBaseAttr.value.assetId || quickBaseAttr.value.asset_id || null,
+            hex: quickBaseAttr.value.hex || quickBaseAttr.value.colorHex || null,
+            color_name: quickBaseAttr.value.displayName || quickBaseAttr.value.colorName || null,
+            process: quickBaseAttr.value.process || null,
+            finish: quickBaseAttr.value.gloss || quickBaseAttr.value.finish || null,
+            roughness: quickBaseAttr.value.roughness ?? null
           }],
           light_mode: null
         };

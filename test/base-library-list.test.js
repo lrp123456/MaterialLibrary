@@ -120,15 +120,18 @@ async function runTests() {
     console.log('=== 3. 测试材质列表与底色大图 (含 ?token= 提取) ===');
     // 创建测试材质文件
     const matRel = path.posix.join('cache', 'base-library', 'materials', 'mat_test_01', 'basecolor.jpg');
+    const prevRel = path.posix.join('cache', 'base-library', 'materials', 'mat_test_01', 'sphere.jpg');
     const fullMatPath = path.resolve(testDir, matRel);
+    const fullPrevPath = path.resolve(testDir, prevRel);
     fs.mkdirSync(path.dirname(fullMatPath), { recursive: true });
     fs.writeFileSync(fullMatPath, Buffer.from('fake-jpeg-data'));
+    fs.writeFileSync(fullPrevPath, Buffer.from('fake-sphere-data'));
 
     const now = Date.now();
     db.prepare(`
-      INSERT INTO ba_materials (id, name_cn, source, source_id, license_note, is_shell, basecolor_rel, width, height, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run('mat_test_01', '极简胡桃木', 'polyhaven', 'wood_01', 'Poly Haven, CC0', 0, matRel, 1024, 1024, now, now);
+      INSERT INTO ba_materials (id, name_cn, source, source_id, license_note, is_shell, preview_rel, basecolor_rel, width, height, track, tone, layout, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('mat_test_01', '极简胡桃木', 'polyhaven', 'wood_01', 'Poly Haven, CC0', 0, prevRel, matRel, 1024, 1024, 'B', 'light', 'plain', now, now);
 
     db.prepare(`
       INSERT INTO ba_asset_tags (asset_kind, asset_id, surface, subclass)
@@ -141,6 +144,7 @@ async function runTests() {
     assert.strictEqual(matList.body.data[0].id, 'mat_test_01');
     assert.strictEqual(matList.body.data[0].tags[0].subclass, 'floor_wood');
     assert.strictEqual(matList.body.data[0].credit, 'Poly Haven, CC0');
+    assert.strictEqual(matList.body.data[0].track, 'B');
 
     // 测试带 ?token= 且不带 Authorization 的 GET
     const imgGet = await request('GET', `/api/base-library/materials/mat_test_01/basecolor?token=${viewerToken}`);
@@ -150,15 +154,16 @@ async function runTests() {
 
     console.log('=== 4. 测试色号列表与本地色块 (含 ?token= 提取) ===');
     db.prepare(`
-      INSERT INTO ba_paints (id, brand, code, name_en, name_zh, hex, interior, pinned, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run('paint_nippon_NN001', 'nippon-paint', 'NN001', 'Classic White', '经典白', '#FAFAFA', 1, 1, now, now);
+      INSERT INTO ba_paints (id, brand, code, name_en, name_zh, display_name, family_key, hex, interior, pinned, curated, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('paint_nippon_NN001', 'nippon-paint', 'NN001', 'Classic White', '经典白', '经典白', 'warm_white', '#FAFAFA', 1, 1, 1, now, now);
 
     const paintList = await request('GET', '/api/base-library/paints?brand=nippon-paint', null, viewerToken);
     assert.strictEqual(paintList.status, 200);
     assert.strictEqual(paintList.body.data.length, 1);
     assert.strictEqual(paintList.body.data[0].code, 'NN001');
-    assert.strictEqual(paintList.body.data[0].pinned, true);
+    assert.strictEqual(paintList.body.data[0].curated, true);
+    assert.strictEqual(paintList.body.data[0].display_name, '经典白');
 
     const swatchGet = await request('GET', `/api/base-library/paints/paint_nippon_NN001/swatch?token=${viewerToken}`);
     assert.strictEqual(swatchGet.status, 200);

@@ -205,11 +205,24 @@ async function runTests() {
     console.log('✅ 单调写入与全量 next_since 检查通过');
 
     console.log('=== 7. 测试 PATCH 画幅回写约束与 SEC-007 ===');
-    // 1) 非属主且非管理员修改他人配方 -> 403
+    // 1) 非属主且非管理员修改他人配方标题 -> 403
     const forbiddenPatch = await request('PATCH', '/api/creation-templates/tpl_alpha', {
       title: '黑客修改'
     }, user2Token);
     assert.strictEqual(forbiddenPatch.status, 403, '非属主非管理员修改他人配方必须 403');
+
+    // 1b) 非属主普通用户标置顶收藏或复用配方 -> 200 允许
+    const pinPatch = await request('PATCH', '/api/creation-templates/tpl_alpha', {
+      is_pinned: 1
+    }, user2Token);
+    assert.strictEqual(pinPatch.status, 200, '非属主用户标收藏置顶必须 200');
+    assert.strictEqual(pinPatch.body.data.is_pinned, 1);
+
+    const usePatch = await request('PATCH', '/api/creation-templates/tpl_alpha', {
+      action: 'use'
+    }, user2Token);
+    assert.strictEqual(usePatch.status, 200, '非属主用户记录复用必须 200');
+    assert.strictEqual(usePatch.body.data.use_count, 1);
 
     // 2) 首次写入画幅（此时 poster_w IS NULL） -> 允许写入
     const patchAspect1 = await request('PATCH', '/api/creation-templates/tpl_alpha', {

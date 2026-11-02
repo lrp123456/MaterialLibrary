@@ -391,15 +391,25 @@ function upsertCreationCard(db, record) {
     remoteId,
   };
   const now = Date.now();
+  let createdAt = now;
+  if (record?.createTime) {
+    const raw = String(record.createTime).trim();
+    const parsed = new Date(raw).getTime() || new Date(raw.replace(' ', 'T')).getTime();
+    if (!Number.isNaN(parsed) && parsed > 0) {
+      createdAt = parsed;
+    }
+  }
   const existing = db.prepare('SELECT id FROM creation_templates WHERE id=?').get(id);
   if (existing) {
     db.prepare(`
       UPDATE creation_templates
       SET prompt=?, aspect_ratio=?, origin_images=?, result_images=?, params_json=?, type=?,
           purpose=CASE WHEN purpose IS NULL OR purpose='' THEN ? ELSE purpose END,
-          channel='ba', updated_at=?
+          channel='ba',
+          created_at=CASE WHEN ? > 0 THEN ? ELSE created_at END,
+          updated_at=?
       WHERE id=?
-    `).run(prompt, ratio, JSON.stringify(refs), JSON.stringify(result), JSON.stringify(params), type, purpose, now, id);
+    `).run(prompt, ratio, JSON.stringify(refs), JSON.stringify(result), JSON.stringify(params), type, purpose, createdAt, createdAt, now, id);
     return id;
   }
   db.prepare(`
@@ -409,7 +419,7 @@ function upsertCreationCard(db, record) {
     ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, 'ba', 0, 0, ?, ?)
   `).run(
     id, title, prompt, ratio, JSON.stringify(refs), JSON.stringify(result), JSON.stringify(params),
-    JSON.stringify(['ba', type]), type, purpose, now, now
+    JSON.stringify(['ba', type]), type, purpose, createdAt, now
   );
   return id;
 }

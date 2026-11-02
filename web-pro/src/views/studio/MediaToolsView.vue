@@ -472,6 +472,22 @@
             <span class="text-slate-500 font-mono text-[11px]">320kbps CBR / 48kHz</span>
           </div>
 
+          <!-- 深度人声提炼去噪开关 -->
+          <div v-if="convertExtractAudioOnly" class="p-3 rounded-xl bg-studio-900 border border-studio-cyan/40 flex items-center justify-between text-xs animate-in fade-in">
+            <div class="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                id="cleanVocalToggle"
+                v-model="convertCleanVocal"
+                class="rounded accent-studio-cyan"
+              />
+              <label for="cleanVocalToggle" class="text-studio-cyan font-bold cursor-pointer flex items-center gap-1.5">
+                <span>🎙️ 深度人声提炼（自适应频域消除底噪与伴奏杂音）</span>
+              </label>
+            </div>
+            <span class="text-amber-300 font-mono text-[11px] font-bold">FFmpeg 降噪增强</span>
+          </div>
+
           <!-- 执行按钮与进度条 -->
           <div class="pt-2 space-y-3">
             <button
@@ -1141,6 +1157,7 @@ const converting = ref(false);
 const convertProgress = ref(0);
 const convertStageText = ref('');
 const convertResult = ref(null);
+const convertCleanVocal = ref(true);
 
 function triggerConvertFilePicker() {
   convertFileInputRef.value?.click();
@@ -1162,11 +1179,10 @@ async function uploadLocalVideo(file) {
   const fd = new FormData();
   fd.append('file', file, file.name);
   fd.append('filename', file.name);
-  fd.append('source', 'studio_media_tools');
-  const res = await authFetch('/api/sync/upload', { method: 'POST', body: fd });
+  const res = await authFetch('/api/tools/upload', { method: 'POST', body: fd });
   const json = await res.json().catch(() => ({}));
   if (!res.ok || !json.success || !json.data) {
-    throw new Error(json.error || '视频上传失败');
+    throw new Error(json.error || '临时媒体文件上传失败');
   }
   return json.data;
 }
@@ -1207,16 +1223,22 @@ async function runVideoConversion() {
     }, 400);
 
     let fid = convertCloudFid.value;
+    let videoPath = '';
     if (!fid) {
-      convertStageText.value = '正在上传源视频到服务端...';
-      fid = (await uploadLocalVideo(convertFileObj.value)).fid;
+      convertStageText.value = '正在上传本地文件到临时工作区（免入库）...';
+      const uploaded = await uploadLocalVideo(convertFileObj.value);
+      videoPath = uploaded.videoPath;
     }
 
-    convertStageText.value = '正在调用原生 FFmpeg 进行深度转码与封装...';
+    convertStageText.value = convertExtractAudioOnly.value && convertCleanVocal.value
+      ? '正在调用 FFmpeg 深度分离人声并消除背景音乐与底噪...'
+      : '正在调用原生 FFmpeg 进行深度转码与封装...';
     convertResult.value = await callConvertVideo({
-      fid,
+      fid: fid || undefined,
+      videoPath: videoPath || undefined,
       targetFormat: targetFmt,
       extractAudio: isAudioOnly,
+      cleanVocal: isAudioOnly && convertCleanVocal.value,
       crf: 23,
     });
     convertProgress.value = 100;
@@ -1233,19 +1255,23 @@ async function runVideoConversion() {
 
 async function saveConvertResultToLibrary() {
   if (!convertResult.value?.downloadUrl) {
-    alert('请先完成一次转码');
+    alert('请先完成一次转码或提炼');
     return;
   }
   try {
+    const isAudio = convertResult.value.type === 'audio' || ['mp3', 'wav', 'aac'].includes(convertResult.value.format);
+    const isVocal = Boolean(convertResult.value.isCleanVocal);
     const out = await registerGeneratedAsset({
       previewUrl: convertResult.value.downloadUrl,
-      prompt: '视频格式转码产物',
+      prompt: isVocal ? '视频提炼纯人声' : (isAudio ? '视频提取音频轨' : '视频格式转码产物'),
       model: 'ffmpeg',
-      mode: 'convert',
+      mode: isVocal ? 'vocal_extract' : (isAudio ? 'audio_extract' : 'convert'),
+      kind: isAudio ? 'audio' : 'video',
+      category: isAudio ? 'voice' : 'video',
       format: convertResult.value.format || ''
     });
-    if (out?.fid) alert('转码产物已归档至素材库: ' + out.fid);
-    else alert('转码产物已归档至素材库');
+    if (out?.fid) alert(isAudio ? '音频已成功归档至素材库「人声参考」: ' + out.fid : '转码产物已归档至素材库: ' + out.fid);
+    else alert('产物已成功归档至素材库');
   } catch (e) {
     alert('归档失败: ' + e.message);
   }

@@ -222,6 +222,26 @@ export function getAssetPlayableUrl(fid) {
 /**
  * 获取素材原文件下载 URL
  */
+/**
+ * 获取基础素材图片地址（外链/本地缓存统一调度）
+ * 针对新明珠/冠珠防盗链(newpearl.com, cg1993.com)及本地缓存(cache/base-library/...)
+ * 自动转由服务端中继接口 /api/base-library/items/:id/preview 或 /scene 获取，并自动附带会话 token
+ */
+export function getBaseItemImageUrl(item, isScene = false) {
+  if (!item || !item.id) return '';
+  const targetRel = isScene && item.scene_rel ? item.scene_rel : (item.preview_rel || item.scene_rel);
+  if (!targetRel) return '';
+
+  if (targetRel.startsWith('cache/') || /newpearl\.com|cg1993\.com/i.test(targetRel)) {
+    const token = getToken();
+    const mediaType = isScene && item.scene_rel ? 'scene' : 'preview';
+    const qs = token ? `?token=${encodeURIComponent(token)}` : '';
+    return resolveApiUrl(`/api/base-library/items/${encodeURIComponent(item.id)}/${mediaType}${qs}`);
+  }
+
+  return targetRel;
+}
+
 export function getAssetDownloadUrl(fid) {
   if (!fid) return '';
   const token = getToken();
@@ -601,6 +621,13 @@ export async function aiDetect(params) {
 /**
  * 真实 AI 生图接口 (/gen/images)
  */
+export async function fetchLibraryCatalog() {
+  const res = await authFetch('/api/library/catalog');
+  const json = await res.json();
+  if (!res.ok || json.error) throw new Error(json.error || '素材库结构读取失败');
+  return json.data || json;
+}
+
 export async function fetchStudioCatalog() {
   const res = await authFetch('/api/studio/catalog');
   const json = await res.json();
@@ -946,3 +973,22 @@ export async function fetchCreationTemplatesIncremental({ since, sinceId, delete
   const res = await authFetch(url);
   return res.json();
 }
+
+export async function patchBaseItem(id, data) {
+  const res = await authFetch(`/api/base-library/items/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+  return res.json();
+}
+
+export async function patchBaseMaterial(id, data) {
+  const res = await authFetch(`/api/base-library/materials/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+  return res.json();
+}
+

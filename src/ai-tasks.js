@@ -567,16 +567,32 @@ function updateTask(db, taskId, fields) {
   const sets = keys.map(k => `${k}=?`).join(', ');
   db.prepare(`UPDATE ai_tasks SET ${sets}, updated_at=? WHERE task_id=?`)
     .run(...keys.map(k => fields[k]), Date.now(), taskId);
+  try {
+    const { eventBus, EVENTS } = require('./events');
+    const row = db.prepare('SELECT * FROM ai_tasks WHERE task_id=?').get(taskId);
+    if (row) {
+      eventBus.emit(EVENTS.TASK_UPDATED, toPublicTask(row));
+    }
+  } catch (_) {}
 }
 
 /** 任务状态变化时推送到长连接客户端（App 无需再等轮询） */
 function broadcastTaskEvent(db, taskId, event) {
+  let pubTask = null;
   try {
     const row = db.prepare('SELECT * FROM ai_tasks WHERE task_id=?').get(taskId);
-    if (!row) return;
-    require('./ws-server').broadcast(event, toPublicTask(row));
+    if (row) {
+      pubTask = toPublicTask(row);
+      require('./ws-server').broadcast(event, pubTask);
+    }
   } catch (e) {
     console.warn('[ws] 任务事件广播失败:', e.message);
+  }
+  try {
+    const { eventBus, EVENTS } = require('./events');
+    eventBus.emit(EVENTS.TASK_UPDATED, pubTask || { taskId, event });
+  } catch (e) {
+    console.warn('[events] 任务事件总线派发失败:', e.message);
   }
 }
 

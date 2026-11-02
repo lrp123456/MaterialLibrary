@@ -213,6 +213,17 @@ class WsConnection {
 
 /** 广播事件给所有在线客户端 */
 function broadcast(event, payload) {
+  try {
+    const { eventBus, EVENTS } = require('./events');
+    if (event.startsWith('ai.task.')) {
+      eventBus.emit(EVENTS.TASK_UPDATED, payload);
+    } else if (event === 'asset.ingested') {
+      eventBus.emit(EVENTS.ASSET_INGESTED, payload);
+    } else if (event === 'asset.deleted') {
+      eventBus.emit(EVENTS.ASSET_DELETED, payload);
+    }
+  } catch (_) {}
+
   if (!clients.size) return 0;
   let sent = 0;
   for (const c of Array.from(clients)) {

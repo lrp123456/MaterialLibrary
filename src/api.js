@@ -20,6 +20,7 @@ const {
   restageStatusForAsset
 } = require('./restage');
 const { orientationLabelMap } = require('./ratio');
+const { expandSpaceFilterValues } = require('./space-filter');
 const { executeAdapter } = require('./gen');
 const { AUTH_VISIBLE_SQL } = require('./governance');
 const { BROWSE_READY_SQL, PROCESSING_STATUSES, VALID_STATUSES } = require('./asset-status');
@@ -298,6 +299,25 @@ async function ensureMediaPlaceholder(services, fid, kind, fileName) {
   }
 }
 
+async function rememberVideoFrame(services, fid, videoPath) {
+  if (!services?.db || !fid || !videoPath) return;
+  try {
+    const meta = await umbra.extractVideoMeta(videoPath);
+    const width = Number(meta?.width) || 0;
+    const height = Number(meta?.height) || 0;
+    if (!(width > 0 && height > 0)) return;
+    services.db.prepare(`
+      UPDATE assets
+      SET width = CASE WHEN COALESCE(width, 0) = 0 THEN ? ELSE width END,
+          height = CASE WHEN COALESCE(height, 0) = 0 THEN ? ELSE height END,
+          duration_s = CASE WHEN COALESCE(duration_s, 0) = 0 THEN ? ELSE duration_s END
+      WHERE fid = ?
+    `).run(width, height, Number(meta.duration) || 0, fid);
+  } catch (e) {
+    console.warn('[api] 写回视频宽高失败', fid, e.message);
+  }
+}
+
 // 后台为缺失缩略图的视频抽帧（不阻塞请求）
 async function ensureVideoThumbAsync(services, fid, deriv) {
   try {
@@ -313,11 +333,51 @@ async function ensureVideoThumbAsync(services, fid, deriv) {
     fs.mkdirSync(path.dirname(out), { recursive: true });
     const { extractPoster } = require('./umbra');
     const ok = await extractPoster(vidPath, out);
-    return !!(ok && fs.existsSync(out));
+    if (ok && fs.existsSync(out)) {
+      await rememberVideoFrame(services, fid, vidPath);
+      return true;
+    }
+    return false;
   } catch (e) {
     console.warn('[api] 后台视频抽帧失败', fid, e.message);
     return false;
   }
+}
+
+async function attachLocalVideoPoster(services, resultImages) {
+  if (!Array.isArray(resultImages) || !resultImages[0] || typeof resultImages[0] !== 'object') return resultImages;
+  const list = resultImages.map((row) => (row && typeof row === 'object' ? { ...row } : row));
+  const row = list[0];
+  const fid = String(row.fid || '').trim();
+  const dataDir = services?.config?.dataDir;
+  if (!fid || !dataDir || !services?.db) return list;
+  const thumb = path.join(dataDir, 'cache', 'thumbs', `${fid}.jpg`);
+  const fresh = fs.existsSync(thumb) && fs.statSync(thumb).size > 20000;
+  if (!fresh) {
+    try {
+      const deriv = services.db.prepare(`
+        SELECT * FROM derivatives
+        WHERE asset_fid=? AND (mime LIKE 'video/%' OR file_name LIKE '%.mp4' OR file_name LIKE '%.mov' OR file_name LIKE '%.webm')
+        ORDER BY id DESC LIMIT 1
+      `).get(fid);
+      if (deriv) {
+        const vidPath = await resolveDerivativeFile(services, deriv);
+        if (vidPath && fs.existsSync(vidPath)) {
+          fs.mkdirSync(path.dirname(thumb), { recursive: true });
+          const { extractPoster } = require('./umbra');
+          await extractPoster(vidPath, thumb);
+          const rel = path.relative(dataDir, thumb).replace(/\\/g, '/');
+          services.db.prepare("UPDATE assets SET poster_path=? WHERE fid=? AND (poster_path IS NULL OR poster_path='')").run(rel, fid);
+        }
+      }
+    } catch (err) {
+      console.warn('[creation-templates] 视频封面抽帧失败', fid, err.message);
+    }
+  }
+  if (fs.existsSync(thumb) && fs.statSync(thumb).size > 1000) {
+    row.poster = `/api/viewer/assets/${encodeURIComponent(fid)}/poster`;
+  }
+  return list;
 }
 
 function parseBody(req, limit = 2 * 1024 * 1024) {
@@ -588,126 +648,21 @@ function queryAssets(db, query = {}) {
     furniture_category, furniture_item, furniture_craft, furniture_form, classic_design,
     palette, luxury, era, temperature, functional,
     media_type: mediaType, video_source: videoSource, video_purpose: videoPurpose,
-    page = 1, pageSize = 24, all = 0, sort, skip_facets
+    lane, section, shelf: queryShelf,
+    page = 1, pageSize = 24, all = 0, sort, skip_facets, fields
   } = query;
 
   // 列表可见判据与筛选项/详情统一（BROWSE_READY_SQL = "a.status = 'ready'"）
-  const where = [BROWSE_READY_SQL, AUTH_VISIBLE_SQL];
+    const where = [BROWSE_READY_SQL, AUTH_VISIBLE_SQL];
   const args = [];
-
-  // media_type: image | video | furniture | music | portrait | clothing | material | favorite | retouched | finished | interior_design
-  try { require('./favorites').ensureFavoriteColumn(db); } catch (_) {}
-  const isOnlyFavorite = (
-    String(query.only_favorite || '') === '1' || query.only_favorite === true ||
-    String(query.favorite || '') === '1' || query.favorite === true ||
-    mediaType === 'favorite'
-  );
-  if (isOnlyFavorite) {
-    where.push('a.favorited_at IS NOT NULL');
-  }
-
-  const effectiveCat = category || (mediaType !== 'favorite' ? mediaType : null);
-  if (effectiveCat === 'favorites' || effectiveCat === 'all_favorites') {
-    if (!isOnlyFavorite) where.push('a.favorited_at IS NOT NULL');
-  } else if (effectiveCat === 'interior_design' || effectiveCat === 'interior' || effectiveCat === 'interior_exterior') {
-    where.push("(a.kind = 'image' AND COALESCE(a.category, 'interior') IN ('interior', 'exterior'))");
-  } else if (effectiveCat === 'exterior') {
-    where.push("a.category = 'exterior'");
-  } else if (effectiveCat === 'finished') {
-    where.push("a.category = 'finished'");
-  } else if (effectiveCat === 'clothing') {
-    where.push("a.category = 'clothing'");
-  } else if (effectiveCat === 'portrait') {
-    where.push("a.category = 'portrait'");
-  } else if (effectiveCat === 'furniture') {
-    where.push("(a.category = 'furniture' OR a.kind = 'furniture')");
-  } else if (effectiveCat === 'portrait_dynamic') {
-    where.push("(a.kind = 'video' OR a.kind = 'audio' OR COALESCE(a.category, '') IN ('portrait', 'finished', 'music', 'video'))");
-  } else if (effectiveCat === 'retouched') {
-    where.push("a.fid IN (SELECT asset_fid FROM derivatives WHERE kind IN ('style_transferred', 'quick_replace', 'quick_remove', 'quick_insert', 'clarity_enhanced', 'expand', 'retouched', 'manual_edit'))");
-  } else if (effectiveCat === 'video') {
-    where.push("a.kind = 'video'");
-  } else if (effectiveCat === 'music' || effectiveCat === 'audio') {
-    where.push("(a.kind = 'audio' OR a.category = 'music' OR a.file_name LIKE '%.mp3' OR a.file_name LIKE '%.wav' OR a.file_name LIKE '%.m4a')");
-  } else if (effectiveCat === 'image') {
-    where.push("a.kind = 'image'");
-  } else if (category && !['furniture', 'music', 'portrait', 'clothing', 'finished', 'retouched', 'interior_design', 'interior', 'exterior', 'interior_exterior', 'favorites', 'all_favorites'].includes(category)) {
-    where.push("COALESCE(a.category, 'interior') = ?");
-    args.push(category);
-  }
-
-  const shelf = String(query.shelf || '').trim();
-  if (shelf === 'finished') {
-    where.push("(a.category = 'finished' OR a.library_shelf = 'finished')");
-  } else if (shelf === 'retouched') {
-    where.push("(a.library_shelf = 'retouched' OR a.is_ai = 1 OR (a.source_asset_id IS NOT NULL AND a.source_asset_id != ''))");
-  } else if (shelf === 'original') {
-    where.push("COALESCE(a.category, '') != 'finished'");
-    where.push("(a.library_shelf IS NULL OR a.library_shelf = '' OR a.library_shelf = 'original')");
-    where.push("(a.is_ai IS NULL OR a.is_ai = 0)");
-    where.push("(a.source_asset_id IS NULL OR a.source_asset_id = '')");
-  }
-
-  // video_source: all | sync（手机实拍 is_ai=0）| ai（AI创作 is_ai=1）
-  const favoriteWithin = String(query.favorite_within || '');
-  if ((isOnlyFavorite || effectiveCat === 'favorites' || effectiveCat === 'all_favorites') && favoriteWithin) {
-    const now = Date.now();
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-    const start = favoriteWithin === 'today'
-      ? startOfToday.getTime()
-      : favoriteWithin === '7d'
-        ? now - 7 * 86400000
-        : favoriteWithin === '30d'
-          ? now - 30 * 86400000
-          : 0;
-    if (start) {
-      where.push('a.favorited_at >= ?');
-      args.push(start);
-    }
-  }
-
-  if (effectiveCat === 'video' || videoSource) {
-    if (videoSource === 'sync') {
-      where.push('(a.is_ai IS NULL OR a.is_ai = 0)');
-    } else if (videoSource === 'ai') {
-      where.push('a.is_ai = 1');
-    }
-  }
-
-  if (!all) {
-    // CONFLICT-002：重复组已退役，不再隐藏任何素材。
-  }
-
-  // 精准日期过滤 (YYYY-MM-DD 或 YYYY-MM)
-  if (query.date) {
-    const dStr = String(query.date).trim();
-    if (/^\d{4}-\d{2}-\d{2}$/.test(dStr)) {
-      const [y, m, d] = dStr.split('-').map(Number);
-      const startOfDay = new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
-      const endOfDay = new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
-      where.push('a.created_at >= ? AND a.created_at <= ?');
-      args.push(startOfDay, endOfDay);
-    } else if (/^\d{4}-\d{2}$/.test(dStr)) {
-      const [y, m] = dStr.split('-').map(Number);
-      const startOfMonth = new Date(y, m - 1, 1, 0, 0, 0, 0).getTime();
-      const endOfMonth = new Date(y, m, 0, 23, 59, 59, 999).getTime();
-      where.push('a.created_at >= ? AND a.created_at <= ?');
-      args.push(startOfMonth, endOfMonth);
-    }
-  }
-
-  // 相对时间范围（剪辑器素材库选择器使用）：7d / 30d / all，按入库时间倒推自然天数。
-  // 与精确 date 互斥，传了 date 时以 date 为准，避免两套时间条件互相裁剪。
-  const createdWithin = String(query.created_within || '').trim();
-  if (!query.date && (createdWithin === '7d' || createdWithin === '30d')) {
-    const days = createdWithin === '7d' ? 7 : 30;
-    where.push('COALESCE(a.created_at, a.discovered_at, 0) >= ?');
-    args.push(Date.now() - days * 86400000);
-  }
 
   const addTagFilter = (dim, val) => {
     if (!val) return;
+    if (dim === 'space') {
+      const expanded = expandSpaceFilterValues(val);
+      if (!expanded.length) return;
+      val = expanded;
+    }
     const list = (Array.isArray(val) ? val : String(val).split(','))
       .map(s => s.trim())
       .filter(Boolean);
@@ -736,6 +691,103 @@ function queryAssets(db, query = {}) {
       }
     }
   };
+
+  // media_type: image | video | furniture | music | portrait | clothing | material | favorite | retouched | finished | interior_design
+  try { require('./favorites').ensureFavoriteColumn(db); } catch (_) {}
+  const isOnlyFavorite = (
+    String(query.only_favorite || '') === '1' || query.only_favorite === true ||
+    String(query.favorite || '') === '1' || query.favorite === true ||
+    mediaType === 'favorite'
+  );
+  if (isOnlyFavorite) {
+    where.push('a.favorited_at IS NOT NULL');
+  }
+
+  const effectiveCat = category || (mediaType !== 'favorite' ? mediaType : null);
+
+  if (lane === 'image') {
+    where.push("a.kind = 'image'");
+    if (!section || section === 'interior_exterior') {
+      where.push("COALESCE(a.category, 'interior') IN ('interior', 'exterior')");
+    } else if (section === 'portrait') {
+      where.push("a.category = 'portrait'");
+    } else if (section === 'clothing') {
+      where.push("a.category = 'clothing'");
+    } else if (section === 'furniture') {
+      where.push("(a.category = 'furniture' OR a.kind = 'furniture')");
+    }
+  } else if (lane === 'video') {
+    where.push("a.kind = 'video'");
+    if (section && section !== 'all') {
+      addTagFilter('video_purpose', section);
+    }
+  } else if (lane === 'audio') {
+    where.push("(a.kind = 'audio' OR a.category IN ('music', 'voice', 'vocal') OR a.file_name LIKE '%.mp3' OR a.file_name LIKE '%.wav' OR a.file_name LIKE '%.m4a')");
+    if (section === 'vocal' || section === 'voice') {
+      where.push("a.category IN ('voice', 'vocal')");
+    } else if (section === 'bgm') {
+      where.push("(a.category = 'music' OR a.category IS NULL OR a.category = '' OR a.category NOT IN ('voice', 'vocal'))");
+    } else if (section && section !== 'all') {
+      addTagFilter('audio_role', section);
+    }
+  } else if (lane === 'clip') {
+    if (section === 'output') {
+      where.push("a.kind = 'video' AND a.category = 'finished'");
+    } else {
+      where.push("a.in_managed_zone = 1");
+    }
+  } else if (lane === 'trash') {
+    if (section === 'gate_reject') {
+      where.push("a.status IN ('gate_reject', 'gateway_reject')");
+    } else if (section === 'user_delete') {
+      where.push("a.status = 'user_delete'");
+    } else {
+      where.push("a.status IN ('gate_reject', 'gateway_reject', 'user_delete')");
+    }
+  } else if (effectiveCat === 'favorites' || effectiveCat === 'all_favorites') {
+    if (!isOnlyFavorite) where.push('a.favorited_at IS NOT NULL');
+  } else if (effectiveCat === 'interior_design' || effectiveCat === 'interior' || effectiveCat === 'interior_exterior') {
+    where.push("(a.kind = 'image' AND COALESCE(a.category, 'interior') IN ('interior', 'exterior'))");
+  } else if (effectiveCat === 'exterior') {
+    where.push("a.category = 'exterior'");
+  } else if (effectiveCat === 'finished') {
+    where.push("a.category = 'finished'");
+  } else if (effectiveCat === 'clothing') {
+    where.push("a.category = 'clothing'");
+  } else if (effectiveCat === 'portrait') {
+    where.push("a.category = 'portrait'");
+  } else if (effectiveCat === 'furniture') {
+    where.push("(a.category = 'furniture' OR a.kind = 'furniture')");
+  } else if (effectiveCat === 'portrait_dynamic') {
+    where.push("(a.kind = 'video' OR a.kind = 'audio' OR COALESCE(a.category, '') IN ('portrait', 'finished', 'music', 'video'))");
+  } else if (effectiveCat === 'retouched') {
+    where.push("a.fid IN (SELECT asset_fid FROM derivatives WHERE kind IN ('style_transferred', 'quick_replace', 'quick_remove', 'quick_insert', 'clarity_enhanced', 'expand', 'retouched', 'manual_edit'))");
+  } else if (effectiveCat === 'video') {
+    where.push("a.kind = 'video'");
+  } else if (effectiveCat === 'music' || effectiveCat === 'audio') {
+    where.push("(a.kind = 'audio' OR a.category = 'music' OR a.file_name LIKE '%.mp3' OR a.file_name LIKE '%.wav' OR a.file_name LIKE '%.m4a')");
+  } else if (effectiveCat === 'image') {
+    where.push("a.kind = 'image'");
+  } else if (category && !['furniture', 'music', 'portrait', 'clothing', 'finished', 'retouched', 'interior_design', 'interior', 'exterior', 'interior_exterior', 'favorites', 'all_favorites'].includes(category)) {
+    where.push("COALESCE(a.category, 'interior') = ?");
+    args.push(category);
+  }
+
+  // 成片阶段（原素材/精修/成品）是资产属性：支持逗号多选；不传时不过滤
+  const shelfList = String(queryShelf || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const allowedShelves = shelfList.filter((s) => ['original', 'retouched', 'finished'].includes(s));
+  if (allowedShelves.length) {
+    where.push(`COALESCE(a.library_shelf, 'original') IN (${allowedShelves.map(() => '?').join(',')})`);
+    args.push(...allowedShelves);
+  }
+
+  if (effectiveCat === 'video' || videoSource || lane === 'video') {
+    if (videoSource === 'sync') {
+      where.push('(a.is_ai IS NULL OR a.is_ai = 0)');
+    } else if (videoSource === 'ai') {
+      where.push('a.is_ai = 1');
+    }
+  }
 
   addTagFilter('space', space);
   addTagFilter('video_purpose', videoPurpose);
@@ -897,7 +949,7 @@ function queryAssets(db, query = {}) {
            a.thumb_url, a.main_derivative_id, a.status, a.ready_flags,
            a.has_watermark, a.auth_state, COALESCE(a.created_at, a.discovered_at, 0) AS created_at,
            a.kind, a.is_ai, a.source_asset_id, a.poster_path, a.duration_s, a.size,
-           a.phash, a.md5, a.sha256, a.favorited_at
+           a.phash, a.md5, a.sha256, a.favorited_at, a.library_shelf
     FROM assets a
     WHERE ${whereSql}
     ORDER BY ${orderSql}
@@ -1040,13 +1092,50 @@ function queryAssets(db, query = {}) {
     }
   }
 
-  return {
-    items,
+  const skipFacets = skip_facets === '1' || skip_facets === 1 || skip_facets === true || skip_facets === 'true';
+  let resultItems = items;
+  if (fields === 'summary') {
+    resultItems = items.map(it => ({
+      fid: it.fid,
+      file_name: it.file_name,
+      width: it.width,
+      height: it.height,
+      orientation: it.orientation,
+      origin_orientation: it.origin_orientation,
+      category: it.category,
+      thumb_url: it.thumb_url,
+      main_derivative_id: it.main_derivative_id,
+      mainDerivative: it.mainDerivative,
+      media_type: it.media_type,
+      kind: it.kind,
+      created_at: it.created_at,
+      tags: it.tags,
+      dominant_color: it.dominant_color,
+      mediaToken: it.mediaToken,
+      poster_url: it.poster_url,
+      duration: it.duration,
+      is_ai: it.is_ai,
+      favorited_at: it.favorited_at,
+      library_shelf: it.library_shelf || 'original',
+      mime: it.mime || '',
+      source_asset_id: it.source_asset_id || '',
+      has_watermark: it.has_watermark,
+      status: it.status,
+      auth_state: it.auth_state,
+      dupCount: it.dupCount || 1
+    }));
+  }
+
+  const resObj = {
+    items: resultItems,
     total,
     page: p,
-    pageSize: ps,
-    filterOptions: skip_facets === '1' ? undefined : filterOptions(db)
+    pageSize: ps
   };
+  if (!skipFacets) {
+    resObj.filterOptions = filterOptions(db);
+  }
+  return resObj;
 }
 
 /**
@@ -1277,6 +1366,35 @@ function applyHumanTag(db, fid, dimension, dir) {
   return true;
 }
 
+// ===== 统一 RBAC 角色权限体系 =====
+function isPublicRoute(pathname, method) {
+  if (method === 'OPTIONS') return true;
+  if (pathname === '/health' || pathname === '/api/health') return true;
+  if (pathname === '/auth/login' || pathname === '/api/auth/login') return true;
+  if (pathname.startsWith('/frames/')) return true;
+  return false;
+}
+
+function requireViewer(res, sessionUser) {
+  if (!sessionUser) {
+    sendJson(res, 401, { error: '未登录或会话已过期' });
+    return false;
+  }
+  return true;
+}
+
+function requireAdmin(res, sessionUser) {
+  if (!sessionUser) {
+    sendJson(res, 401, { error: '未登录或会话已过期' });
+    return false;
+  }
+  if (sessionUser.role !== 'admin') {
+    sendJson(res, 403, { error: '需要管理员权限' });
+    return false;
+  }
+  return true;
+}
+
 // 核心 HTTP 请求路由调度
 async function handleApi(services, req, res, prefix = '/api') {
   const { db, config, interpreter } = services;
@@ -1300,9 +1418,10 @@ async function handleApi(services, req, res, prefix = '/api') {
   const token = extractToken(req, urlObj, {
     // HEAD 与 GET 同样是媒体探活/播放器分片请求（<video>、Chrome 下载器都可能先发 HEAD），
     // 只放行 GET 会让带 token 的 HEAD 直接 401。
+    // SSE (/events) 标准浏览器 EventSource 无法自定义 Header，亦允许 query token 鉴权。
     allowQuery:
       (req.method === 'GET' || req.method === 'HEAD') &&
-      /(image|poster|file|mask|temp|masks|video|audio|download|media|voice|preview|basecolor|swatch)/.test(pathname || urlObj.pathname || ''),
+      /(image|poster|file|mask|temp|masks|video|audio|download|media|voice|preview|basecolor|swatch|scene|events)/.test(pathname || urlObj.pathname || ''),
   });
   const isViewerRoute = pathname === '/viewer' || pathname.startsWith('/viewer/');
   // SEC-001：已移除 lanInternalSession 免密提权后门——会话只认真实登录 token。
@@ -1349,14 +1468,23 @@ async function handleApi(services, req, res, prefix = '/api') {
     ['GET', /^\/presets$/],
     ['GET', /^\/dict$/],
     ['GET', /^\/dict\/menu-tree$/],
+    ['GET', /^\/library\/catalog$/],
     ['GET', /^\/studio\/schema$/],
     ['GET', /^\/studio\/catalog$/],
     ['POST', /^\/tools\/convert-video$/],
+    ['POST', /^\/tools\/upload$/],
     ['POST', /^\/tools\/extract-frames$/],
+    ['POST', /^\/upload$/],
+    ['GET', /^\/tools\/lip-sync\/status$/],
+    ['POST', /^\/tools\/lip-sync$/],
+    ['GET', /^\/tools\/lip-sync\/tasks\/[^\/]+$/],
     ['GET', /^\/stats$/],
     ['GET', /^\/vectors\/status$/],
     ['POST', /^\/snapshot$/],
-    // SEC-007：/sync/reconcile 为批量删除对账，仅管理员（已移出 viewer 白名单）
+    ['GET', /^\/sync\/reconcile$/],
+    ['POST', /^\/sync\/upload$/],
+    ['POST', /^\/sync\/chunk$/],
+    ['POST', /^\/sync\/complete$/],
     ['POST', /^\/assets\/[^\/]+\/restage$/],
     ['POST', /^\/assets\/[^\/]+\/main-derivative$/],
     ['GET', /^\/lab\/capabilities$/],
@@ -1364,17 +1492,20 @@ async function handleApi(services, req, res, prefix = '/api') {
     ['GET', /^\/lab\/filter-vocabulary$/],
     ['GET', /^\/lab\/quick-models$/],
     ['GET', /^\/lab\/local-models$/],
+    ['POST', /^\/lab\/gate-preview$/],
+    ['POST', /^\/lab\/stale-tags$/],
     ['POST', /^\/lab\/runs$/],
     ['GET', /^\/lab\/runs\/[^\/]+\/[^\/]+$/],
     ['GET', /^\/cache\/temp\/[^\/]+$/],
     ['HEAD', /^\/cache\/temp\/[^\/]+$/],
+    ['GET', /^\/events$/],
     // 云端视频供应商凭 media_token 免登拉取首帧/尾帧（帧中继：/frames/<token>/<file>）
     ['GET', /^\/frames\/[^/]+\/[^/]+$/],
     ['HEAD', /^\/frames\/[^/]+\/[^/]+$/],
     ['GET', /^\/app\/update$/],
     ['DELETE', /^\/assets\/[^\/]+$/],
     ['POST', /^\/assets\/[^\/]+\/delete$/],
-    // SEC-007：dedupe-scan / dedupe-library（含 apply 全库软删）与 purge 同级，仅管理员
+    ['POST', /^\/assets\/dedupe-library$/],
     ['GET', /^\/rejected$/],
     ['GET', /^\/rejected\/[^\/]+$/],
     ['POST', /^\/rejected\/[^\/]+\/restore$/],
@@ -1469,6 +1600,57 @@ async function handleApi(services, req, res, prefix = '/api') {
   // 公开健康探测（客户端 ServerResolve 依赖 2xx/401）
   if ((pathname === '/health' || pathname === '/api/health') && req.method === 'GET') {
     return sendJson(res, 200, { ok: true, service: 'material-library', ts: Date.now() });
+  }
+
+  // ===== 实时事件总线 SSE 推送 (/api/events & /api/viewer/events) =====
+  if (pathname === '/events' && req.method === 'GET') {
+    if (!requireViewer(res, sessionUser)) return;
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.write(': sse connected\n\n');
+
+    const { eventBus, EVENTS } = require('./events');
+
+    const onTaskUpdated = (payload) => {
+      try { res.write(`event: task:updated\ndata: ${JSON.stringify(payload)}\n\n`); } catch (_) {}
+    };
+    const onAssetIngested = (payload) => {
+      try { res.write(`event: asset:ingested\ndata: ${JSON.stringify(payload)}\n\n`); } catch (_) {}
+    };
+    const onAssetDeleted = (payload) => {
+      try { res.write(`event: asset:deleted\ndata: ${JSON.stringify(payload)}\n\n`); } catch (_) {}
+    };
+    const onReconcileDone = (payload) => {
+      try { res.write(`event: sync:reconcile_done\ndata: ${JSON.stringify(payload)}\n\n`); } catch (_) {}
+    };
+
+    eventBus.on(EVENTS.TASK_UPDATED, onTaskUpdated);
+    eventBus.on(EVENTS.ASSET_INGESTED, onAssetIngested);
+    eventBus.on(EVENTS.ASSET_DELETED, onAssetDeleted);
+    eventBus.on(EVENTS.RECONCILE_DONE, onReconcileDone);
+
+    const pingTimer = setInterval(() => {
+      try { res.write(': ping\n\n'); } catch (_) {}
+    }, 20000);
+
+    const cleanup = () => {
+      clearInterval(pingTimer);
+      eventBus.off(EVENTS.TASK_UPDATED, onTaskUpdated);
+      eventBus.off(EVENTS.ASSET_INGESTED, onAssetIngested);
+      eventBus.off(EVENTS.ASSET_DELETED, onAssetDeleted);
+      eventBus.off(EVENTS.RECONCILE_DONE, onReconcileDone);
+    };
+
+    req.on('close', cleanup);
+    res.on('close', cleanup);
+    res.on('finish', cleanup);
+    return;
   }
 
   // ===== 语音输入（ASR）=====
@@ -1654,6 +1836,15 @@ async function handleApi(services, req, res, prefix = '/api') {
   }
 
   // ===== 统一菜单树与工作台契约 (Server-Driven UI 元数据开放只读) =====
+  if (pathname === '/library/catalog' && req.method === 'GET') {
+    try {
+      const { getLibraryCatalog } = require('./library-catalog');
+      return sendJson(res, 200, { success: true, data: getLibraryCatalog() });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
   if (pathname === '/dict/menu-tree' && req.method === 'GET') {
     try {
       const data = menuTree.getMenuTree(db);
@@ -1675,8 +1866,8 @@ async function handleApi(services, req, res, prefix = '/api') {
   // 鉴权拦截（临时生成预览产物同样需要会话；前端 <img> 标签走 ml_session Cookie 鉴权；或走 15min media_token）
   // SEC-002：/tools/* 不再免鉴权直达——未登录只放行公共模型目录与合法 media_token 的媒体读取。
   if (!isViewerOrAdmin) {
-    if (pathname === '/studio/catalog') {
-      // 仅允许公共模型目录直达
+    if (pathname === '/studio/catalog' || /^\/base-library\/items\/[^\/]+\/(preview|scene)$/.test(pathname) || /^\/base-library\/materials\/[^\/]+\/preview$/.test(pathname)) {
+      // 仅允许公共模型目录与公共切片预览图直达
     } else {
       const mImgCheck = pathname.match(/^\/assets\/([^\/]+)\/(?:image|file)(?:\/([^\/]+))?$/);
       const mMaskCheck = pathname.match(/^\/ai\/masks\/([^\/]+)$/);
@@ -1744,6 +1935,18 @@ async function handleApi(services, req, res, prefix = '/api') {
     }
   };
 
+  // 独立媒体工具免入库纯临时文件上传（支持格式转换、纯音频提炼、压缩等工坊使用）
+  if (pathname === '/tools/upload' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const { handleToolTempUpload } = require('./stream-upload');
+    try {
+      const data = await handleToolTempUpload(services, req);
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
   if (pathname === '/tools/extract-frames' && req.method === 'POST') {
     try {
       const body = await parseBody(req);
@@ -1767,6 +1970,130 @@ async function handleApi(services, req, res, prefix = '/api') {
         maxFrames: Number(body.maxFrames) || 16,
       });
       return sendJson(res, 200, { success: true, data: result });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // ===== AI 唇同步全流程引擎 (LatentSync / MuseTalk + 分片缝合 + GFPGAN，为后续画布预留) =====
+  if (pathname === '/tools/lip-sync/status' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const { getGpuStatus } = require('./vram-arbiter');
+      const status = await getGpuStatus();
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          engine: 'latentsync',
+          supportedEngines: ['latentsync', 'musetalk'],
+          defaultOffsetMs: 50,
+          chunkSeconds: 15,
+          faceEnhanceAvailable: true,
+          gpu: status.gpu,
+          serverOnline: status.online
+        }
+      });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 任务内存注册表（带自动 TTL 淘汰）
+  global.__LIP_SYNC_TASKS = global.__LIP_SYNC_TASKS || new Map();
+
+  if (pathname.startsWith('/tools/lip-sync/tasks/') && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const taskId = pathname.replace('/tools/lip-sync/tasks/', '');
+    const task = global.__LIP_SYNC_TASKS.get(taskId);
+    if (!task) return sendJson(res, 404, { error: '任务不存在或已过期' });
+    return sendJson(res, 200, { success: true, data: task });
+  }
+
+  if (pathname === '/tools/lip-sync' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const b = await parseBody(req);
+      const toWslPath = (p) => {
+        if (!p || typeof p !== 'string') return p;
+        const m = p.match(/^([a-zA-Z]):[\/\\](.*)/);
+        if (m && process.platform !== 'win32') {
+          return `/mnt/${m[1].toLowerCase()}/${m[2].replace(/\\/g, '/')}`;
+        }
+        return p;
+      };
+      let videoPath = toWslPath(b.videoPath);
+      let audioPath = toWslPath(b.audioPath);
+
+      // 若传入视频 fid 则通过资产表查找
+      if (!videoPath && b.videoFid) {
+        const deriv = db.prepare("SELECT * FROM derivatives WHERE asset_fid=? ORDER BY CASE kind WHEN 'origin' THEN 0 ELSE 1 END LIMIT 1").get(b.videoFid);
+        if (deriv) videoPath = await resolveDerivativeFile(services, deriv);
+      }
+      // 若传入音频 fid 则通过资产表查找
+      if (!audioPath && b.audioFid) {
+        const deriv = db.prepare("SELECT * FROM derivatives WHERE asset_fid=? ORDER BY CASE kind WHEN 'origin' THEN 0 ELSE 1 END LIMIT 1").get(b.audioFid);
+        if (deriv) audioPath = await resolveDerivativeFile(services, deriv);
+      }
+
+      if (!videoPath || !fs.existsSync(videoPath)) {
+        return sendJson(res, 400, { error: '未找到有效视频文件，请提供有效 videoFid 或 videoPath' });
+      }
+      if (!audioPath || !fs.existsSync(audioPath)) {
+        return sendJson(res, 400, { error: '未找到有效配音音频文件，请提供有效 audioFid 或 audioPath' });
+      }
+
+      const taskId = 'lipsync_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+      const outputDir = path.join(config.dataDir, 'cache', 'temp', 'lipsync', taskId);
+      fs.mkdirSync(outputDir, { recursive: true });
+
+      const taskRecord = {
+        taskId,
+        status: 'queued',
+        progress: 0,
+        stage: '任务已进入队列',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        downloadUrl: null,
+        error: null
+      };
+      global.__LIP_SYNC_TASKS.set(taskId, taskRecord);
+
+      // 异步触发分片唇同步与人脸修复流水线
+      const { runLipSyncPipeline } = require('./lip-sync-runner');
+      runLipSyncPipeline({
+        videoPath,
+        audioPath,
+        outputDir,
+        engine: b.engine || 'latentsync',
+        offsetMs: b.offsetMs != null ? Number(b.offsetMs) : 50,
+        chunkSeconds: b.chunkSeconds != null ? Number(b.chunkSeconds) : 15,
+        faceEnhance: b.faceEnhance !== false,
+        onProgress: (pct, stage) => {
+          taskRecord.status = 'processing';
+          taskRecord.progress = pct;
+          taskRecord.stage = stage;
+          taskRecord.updatedAt = Date.now();
+        }
+      }).then((result) => {
+        taskRecord.status = 'success';
+        taskRecord.progress = 100;
+        taskRecord.stage = '对口型渲染完成';
+        taskRecord.updatedAt = Date.now();
+        taskRecord.downloadUrl = `/api/cache/temp/lipsync/${taskId}/${path.basename(result.outputPath)}`;
+      }).catch((err) => {
+        taskRecord.status = 'failed';
+        taskRecord.error = err.message || String(err);
+        taskRecord.updatedAt = Date.now();
+      });
+
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          taskId,
+          status: 'queued',
+          message: '唇同步对口型任务已成功创建并排队执行'
+        }
+      });
     } catch (e) {
       return sendJson(res, 500, { error: e.message });
     }
@@ -1797,6 +2124,7 @@ async function handleApi(services, req, res, prefix = '/api') {
         targetFormat: body.targetFormat || 'mp4',
         crf: Number(body.crf) || 23,
         extractAudio: !!body.extractAudio,
+        cleanVocal: Boolean(body.cleanVocal),
       });
       return sendJson(res, 200, {
         success: true,
@@ -2375,10 +2703,11 @@ async function handleApi(services, req, res, prefix = '/api') {
   // 全库图片多手段去重：原图×原图×衍生（MD5/SHA/pHash/导出标记/血缘）
   // body: { apply?: boolean, phashStrict?, phashNear?, readExportTags? }
   if (pathname === '/assets/dedupe-library' && req.method === 'POST') {
-    if (!isAdmin) return sendJson(res, 403, { error: '需要管理员权限（SEC-007）' });
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
     try {
       const body = await parseBody(req);
       const apply = body.apply === true;
+      if (apply && !isAdmin) return sendJson(res, 403, { error: '应用全库去重需要管理员权限（SEC-007）' });
       const { scanLibraryDuplicates, applyDedupePairs, formatReportCsv } = require('./dedupe-library');
       const report = scanLibraryDuplicates(services, {
         dryRun: !apply,
@@ -2509,16 +2838,16 @@ async function handleApi(services, req, res, prefix = '/api') {
   // preview 只统计无副作用；apply 会把条目移入回收站（可恢复）。
   // 不自动执行：素材库是共享资产，必须由用户主动触发。
   if (pathname === '/sync/reconcile' && (req.method === 'POST' || req.method === 'GET')) {
-    if (!isAdmin) return sendJson(res, 403, { error: '需要管理员权限（SEC-007）' });
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
     const b = req.method === 'POST' ? await parseBody(req) : {};
     const q = urlObj.searchParams;
+    const apply = req.method === 'POST' && (b.apply === true || b.apply === 'true');
+    if (apply && !isAdmin) return sendJson(res, 403, { error: '执行相册对账删除需要管理员权限（SEC-007）' });
     const deviceId = String(b.deviceId || q.get('deviceId') || sessionUser?.device_id || '').trim();
     if (!deviceId) return sendJson(res, 400, { error: '缺少设备 ID（请先执行一次相册同步）' });
     const graceRaw = b.graceDays !== undefined ? b.graceDays : q.get('graceDays');
     const graceDays = graceRaw === null || graceRaw === undefined || graceRaw === ''
       ? null : Number(graceRaw);
-    const apply = req.method === 'POST' && (b.apply === true || b.apply === 'true');
     try {
       const albumReconcile = require('./album-reconcile');
       if (apply) {
@@ -2528,6 +2857,10 @@ async function handleApi(services, req, res, prefix = '/api') {
           limit: b.limit,
           actor: sessionUser?.username || 'user',
         });
+        try {
+          const { eventBus, EVENTS } = require('./events');
+          eventBus.emit(EVENTS.RECONCILE_DONE, { deviceId, out });
+        } catch (_) {}
         return sendJson(res, 200, { success: true, data: out });
       }
       const out = albumReconcile.previewReconcile(services, { deviceId, graceDays });
@@ -2539,6 +2872,7 @@ async function handleApi(services, req, res, prefix = '/api') {
 
   // 手机端相册媒体文件直传落盘 NAS（单文件流式/multipart）
   if (pathname === '/sync/upload' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
     const { handleDirectUpload } = require('./stream-upload');
     try {
       const data = await handleDirectUpload(services, req);
@@ -2550,6 +2884,7 @@ async function handleApi(services, req, res, prefix = '/api') {
 
   // 手机端大视频/大文件分片上传
   if (pathname === '/sync/chunk' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
     const { handleChunkUpload } = require('./stream-upload');
     const uploadId = req.headers['x-upload-id'] || urlObj.searchParams.get('upload_id');
     const chunkIndex = req.headers['x-chunk-index'] || urlObj.searchParams.get('chunk_index');
@@ -2564,6 +2899,7 @@ async function handleApi(services, req, res, prefix = '/api') {
 
   // 手机端大视频/大文件分片合并完成
   if (pathname === '/sync/complete' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
     const b = await parseBody(req);
     const { handleCompleteChunkUpload } = require('./stream-upload');
     try {
@@ -2999,8 +3335,17 @@ async function handleApi(services, req, res, prefix = '/api') {
 
   if (pathname === '/chat/sessions' && req.method === 'GET') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
-    const sessions = db.prepare('SELECT * FROM chat_sessions WHERE user_id=? OR user_id=0 ORDER BY updated_at DESC LIMIT 50')
-      .all(sessionUser?.id || 0);
+    const sessions = db.prepare(`
+      SELECT s.*,
+        (SELECT COUNT(*) FROM chat_messages m WHERE m.session_id = s.id AND (
+          (m.result_json IS NOT NULL AND m.result_json != '' AND m.result_json != 'null') OR
+          (m.mode IN ('text_to_image', 'image_to_image', 'omni_reference', 'text_to_video', 'video') AND m.role = 'assistant')
+        )) as product_count,
+        (SELECT m.mode FROM chat_messages m WHERE m.session_id = s.id ORDER BY m.created_at DESC LIMIT 1) as last_mode
+      FROM chat_sessions s
+      WHERE s.user_id=? OR s.user_id=0
+      ORDER BY s.updated_at DESC LIMIT 100
+    `).all(sessionUser?.id || 0);
     return sendJson(res, 200, { success: true, data: sessions });
   }
 
@@ -3055,7 +3400,8 @@ async function handleApi(services, req, res, prefix = '/api') {
   // 5. 新增/更新单条消息
   if (pathname === '/chat/messages' && req.method === 'POST') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
-    const b = await parseBody(req);
+    const b = await parseBody(req, 64 * 1024 * 1024);
+    if (b.__bodyTooLarge) return sendJson(res, 413, { error: '请求数据过大，超出上限' });
     const sessionId = b.sessionId || 'default_session';
     if (!chatSessionOwned(sessionId)) return sendJson(res, 403, { error: '无权写入该会话' });
     const msgId = b.id || `msg_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
@@ -3410,8 +3756,15 @@ async function handleApi(services, req, res, prefix = '/api') {
       try { result_images = JSON.parse(r.result_images || '[]'); } catch {}
       try { paramsObj = JSON.parse(r.params_json || '{}'); } catch {}
       try { tagsArr = JSON.parse(r.tags || '[]'); } catch {}
+      if ((r.type === 'video' || String(result_images[0]?.url || '').endsWith('.mp4')) && result_images[0]) {
+        if (!result_images[0].poster && result_images[0].fid) {
+          result_images[0].poster = '/api/viewer/assets/' + encodeURIComponent(result_images[0].fid) + '/poster';
+        }
+      }
       return {
         ...r,
+        created_at: Number(r.created_at || r.updated_at || Date.now()),
+        updated_at: Number(r.updated_at || r.created_at || Date.now()),
         type: r.type || 'image',
         space: r.space || '',
         style: r.style || '',
@@ -3456,10 +3809,15 @@ async function handleApi(services, req, res, prefix = '/api') {
     const id = b.id || `tpl_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
     const aspectRatio = b.aspect_ratio || b.aspectRatio || '16:9';
     const originImages = JSON.stringify(b.origin_images || b.originImages || []);
-    const resultImages = JSON.stringify(b.result_images || b.resultImages || []);
+    const type = b.type || 'image'; // image / video / audio
+    let resultList = b.result_images || b.resultImages || [];
+    if (!Array.isArray(resultList)) resultList = [];
+    if (type === 'video') {
+      resultList = await attachLocalVideoPoster(services, resultList);
+    }
+    const resultImages = JSON.stringify(resultList);
     const paramsJson = JSON.stringify(b.params || {});
     const tagsJson = JSON.stringify(b.tags || ['用户自定义']);
-    const type = b.type || 'image'; // image / video / audio
     const space = (b.space || '').trim();
     const style = (b.style || '').trim();
     const purpose = (b.purpose || '').trim();
@@ -3515,8 +3873,18 @@ async function handleApi(services, req, res, prefix = '/api') {
     const b = await parseBody(req);
     const existing = db.prepare('SELECT * FROM creation_templates WHERE id=?').get(tplId);
     if (!existing) return sendJson(res, 404, { error: '作品配方不存在' });
-    // SEC-007：仅属主或管理员可改他人配方
-    if (!isAdmin && Number(existing.user_id) !== Number(sessionUser?.id)) {
+    // SEC-007：仅属主或管理员可改他人配方（标常用/置顶与复用频次累加为全局交互，任何登录用户均可操作）
+    const isPinOrUseOnly = (
+      (b.is_pinned !== undefined || b.action === 'use' || b.use_count !== undefined) &&
+      b.title === undefined &&
+      b.prompt === undefined &&
+      b.tags === undefined &&
+      b.type === undefined &&
+      b.space === undefined &&
+      b.style === undefined &&
+      b.purpose === undefined
+    );
+    if (!isAdmin && !isPinOrUseOnly && Number(existing.user_id) !== Number(sessionUser?.id)) {
       return sendJson(res, 403, { error: '无权修改他人配方' });
     }
 
@@ -3901,6 +4269,25 @@ async function handleApi(services, req, res, prefix = '/api') {
           const ap = path.join(ad, asset.storage_ref);
           if (fs.existsSync(ap)) { found = ap; break; }
         }
+      }
+    }
+    if (found && /\.(mp4|mov|webm|mkv|m4v)$/i.test(found)) found = null;
+    if (!found) {
+      const fid = fn.replace(/\.[a-zA-Z0-9]+$/, '');
+      try {
+        const deriv = db.prepare(`
+          SELECT * FROM derivatives
+          WHERE asset_fid=? AND (mime LIKE 'video/%' OR file_name LIKE '%.mp4' OR file_name LIKE '%.mov' OR file_name LIKE '%.webm')
+          ORDER BY id DESC LIMIT 1
+        `).get(fid);
+        if (deriv) {
+          const ok = await ensureVideoThumbAsync(services, fid, deriv);
+          const dataDir = services?.config?.dataDir || process.env.ML_DATA_DIR || path.join(require('os').homedir(), '.dsh-material-library');
+          const out = path.join(dataDir, 'cache', 'thumbs', `${fid}.jpg`);
+          if (ok && fs.existsSync(out)) found = out;
+        }
+      } catch (err) {
+        console.warn('[api] 缩略图抽帧失败', fn, err.message);
       }
     }
     if (!found) {
@@ -4611,6 +4998,7 @@ async function handleApi(services, req, res, prefix = '/api') {
               try {
                 db.prepare("UPDATE assets SET poster_path=? WHERE fid=? AND (poster_path IS NULL OR poster_path='')").run(relPath, fid);
               } catch {}
+              await rememberVideoFrame(services, fid, vidPath);
               const buf = fs.readFileSync(outThumb);
               res.writeHead(200, {
                 'Content-Type': 'image/jpeg',
@@ -4848,6 +5236,12 @@ async function handleApi(services, req, res, prefix = '/api') {
     const forceLocal = urlObj.searchParams.get('local') === '1';
     const thumb = path.join(config.dataDir, 'cache', 'thumbs', `${fid}.jpg`);
     const gridPath = path.join(config.dataDir, 'cache', 'grid', `${fid}.jpg`);
+    const gridWebpPath = path.join(config.dataDir, 'cache', 'grid', `${fid}.webp`);
+    const previewJpegPath = path.join(config.dataDir, 'cache', 'preview', `${fid}.jpg`);
+    const previewWebpPath = path.join(config.dataDir, 'cache', 'preview', `${fid}.webp`);
+    const acceptHeader = String(req.headers['accept'] || '').toLowerCase();
+    const formatParam = String(urlObj.searchParams.get('format') || '').toLowerCase();
+    const wantsWebp = !isFileOrVideo && !isDl && (formatParam === 'webp' || acceptHeader.includes('image/webp'));
     const assetRow = db.prepare('SELECT thumb_url, main_derivative_id FROM assets WHERE fid=?').get(fid);
 
     const buildStandardDisposition = (targetName, defaultExt = '.jpg', kind = 'origin') => {
@@ -4870,7 +5264,7 @@ async function handleApi(services, req, res, prefix = '/api') {
       host === '127.0.0.1' || host === 'localhost' || host === '::1'
       || /^192\.168\./.test(host) || /^10\./.test(host)
       || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
-    if (!isFileOrVideo && !isDl && !isRaw && !derivativeId && !forceLocal && !isPrivateHost && tier !== 'grid' && assetRow?.thumb_url && !fs.existsSync(thumb)) {
+    if (!isFileOrVideo && !isDl && !isRaw && !derivativeId && !forceLocal && !isPrivateHost && tier !== 'grid' && tier !== 'preview' && assetRow?.thumb_url && !fs.existsSync(thumb)) {
       res.writeHead(302, {
         'Location': assetRow.thumb_url,
         'Cache-Control': 'public, max-age=3600'
@@ -4885,6 +5279,52 @@ async function handleApi(services, req, res, prefix = '/api') {
     } else {
       // 网格档 (256px)：App 列表专用，命中缓存时零解码、零原图读取
       if (!isFileOrVideo && !isDl && !isRaw && tier === 'grid') {
+        if (wantsWebp) {
+          if (fs.existsSync(gridWebpPath)) {
+            const gbuf = fs.readFileSync(gridWebpPath);
+            const gridDisp = buildStandardDisposition(`ML_SAVED_${fid}_grid.webp`, '.webp', 'grid');
+            res.writeHead(200, {
+              'Content-Type': 'image/webp',
+              'Content-Length': gbuf.length,
+              'Content-Disposition': gridDisp,
+              'Cache-Control': 'public, max-age=86400'
+            });
+            if (req.method === 'HEAD') return res.end();
+            return res.end(gbuf);
+          }
+          if (fs.existsSync(thumb)) {
+            const { ensureGridWebpFromThumb } = require('./derivatives');
+            const made = await ensureGridWebpFromThumb(thumb, gridWebpPath);
+            if (made && fs.existsSync(made)) {
+              const gbuf = fs.readFileSync(made);
+              const gridDisp = buildStandardDisposition(`ML_SAVED_${fid}_grid.webp`, '.webp', 'grid');
+              res.writeHead(200, {
+                'Content-Type': 'image/webp',
+                'Content-Length': gbuf.length,
+                'Content-Disposition': gridDisp,
+                'Cache-Control': 'public, max-age=86400'
+              });
+              if (req.method === 'HEAD') return res.end();
+              return res.end(gbuf);
+            }
+          }
+          if (fs.existsSync(gridPath)) {
+            const { ensureGridWebpFromThumb } = require('./derivatives');
+            const made = await ensureGridWebpFromThumb(gridPath, gridWebpPath);
+            if (made && fs.existsSync(made)) {
+              const gbuf = fs.readFileSync(made);
+              const gridDisp = buildStandardDisposition(`ML_SAVED_${fid}_grid.webp`, '.webp', 'grid');
+              res.writeHead(200, {
+                'Content-Type': 'image/webp',
+                'Content-Length': gbuf.length,
+                'Content-Disposition': gridDisp,
+                'Cache-Control': 'public, max-age=86400'
+              });
+              if (req.method === 'HEAD') return res.end();
+              return res.end(gbuf);
+            }
+          }
+        }
         if (fs.existsSync(gridPath)) {
           const gbuf = fs.readFileSync(gridPath);
           const gridDisp = buildStandardDisposition(`ML_SAVED_${fid}_grid.jpg`, '.jpg', 'grid');
@@ -4914,8 +5354,35 @@ async function handleApi(services, req, res, prefix = '/api') {
           }
         }
       }
+      // 预览档 (1280px)：命中缓存时零解码、零原图读取直接返回
+      if (!isFileOrVideo && !isDl && !isRaw && tier === 'preview') {
+        if (wantsWebp && fs.existsSync(previewWebpPath)) {
+          const pbuf = fs.readFileSync(previewWebpPath);
+          const previewDisp = buildStandardDisposition(`ML_SAVED_${fid}_preview.webp`, '.webp', 'preview');
+          res.writeHead(200, {
+            'Content-Type': 'image/webp',
+            'Content-Length': pbuf.length,
+            'Content-Disposition': previewDisp,
+            'Cache-Control': 'private, max-age=3600, must-revalidate'
+          });
+          if (req.method === 'HEAD') return res.end();
+          return res.end(pbuf);
+        }
+        if (!wantsWebp && fs.existsSync(previewJpegPath)) {
+          const pbuf = fs.readFileSync(previewJpegPath);
+          const previewDisp = buildStandardDisposition(`ML_SAVED_${fid}_preview.jpg`, '.jpg', 'preview');
+          res.writeHead(200, {
+            'Content-Type': 'image/jpeg',
+            'Content-Length': pbuf.length,
+            'Content-Disposition': previewDisp,
+            'Cache-Control': 'private, max-age=3600, must-revalidate'
+          });
+          if (req.method === 'HEAD') return res.end();
+          return res.end(pbuf);
+        }
+      }
       // 浏览网格：无 derivative 时允许共享缩略图；raw=1 时强制拉高清原图
-      if (!isFileOrVideo && !isDl && !isRaw && fs.existsSync(thumb)) {
+      if (!isFileOrVideo && !isDl && !isRaw && tier !== 'preview' && !wantsWebp && fs.existsSync(thumb)) {
         const tbuf = fs.readFileSync(thumb);
         setImmediate(() => {
           try {
@@ -5059,11 +5526,27 @@ async function handleApi(services, req, res, prefix = '/api') {
 
     if (!isDl && !isRaw && !isVideo && !isAudio && actionType === 'image' && tier === 'grid') {
       try {
+        if (wantsWebp) {
+          const { ensureGridWebp } = require('./derivatives');
+          const grid = await ensureGridWebp(services, fid, filePath, deriv || derivativeId);
+          if (grid && fs.existsSync(grid)) {
+            const gbuf = fs.readFileSync(grid);
+            const gridDisp = buildStandardDisposition(path.basename(grid), '.webp', deriv?.kind || 'grid');
+            res.writeHead(200, {
+              'Content-Type': 'image/webp',
+              'Content-Length': gbuf.length,
+              'Content-Disposition': gridDisp,
+              'Cache-Control': 'public, max-age=86400'
+            });
+            if (req.method === 'HEAD') return res.end();
+            return res.end(gbuf);
+          }
+        }
         const { ensureGridJpeg } = require('./derivatives');
-        const grid = await ensureGridJpeg(services, fid, filePath);
+        const grid = await ensureGridJpeg(services, fid, filePath, deriv || derivativeId);
         if (grid && fs.existsSync(grid)) {
           const gbuf = fs.readFileSync(grid);
-          const gridDisp = buildStandardDisposition(`ML_SAVED_${fid}_grid.jpg`, '.jpg', 'grid');
+          const gridDisp = buildStandardDisposition(path.basename(grid), '.jpg', deriv?.kind || 'grid');
           res.writeHead(200, {
             'Content-Type': 'image/jpeg',
             'Content-Length': gbuf.length,
@@ -5078,6 +5561,22 @@ async function handleApi(services, req, res, prefix = '/api') {
 
     if (!isDl && !isRaw && !isVideo && !isAudio && actionType === 'image') {
       try {
+        if (wantsWebp) {
+          const { ensurePreviewWebp } = require('./derivatives');
+          const preview = await ensurePreviewWebp(services, fid, deriv, filePath);
+          if (preview && fs.existsSync(preview)) {
+            const buf = fs.readFileSync(preview);
+            const previewDisp = buildStandardDisposition(path.basename(preview), '.webp', deriv?.kind || 'preview');
+            res.writeHead(200, {
+              'Content-Type': 'image/webp',
+              'Content-Length': buf.length,
+              'Content-Disposition': previewDisp,
+              'Cache-Control': 'private, max-age=3600, must-revalidate'
+            });
+            if (req.method === 'HEAD') return res.end();
+            return res.end(buf);
+          }
+        }
         const preview = await ensurePreviewJpeg(services, fid, deriv, filePath);
         if (preview && fs.existsSync(preview)) {
           const buf = fs.readFileSync(preview);
@@ -6221,6 +6720,25 @@ async function handleApi(services, req, res, prefix = '/api') {
     if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
     const { getEndpointsList } = require('./models-contract');
     return sendJson(res, 200, { success: true, data: getEndpointsList(db) });
+  }
+
+  if (pathname === '/providers/newapi/models' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const { resolveEndpointAuth } = require('./models-contract');
+      const endpoint = db.prepare("SELECT * FROM llm_endpoints WHERE id='newapi'").get();
+      const auth = endpoint ? resolveEndpointAuth(db, endpoint) : null;
+      const apiKey = auth?.apiKey || process.env.NEWAPI_API_KEY || '';
+      if (!apiKey) return sendJson(res, 503, { success: false, error: 'New API 密钥未配置' });
+      const base = (endpoint?.base_url || process.env.NEWAPI_BASE_URL || 'https://newapi.naite.cc/v1').replace(/\/$/, '');
+      const resp = await fetch(`${base}/models`, { headers: { Authorization: `Bearer ${apiKey}` } });
+      const payload = await resp.json();
+      if (!resp.ok) return sendJson(res, 502, { success: false, error: payload?.error?.message || `New API HTTP ${resp.status}` });
+      const models = (payload.data || []).map((m) => m.id).filter(Boolean).sort();
+      return sendJson(res, 200, { success: true, data: { base_url: base, count: models.length, models } });
+    } catch (e) {
+      return sendJson(res, 502, { success: false, error: e.message });
+    }
   }
 
   if (pathname === '/providers/env-keys' && req.method === 'GET') {
@@ -7878,7 +8396,8 @@ module.exports = {
       const imgAdapters = engines.gen?.imageAdapters || [];
       const { pickAdapterId, adapterMissingError, isGoogleModel } = require('./adapter-match');
       const mCode = String(modelContract?.vendor_model_id || b.model || '');
-      const pickedId = pickAdapterId('image', mCode, imgAdapters);
+      const execEndpointId = modelExec?.capability?.endpoint_id || modelExec?.endpoint?.id || '';
+      const pickedId = pickAdapterId('image', mCode, imgAdapters, execEndpointId);
       let adapterRow = null;
       if (b.adapterId) {
         adapterRow = db.prepare('SELECT * FROM gen_adapters WHERE id=?').get(b.adapterId);

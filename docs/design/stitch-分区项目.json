@@ -1,0 +1,20 @@
+{
+  "projectId": "7051111932614979142",
+  "title": "灵感空间分区设计",
+  "designSystem": "assets/2606859806028525187",
+  "note": "顶栏不重生成，只认 150266a7b49244798826ab7ea1acd652。下面 11 张是按新提示词生成的准绳。同项目里更早的同名画面作废。配色下一轮重做。",
+  "screens": [
+    { "canonical": "顶栏", "screenId": "150266a7b49244798826ab7ea1acd652", "generated": false },
+    { "canonical": "图片 · 室内外设计", "screenId": "e15dc250de264309ae9d3e3c78dba10d" },
+    { "canonical": "基础素材 · 地面", "screenId": "7ee722916f6b4cfc97b9d465ce6b9f41" },
+    { "canonical": "基础素材 · 灯具换整件", "screenId": "7f4f3a6fbd0043bf886a2e8edf49fcde" },
+    { "canonical": "对话工作台", "screenId": "016fbbff58994045b735b2112494fb82" },
+    { "canonical": "历史收起", "screenId": "792f4e7a9ee64219a58163f2c08f2f08" },
+    { "canonical": "全局编辑", "screenId": "a4319b250adc4c84adb5462aeb20de28" },
+    { "canonical": "精准编辑换表面", "screenId": "bb98d06844f2446daa1719246db0812d" },
+    { "canonical": "精准编辑换整件", "screenId": "c796ac2ccf834c6680fccc79a325bcc4" },
+    { "canonical": "多轨时间轴", "screenId": "6be958ab80924c998c1d5cba39e75f47" },
+    { "canonical": "视频寻帧", "screenId": "e64806e192674800a76c1fc1723d8f5a" },
+    { "canonical": "连接与存储", "screenId": "2a7ce7a2ace9496380e5139971272201" }
+  ]
+}

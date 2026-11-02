@@ -1335,6 +1335,7 @@ function endpointIdForAdapter(adapter) {
   const KNOWN_EPS = ['volc_ark', 'agnes', 'agnes_intl', 'litellm', 'qwen_lan', 'local_host', 'doubao_music', 'volc_portrait', 'gemini', 'groq', 'kilo', 'modelscope'];
   if (KNOWN_EPS.includes(id)) return id;
 
+  if (id.startsWith('newapi') || bu.includes('newapi.naite.cc') || proto === 'gemini_generate_content') return 'newapi';
   if (proto === 'doubao_music' || id === 'doubao_music' || bu.includes('imagination')) return 'doubao_music';
   if (proto === 'volc_portrait' || id === 'volc_portrait' || id.startsWith('ark_portrait') || bu.includes('ark.cn-beijing.volcengineapi.com')) return 'volc_portrait';
   if (

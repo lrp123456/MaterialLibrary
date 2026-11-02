@@ -1,87 +1,114 @@
-# MaterialLibraryServer Agent 开发规范与职责界定 (Server-Driven Contract)
+# Material Studio Pro · 系统架构与 Agent 开发全景规范 (2026 权威真值版)
 
-## 1. 核心定位与职责边界
-- **核心定位**：整个系统的数据中心、业务规则中枢与 AI 算力管线网关。
-- **唯一真实数据源 (Single Source of Truth)**：任何分类层级、品类选项、打标字典、模型列表、参数控制项（快捷项/高级项），**必须由服务端统一收敛与定义**，严禁在客户端写死！
-- **向后兼容与容灾兜底**：元数据契约接口（如 `/dict/menu-tree` 与 `/studio/schema`）必须保持高可用、无死锁，支持公开只读或低鉴权探测，确保客户端在未登录或网络抖动时依然能渲染完整 UI 框架骨架。
+> **核心原则**：本文档为全系统的唯一全局架构真值源（Single Source of Truth）。一切开发、部署、运维与 Agent 代码交互，均以此规范为最高准绳，坚决避免「文档写在 A、代码跑在 B、数据库落在 C」的认知割裂。
 
 ---
 
-## 2. 关键核心契约 (Contract API)
+## 一、物理拓扑与环境边界 (Windows vs WSL)
 
-### 2.1 统一菜单树契约 (`GET /api/dict/menu-tree`)
-- **源码实现**：`src/menu-tree.js` 中的 `getMenuTree(db)`
-- **数据结构**：
-  ```ts
-  interface MenuNode {
-    key: string;              // 分类唯一标识 (如 all, interior, furniture...)
-    label: string;            // 中文显示标签
-    icon: string;             // 图标代号
-    children: Array<{         // 二级子品类
-      key: string;
-      label: string;
-    }>;
-    facets: Array<{           // 该分类专属与通用的关联过滤维度
-      key: string;            // dominant_color, orientation, space_type...
-      label: string;
-      type: 'color_palette' | 'radio_group' | 'tag_single' | 'tag_multi';
-      placement: 'primary' | 'advanced'; // 明确指示快捷展平还是放入折叠抽屉
-      options: Array<{ value: string; label: string; hex?: string; isLight?: boolean }>;
-    }>;
-  }
-  ```
-- **打标系统 100% 统一**：
-  - 主色必须采用 12 色标准板 (`src/tags-seed.js` 与 `src/menu-tree.js`)；
-  - 严禁出现客户端自行发明的色彩定义。
-
-### 2.2 工作台 Studio Schema 契约 (`GET /api/studio/schema`)
-- **源码实现**：`src/menu-tree.js` 中的 `getStudioSchema()`
-- **数据结构**：
-  - `models`: 可用生成模型列表（`Seedream 5.0 Flash`、`Seedream 5.0 Pro`、`Seedance 2.0` 等）及推荐位。
-  - `inputControls.quick`: 快捷操作栏参数（如画幅比例、画质等级）。
-  - `inputControls.advanced`: 高级抽屉参数（负向提示词、Seed、采样步数 Steps、CFG Scale）。
-  - `fixedActions`: 客户端固定高优独立保留插槽（如 `✨ 优化提示词`）。
-
-### 2.3 提示词系统专属 Skill 优化器 (`POST /api/chat/optimize-prompt`)
-- **参数要求**：必须携带 `{ prompt, modelId, mode, imageUrls }`；
-- **业务职责**：调用服务端为该生成模型预设的专属优化 Skill 系统提示词，结合挂载的参考素材图，扩写为空间、材质、光影层次严谨的电影级描述，去除违规参数词。
+| 节点 / 组件 | 运行环境 | 物理路径 / 端口 | 核心职责 |
+| :--- | :--- | :--- | :--- |
+| **代码仓库 (Git)** | Windows 宿主 | `C:\Users\lrp\DevEcoStudioProjects\MaterialLibraryServer`<br>(WSL 内部对应: `/mnt/c/Users/lrp/DevEcoStudioProjects/MaterialLibraryServer`) | 所有业务源码、前端源码、构建脚本的唯一工作区 |
+| **核心业务后端** | **WSL (Linux)** | **端口：`30001`**<br>主进程文件：`src/server.js` | 核心业务路由、SQLite 连接池、AI 抠图生成、音频 Demucs、Whisper 语音、FFmpeg 剪辑转码等 Linux 原生算力中枢 |
+| **唯一生产数据库** | **WSL (Linux)** | **`/home/lrp/.dsh-material-library/material.db`**<br>(包含 WAL: `material.db-wal`, `material.db-shm`) | **全系统唯一真实生产数据库**（包含全部资产库、2000+条基础素材、向量特征）。**严禁在 Windows 目录建立孤立库**！ |
+| **桌面工作台网关** | Windows / WSL | **端口：`30002`**<br>主进程文件：`web-pro/server.cjs` | 高性能静态服务器与反向代理网关：托管 `web-pro/dist`，并将所有 `/api/*` 请求代理转发至 WSL 30001 |
+| **浏览器交互端** | Windows 桌面 | `http://localhost:30002/static/preview.html` 或 `http://localhost:30002/` | 用户直面 UI（Vue 3 SPA），包含素材库 (DAM)、空间创作 (Studio)、媒体剪辑 (MediaHub)、系统设置 (Settings) |
+| **剪辑器子应用** | WSL (Linux) | **端口：`3010`**<br>工作目录：`editor/apps/web` (Next.js) | 以 `basePath=/editor` 启动，经 30002 网关无缝反向代理嵌入主应用 iframe |
 
 ---
 
-## 3. Server Agent 开发红线
-1. **四端口双通道结构（2026-10-23 起，禁止改端口）**：
-   - 正式：`30001` 核心 API + `30002` 桌面 Web 端，WSL 内由 `scripts/watchdog.sh` 统一守护；
-   - 灰测：`30000` 灰测 API + `30003` 灰测 Web 端，Windows 侧由 `scripts/gray-release.js` 拉起，
-     产物目录 `web-pro/dist-gray`、数据目录 `~/.dsh-material-library-gray`；
-   - 所有改动必须先发到 30003 验证，再在灰测页面「系统设置 → 双通道灰度发布」点「发布到正式版」；
-   - 30002 是给用户看的唯一客户端入口，30003 只用于灰测；临时调试不得占用 30000/30001/30002/30003。
-   - 详细流程与故障排查见 `docs/双通道灰度发布与语音输入.md`。
-2. **契约变更须升级 Version**：
-   - 若增加新的维度或修改模型参数结构，必须更新 `getStudioSchema()` 中的 `version` 字段，方便客户端缓存协商更新。
-3. **白名单与权限管理**：
-   - 客户端必需的 Schema 与通用元数据必须纳入 `VIEWER_WHITELIST`。
-   - 包括媒体流与文件端点：`/assets/:fid/image`、`/assets/:fid/file`、`/assets/:fid/video`、`/assets/:fid/poster` 必须全量支持 Range 206 流式传输与 Token 鉴权。
+## 二、项目代码目录结构清单 (各模块绝对归属)
+
+```
+MaterialLibraryServer/
+├── src/                          # 【30001 核心后端】Node.js 业务服务层
+│   ├── server.js                 # HTTP 服务主入口 (端口 30001)
+│   ├── db.js                     # SQLite 连接管理 (跨平台加载 better_sqlite3.node，配置 busy_timeout)
+│   ├── auth.js                   # 账号鉴权与 Token 管理 (admin: zxlrppp145)
+│   ├── menu-tree.js              # 服务端驱动的分类菜单树与 Studio 参数 Schema
+│   ├── base-library/             # 基础素材核心业务模块
+│   │   ├── items.js              # 基础素材 CRUD、多使用面挂载、光泽/纹理/主色清洗
+│   │   ├── taxonomy.js           # 分类法字典 (墙面/顶面/地面/软装/全屋定制/选品)
+│   │   └── compiler.js           # 空间提示词与风格方案编译器
+│   └── routes/                   # 各板块 REST API 路由
+│
+├── web-pro/                      # 【30002 桌面端前端】Vue 3 + Vite + Tailwind CSS
+│   ├── server.cjs                # 30002 独立高性能 Web 服务器与 API 反向代理网关
+│   ├── dist/                     # 前端生产构建产物 (由 npm run build 生成)
+│   └── src/                      # 前端组件与业务逻辑源码
+│       ├── App.vue               # 全局根组件 (顶栏导航、全局登录框、新版本感知、白屏容错屏障)
+│       ├── api.js                # 前端统一 API 封装与会话管理
+│       ├── views/                # 四大主板块核心视口
+│       │   ├── LibraryView.vue   # 素材库 (DAM 大资产生态 + 基础素材四板块瀑布流)
+│       │   ├── StudioView.vue    # 空间创作 (对话式生成 + 6大精准模式控制台)
+│       │   ├── MediaHubView.vue  # 媒体多轨剪辑与 FFmpeg 工具箱
+│       │   └── SettingsView.vue  # 系统设置与双通道灰度发布
+│       └── components/           # 通用原子 UI 组件
+│
+├── scripts/                      # 【运维与数据自动化】工具集
+│   ├── build-base-library.js     # 一体化基础素材生产库构建与同步注入器 (核心推荐)
+│   ├── crawl-latex-nippon.js     # 立邦乳胶漆 (898款带真实空间实景图与主色分类)
+│   ├── crawl-tiles-guanzhu.js    # 冠珠瓷砖 (884款带单片材质图、铺贴实景图、光泽、纹理)
+│   ├── migrate.js                # SQLite 数据库表结构迁移与种子化
+│   └── watchdog.sh               # WSL 内部生产服务守护进程 (崩溃自愈拉起)
+│
+├── editor/                       # 【3010 剪辑子应用】基于 Next.js 的多轨剪辑核心
+└── docs/                         # 【系统架构与设计文档】
+    └── SYSTEM_ARCHITECTURE.md    # 系统底层运转与全流程详解手册
+```
 
 ---
 
-## 4. 全局色彩与 UI 规范唯一真相源 (Theme Single Source of Truth)
+## 三、基础素材业务标准与架构规范
 
-### 4.1 三大官方主题模式与定义
-1. **专业暗黑尊享 (Obsidian Titanium - `dark`)**：
-   - 底色 `#0A0E17` / `#131A29`，主文本 `#F8FAFC`，边框 `#27354D`。
-2. **极简白瓷明朗 (Porcelain Studio - `light`)**：
-   - 底色 `#F1F5F9` / `#FFFFFF`，主文本 `#0F172A`，边框 `#CBD5E1`。
-3. **沉香宣纸·温润茶道护眼 (Warm Parchment - `eye-care`)**：
-   - 底色 `#F6F1E5` / `#FAF5EB` / `#FFFDF8`，主文本 `#241E15`，强调色 `#B45309` (焦糖香木)，次级色 `#2D5A43` (沉静松青)。
+### 1. 板块划分与使用面定义
+- **第一行四大板块**：`材质`（material）、`做法`（design）、`选品`（product）、`风格方案`（scheme）。
+- **材质细分五大使用面**：
+  1. **墙面 (`wall`)**：乳胶漆、微水泥、墙纸、墙布、木饰面（木饰面仅收上墙饰面板）；
+  2. **顶面 (`ceiling`)**：乳胶漆、微水泥（与墙面共用记录，同一条多处挂载）；
+  3. **地面 (`floor`)**：瓷砖、木地板（实木/复合地板）；
+  4. **软装 (`soft`)**：织物（棉麻为筛选项）、皮革；
+  5. **全屋定制 (`millwork`)**：板材、门（材质与颜色）、门套、踢脚线、台面与窗台石（岩板/石材）。
+- **选品 (`product`)**：茶几、餐桌、灯、地毯、成品柜、成品门。
+- **已废弃类目**：玻璃（`glass`）、金属（`metal`）、藤编（`rattan`）已彻底清理，严禁死灰复燃。
 
-### 4.2 严禁违规项 (Agent 铁律)
-1. **严禁硬编码暗黑专属类**：
-   - 禁止在组件中直接书写 `bg-slate-900`、`bg-slate-950`、`bg-black/80`、`bg-rose-950`、`bg-blue-950`、`bg-indigo-950` 等。必须统一使用 `bg-studio-*` 映射类或 CSS Token。
-2. **严禁浅底浅字与深底深字 (WCAG AAA/AA 规范)**：
-   - 任何状态胶囊（如 `1080×1920` 分辨率徽标）、状态徽章、输入框、按钮，必须确保对比度 >= 4.5:1。
-   - 状态为激活态时（如按钮高亮背景），内嵌小字徽标禁止使用透明灰/浅底色造成文字融进背景，必须具备清晰的对比反差。
-3. **危险/警告按钮必须语义化自适应**：
-   - 「移入回收站」、「彻底清除」等危险操作，暗黑模式下为深红微光，明亮模式下为浅粉底深红字（`bg-rose-50 text-rose-700 border-rose-200`），护眼模式下为温润赭红深酒红字（`bg-amber-950/10 text-rose-900 border-rose-300/40`），绝不允许出现灰泥粉色或不可读低对比。
-4. **老年人/视力友好规范**：
-   - 全站字号根基保持 15px ~ 15.5px，标题与操作项行高 >= 1.5，交互元素点击区域 >= 32px。
+### 2. 挂载模型与瀑布流铁律
+1. **一条记录多处挂载，严禁复制记录**：
+   - 同一款立邦乳胶漆，同时挂载到【墙面】与【顶面】；
+   - 同一款大板/岩板瓷砖，同时挂载到【地面】与【墙面】；若是岩板，再额外挂载到【全屋定制】（台面与窗台石）；
+   - 一款门若带有成品样式图，同时挂载到【全屋定制】与【选品】。
+2. **看图说话铁律（无参考图条目严格不进瀑布流）**：
+   - 瀑布流卡片必须以「高清参考图」为主体，品牌、名称、光泽、主色叠在图下方；
+   - 凡 `preview_rel` 为空的条目，**坚决不进瀑布流**！用户替换材质时只认图，不看孤立的名字。
+3. **瓷砖双图机制**：
+   - 首图采用单片平面材质图，卡片悬浮/点击可查看实物铺贴空间搭配图；
+   - 提示词中强制附加光泽（亮光/柔光/哑光）与纹理（木纹/石纹/拼花/纯色）。
+4. **乳胶漆色系与色号规范**：
+   - 主色仅使用 8 大基准：白、黄、绿、蓝、红、灰、黑、棕，默认按此顺序排序；
+   - 卡片内嵌真实纯色块徽标与官方色号，明度自动派生角色建议（基底/强调）。
 
+---
+
+## 四、启动、构建与运维标准工作流
+
+### 1. 核心后端启动 / 重启 (WSL)
+在 WSL 终端中执行：
+```bash
+cd /mnt/c/Users/lrp/DevEcoStudioProjects/MaterialLibraryServer
+./start.sh restart
+```
+该命令会自动检查端口、启动守护进程 `scripts/watchdog.sh`，并在 30001 端口拉起主服务。
+
+### 2. 前端构建与热更新发布 (Windows)
+在 Windows PowerShell 或终端中执行：
+```powershell
+npm --prefix web-pro run build
+```
+打包成功后，静态文件输出至 `web-pro/dist`。30002 网关已配置 `index.html` 的 `Cache-Control: no-cache, no-store, must-revalidate`，前端页面内置了入口哈希心跳感知，浏览器端可通过点击左下角【立即更新】或按 <kbd>Ctrl</kbd> + <kbd>F5</kbd> 强刷生效。
+
+### 3. 基础素材生产库重构与同步
+若爬取了新数据或更新了分类挂载，只需在 WSL 终端中运行：
+```bash
+wsl -e bash -lc "cd /mnt/c/Users/lrp/DevEcoStudioProjects/MaterialLibraryServer && node scripts/build-base-library.js"
+```
+脚本会自动以原子事务安全写入 WSL 生产库 `/home/lrp/.dsh-material-library/material.db`（带 15 秒并发防锁重试），并输出各使用面的挂载统计，前台网页立刻即可检索到全量内容。

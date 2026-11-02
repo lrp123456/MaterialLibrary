@@ -3,13 +3,19 @@
  * 禁止 list[0] / find(... true) 回落到其它厂商。
  */
 
-function pickAdapterId(kind, modelCode, adapters) {
+function pickAdapterId(kind, modelCode, adapters, preferEndpointId) {
   const code = String(modelCode || '').toLowerCase();
   const list = Array.isArray(adapters) ? adapters : [];
   const findId = (pred) => {
     const hit = list.find(pred);
     return hit ? hit.id : null;
   };
+
+  // 模型契约已经指明了 endpoint（如 newapi 的 Gemini 原生图像），必须优先走对应适配器
+  if (preferEndpointId === 'newapi') {
+    return findId((a) => a.protocol === 'gemini_generate_content' || a.id === 'newapi_gemini_image')
+      || null;
+  }
 
   // 魔搭云端 Qwen：repo id 形如 Qwen/Qwen-Image-2.1-Turbo（带斜杠），或显式带 modelscope。
   // 必须排在下面 /qwen/ 的本机规则之前，否则云端模型会被路由到局域网 ncnn 适配器。

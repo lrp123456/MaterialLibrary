@@ -3,7 +3,16 @@
  * 将底图价签 (regions + light) 编译成结构化提示词与单选区唯一参考图契约 ({ kind, rel })
  */
 
-const { getFlag } = require('./list');
+const fs = require('fs');
+const path = require('path');
+const { normalizeHex6 } = require('./pretint');
+const { processPrompt } = require('./processes');
+const {
+  VALID_PARTS,
+  PART_POLICIES,
+  resolvePartFromSurface,
+  isAssetAllowedForPart
+} = require('./part-policy');
 
 const SURFACE_LABELS = {
   ceiling: '天花',
@@ -11,9 +20,15 @@ const SURFACE_LABELS = {
   floor: '地面',
   millwork: '全屋定制',
   furniture: '活动家具',
+  upholstery: '软体沙发',
+  hard_furniture: '硬家具',
+  curtain_bedding: '窗帘床品',
+  rug: '地毯',
   lighting: '灯具',
   fixture: '卫浴厨电',
-  soft: '软装'
+  soft: '软装',
+  metal: '金属饰面',
+  counter: '台面'
 };
 
 const BRAND_LABELS = {
@@ -51,176 +66,232 @@ function formatRoughnessSentence(roughness) {
   return '';
 }
 
+function locationPrefix(reg, baseImageTag) {
+  if (reg.locationClause) return String(reg.locationClause);
+  const b = reg.bbox;
+  if (b && [b.x1, b.y1, b.x2, b.y2].every((n) => Number.isFinite(Number(n)))) {
+    const nums = [b.x1, b.y1, b.x2, b.y2]
+      .map((n) => Math.max(0, Math.min(999, Math.round(Number(n)))))
+      .join(' ');
+    return `${baseImageTag} <bbox>${nums}</bbox> 内`;
+  }
+  return `${baseImageTag}的指定区域`;
+}
+
+function fillRefTag(text, tag) {
+  return String(text || '').split('{{ref}}').join(tag);
+}
+
+function dropRefText(text) {
+  return String(text || '')
+    .replace(/纹理与铺法对齐\{\{ref\}\}[^。]*。/g, '本次没有附上纹理参考图，按文字描述处理。')
+    .split('{{ref}}')
+    .join('参考图');
+}
+
 /**
- * 编译底图价签
- * @param {object} db SQLite 数据库
- * @param {object} payload { regions, light_mode, kelvin, maxRefs = 4 }
+ * 编译底图价签。
+ * 轨道 A 与只换色不发参考图。轨道 B 的图号在截断之后按实际出图递增。
  */
 function compileBaseAttributes(db, payload = {}) {
   const regions = payload.regions || [];
   const lightMode = payload.light_mode || null;
   const kelvin = payload.kelvin || null;
   const maxRefs = typeof payload.maxRefs === 'number' ? payload.maxRefs : 4;
-
-  const flagMaterials = getFlag(db, 'base_library');
-  const flagPaints = getFlag(db, 'base_library_paints');
+  const baseImageTag = payload.baseImageTag || '图1';
+  const firstRefIndex = Number.isInteger(payload.firstRefIndex) ? payload.firstRefIndex : 2;
 
   const clauses = [];
-  const rawReferences = [];
-  const refDropped = [];
+  const warnings = [];
 
-  // 判断同批次中是否有柜门绑定
   const hasMillworkDoor = regions.some(
     (r) => r.subclass === 'millwork_door' && (r.asset_id || r.color_name)
   );
 
   for (const reg of regions) {
     const regId = reg.region_id || ('reg_' + Math.random().toString(36).slice(2, 8));
-    const surface = reg.surface || 'wall';
-    const surfaceLabel = SURFACE_LABELS[surface] || '区域';
-    const warehouse = reg.warehouse || 'paint';
+    const part = reg.part || (VALID_PARTS.includes(reg.surface) ? reg.surface : resolvePartFromSurface(reg.surface)) || 'wall';
+    const surface = reg.part || reg.surface || 'wall';
+    const surfaceLabel = SURFACE_LABELS[part] || SURFACE_LABELS[surface] || '区域';
+    const warehouse = reg.warehouse || (reg.mode === 'rematerial' ? 'material' : 'paint');
     const subclass = reg.subclass || '';
+    const loc = locationPrefix(reg, baseImageTag);
+    const mode = reg.mode || (warehouse === 'paint' ? 'recolor' : 'rematerial');
 
     let textLines = [];
     let reference = null;
+    let track = 'A';
+
+    if (reg.use_shell) warnings.push(`${regId}:shell_ignored`);
+
+    // 部位资产白名单与黑名单强门禁校验
+    let isPaintAsset = false;
+    if (warehouse === 'paint' || (reg.asset_id && String(reg.asset_id).startsWith('paint_'))) {
+      isPaintAsset = true;
+    } else if (db && reg.asset_id) {
+      try {
+        const p = db.prepare('SELECT 1 FROM ba_paints WHERE id = ?').get(reg.asset_id);
+        if (p) isPaintAsset = true;
+      } catch (_) {}
+    }
+
+    if (part === 'upholstery' && isPaintAsset && reg.asset_id) {
+      warnings.push(`${regId}:part_asset_rejected`);
+      clauses.push({
+        region_id: regId,
+        text: `${loc}是${surfaceLabel}，该部位严禁涂刷乳胶漆，保持原样。`,
+        reference: null,
+        track: 'A'
+      });
+      continue;
+    }
+
+    if (db && reg.asset_id && !isPaintAsset) {
+      let tags = [];
+      try {
+        tags = db.prepare('SELECT surface, subclass FROM ba_asset_tags WHERE asset_kind = "material" AND asset_id = ?').all(reg.asset_id);
+      } catch (_) {}
+      if (tags.length > 0 && !isAssetAllowedForPart(part, tags)) {
+        warnings.push(`${regId}:part_asset_rejected`);
+        clauses.push({
+          region_id: regId,
+          text: `${loc}是${surfaceLabel}，所选材料不符合该部位规范，保持原样。`,
+          reference: null,
+          track: 'A'
+        });
+        continue;
+      }
+    }
+
+    if (reg.item_id) {
+      let item = null;
+      try {
+        item = db.prepare('SELECT * FROM ba_items WHERE id = ?').get(reg.item_id);
+      } catch (_) {}
+      if (!item) {
+        textLines.push(`这块${surfaceLabel}的选定条目已不在库里，保持原样。`);
+      } else if (item.kind === 'product' || !item.preview_rel) {
+        textLines.push(`将这块${surfaceLabel}更换为${item.prompt_name || item.name_zh}。不要改变结构与透视。`);
+      } else if (item.kind === 'color') {
+        textLines.push(`${loc}是${surfaceLabel}。将颜色调为${item.name_zh}（${item.hex || ''}）。不要改变结构与透视。不要添加色块贴图。`);
+      } else {
+        track = 'B';
+        reference = { kind: 'basecolor', rel: item.preview_rel, tinted: false, assetId: item.id };
+        textLines.push(`${loc}是${surfaceLabel}。纹理与铺法对齐{{ref}}（${item.name_zh}）。不要复制{{ref}}的光照、透视或尺度。`);
+      }
+      clauses.push({ region_id: regId, text: textLines.join('\n'), reference, track });
+      continue;
+    }
 
     if (subclass === 'millwork_carcass' && !reg.asset_id) {
-      // 柜体结构板跟随门板
-      if (hasMillworkDoor) {
-        textLines.push('柜体结构与门板使用同一材质。');
-      } else {
-        textLines.push('柜体结构采用平整哑光饰面。');
-      }
+      textLines.push(hasMillworkDoor ? '柜体结构与门板使用同一材质。' : '柜体结构采用平整哑光饰面。');
     } else if (warehouse === 'light') {
       textLines.push('这一版不替换这里的灯具。');
     } else if (warehouse === 'model') {
       textLines.push('这一版不替换模型。');
-    } else if (warehouse === 'paint') {
+    } else if (mode === 'recolor' || warehouse === 'paint') {
       let paint = null;
-      if (reg.asset_id) {
-        paint = db.prepare('SELECT * FROM ba_paints WHERE id = ?').get(reg.asset_id);
+      if (reg.asset_id && warehouse === 'paint') {
+        try { paint = db.prepare('SELECT * FROM ba_paints WHERE id = ?').get(reg.asset_id); } catch (_) {}
       }
-
-      if (paint) {
-        const brandLabel = BRAND_LABELS[paint.brand] || paint.brand;
-        const paintName = paint.alias_zh || paint.name_zh || paint.name_en || paint.code;
-
-        // 仅在 flag.base_library_paints 开启时提供参考图
-        if (flagPaints) {
-          if (reg.use_shell && paint.shell_material_id) {
-            const shellMat = db
-              .prepare('SELECT * FROM ba_materials WHERE id = ? AND deleted_at IS NULL')
-              .get(paint.shell_material_id);
-            if (shellMat) {
-              reference = {
-                kind: 'basecolor',
-                rel: shellMat.basecolor_rel
-              };
-              textLines.push(
-                `将这块${surfaceLabel}的质感对齐参考图，并把颜色调为色号：${paintName}（${brandLabel}，${paint.code}，${paint.hex}）。不要复制参考图的光照、透视或尺度。`
-              );
-            }
-          }
-
-          if (!reference) {
-            reference = {
-              kind: 'swatch',
-              rel: paint.swatch_rel || `cache/base-library/paints/${paint.id}/swatch.png`
-            };
-            textLines.push(
-              `将这块${surfaceLabel}的颜色对齐参考图的色号：${paintName}（${brandLabel}，${paint.code}，${paint.hex}）。不要复制参考图的光照、透视或尺度。`
-            );
-          }
-        } else {
-          // 色号标志关闭，仅输出文字
-          textLines.push(
-            `将这块${surfaceLabel}的颜色调为色号：${paintName}（${brandLabel}，${paint.code}，${paint.hex}）。`
-          );
-        }
-      } else {
-        // 无色号数据，文字兜底
-        const colorDesc = reg.color_name || reg.hex || '标准室内色';
-        textLines.push(`将这块${surfaceLabel}的颜色调为${colorDesc}。不要改变整体结构与透视。`);
-      }
-
+      const colorName = (paint && (paint.display_name || paint.alias_zh || paint.name_zh || paint.name_en))
+        || reg.display_name || reg.color_name || reg.material_name || '';
+      const hex = (paint && paint.hex) || reg.hex || '';
+      const brandLabel = paint ? (BRAND_LABELS[paint.brand] || paint.brand) : '';
+      const code = paint ? paint.code : '';
+      const family = reg.material_family || reg.materialFamily || (warehouse === 'paint' ? '乳胶漆' : '原有材料');
+      const who = [colorName, brandLabel, code, hex].filter(Boolean).join('，');
+      textLines.push(`${loc}是${surfaceLabel}，现有材料是${family}。`);
+      textLines.push(who
+        ? `只改变这块${surfaceLabel}的颜色，改为${who}。保持原有材质结构与光影。不要添加色块贴图，不要铺水泥或石材纹理。`
+        : `将这块${surfaceLabel}的颜色调为标准室内色。不要改变整体结构与透视。不要添加色块贴图。`);
+      const proc = processPrompt(reg.process);
+      if (proc) textLines.push(proc);
       const finishSent = formatFinishSentence(reg.finish || 'matte');
       const roughSent = formatRoughnessSentence(reg.roughness);
       const secondLine = [finishSent, roughSent].filter(Boolean).join('，');
       if (secondLine) textLines.push(secondLine);
+      textLines.push('框外所有像素保持原样。');
     } else if (warehouse === 'material') {
       let mat = null;
       if (reg.asset_id) {
-        mat = db
-          .prepare('SELECT * FROM ba_materials WHERE id = ? AND deleted_at IS NULL')
-          .get(reg.asset_id);
+        try {
+          mat = db.prepare('SELECT * FROM ba_materials WHERE id = ? AND deleted_at IS NULL').get(reg.asset_id);
+        } catch (_) {}
       }
-
-      if (mat) {
-        if (flagMaterials) {
+      if (mat && mat.basecolor_rel) {
+        if (payload.dataDir && !fs.existsSync(path.resolve(payload.dataDir, mat.basecolor_rel))) {
+          warnings.push(`${regId}:texture_missing`);
+          track = 'A';
+          textLines.push(`${loc}是${surfaceLabel}。该材质贴图文件缺失，保持材质平整细腻。`);
+        } else {
+          track = 'B';
+          const tintHex = normalizeHex6(reg.hex || reg.tint);
           reference = {
             kind: 'basecolor',
-            rel: mat.basecolor_rel
+            rel: mat.basecolor_rel,
+            tinted: Boolean(tintHex),
+            hex: tintHex ? `#${tintHex}` : null,
+            assetId: mat.id
           };
-          const isFabric = subclass === 'chair_fabric' || subclass === 'soft_fabric';
-          if (isFabric && reg.tint) {
-            textLines.push(
-              `将这块织物的纹理对齐参考图，并把颜色染成${reg.tint}。不要复制参考图的光照、透视或尺度。`
-            );
+          if (tintHex) {
+            const tintName = reg.display_name || reg.color_name || `#${tintHex}`;
+            textLines.push(`${loc}是${surfaceLabel}。把这块${surfaceLabel}换成${mat.name_cn}。纹理与铺法对齐{{ref}}。{{ref}}已经是${tintName}（#${tintHex}），不要再改色。不要复制{{ref}}的光照、透视或比例。`);
+          } else if ((subclass === 'chair_fabric' || subclass === 'soft_fabric') && reg.tint) {
+            textLines.push(`${loc}是${surfaceLabel}。将这块织物的纹理对齐{{ref}}（${mat.name_cn}），颜色以{{ref}}为准。不要复制{{ref}}的光照、透视或尺度。`);
           } else {
-            textLines.push(
-              `将这块${surfaceLabel}的纹理与颜色对齐参考图（${mat.name_cn}）。不要复制参考图的光照、透视或尺度。`
-            );
+            textLines.push(`${loc}是${surfaceLabel}。将这块${surfaceLabel}的纹理与颜色对齐{{ref}}（${mat.name_cn}）。不要复制{{ref}}的光照、透视或尺度。`);
           }
-        } else {
-          // 材质库标志关闭
-          textLines.push(`将这块${surfaceLabel}的饰面质感优化为平整高质感天然纹理。`);
         }
+      } else if (reg.asset_id) {
+        warnings.push(`${regId}:texture_missing`);
+        textLines.push(`这块${surfaceLabel}的原选定素材已下架或缺失，保持材质平整细腻。`);
       } else {
-        if (reg.asset_id) {
-          textLines.push(`这块${surfaceLabel}的原选定素材已下架，保持材质平整细腻。`);
-        } else {
-          const matName = reg.material_name || '自然高质感材质';
-          textLines.push(`将这块${surfaceLabel}的材质换为${matName}。不要改变空间采光与透视。`);
-        }
+        const matName = reg.material_name || '自然高质感材质';
+        textLines.push(`${loc}是${surfaceLabel}。将这块${surfaceLabel}的材质换为${matName}。不要改变空间采光与透视。`);
       }
-
       const finishSent = formatFinishSentence(reg.finish || 'satin');
       const roughSent = formatRoughnessSentence(reg.roughness);
       const secondLine = [finishSent, roughSent].filter(Boolean).join('，');
       if (secondLine) textLines.push(secondLine);
+      textLines.push('框外保持原样。');
     }
 
-    clauses.push({
-      region_id: regId,
-      text: textLines.join('\n'),
-      reference
-    });
-
-    if (reference) {
-      rawReferences.push({
-        region_id: regId,
-        clauseIndex: clauses.length - 1,
-        kind: reference.kind,
-        rel: reference.rel
-      });
-    }
+    clauses.push({ region_id: regId, text: textLines.join('\n'), reference, track });
   }
 
-  // 截断参考图超出上限部分
-  const finalReferences = [];
-  for (let i = 0; i < rawReferences.length; i++) {
-    const item = rawReferences[i];
-    if (i < maxRefs) {
-      finalReferences.push({
-        region_id: item.region_id,
-        kind: item.kind,
-        rel: item.rel
-      });
-    } else {
-      // 超额参考图丢弃，保留文字
-      clauses[item.clauseIndex].reference = null;
-      refDropped.push(item.region_id);
+  const refDropped = [];
+  const wanted = [];
+  clauses.forEach((clause, index) => {
+    if (clause.reference) wanted.push(index);
+  });
+  wanted.forEach((index, order) => {
+    if (order >= maxRefs) {
+      clauses[index].reference = null;
+      clauses[index].text = dropRefText(clauses[index].text);
+      refDropped.push(clauses[index].region_id);
     }
+  });
+
+  const finalReferences = [];
+  let cursor = firstRefIndex;
+  for (const clause of clauses) {
+    if (!clause.reference) {
+      if (clause.text.includes('{{ref}}')) clause.text = dropRefText(clause.text);
+      continue;
+    }
+    const tag = `图${cursor++}`;
+    clause.reference.refImageTag = tag;
+    clause.text = fillRefTag(clause.text, tag);
+    finalReferences.push({
+      region_id: clause.region_id,
+      kind: clause.reference.kind,
+      rel: clause.reference.rel,
+      tinted: Boolean(clause.reference.tinted),
+      hex: clause.reference.hex || null,
+      assetId: clause.reference.assetId || null,
+      refImageTag: tag
+    });
   }
 
   // 全局光线子句
@@ -247,7 +318,8 @@ function compileBaseAttributes(db, payload = {}) {
     light_clause: lightClause,
     clauses,
     references: finalReferences,
-    ref_dropped: refDropped
+    ref_dropped: refDropped,
+    warnings
   };
 }
 

@@ -75,9 +75,9 @@ async function upsertPaintDbPage(db, dataDir, brand, pageData = [], { autoGenera
 
   const ins = db.prepare(`
     INSERT INTO ba_paints (
-      id, brand, code, name_en, name_zh, alias_zh, alt_code, hex, family, lrv, interior, pinned, shell_material_id, swatch_rel, source_url, created_at, updated_at
+      id, brand, code, name_en, name_zh, alias_zh, alt_code, hex, family, lrv, interior, pinned, shell_material_id, swatch_rel, source_url, curated, created_at, updated_at
     ) VALUES (
-      ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?
+      ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, 0, NULL, NULL, ?, 0, ?, ?
     )
     ON CONFLICT(brand, code) DO UPDATE SET
       name_en=excluded.name_en,
@@ -101,8 +101,6 @@ async function upsertPaintDbPage(db, dataDir, brand, pageData = [], { autoGenera
     const nameZh = deriveChineseName(item.undertone, item.family);
     const lrv = typeof item.lrv === 'number' ? item.lrv : null;
     const interior = item.interior !== false ? 1 : 0;
-    // 首次插入全库前 36 条置顶
-    const pinned = (countBefore + written < 36) ? 1 : 0;
     const sourceUrl = item.url || `https://paintdb.com/colors/${brand}/${encodeURIComponent(item.code)}`;
 
     ins.run(
@@ -115,17 +113,10 @@ async function upsertPaintDbPage(db, dataDir, brand, pageData = [], { autoGenera
       item.family || null,
       lrv,
       interior,
-      pinned,
       sourceUrl,
       now,
       now
     );
-
-    if (autoGenerateSwatches && pinned) {
-      try {
-        await ensurePaintSwatchFile(dataDir, paintId, hex);
-      } catch {}
-    }
 
     written++;
   }

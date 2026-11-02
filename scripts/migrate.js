@@ -236,6 +236,19 @@ const BUILTIN_ADAPTERS = [
     })
   },
   {
+    id: 'newapi_gemini_image',
+    label: 'New API Gemini 图像',
+    kind: 'image',
+    builtin: 1,
+    enabled: 1,
+    protocol: 'gemini_generate_content',
+    base_url: process.env.NEWAPI_BASE_URL || 'https://newapi.naite.cc/v1',
+    config_json: JSON.stringify({
+      defaultModel: 'gemini-3.1-flash-image',
+      timeoutMs: 180000
+    })
+  },
+  {
     id: 'gemini_video',
     label: 'Google Gemini Omni 视频',
     kind: 'video',
@@ -1103,6 +1116,7 @@ function migrate(dataDir, { doBackup = true } = {}) {
   });
 
   tx();
+  try { require('../src/shelf-normalize').normalizeLibraryShelves(db); } catch (e) { console.warn('[migrate] normalizeLibraryShelves error:', e.message); }
   backfillAssetAliasesAndCleanup(db, dataDir);
   console.log('[migrate] 数据库迁移升级完成');
   return db;

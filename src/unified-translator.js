@@ -511,9 +511,9 @@ function compileModelDialect({
     text = text.replace(/@视频(\d+)\[[^\]]*\]/g, '@视频$1');
     text = text.replace(/@音频(\d+)\[[^\]]*\]/g, '@音频$1');
   } else if (refSyntax === '图N') {
-    text = text.replace(/@(?:图片|图)(\d+)(?:\[[^\]]*\])?/g, '图$1');
-    text = text.replace(/@视频(\d+)(?:\[[^\]]*\])?/g, '视频$1');
-    text = text.replace(/@音频(\d+)(?:\[[^\]]*\])?/g, '音频$1');
+    text = text.replace(/@(?:图片|图)(\d+)/g, '图$1');
+    text = text.replace(/@视频(\d+)/g, '视频$1');
+    text = text.replace(/@音频(\d+)/g, '音频$1');
   } else if (idLower.includes('omni')) {
     if (mode === 'first_last_frame') {
       text = text.replace(/@(?:图片|图)1/g, '<FIRST_FRAME>');

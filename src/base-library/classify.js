@@ -84,6 +84,31 @@ function parseJevResponse(resJson) {
 }
 
 let warnedMissingApiKey = false;
+let envLoaded = false;
+
+function loadEnvOnce() {
+  if (envLoaded) return;
+  envLoaded = true;
+  if (!process.env.TYPESAFE_API_KEY && !process.env.JEV_API_KEY) {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const envPath = path.resolve(__dirname, '../../.env');
+      if (fs.existsSync(envPath)) {
+        const content = fs.readFileSync(envPath, 'utf8');
+        const match = content.match(/(?:TYPESAFE_API_KEY|JEV_API_KEY)\s*=\s*([^\r\n#]+)/);
+        if (match && match[1]) {
+          process.env.TYPESAFE_API_KEY = match[1].trim();
+        }
+      }
+    } catch (_) {}
+  }
+}
+loadEnvOnce();
+
+function resolveApiKey() {
+  return process.env.TYPESAFE_API_KEY || process.env.JEV_API_KEY;
+}
 
 /**
  * 调用 TypeSafe JEV 对选区切片进行八选一分类
@@ -106,7 +131,7 @@ async function classifyRegionSurface(db, cropJpegBuffer, options = {}) {
     };
   }
 
-  const apiKey = process.env.TYPESAFE_API_KEY;
+  const apiKey = resolveApiKey();
   if (!apiKey) {
     if (!warnedMissingApiKey) {
       console.warn('[base-library] TYPESAFE_API_KEY is not configured');

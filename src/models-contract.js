@@ -381,6 +381,7 @@ const DEFAULT_ENDPOINTS = [
     enabled: 1,
     capabilities: [
       { id: 'newapi_chat', name: '对话与视觉', kind: 'chat', type: 'path', path: '/chat/completions', method: 'POST' },
+      { id: 'newapi_gemini_image', name: 'Gemini 原生图像', kind: 'image', type: 'path', path: '/v1beta/models/{{model}}:generateContent', method: 'POST' },
     ]
   }
 ];
@@ -1094,6 +1095,37 @@ const DEFAULT_MODEL_CONTRACTS = [
     mutex_groups: [],
     optimizer: { optimizer_model_id: 'agnes-3.0-flash', prompt: '' },
   },
+  ...['gemini-3.1-flash-image', 'gemini-3.1-flash-image-preview', 'gemini-3.1-flash-lite-image'].map((vendorModelId, index) => ({
+    id: vendorModelId.replaceAll('.', '_').replaceAll('-', '_'),
+    name: index === 1 ? 'Gemini 3.1 Flash Image Preview' : (vendorModelId.includes('lite') ? 'Gemini 3.1 Flash Lite Image' : 'Gemini 3.1 Flash Image'),
+    vendor_model_id: vendorModelId,
+    capability_id: 'newapi_gemini_image',
+    converter: 'gemini_generate_content',
+    refStyle: 'generic',
+    polishHint: 'NewAPI 聚合直连 · 原生 generateContent · 支持文生图/单参考编辑',
+    modes: [
+      { id: 'text_to_image', label: '文生图' },
+      { id: 'image_to_image', label: '图生图' },
+      { id: 'image_edit', label: '参考编辑' },
+    ],
+    slots: { images: 3, videos: 0, audios: 0 },
+    enabled: 1,
+    params: [
+      {
+        key: 'ratio',
+        label: '宽高比',
+        type: 'enum',
+        default: '1:1',
+        options: ['1:1', '3:4', '4:3', '16:9', '9:16'],
+        visibility: 'public',
+        location: 'body',
+      },
+    ],
+    table_mappings: {},
+    conditional_rules: [],
+    mutex_groups: [],
+    optimizer: {},
+  })),
 ];
 
 // ================= 官方提示词基线中心定义 =================

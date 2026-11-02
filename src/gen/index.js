@@ -1073,6 +1073,88 @@ async function executeAdapterInner(services, adapter, input) {
     };
   }
 
+  // ---- NewAPI / Google Gemini 原生 generateContent 图像 ----
+  if (adapter.protocol === 'gemini_generate_content') {
+    const model = vars.model || cfg.defaultModel || '';
+    if (!model) throw new Error('Gemini generate_content 适配器缺少 model');
+    const modelPath = encodeURIComponent(model);
+    // endpoint base_url 通常以 /v1 结尾；Gemini 原生接口在根路径 /v1beta 下
+    const root = baseUrl.replace(/\/v1$/i, '');
+    const reqUrl = `${root}/v1beta/models/${modelPath}:generateContent`;
+    const inlineParts = [];
+    const pushInline = (raw, mimeHint) => {
+      const s = String(raw || '');
+      const m = s.match(/^data:([^;]+);base64,(.+)$/);
+      if (m) {
+        inlineParts.push({ inlineData: { mimeType: m[1] || mimeHint || 'image/jpeg', data: m[2] } });
+        return;
+      }
+      if (/^https?:\/\//i.test(s)) return;
+      try {
+        if (s.length < 500 && fs.existsSync(s)) {
+          inlineParts.push({ inlineData: { mimeType: mimeHint || 'image/jpeg', data: fs.readFileSync(s).toString('base64') } });
+          return;
+        }
+      } catch (_) {}
+      if (s.length > 200) {
+        inlineParts.push({ inlineData: { mimeType: mimeHint || 'image/jpeg', data: s } });
+      }
+    };
+    pushInline(vars.image_data_url);
+    pushInline(vars.image_b64);
+    if (Array.isArray(vars.extra_image_data_urls)) vars.extra_image_data_urls.forEach((u) => pushInline(u));
+    if (Array.isArray(vars.image_urls)) vars.image_urls.forEach((u) => pushInline(u));
+
+    const generationConfig = { responseModalities: ['TEXT', 'IMAGE'] };
+    const allowedRatios = ['1:1', '3:4', '4:3', '9:16', '16:9'];
+    if (allowedRatios.includes(vars.ratio)) {
+      generationConfig.imageConfig = { aspectRatio: vars.ratio };
+    }
+    const geminiBody = {
+      contents: [{ role: 'user', parts: [...inlineParts, { text: vars.prompt }] }],
+      generationConfig
+    };
+    const geminiRes = await fetchNet(reqUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(geminiBody)
+    }, { timeoutMs, what: 'Gemini 图像生成', retryOn: isPreSendError, onRetry: logNetRetry });
+    const geminiText = await geminiRes.text().catch(() => '');
+    if (!geminiRes.ok) {
+      noteVendorOutcome(input, false, geminiText);
+      throw new Error(`Gemini 图像生成失败 HTTP ${geminiRes.status}: ${geminiText.slice(0, 400)}`);
+    }
+    noteVendorOutcome(input, true);
+    const geminiData = JSON.parse(geminiText);
+    const geminiFiles = [];
+    const partsList = (geminiData.candidates || []).flatMap((c) => c?.content?.parts || []);
+    for (const part of partsList) {
+      const b64 = part?.inlineData?.data || part?.inline_data?.data;
+      if (!b64) continue;
+      const mime = part.inlineData?.mimeType || part.inline_data?.mime_type || 'image/png';
+      const ext = mime.includes('jpeg') || mime.includes('jpg') ? '.jpg' : '.png';
+      const fileName = `gen_${Date.now()}_${crypto.randomBytes(4).toString('hex')}${ext}`;
+      const filePath = path.join(tempDir, fileName);
+      fs.writeFileSync(filePath, Buffer.from(b64, 'base64'));
+      let meta = { mime };
+      try {
+        const info = await sharp(filePath).metadata();
+        meta = { width: info.width, height: info.height, mime: info.format === 'jpeg' ? 'image/jpeg' : 'image/png' };
+      } catch {}
+      geminiFiles.push({
+        localPath: filePath,
+        previewUrl: `/api/cache/temp/${fileName}`,
+        mime: meta.mime,
+        width: meta.width,
+        height: meta.height
+      });
+    }
+    if (!geminiFiles.length) {
+      throw new Error('Gemini 响应中没有 inlineData 图片: ' + geminiText.slice(0, 300));
+    }
+    return { ok: true, success: true, files: geminiFiles, raw: geminiData };
+  }
+
   // ---- 本地 QwenImage（ncnn-vulkan）----
   // Agnes 的并行补充/降级通道。必须放在 http_json 之前独占分支：
   // 它要 multipart/form-data + 异步轮询 + 从面板取产物，与通用协议都不同。

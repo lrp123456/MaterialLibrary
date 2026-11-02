@@ -18,10 +18,12 @@ const RATIO_HW = {
   '2:3': 3 / 2,
   '1:1': 1,
   '4:3': 3 / 4,
-  '16:9': 9 / 16
+  '3:2': 2 / 3,
+  '16:9': 9 / 16,
+  '21:9': 9 / 21
 };
 
-const RATIO_ORDER = ['9:16', '3:4', '2:3', '1:1', '4:3', '16:9'];
+const RATIO_ORDER = ['9:16', '3:4', '2:3', '1:1', '4:3', '3:2', '16:9', '21:9'];
 
 /** 短边优先、保持目标比的像素档 */
 const SIZE_PRESETS = {
@@ -276,6 +278,65 @@ function orientationLabelMap() {
   };
 }
 
+/**
+ * 智能感知与自适应：根据自然宽高与候选列表，自动推导最匹配的标准画幅 ratio 与分辨率 size 档位。
+ * 杜绝竖屏 9:16 底图被 16:9 / 1:1 强行压扁变形。
+ */
+function detectOptimalRatioAndSize(width, height, supportedRatios = null) {
+  if (!width || !height) {
+    return { ratio: '1:1', size: '2K', videoResolution: '1080p', orientation: 'square', exact: false, hw: 1 };
+  }
+  const hw = height / width;
+  const c = classifyOrientation(width, height);
+  let bestRatio = c.bucket;
+  if (!RATIO_ORDER.includes(bestRatio)) {
+    if (hw > 1.45) bestRatio = '9:16';
+    else if (hw > 1.25) bestRatio = '3:4';
+    else if (hw > 1.1) bestRatio = '2:3';
+    else if (hw >= 0.9 && hw <= 1.1) bestRatio = '1:1';
+    else if (hw < 0.52) bestRatio = '21:9';
+    else if (hw < 0.65) bestRatio = '16:9';
+    else if (hw < 0.72) bestRatio = '3:2';
+    else if (hw < 0.88) bestRatio = '4:3';
+    else bestRatio = '1:1';
+  }
+  if (Array.isArray(supportedRatios) && supportedRatios.length > 0) {
+    if (!supportedRatios.includes(bestRatio)) {
+      let minDiff = Infinity;
+      let closest = supportedRatios[0];
+      for (const r of supportedRatios) {
+        const targetHw = RATIO_HW[r] != null ? RATIO_HW[r] : (r === 'adaptive' ? hw : 1);
+        const diff = Math.abs(hw - targetHw);
+        if (diff < minDiff) {
+          minDiff = diff;
+          closest = r;
+        }
+      }
+      bestRatio = closest;
+    }
+  }
+
+  const maxDim = Math.max(width, height);
+  let size = '2K';
+  if (maxDim >= 3000) size = '4K';
+  else if (maxDim >= 1800) size = '2K';
+  else if (maxDim >= 1200) size = '1.5K';
+  else size = '1K';
+
+  let videoRes = '1080p';
+  if (maxDim >= 1800) videoRes = '1080p';
+  else if (maxDim < 900) videoRes = '720p';
+
+  return {
+    ratio: bestRatio,
+    size,
+    videoResolution: videoRes,
+    orientation: c.bucket,
+    exact: c.exact,
+    hw
+  };
+}
+
 module.exports = {
   MATCH_TOL,
   CALIBRATE_TOL,
@@ -296,5 +357,6 @@ module.exports = {
   RESTAGE_NEGATIVE_TOKENS,
   RESTAGE_BAR_CONSTRAINT,
   simplifyRatioLabel,
-  orientationLabelMap
+  orientationLabelMap,
+  detectOptimalRatioAndSize
 };
