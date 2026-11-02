@@ -249,13 +249,14 @@ async function handleBaseLibraryRoutes(services, req, res, pathname, urlObj, { s
   // 1.1 部位策略 GET /api/base-library/part-policy (单一事实来源)
   if (pathname === '/base-library/part-policy' && req.method === 'GET') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
-    const { PART_POLICIES, VALID_PARTS, VALID_MATERIAL_FAMILIES } = require('./part-policy');
+    const { PART_POLICIES, VALID_PARTS, VALID_MATERIAL_FAMILIES, SUBCLASS_COMPAT_MAP } = require('./part-policy');
     return sendJson(res, 200, {
       success: true,
       data: {
         parts: PART_POLICIES,
         valid_parts: VALID_PARTS,
-        valid_families: VALID_MATERIAL_FAMILIES
+        valid_families: VALID_MATERIAL_FAMILIES,
+        subclass_compat_map: SUBCLASS_COMPAT_MAP || {}
       }
     });
   }
@@ -319,6 +320,22 @@ async function handleBaseLibraryRoutes(services, req, res, pathname, urlObj, { s
 
     const fullPath = path.resolve(dataDir, row.basecolor_rel);
     if (!fs.existsSync(fullPath)) return sendJson(res, 404, { error: '贴图文件不存在' });
+
+    const hexParam = urlObj.searchParams.get('hex');
+    if (hexParam) {
+      try {
+        const { ensureTintedFile } = require('./pretint');
+        const sourceBuffer = fs.readFileSync(fullPath);
+        const { buffer } = await ensureTintedFile(dataDir, matId, hexParam, sourceBuffer);
+        res.writeHead(200, {
+          'Content-Type': 'image/jpeg',
+          'Content-Length': buffer.length,
+          'Cache-Control': 'public, max-age=86400'
+        });
+        if (req.method === 'HEAD') return res.end();
+        return res.end(buffer);
+      } catch (err) {}
+    }
 
     const stat = fs.statSync(fullPath);
     res.writeHead(200, {
@@ -1164,7 +1181,10 @@ async function handleBaseLibraryRoutes(services, req, res, pathname, urlObj, { s
       regions: b.regions || [],
       light_mode: b.light_mode || null,
       kelvin: b.kelvin || null,
-      maxRefs: typeof b.maxRefs === 'number' ? b.maxRefs : 4
+      maxRefs: typeof b.maxRefs === 'number' ? b.maxRefs : 4,
+      baseImageTag: b.baseImageTag || '图1',
+      firstRefIndex: Number.isInteger(b.firstRefIndex) ? b.firstRefIndex : 2,
+      dataDir
     });
     return sendJson(res, 200, result);
   }

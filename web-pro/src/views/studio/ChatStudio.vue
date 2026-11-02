@@ -3437,9 +3437,12 @@ function onEditApplyRegionsToImage({ imageIndex, regions, recipe, silentRefs, an
             path: `/api/base-library/paints/${mSwatch[1]}/swatch`
           });
         } else if (item.kind === 'basecolor' && mBasecolor) {
+          const tintQuery = (item.tinted && item.hex)
+            ? `?hex=${encodeURIComponent(String(item.hex).replace('#', ''))}`
+            : '';
           mappedRefs.push({
             kind: 'basecolor',
-            path: `/api/base-library/materials/${mBasecolor[1]}/basecolor`
+            path: `/api/base-library/materials/${mBasecolor[1]}/basecolor${tintQuery}`
           });
         }
       }

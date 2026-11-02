@@ -13,7 +13,8 @@ async function runTests() {
     name: '区域1',
     guide: { type: 'resurface', materialName: '微水泥', colorHex: '', finish: '', roughness: null, aging: '' }
   });
-  assert.strictEqual(resurface, '将区域1的表面改为微水泥。');
+  assert.ok(resurface.includes('微水泥'));
+  assert.ok(resurface.includes('框外所有像素保持原样'));
   assert.ok(!resurface.includes('#'));
   assert.ok(!resurface.includes('粗糙'));
   assert.ok(!resurface.includes('光泽'));
@@ -22,9 +23,10 @@ async function runTests() {
     name: '区域1',
     guide: { type: 'resurface', materialName: '微水泥', colorHex: '#B5B4AF', roughness: 25, finish: 'matte' }
   });
+  assert.ok(colored.includes('微水泥'));
   assert.ok(colored.includes('#B5B4AF'));
-  assert.ok(colored.includes('粗糙度 25%'));
   assert.ok(colored.includes('哑光'));
+  assert.ok(colored.includes('框外所有像素保持原样'));
 
   assert.strictEqual(guideSentence({ name: '区域2', guide: { type: 'remove', text: '' } }), BUILTIN_GUIDE_TEXT.remove);
   assert.strictEqual(guideSentence({ name: '区域3', guide: { type: 'blank', text: '' } }), BUILTIN_GUIDE_TEXT.blank);

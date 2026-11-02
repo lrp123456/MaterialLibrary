@@ -94,11 +94,25 @@ for (const s of SURFACES) {
 }
 
 function isValidSurface(surface) {
-  return VALID_SURFACE_KEYS.has(surface);
+  if (VALID_SURFACE_KEYS.has(surface)) return true;
+  try {
+    const { VALID_PARTS } = require('./part-policy');
+    if (Array.isArray(VALID_PARTS) && VALID_PARTS.includes(surface)) return true;
+  } catch (_) {}
+  return false;
 }
 
 function isValidSubclass(subclass) {
-  return VALID_SUBCLASS_KEYS.has(subclass);
+  if (VALID_SUBCLASS_KEYS.has(subclass)) return true;
+  try {
+    const { PART_POLICIES } = require('./part-policy');
+    if (PART_POLICIES && typeof PART_POLICIES === 'object') {
+      for (const p of Object.values(PART_POLICIES)) {
+        if (Array.isArray(p.subclasses) && p.subclasses.includes(subclass)) return true;
+      }
+    }
+  } catch (_) {}
+  return false;
 }
 
 function getSubclassMeta(subclass) {

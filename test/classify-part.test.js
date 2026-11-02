@@ -57,6 +57,7 @@ async function runTests() {
   console.log('✅ 非法部位枚举拦截通过');
 
   console.log('=== 4. 测试 JEV 回退：遇到 furniture / soft 必须返回 uncertain ===');
+  process.env.TYPESAFE_API_KEY = 'test_jev_key_for_unit_test';
   setFlag(db, 'base_library_jev', 1);
 
   // 模拟 VLM 报错，降级至 JEV

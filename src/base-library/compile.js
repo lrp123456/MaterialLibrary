@@ -36,6 +36,17 @@ const BRAND_LABELS = {
   dulux: '多乐士'
 };
 
+const MATERIAL_FAMILY_LABELS = {
+  paint: '乳胶漆',
+  art_coat: '艺术涂料',
+  wood: '木质',
+  stone: '石材',
+  leather: '真皮',
+  fabric: '布艺织物',
+  metal: '金属',
+  glass: '玻璃'
+};
+
 const DIRECTION_LABELS = {
   left: '画面左侧',
   upper_left: '左上',
@@ -199,13 +210,16 @@ function compileBaseAttributes(db, payload = {}) {
       const hex = (paint && paint.hex) || reg.hex || '';
       const brandLabel = paint ? (BRAND_LABELS[paint.brand] || paint.brand) : '';
       const code = paint ? paint.code : '';
-      const family = reg.material_family || reg.materialFamily || (warehouse === 'paint' ? '乳胶漆' : '原有材料');
+      const rawFamily = reg.material_family || reg.materialFamily || PART_POLICIES[part]?.default_material_family || (['ceiling', 'wall'].includes(part) ? 'paint' : '');
+      const family = MATERIAL_FAMILY_LABELS[rawFamily] || rawFamily || (['ceiling', 'wall'].includes(part) ? '乳胶漆' : '原有材料');
       const who = [colorName, brandLabel, code, hex].filter(Boolean).join('，');
       textLines.push(`${loc}是${surfaceLabel}，现有材料是${family}。`);
       textLines.push(who
         ? `只改变这块${surfaceLabel}的颜色，改为${who}。保持原有材质结构与光影。不要添加色块贴图，不要铺水泥或石材纹理。`
         : `将这块${surfaceLabel}的颜色调为标准室内色。不要改变整体结构与透视。不要添加色块贴图。`);
-      const proc = processPrompt(reg.process);
+      const proc = (['ceiling', 'wall'].includes(part) || ['paint', 'art_coat'].includes(rawFamily))
+        ? processPrompt(reg.process)
+        : '';
       if (proc) textLines.push(proc);
       const finishSent = formatFinishSentence(reg.finish || 'matte');
       const roughSent = formatRoughnessSentence(reg.roughness);

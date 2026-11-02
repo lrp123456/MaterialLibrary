@@ -4,7 +4,7 @@
     <div class="flex flex-col gap-2 p-2.5 rounded-xl bg-studio-900 border border-studio-750">
       <div class="flex items-center justify-between gap-2">
         <div class="min-w-0 flex items-center gap-1.5">
-          <span class="inline-block w-2 h-2 rounded-full" :class="uncertain ? 'bg-amber-400' : 'bg-emerald-400'"></span>
+          <span class="inline-block w-2 h-2 rounded-full" :class="uncertain ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'"></span>
           <span class="font-bold text-slate-100 truncate">
             {{ headerTitle }}
           </span>
@@ -48,6 +48,31 @@
           <input type="checkbox" v-model="ceilingShowAll" class="rounded bg-studio-800 border-studio-700 text-studio-accent text-[10px]" />
           <span>墙顶同色全系</span>
         </label>
+      </div>
+
+      <!-- 自定义取色板 / Hex 调色盘 -->
+      <div class="flex items-center justify-between p-2 rounded-lg bg-studio-900 border border-studio-800">
+        <div class="flex items-center gap-2">
+          <input
+            type="color"
+            :value="activeHex || '#C47D42'"
+            @input="pickCustomColor($event.target.value)"
+            class="w-6 h-6 rounded border border-studio-700 bg-transparent cursor-pointer"
+            title="点击打开系统调色盘取色"
+          />
+          <span class="text-[11px] text-slate-300 font-medium">自定义调色板</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <input
+            type="text"
+            :value="activeHex || ''"
+            placeholder="#HEX"
+            maxlength="9"
+            @change="pickCustomColor($event.target.value)"
+            class="w-20 px-1.5 py-0.5 rounded bg-studio-850 border border-studio-700 font-mono text-[10px] text-slate-200 uppercase text-center"
+          />
+          <span v-if="activeHex" class="w-3.5 h-3.5 rounded-full border border-black/30 shadow-sm" :style="{ backgroundColor: activeHex }"></span>
+        </div>
       </div>
 
       <!-- 色板：精选策展色号网格 -->
@@ -151,15 +176,23 @@
       </button>
 
       <div v-if="layer2Expanded" class="p-3 space-y-3 border-t border-studio-850">
-        <!-- 柜体专属：3 枚分类子类胶囊 (Patch 7 按原材质排序) -->
-        <div v-if="activePart === 'millwork'" class="flex gap-1.5">
+        <!-- 材质品类胶囊 (按当前部位合法白名单切换，杜绝跨品类混杂) -->
+        <div v-if="availableSubclassCapsules.length > 1" class="flex flex-wrap gap-1">
           <button
-            v-for="sub in millworkCapsules"
+            type="button"
+            class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition cursor-pointer"
+            :class="!selectedSubclass ? 'bg-studio-cyan/20 text-studio-cyan border border-studio-cyan/40 font-bold' : 'bg-studio-850 text-slate-300 hover:bg-studio-800'"
+            @click="selectedSubclass = ''; emitChange();"
+          >
+            全部品类
+          </button>
+          <button
+            v-for="sub in availableSubclassCapsules"
             :key="sub.key"
             type="button"
             class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition cursor-pointer"
             :class="selectedSubclass === sub.key ? 'bg-studio-cyan/20 text-studio-cyan border border-studio-cyan/40 font-bold' : 'bg-studio-850 text-slate-300 hover:bg-studio-800'"
-            @click="selectedSubclass = sub.key; refreshMaterials();"
+            @click="selectedSubclass = sub.key; emitChange();"
           >
             {{ sub.label }}
           </button>
@@ -222,6 +255,9 @@
               @change="emitChange"
             />
             <span class="font-mono text-slate-300 text-[11px]">{{ tintHex || '无染色（原材质固有色）' }}</span>
+            <span v-if="tintHex && activeHex && tintHex === activeHex" class="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 font-bold">
+              已联动第 1 层颜色
+            </span>
           </div>
         </div>
 
@@ -229,10 +265,10 @@
         <button
           v-if="activeAssetId"
           type="button"
-          class="w-full py-1 text-center text-[10px] text-slate-400 hover:text-slate-200 cursor-pointer"
-          @click="clearMaterialToLayer1"
+          class="w-full py-1.5 rounded-lg border border-studio-700 text-slate-400 hover:text-white hover:bg-studio-900 text-xs transition cursor-pointer"
+          @click="resetToLayer1"
         >
-          取消材质，切回只换色
+          取消选用此材料（切回第一层纯色）
         </button>
       </div>
     </div>
@@ -305,6 +341,44 @@ const ALL_FAMILIES = [
   { key: 'ink', label: '静谧深色' }
 ];
 
+const DEFAULT_PART_FAMILY = {
+  ceiling: 'paint',
+  wall: 'paint',
+  floor: 'wood',
+  millwork: 'wood',
+  upholstery: 'leather',
+  hard_furniture: 'wood',
+  curtain_bedding: 'fabric',
+  rug: 'fabric'
+};
+
+const SUBCLASS_LABELS = {
+  wood_flooring: '木地板',
+  stone_tile: '石材地砖',
+  carpet_rug: '地毯地垫',
+  microcement_floor: '微水泥地坪',
+  latex_paint: '乳胶漆',
+  art_paint: '艺术涂料',
+  wood_veneer: '木饰面',
+  stone_slab: '石材岩板',
+  wallpaper_cloth: '壁纸壁布',
+  wall_tile: '墙砖',
+  cabinet_lacquer: '烤漆门板',
+  cabinet_veneer: '实木木皮',
+  cabinet_glass: '玻璃铝框',
+  countertop_stone: '台面石材',
+  sofa_leather: '真皮皮革',
+  sofa_fabric: '布艺棉麻',
+  sofa_velvet: '丝绒羊羔绒',
+  table_wood: '实木木质',
+  table_stone: '桌面石材',
+  hardware_metal: '金属拉丝',
+  curtain_fabric: '窗帘面料',
+  bedding_cotton: '床品纯棉',
+  wool_rug: '羊毛地毯',
+  sisal_rug: '麻编地垫'
+};
+
 const showPartSelector = ref(false);
 const layer2Expanded = ref(false);
 const ceilingShowAll = ref(false);
@@ -326,9 +400,10 @@ const materials = ref([]);
 const loadingPaints = ref(false);
 const loadingMaterials = ref(false);
 const policies = ref({});
+const compatMap = ref({});
 
 const uncertain = computed(() => {
-  return props.inferredProb < 0.75 && !props.guide?.part;
+  return (props.inferredProb < 0.75 && !props.guide?.part) || !activePart.value;
 });
 
 const confidencePercent = computed(() => {
@@ -336,20 +411,21 @@ const confidencePercent = computed(() => {
 });
 
 const headerTitle = computed(() => {
-  if (uncertain.value && !activePart.value) return '先选这框是什么';
+  if (uncertain.value && !activePart.value) return '❓ 待确认部位（请点选下方部位）';
   const partObj = PARTS.find(p => p.key === activePart.value);
-  const partName = partObj ? partObj.label : '选区';
+  const partName = partObj ? partObj.label : '选区部位';
   const famMap = {
     paint: '乳胶漆',
     art_coat: '艺术漆',
     wood: '木质',
     stone: '石材岩板',
-    leather: '真皮',
-    fabric: '布艺',
-    metal: '金属',
+    leather: '真皮皮革',
+    fabric: '布艺面料',
+    metal: '金属五金',
     glass: '玻璃'
   };
-  const matName = famMap[materialFamily.value] || '表面';
+  const currentFam = materialFamily.value || DEFAULT_PART_FAMILY[activePart.value] || 'paint';
+  const matName = famMap[currentFam] || '表面';
   return `${partName} · ${matName}`;
 });
 
@@ -371,28 +447,43 @@ const filteredPaints = computed(() => {
 });
 
 const showProcessOptions = computed(() => {
-  if (['upholstery', 'curtain_bedding', 'rug', 'floor'].includes(activePart.value)) {
+  if (['upholstery', 'curtain_bedding', 'rug', 'floor', 'hard_furniture'].includes(activePart.value)) {
     return false;
   }
   return ['paint', 'art_coat'].includes(materialFamily.value) || ['ceiling', 'wall'].includes(activePart.value);
 });
 
-const millworkCapsules = computed(() => {
-  const list = [
-    { key: 'mill_lacquer', label: '柜门-烤漆' },
-    { key: 'mill_veneer', label: '柜门-木皮' },
-    { key: 'mill_stone', label: '台面-石材岩板' }
-  ];
-  if (materialFamily.value === 'stone') {
-    return [list[2], list[0], list[1]];
-  }
-  return list;
+const availableSubclassCapsules = computed(() => {
+  const policy = policies.value?.[activePart.value];
+  if (!policy || !Array.isArray(policy.subclasses)) return [];
+  return policy.subclasses.map(sc => ({
+    key: sc,
+    label: SUBCLASS_LABELS[sc] || sc
+  }));
 });
 
 const filteredMaterials = computed(() => {
+  const policy = policies.value?.[activePart.value] || null;
+  const cmap = compatMap.value || {};
   return materials.value.filter(m => {
+    const rawTags = (m.tags || []).map(t => t.subclass).filter(Boolean);
+    const normalizedTags = rawTags.map(sc => cmap[sc] || sc);
+
+    if (policy) {
+      if (Array.isArray(policy.forbidden_subclasses) && policy.forbidden_subclasses.length > 0) {
+        const isForbidden = normalizedTags.some(sc => policy.forbidden_subclasses.includes(sc));
+        if (isForbidden) return false;
+      }
+      if (selectedSubclass.value) {
+        return normalizedTags.some(sc => sc === selectedSubclass.value);
+      }
+      if (Array.isArray(policy.subclasses) && policy.subclasses.length > 0) {
+        return normalizedTags.some(sc => policy.subclasses.includes(sc));
+      }
+    }
+
     if (selectedSubclass.value) {
-      return (m.tags || []).some(t => t.subclass === selectedSubclass.value);
+      return normalizedTags.some(sc => sc === selectedSubclass.value);
     }
     return true;
   });
@@ -406,6 +497,7 @@ async function loadPolicies() {
     const json = await res.json();
     if (json.success && json.data) {
       policies.value = json.data.parts || {};
+      compatMap.value = json.data.subclass_compat_map || {};
     }
   } catch (_) {}
 }
@@ -444,10 +536,14 @@ async function refreshMaterials() {
 
 function selectPart(partKey) {
   activePart.value = partKey;
+  materialFamily.value = policies.value[partKey]?.default_material_family || DEFAULT_PART_FAMILY[partKey] || 'paint';
   showPartSelector.value = false;
-  // 清空已选材质资产
+  // 清空已选材质资产与颜色状态
   activeAssetId.value = '';
   tintHex.value = '';
+  activeHex.value = '';
+  activeDisplayName.value = '';
+  selectedSubclass.value = '';
 
   // 设定默认色系
   if (partKey === 'ceiling') {
@@ -455,10 +551,21 @@ function selectPart(partKey) {
   } else if (partKey === 'upholstery') {
     selectedFamilyKey.value = 'caramel';
   } else if (partKey === 'floor') {
-    selectedFamilyKey.value = 'caramel';
+    selectedFamilyKey.value = 'earth';
   }
 
   emit('surface', partKey);
+  emitChange();
+}
+
+function pickCustomColor(hex) {
+  if (!hex) return;
+  activeHex.value = hex;
+  activeDisplayName.value = `自定义色 (${hex.toUpperCase()})`;
+  if (activeAssetId.value) {
+    tintHex.value = hex;
+  }
+  emit('color', { hex: activeHex.value, name: activeDisplayName.value });
   emitChange();
 }
 
@@ -469,6 +576,9 @@ function pickColor(paint) {
   } else {
     activeHex.value = paint.hex;
     activeDisplayName.value = paint.display_name;
+  }
+  if (activeAssetId.value && activeHex.value) {
+    tintHex.value = activeHex.value;
   }
   emit('color', { hex: activeHex.value, name: activeDisplayName.value });
   emitChange();
@@ -482,8 +592,18 @@ function pickProcess(procKey) {
 function pickMaterial(mat) {
   activeAssetId.value = mat.id;
   selectedSubclass.value = (mat.tags && mat.tags[0] && mat.tags[0].subclass) || '';
+  // 核心联动：若第一层已经选了颜色，自动继承为当前材质的预染色，并同步至 tintHex
+  if (activeHex.value && !tintHex.value) {
+    tintHex.value = activeHex.value;
+  }
   emit('material', { id: mat.id, name: mat.name_cn });
   emit('subclass', selectedSubclass.value);
+  emitChange();
+}
+
+function resetToLayer1() {
+  activeAssetId.value = '';
+  tintHex.value = '';
   emitChange();
 }
 
@@ -495,17 +615,21 @@ function clearMaterialToLayer1() {
 
 function emitChange() {
   const isRematerial = Boolean(activeAssetId.value);
+  const currentFam = materialFamily.value || DEFAULT_PART_FAMILY[activePart.value] || 'paint';
   const guidePayload = {
     type: 'resurface',
     mode: isRematerial ? 'rematerial' : 'recolor',
     part: activePart.value,
-    materialFamily: materialFamily.value,
+    surface: activePart.value,
+    materialFamily: currentFam,
     displayName: isRematerial
       ? (materials.value.find(m => m.id === activeAssetId.value)?.name_cn || '')
       : activeDisplayName.value,
+    materialName: isRematerial ? (materials.value.find(m => m.id === activeAssetId.value)?.name_cn || '') : '',
+    subclass: isRematerial ? selectedSubclass.value : '',
     hex: isRematerial ? tintHex.value : activeHex.value,
     colorHex: isRematerial ? tintHex.value : activeHex.value,
-    process: isRematerial ? '' : selectedProcess.value,
+    process: (!isRematerial && showProcessOptions.value) ? selectedProcess.value : '',
     gloss: selectedGloss.value,
     track: isRematerial ? 'B' : 'A',
     assetId: activeAssetId.value || '',
@@ -521,13 +645,15 @@ watch(
   () => props.guide,
   (newG) => {
     if (!newG) return;
-    if (newG.part && newG.part !== activePart.value) activePart.value = newG.part;
-    if (newG.materialFamily) materialFamily.value = newG.materialFamily;
-    if (newG.hex) activeHex.value = newG.hex;
-    if (newG.displayName) activeDisplayName.value = newG.displayName;
-    if (newG.assetId) activeAssetId.value = newG.assetId;
+    activePart.value = newG.part || newG.surface || '';
+    materialFamily.value = newG.materialFamily || (activePart.value ? (DEFAULT_PART_FAMILY[activePart.value] || 'paint') : '');
+    activeHex.value = newG.hex || newG.colorHex || '';
+    activeDisplayName.value = newG.displayName || '';
+    activeAssetId.value = newG.assetId || '';
+    selectedSubclass.value = newG.subclass || '';
+    tintHex.value = newG.mode === 'rematerial' ? (newG.hex || newG.colorHex || '') : '';
   },
-  { immediate: true }
+  { immediate: true, deep: true }
 );
 
 watch(
@@ -535,6 +661,7 @@ watch(
   (newS) => {
     if (newS && PARTS.some(p => p.key === newS) && newS !== activePart.value) {
       activePart.value = newS;
+      materialFamily.value = policies.value[newS]?.default_material_family || DEFAULT_PART_FAMILY[newS] || 'paint';
     }
   }
 );

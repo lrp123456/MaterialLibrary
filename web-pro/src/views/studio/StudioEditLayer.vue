@@ -1203,14 +1203,6 @@
               :subclass="activeGuide.subclass"
               :inferred-prob="activeRegion.inferredProb || 0"
               @update:guide="Object.assign(activeGuide, $event)"
-              @change="Object.assign(activeGuide, $event)"
-              @surface="onGuideSurface"
-              @subclass="onGuideSubclass"
-              @material="onGuideMaterial"
-              @color="onGuideColor"
-              @finish="onGuideFinish"
-              @roughness="onGuideRoughness"
-              @aging="onGuideAging"
             />
           </div>
 
@@ -3915,6 +3907,8 @@ async function executeUnifiedApply() {
             track: isRematerial ? 'B' : 'A',
             subclass: r.guide?.subclass || r.params?.baseAttr?.subclass || '',
             warehouse: isRematerial ? 'material' : 'paint',
+            material_family: r.guide?.materialFamily || r.params?.baseAttr?.materialFamily || '',
+            display_name: r.guide?.displayName || r.params?.baseAttr?.displayName || r.params?.baseAttr?.colorName || null,
             asset_id: r.guide?.assetId || r.params?.baseAttr?.asset_id || null,
             item_id: r.params?.baseAttr?.item_id || null,
             color_name: r.guide?.displayName || r.params?.baseAttr?.colorName || null,

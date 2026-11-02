@@ -241,7 +241,7 @@
             <div class="p-2 flex-1 flex flex-col justify-between">
               <div>
                 <div class="text-xs font-bold text-white font-mono truncate">{{ p.code }}</div>
-                <div class="text-[11px] text-slate-300 truncate mt-0.5">{{ p.name_zh || p.name_en }}</div>
+                <div class="text-[11px] text-slate-300 truncate mt-0.5">{{ p.display_name || p.alias_zh || p.name_zh || p.name_en }}</div>
                 <div class="text-[9px] text-slate-500 uppercase mt-0.5">{{ p.brand }} · {{ p.hex }}</div>
               </div>
               <div class="mt-2 pt-1 border-t border-studio-800/60 flex items-center justify-between text-[9px] text-slate-500">
@@ -860,17 +860,17 @@ const filteredMaterials = computed(() => {
   });
 });
 
-// 计算过滤后的色号列表（置顶优先）
+// 计算过滤后的色号列表（置顶优先，保持服务端返回的 9 大色系 + LRV 降序）
 const filteredPaints = computed(() => {
   let list = paints.value;
   if (localFamily.value) {
-    list = list.filter(p => p.family === localFamily.value);
+    list = list.filter(p => (p.family_key || p.family) === localFamily.value);
   }
   return [...list].sort((a, b) => {
     const pinA = a.pinned ? 1 : 0;
     const pinB = b.pinned ? 1 : 0;
     if (pinB !== pinA) return pinB - pinA;
-    return (b.updated_at || 0) - (a.updated_at || 0);
+    return 0;
   });
 });
 

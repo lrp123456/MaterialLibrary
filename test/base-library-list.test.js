@@ -158,12 +158,16 @@ async function runTests() {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run('paint_nippon_NN001', 'nippon-paint', 'NN001', 'Classic White', '经典白', '经典白', 'warm_white', '#FAFAFA', 1, 1, 1, now, now);
 
-    const paintList = await request('GET', '/api/base-library/paints?brand=nippon-paint', null, viewerToken);
+    const paintList = await request('GET', '/api/base-library/paints?brand=nippon-paint&q=NN001', null, viewerToken);
     assert.strictEqual(paintList.status, 200);
     assert.strictEqual(paintList.body.data.length, 1);
     assert.strictEqual(paintList.body.data[0].code, 'NN001');
     assert.strictEqual(paintList.body.data[0].curated, true);
     assert.strictEqual(paintList.body.data[0].display_name, '经典白');
+
+    const curatedList = await request('GET', '/api/base-library/paints?curated=1', null, viewerToken);
+    assert.strictEqual(curatedList.status, 200);
+    assert.ok(curatedList.body.data.length >= 62, '策展色卡初始行数必须至少为 62');
 
     const swatchGet = await request('GET', `/api/base-library/paints/paint_nippon_NN001/swatch?token=${viewerToken}`);
     assert.strictEqual(swatchGet.status, 200);

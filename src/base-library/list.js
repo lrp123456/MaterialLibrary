@@ -166,13 +166,13 @@ function listMaterials(db, { surface, subclass, source, is_shell, q, track = 'B'
   });
 }
 
-function listPaints(db, { brand, family, family_key, subclass, q, pinned, curated = 1, min_lrv, limit = 60, offset = 0 } = {}) {
+function listPaints(db, { brand, family, family_key, subclass, q, pinned, curated = 1, min_lrv, limit = 100, offset = 0 } = {}) {
   // 标志检查：若色号关闭则返回空
   if (getFlag(db, 'base_library_paints', 1) === 0) {
     return [];
   }
 
-  const lim = Math.max(1, Math.min(Number(limit) || 60, 200));
+  const lim = Math.max(1, Math.min(Number(limit) || 100, 200));
   const off = Math.max(0, Number(offset) || 0);
 
   let sql = 'SELECT * FROM ba_paints WHERE 1=1';

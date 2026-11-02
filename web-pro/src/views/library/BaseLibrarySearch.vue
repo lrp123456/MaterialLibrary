@@ -156,7 +156,8 @@ async function importItem(item) {
       subclass = 'floor_wood';
     }
 
-    const res = await fetch('/api/base-library/materials/confirm', {
+    // 1. 先创建草稿
+    const draftRes = await fetch('/api/base-library/materials/draft', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -164,7 +165,23 @@ async function importItem(item) {
       },
       body: JSON.stringify({
         source: item.source,
-        source_id: item.id,
+        source_id: item.id
+      })
+    });
+    const draftJson = await draftRes.json();
+    if (!draftJson.success || !draftJson.data?.draft_id) {
+      throw new Error(draftJson.error || '创建材质草稿失败');
+    }
+
+    // 2. 确认入库
+    const res = await fetch('/api/base-library/materials/confirm', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${getToken()}`
+      },
+      body: JSON.stringify({
+        draft_id: draftJson.data.draft_id,
         name_cn: item.title || item.id,
         track: 'B',
         tags: [{ surface, subclass }]

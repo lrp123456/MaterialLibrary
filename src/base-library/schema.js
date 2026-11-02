@@ -85,6 +85,8 @@ function ensureBaseLibrarySchema(db) {
       track TEXT NOT NULL DEFAULT 'B', -- 'A' | 'B'
       tone TEXT,                     -- light | medium | dark
       layout TEXT,                   -- plain | chevron | herringbone | tiles | grid
+      is_pinned INTEGER NOT NULL DEFAULT 0,
+      use_count INTEGER NOT NULL DEFAULT 0,
       deleted_at INTEGER,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
@@ -93,6 +95,37 @@ function ensureBaseLibrarySchema(db) {
       ON ba_materials(source, source_id) WHERE source_id IS NOT NULL AND deleted_at IS NULL;
     CREATE INDEX IF NOT EXISTS idx_ba_mat_deleted
       ON ba_materials(deleted_at, updated_at DESC);
+
+    -- 色号仓库 (先建表再做 ALTER 兼容补齐)
+    CREATE TABLE IF NOT EXISTS ba_paints (
+      id TEXT PRIMARY KEY,
+      brand TEXT NOT NULL,           -- nippon-paint | dulux
+      code TEXT NOT NULL,
+      name_en TEXT NOT NULL,
+      name_zh TEXT,
+      alias_zh TEXT,
+      alt_code TEXT,
+      hex TEXT NOT NULL,
+      family TEXT,
+      lrv REAL,
+      interior INTEGER NOT NULL DEFAULT 0,
+      pinned INTEGER NOT NULL DEFAULT 0,
+      shell_material_id TEXT,
+      swatch_rel TEXT,
+      source_url TEXT,
+      curated INTEGER NOT NULL DEFAULT 0,
+      family_key TEXT,
+      display_name TEXT,
+      role_hint TEXT,
+      use_count INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(brand, code)
+    );
+    CREATE INDEX IF NOT EXISTS idx_ba_paints_pinned_brand
+      ON ba_paints(pinned DESC, brand, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_ba_paints_curated
+      ON ba_paints(curated DESC, family_key, lrv DESC);
   `);
 
   // 补齐列 preview_rel, is_pinned, use_count, track, tone, layout (幂等升级)
@@ -138,36 +171,6 @@ function ensureBaseLibrarySchema(db) {
   } catch (e) {}
 
   db.exec(`
-    -- 色号仓库
-    CREATE TABLE IF NOT EXISTS ba_paints (
-      id TEXT PRIMARY KEY,
-      brand TEXT NOT NULL,           -- nippon-paint | dulux
-      code TEXT NOT NULL,
-      name_en TEXT NOT NULL,
-      name_zh TEXT,
-      alias_zh TEXT,
-      alt_code TEXT,
-      hex TEXT NOT NULL,
-      family TEXT,
-      lrv REAL,
-      interior INTEGER NOT NULL DEFAULT 0,
-      pinned INTEGER NOT NULL DEFAULT 0,
-      shell_material_id TEXT,
-      swatch_rel TEXT,
-      source_url TEXT,
-      curated INTEGER NOT NULL DEFAULT 0,
-      family_key TEXT,
-      display_name TEXT,
-      role_hint TEXT,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      UNIQUE(brand, code)
-    );
-    CREATE INDEX IF NOT EXISTS idx_ba_paints_pinned_brand
-      ON ba_paints(pinned DESC, brand, updated_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_ba_paints_curated
-      ON ba_paints(curated DESC, family_key, lrv DESC);
-
     -- 货架标签 (一个资产可挂多个装修面/子类)
     CREATE TABLE IF NOT EXISTS ba_asset_tags (
       asset_kind TEXT NOT NULL,      -- material | paint
@@ -306,6 +309,44 @@ function ensureBaseLibrarySchema(db) {
   cleanupExpiredTombstones(db, now);
   cleanupExpiredDrafts(db, now);
   try { require('./items').ensureItems(db); } catch (e) { console.warn('[base-library] ensureItems error:', e.message); }
+
+  // 8. 策展色卡幂等同步（只写数据库行，确保任何环境启动即可读到 62 款策展色卡）
+  try {
+    const { CURATED_PAINTS } = require('./curated-paints');
+    const upsertCurated = db.prepare(`
+      INSERT INTO ba_paints (
+        id, brand, code, name_en, name_zh, alias_zh, hex, family, lrv,
+        interior, pinned, shell_material_id, swatch_rel, source_url,
+        curated, family_key, display_name, role_hint, use_count, created_at, updated_at
+      ) VALUES (
+        @id, @brand, @code, @name_en, @display_name, @display_name, @hex, @family_key, @lrv,
+        @interior, 0, NULL, @swatch_rel, @source_url,
+        1, @family_key, @display_name, @role_hint, 0, @created_at, @updated_at
+      )
+      ON CONFLICT(brand, code) DO UPDATE SET
+        curated = 1,
+        family_key = excluded.family_key,
+        display_name = excluded.display_name,
+        role_hint = excluded.role_hint,
+        hex = excluded.hex,
+        lrv = excluded.lrv,
+        interior = excluded.interior,
+        updated_at = excluded.updated_at
+    `);
+    const syncCuratedTx = db.transaction(() => {
+      for (const cp of CURATED_PAINTS) {
+        upsertCurated.run({
+          ...cp,
+          swatch_rel: `cache/base-library/paints/${cp.id}/swatch.png`,
+          created_at: now,
+          updated_at: now
+        });
+      }
+    });
+    syncCuratedTx();
+  } catch (e) {
+    console.warn('[base-library] syncCuratedPaints error:', e.message);
+  }
 }
 
 module.exports = {

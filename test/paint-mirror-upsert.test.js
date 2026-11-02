@@ -45,11 +45,12 @@ async function runTests() {
     });
   }
 
+  const initialCount = db.prepare('SELECT COUNT(*) as c FROM ba_paints WHERE brand=?').get('nippon-paint').c;
   const written1 = await upsertPaintDbPage(db, testDir, 'nippon-paint', batch1);
   assert.strictEqual(written1, 40);
 
   const totalInDb = db.prepare('SELECT COUNT(*) as c FROM ba_paints WHERE brand=?').get('nippon-paint').c;
-  assert.strictEqual(totalInDb, 40);
+  assert.strictEqual(totalInDb, initialCount + 40);
 
   const pinnedCount = db.prepare('SELECT COUNT(*) as c FROM ba_paints WHERE brand=? AND pinned=1').get('nippon-paint').c;
   assert.strictEqual(pinnedCount, 0, '前 36 条不再自动置顶，默认浏览序由策展集与 LRV 控制');
