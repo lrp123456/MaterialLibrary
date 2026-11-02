@@ -194,6 +194,62 @@ function compileBaseAttributes(db, payload = {}) {
       continue;
     }
 
+    // 优先匹配 Master 统一字典资产 (ba_material_swatches)
+    let masterSwatch = null;
+    const swatchLookupId = reg.swatch_id || reg.asset_id;
+    if (db && swatchLookupId) {
+      try { masterSwatch = db.prepare('SELECT * FROM ba_material_swatches WHERE id = ? AND enabled = 1').get(swatchLookupId); } catch (_) {}
+    }
+
+    if (masterSwatch) {
+      let catRow = null;
+      let partRow = null;
+      try { catRow = db.prepare('SELECT * FROM ba_material_categories WHERE id = ?').get(masterSwatch.category_id); } catch (_) {}
+      try { partRow = db.prepare('SELECT * FROM ba_parts WHERE id = ?').get(part); } catch (_) {}
+
+      // 提取专属工艺描述
+      let finishPrompt = '';
+      if (catRow && catRow.finishes_json) {
+        try {
+          const finishes = JSON.parse(catRow.finishes_json || '[]');
+          const targetFinishId = reg.finish_id || reg.finish || masterSwatch.finish_override || catRow.default_finish_id;
+          const matchFinish = finishes.find(f => f.id === targetFinishId) || finishes[0];
+          if (matchFinish) finishPrompt = matchFinish.prompt_zh || '';
+        } catch (_) {}
+      }
+
+      const preserveClause = (partRow && partRow.preserve_clause_zh) || '保持原有结构体积与光影';
+      const categoryName = (catRow && catRow.name_zh) || '';
+      const colorBrandCode = [masterSwatch.brand, masterSwatch.code].filter(Boolean).join(' ');
+      const colorDetail = [masterSwatch.name_zh, colorBrandCode, masterSwatch.hex].filter(Boolean).join('，');
+
+      if (masterSwatch.item_type === 'solid_color') {
+        track = 'A';
+        reference = null;
+        textLines.push(`${loc}是${surfaceLabel}。将表面材质与色彩更换为${colorDetail}（${categoryName}）。`);
+        if (finishPrompt) textLines.push(`表面呈现${finishPrompt}。`);
+        if (masterSwatch.prompt_hint_zh) textLines.push(`${masterSwatch.prompt_hint_zh}。`);
+        textLines.push(`${preserveClause}。不要添加色块贴图，框外像素保持原样。`);
+      } else {
+        track = 'B';
+        const rel = masterSwatch.texture_1k_path || masterSwatch.preview_path || `cache/base-library/materials/${masterSwatch.id}/basecolor.jpg`;
+        const tintHex = masterSwatch.tintable ? normalizeHex6(reg.hex || reg.tint) : null;
+        reference = {
+          kind: 'basecolor',
+          rel,
+          tinted: Boolean(tintHex),
+          hex: tintHex ? `#${tintHex}` : null,
+          assetId: masterSwatch.id
+        };
+        textLines.push(`${loc}是${surfaceLabel}。将这块${surfaceLabel}的材质纹理对齐{{ref}}（${masterSwatch.name_zh}）。`);
+        if (finishPrompt) textLines.push(`表面呈现${finishPrompt}。`);
+        textLines.push(`${preserveClause}。不要复制{{ref}}的光照、透视或尺度，框外像素保持原样。`);
+      }
+
+      clauses.push({ region_id: regId, text: textLines.join('\n'), reference, track });
+      continue;
+    }
+
     if (subclass === 'millwork_carcass' && !reg.asset_id) {
       textLines.push(hasMillworkDoor ? '柜体结构与门板使用同一材质。' : '柜体结构采用平整哑光饰面。');
     } else if (warehouse === 'light') {

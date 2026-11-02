@@ -56,7 +56,7 @@ async function runTests() {
   assert.strictEqual(resBad.part, null);
   console.log('✅ 非法部位枚举拦截通过');
 
-  console.log('=== 4. 测试 JEV 回退：遇到 furniture / soft 必须返回 uncertain ===');
+  console.log('=== 4. 测试 JEV 回退：遇到 furniture / soft 智能预选 upholstery 软体家具 ===');
   process.env.TYPESAFE_API_KEY = 'test_jev_key_for_unit_test';
   setFlag(db, 'base_library_jev', 1);
 
@@ -81,8 +81,10 @@ async function runTests() {
     chatVision: mockVlmFail,
     fetch: mockFetchFurniture
   });
-  assert.strictEqual(resJevFurn.uncertain, true, 'JEV 返回 furniture 时不得擅自猜沙发还是桌椅，必须 uncertain');
-  assert.strictEqual(resJevFurn.part, null);
+  assert.strictEqual(resJevFurn.uncertain, false, 'JEV 返回 furniture 时智能预选沙发 upholstery，彻底告别空白待确认');
+  assert.strictEqual(resJevFurn.part, 'upholstery');
+  assert.strictEqual(resJevFurn.material_family, 'leather');
+  assert.ok(resJevFurn.alternatives.includes('hard_furniture'));
 
   const mockFetchSoft = async () => ({
     ok: true,
@@ -102,8 +104,9 @@ async function runTests() {
     chatVision: mockVlmFail,
     fetch: mockFetchSoft
   });
-  assert.strictEqual(resJevSoft.uncertain, true, 'JEV 返回 soft 时不得擅自猜窗帘还是地毯，必须 uncertain');
-  assert.strictEqual(resJevSoft.part, null);
+  assert.strictEqual(resJevSoft.uncertain, false, 'JEV 返回 soft 时智能预选布艺软包 upholstery');
+  assert.strictEqual(resJevSoft.part, 'upholstery');
+  assert.strictEqual(resJevSoft.material_family, 'fabric');
 
   console.log('=== 5. 测试 JEV 回退：明确装修面 (如 ceiling) 正常映射 ===');
   const mockFetchCeiling = async () => ({

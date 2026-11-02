@@ -126,6 +126,65 @@ function ensureBaseLibrarySchema(db) {
       ON ba_paints(pinned DESC, brand, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_ba_paints_curated
       ON ba_paints(curated DESC, family_key, lrv DESC);
+
+    -- 空间装修面 / 部位字典表 (支持全量 CRUD)
+    CREATE TABLE IF NOT EXISTS ba_parts (
+      id TEXT PRIMARY KEY,
+      name_zh TEXT NOT NULL,
+      name_en TEXT NOT NULL DEFAULT '',
+      jev_aliases TEXT NOT NULL DEFAULT '[]',
+      preserve_clause_zh TEXT NOT NULL DEFAULT '',
+      preserve_clause_en TEXT NOT NULL DEFAULT '',
+      default_category_id TEXT NOT NULL DEFAULT '',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      is_system INTEGER NOT NULL DEFAULT 1,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- 基材品类与生图路由表 (支持全量 CRUD)
+    CREATE TABLE IF NOT EXISTS ba_material_categories (
+      id TEXT PRIMARY KEY,
+      name_zh TEXT NOT NULL,
+      name_en TEXT NOT NULL DEFAULT '',
+      track_mode TEXT NOT NULL DEFAULT 'track_a', -- 'track_a' | 'track_b' | 'hybrid'
+      allowed_parts TEXT NOT NULL DEFAULT '[]',   -- JSON array of ba_parts.id
+      default_finish_id TEXT NOT NULL DEFAULT '',
+      finishes_json TEXT NOT NULL DEFAULT '[]',   -- JSON array of { id, name_zh, prompt_zh, prompt_en }
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      is_system INTEGER NOT NULL DEFAULT 1,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- 各基材专属色卡与花色资产统一核心表 (支持全量 CRUD)
+    CREATE TABLE IF NOT EXISTS ba_material_swatches (
+      id TEXT PRIMARY KEY,
+      category_id TEXT NOT NULL,                  -- 关联 ba_material_categories.id
+      item_type TEXT NOT NULL DEFAULT 'solid_color', -- 'solid_color' (Track A) | 'texture_map' (Track B)
+      name_zh TEXT NOT NULL,                      -- 美学色名/花色名，如「可可蛋奶」「意式马鞍棕」「北美黑胡桃」
+      brand TEXT NOT NULL DEFAULT '',             -- 品牌/色卡体系，如「立邦」「Poltrona Frau 参考」「灵感取色」
+      code TEXT NOT NULL DEFAULT '',              -- 标准色号或近似色号，如「NN0107-4」「SC-142」
+      hex TEXT NOT NULL DEFAULT '#CCCCCC',        -- 标准 HEX
+      lrv REAL NOT NULL DEFAULT 50.0,             -- 0~100 光反射值，自动由 HEX 计算
+      color_family TEXT NOT NULL DEFAULT 'off_white', -- 'off_white'|'beige_brown'|'warm_gray'|'cool_gray'|'green_blue'|'terracotta_red'|'yellow_gold'
+      style_tags TEXT NOT NULL DEFAULT '[]',      -- JSON array
+      finish_override TEXT NOT NULL DEFAULT '',   -- 可选覆盖默认工艺 ID
+      prompt_hint_zh TEXT NOT NULL DEFAULT '',    -- 针对特殊奢石/花砖的附加视觉描述
+      prompt_hint_en TEXT NOT NULL DEFAULT '',
+      texture_1k_path TEXT NOT NULL DEFAULT '',   -- 仅 texture_map 使用，指向 1024x1024 纹理图
+      preview_path TEXT NOT NULL DEFAULT '',
+      tintable INTEGER NOT NULL DEFAULT 0,        -- 1=支持 ?hex= Lab 预染色，0=保持原图色彩
+      source_type TEXT NOT NULL DEFAULT 'curated',-- 'curated' | 'vlm_eyedropper' | 'user_manual'
+      pinned INTEGER NOT NULL DEFAULT 1,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_ba_swatches_cat_fam ON ba_material_swatches(category_id, color_family, lrv DESC);
   `);
 
   // 补齐列 preview_rel, is_pinned, use_count, track, tone, layout (幂等升级)
@@ -346,6 +405,14 @@ function ensureBaseLibrarySchema(db) {
     syncCuratedTx();
   } catch (e) {
     console.warn('[base-library] syncCuratedPaints error:', e.message);
+  }
+
+  // 9. Master 统一字典种子化 (8大部位、12大基材品类、专属色卡与花色资产)
+  try {
+    const { seedMasterDictionary } = require('./master-dictionary-seed');
+    seedMasterDictionary(db);
+  } catch (e) {
+    console.warn('[base-library] seedMasterDictionary error:', e.message);
   }
 }
 

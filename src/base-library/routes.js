@@ -246,6 +246,136 @@ async function handleBaseLibraryRoutes(services, req, res, pathname, urlObj, { s
     return sendJson(res, 200, { success: true, data: getTaxonomy() });
   }
 
+  // ── Master 统一字典联动查询 GET /api/base-library/dictionary ──
+  if (pathname === '/base-library/dictionary' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const part = urlObj.searchParams.get('part') || '';
+    const dict = require('./dictionary-routes');
+    return sendJson(res, 200, { success: true, data: dict.getDictionary(db, { part }) });
+  }
+
+  // ── 部位 CRUD ──
+  if (pathname === '/base-library/parts' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '仅管理员可新增部位' });
+    const b = await parseBody(req);
+    const dict = require('./dictionary-routes');
+    try {
+      const data = dict.createPart(db, b);
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 400, { success: false, error: e.message });
+    }
+  }
+  const mPart = pathname.match(/^\/base-library\/parts\/([^\/]+)$/);
+  if (mPart && req.method === 'PATCH') {
+    if (!isAdmin) return sendJson(res, 403, { error: '仅管理员可修改部位' });
+    const id = decodeURIComponent(mPart[1]);
+    const b = await parseBody(req);
+    const dict = require('./dictionary-routes');
+    const data = dict.updatePart(db, id, b);
+    if (!data) return sendJson(res, 404, { success: false, error: '部位不存在' });
+    return sendJson(res, 200, { success: true, data });
+  }
+  if (mPart && req.method === 'DELETE') {
+    if (!isAdmin) return sendJson(res, 403, { error: '仅管理员可删除部位' });
+    const id = decodeURIComponent(mPart[1]);
+    const dict = require('./dictionary-routes');
+    const ok = dict.deletePart(db, id);
+    return sendJson(res, 200, { success: ok });
+  }
+
+  // ── 基材品类 CRUD ──
+  if (pathname === '/base-library/categories' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '仅管理员可新增基材品类' });
+    const b = await parseBody(req);
+    const dict = require('./dictionary-routes');
+    try {
+      const data = dict.createCategory(db, b);
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 400, { success: false, error: e.message });
+    }
+  }
+  const mCat = pathname.match(/^\/base-library\/categories\/([^\/]+)$/);
+  if (mCat && req.method === 'PATCH') {
+    if (!isAdmin) return sendJson(res, 403, { error: '仅管理员可修改基材品类' });
+    const id = decodeURIComponent(mCat[1]);
+    const b = await parseBody(req);
+    const dict = require('./dictionary-routes');
+    const data = dict.updateCategory(db, id, b);
+    if (!data) return sendJson(res, 404, { success: false, error: '品类不存在' });
+    return sendJson(res, 200, { success: true, data });
+  }
+  if (mCat && req.method === 'DELETE') {
+    if (!isAdmin) return sendJson(res, 403, { error: '仅管理员可删除基材品类' });
+    const id = decodeURIComponent(mCat[1]);
+    const dict = require('./dictionary-routes');
+    const ok = dict.deleteCategory(db, id);
+    return sendJson(res, 200, { success: ok });
+  }
+
+  // ── 专属色卡与花色资产 CRUD ──
+  if (pathname === '/base-library/swatches' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const dict = require('./dictionary-routes');
+    const data = dict.listSwatches(db, {
+      category_id: urlObj.searchParams.get('category_id'),
+      color_family: urlObj.searchParams.get('color_family'),
+      item_type: urlObj.searchParams.get('item_type'),
+      q: urlObj.searchParams.get('q'),
+      pinned: urlObj.searchParams.get('pinned'),
+      limit: urlObj.searchParams.get('limit'),
+      offset: urlObj.searchParams.get('offset')
+    });
+    return sendJson(res, 200, { success: true, data });
+  }
+  if (pathname === '/base-library/swatches' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req, 16 * 1024 * 1024);
+    const dict = require('./dictionary-routes');
+    try {
+      const data = dict.createSwatch(db, b);
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 400, { success: false, error: e.message });
+    }
+  }
+  const mSwatch = pathname.match(/^\/base-library\/swatches\/([^\/]+)$/);
+  if (mSwatch && req.method === 'PATCH') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const id = decodeURIComponent(mSwatch[1]);
+    const b = await parseBody(req);
+    const dict = require('./dictionary-routes');
+    const data = dict.updateSwatch(db, id, b);
+    if (!data) return sendJson(res, 404, { success: false, error: '色卡不存在' });
+    return sendJson(res, 200, { success: true, data });
+  }
+  if (mSwatch && req.method === 'DELETE') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const id = decodeURIComponent(mSwatch[1]);
+    const dict = require('./dictionary-routes');
+    const ok = dict.deleteSwatch(db, id);
+    return sendJson(res, 200, { success: ok });
+  }
+
+  // ── 「物理测色 + ΔE00 品牌近邻 + VLM 智能美学赋名」POST /api/base-library/swatches/recognize-vlm ──
+  if (pathname === '/base-library/swatches/recognize-vlm' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req, 16 * 1024 * 1024);
+    const dict = require('./dictionary-routes');
+    try {
+      const result = await dict.recognizeVlmSwatch(db, {
+        hex: b.hex,
+        cropDataUrl: b.cropDataUrl || b.image_base64 || b.crop_base64,
+        partHint: b.partHint || b.part,
+        config: services && services.config
+      });
+      return sendJson(res, 200, { success: true, data: result });
+    } catch (err) {
+      return sendJson(res, 500, { success: false, error: err.message });
+    }
+  }
+
   // 1.1 部位策略 GET /api/base-library/part-policy (单一事实来源)
   if (pathname === '/base-library/part-policy' && req.method === 'GET') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });

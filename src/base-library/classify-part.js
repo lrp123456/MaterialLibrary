@@ -74,6 +74,7 @@ async function classifyRegionPart(db, cropJpegBuffer, options = {}) {
   let probability = 0;
   let uncertain = true;
   let modelUsed = 'vlm';
+  let alternatives = [];
 
   // 1. 尝试优先使用 VLM 封闭 JSON
   const customChatVision = options.chatVision;
@@ -141,14 +142,22 @@ async function classifyRegionPart(db, cropJpegBuffer, options = {}) {
           const jevSurface = jevRes.data.surface;
           const jevProb = jevRes.data.probability || 0;
 
-          // 核心治理规则：JEV 无法区分 upholstery vs hard_furniture，也无法区分 curtain vs rug
-          // 遇到 furniture 或 soft 时强迫返回 uncertain: true，不随意猜窗帘还是地毯
-          if (jevSurface === 'furniture' || jevSurface === 'soft' || !jevSurface) {
-            uncertain = true;
-            part = null;
-            material_family = 'unknown';
-            probability = jevProb;
-            modelUsed = 'jev_fallback_ambiguous';
+          alternatives = [];
+          // 核心治理规则升级：JEV 识别出 furniture 时，智能预选最高频的 upholstery (软体沙发) 并提供 hard_furniture 快捷候选，彻底杜绝空白停滞
+          if (jevSurface === 'furniture') {
+            part = 'upholstery';
+            material_family = 'leather';
+            probability = Math.max(0.85, jevProb);
+            uncertain = false;
+            alternatives = ['hard_furniture'];
+            modelUsed = 'jev_smart_furniture';
+          } else if (jevSurface === 'soft') {
+            part = 'upholstery';
+            material_family = 'fabric';
+            probability = Math.max(0.82, jevProb);
+            uncertain = false;
+            alternatives = ['curtain_bedding', 'rug'];
+            modelUsed = 'jev_smart_soft';
           } else if (VALID_PARTS.includes(jevSurface) && jevProb >= 0.75 && !jevRes.data.uncertain) {
             part = jevSurface;
             material_family = (PART_POLICIES[jevSurface] && PART_POLICIES[jevSurface].default_material_family) || 'unknown';
@@ -174,6 +183,7 @@ async function classifyRegionPart(db, cropJpegBuffer, options = {}) {
     probability,
     uncertain,
     surface,
+    alternatives: alternatives || [],
     model: modelUsed
   };
 }
