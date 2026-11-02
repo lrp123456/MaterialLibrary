@@ -479,7 +479,101 @@ async function recognizeVlmSwatch(db, { hex, cropDataUrl, partHint = '', config 
   };
 }
 
+
+/**
+ * 针对当前框选区域与当前基材品类，计算 4~6 款智能建议色卡
+ * (含：原色同频、空间百搭基底色、质感点睛/压阵色)
+ */
+function getRecommendedSwatchesForRegion(db, { part = '', category_id = '', dominant_hex = '', scenePaletteHexes = [] } = {}) {
+  let targetCatId = category_id;
+  if (!targetCatId && part) {
+    const partRow = db.prepare('SELECT default_category_id FROM ba_parts WHERE id = ?').get(part);
+    if (partRow && partRow.default_category_id) {
+      targetCatId = partRow.default_category_id;
+    }
+  }
+  if (!targetCatId) {
+    targetCatId = (part === 'upholstery' || part === 'furniture') ? 'mat_cat_leather' : 'mat_cat_latex';
+  }
+
+  const catRow = db.prepare('SELECT * FROM ba_material_categories WHERE id = ?').get(targetCatId);
+  const catName = catRow ? catRow.name_zh.split('/')[0] : '基材';
+
+  const rows = db.prepare('SELECT * FROM ba_material_swatches WHERE category_id = ? AND enabled = 1 ORDER BY pinned DESC, sort_order ASC, lrv DESC').all(targetCatId);
+  if (!rows || rows.length === 0) {
+    return {
+      category_id: targetCatId,
+      category_name: catName,
+      swatches: [],
+      advice_zh: `当前基材【${catName}】暂无专属色卡`
+    };
+  }
+
+  const swatchesWithLab = rows.map(r => ({
+    ...r,
+    _lab: hexToLab(r.hex)
+  }));
+
+  const recommended = [];
+  const usedIds = new Set();
+
+  // (1) 原色同频推荐 (若提供选区原色)
+  let originMatch = null;
+  if (dominant_hex) {
+    const matches = matchClosestSwatches(dominant_hex, swatchesWithLab, 1);
+    if (matches && matches.length > 0) {
+      originMatch = {
+        ...matches[0],
+        badge: '原色同频',
+        recommend_reason: `与框选区域原色 (${dominant_hex}) 色差极小 (ΔE=${matches[0].delta_e.toFixed(1)})`
+      };
+      recommended.push(originMatch);
+      usedIds.add(originMatch.id);
+    }
+  }
+
+  // (2) 空间百搭基底色 (中高明度经典常用色，优先 pinned)
+  const baseCandidates = swatchesWithLab.filter(s => !usedIds.has(s.id) && s.pinned === 1);
+  for (const s of baseCandidates) {
+    if (recommended.length >= (originMatch ? 3 : 2)) break;
+    recommended.push({
+      ...s,
+      badge: '空间百搭',
+      recommend_reason: '经典高频基底色，温润通透不挑空间采光'
+    });
+    usedIds.add(s.id);
+  }
+
+  // (3) 质感跳色/沉稳压阵色 (深色或特色色调)
+  const accentCandidates = swatchesWithLab.filter(s => !usedIds.has(s.id));
+  for (const s of accentCandidates) {
+    if (recommended.length >= 5) break;
+    recommended.push({
+      ...s,
+      badge: s.lrv < 25 ? '沉稳压阵' : '高级点睛',
+      recommend_reason: s.lrv < 25 ? '沉稳视觉重心，强化大宅高级气场' : '设计师推荐跳色搭配'
+    });
+    usedIds.add(s.id);
+  }
+
+  const advice_zh = originMatch
+    ? `已根据框选原色 (${dominant_hex}) 与【${catName}】材质特征，为您推荐 ${recommended.length} 款和谐配色方案`
+    : `为您精选 ${recommended.length} 款【${catName}】高频经典与点睛配色建议`;
+
+  return {
+    category_id: targetCatId,
+    category_name: catName,
+    swatches: recommended.map(r => {
+      const copy = { ...r };
+      delete copy._lab;
+      return copy;
+    }),
+    advice_zh
+  };
+}
+
 module.exports = {
+  getRecommendedSwatchesForRegion,
   getDictionary,
   createPart,
   updatePart,

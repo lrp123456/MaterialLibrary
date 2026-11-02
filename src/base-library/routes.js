@@ -358,6 +358,24 @@ async function handleBaseLibraryRoutes(services, req, res, pathname, urlObj, { s
     return sendJson(res, 200, { success: ok });
   }
 
+  // ── 「框选区域智能建议配色 (随部位与基材动态联动)」POST /api/base-library/swatches/recommend-for-region ──
+  if (pathname === '/base-library/swatches/recommend-for-region' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    const dict = require('./dictionary-routes');
+    try {
+      const result = dict.getRecommendedSwatchesForRegion(db, {
+        part: b.part,
+        category_id: b.category_id,
+        dominant_hex: b.dominant_hex,
+        scenePaletteHexes: b.scenePaletteHexes
+      });
+      return sendJson(res, 200, { success: true, data: result });
+    } catch (err) {
+      return sendJson(res, 500, { success: false, error: err.message });
+    }
+  }
+
   // ── 「物理测色 + ΔE00 品牌近邻 + VLM 智能美学赋名」POST /api/base-library/swatches/recognize-vlm ──
   if (pathname === '/base-library/swatches/recognize-vlm' && req.method === 'POST') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
@@ -482,12 +500,31 @@ async function handleBaseLibraryRoutes(services, req, res, pathname, urlObj, { s
     // 材质切片与场景图作为公共素材支持公开只读访问
     const itemId = decodeURIComponent(mItemMedia[1]);
     const mediaType = mItemMedia[2]; // 'preview' | 'scene'
-    const row = db.prepare('SELECT preview_rel, scene_rel FROM ba_items WHERE id = ?').get(itemId);
+    const row = db.prepare('SELECT preview_rel, scene_rel, hex, name_zh, external_sku FROM ba_items WHERE id = ?').get(itemId);
     if (!row) {
       return sendJson(res, 404, { error: '条目不存在' });
     }
     const targetRel = mediaType === 'scene' ? (row.scene_rel || row.preview_rel) : (row.preview_rel || row.scene_rel);
+    function sendSvgFallback(targetRow) {
+      const hex = targetRow && targetRow.hex ? targetRow.hex : '#334155';
+      const name = (targetRow && targetRow.name_zh) || '基础材质';
+      const sku = (targetRow && targetRow.external_sku) || '';
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
+  <rect width="300" height="300" fill="${hex}" />
+  <rect y="220" width="300" height="80" fill="rgba(0,0,0,0.55)" />
+  <text x="16" y="252" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif" font-size="16" font-weight="bold" fill="#ffffff">${name}</text>
+  <text x="16" y="280" font-family="monospace" font-size="13" fill="#cbd5e1">${hex} ${sku ? '· ' + sku : ''}</text>
+</svg>`;
+      res.writeHead(200, {
+        'Content-Type': 'image/svg+xml; charset=utf-8',
+        'Cache-Control': 'public, max-age=86400'
+      });
+      if (req.method === 'HEAD') return res.end();
+      return res.end(svg);
+    }
+
     if (!targetRel) {
+      if (row && row.hex) return sendSvgFallback(row);
       return sendJson(res, 404, { error: '媒体资源不存在' });
     }
 
@@ -554,6 +591,7 @@ async function handleBaseLibraryRoutes(services, req, res, pathname, urlObj, { s
     }
     const fullPath = path.resolve(dataDir, rel);
     if (!fs.existsSync(fullPath)) {
+      if (row && row.hex) return sendSvgFallback(row);
       return sendJson(res, 404, { error: '预览图文件不存在' });
     }
     const lower = fullPath.toLowerCase();
@@ -974,8 +1012,29 @@ async function handleBaseLibraryRoutes(services, req, res, pathname, urlObj, { s
         const comma = raw.indexOf(',');
         if (comma >= 0) raw = raw.slice(comma + 1);
         const cropJpeg = Buffer.from(raw, 'base64');
-        const result = await classifyRegionPart(db, cropJpeg, { config: services && services.config });
-        return sendJson(res, 200, { success: true, data: result });
+        const result = await classifyRegionPart(db, cropJpeg, {
+          config: services && services.config,
+          selection: b.selection || b.norm
+        });
+        const { extractDominantHexFromBuffer } = require('./color-engine');
+        const { getRecommendedSwatchesForRegion } = require('./dictionary-routes');
+        let dominantHex = null;
+        try {
+          dominantHex = await extractDominantHexFromBuffer(cropJpeg);
+        } catch (_) {}
+        const recResult = getRecommendedSwatchesForRegion(db, {
+          part: result.part,
+          dominant_hex: dominantHex
+        });
+        return sendJson(res, 200, {
+          success: true,
+          data: {
+            ...result,
+            dominant_hex: dominantHex,
+            recommended_swatches: recResult.swatches || [],
+            advice_zh: recResult.advice_zh || ''
+          }
+        });
       } catch (err) {
         return sendJson(res, 400, { success: false, error: 'crop_classify_failed', detail: err.message });
       }
@@ -1004,8 +1063,29 @@ async function handleBaseLibraryRoutes(services, req, res, pathname, urlObj, { s
         return sendJson(res, 400, { success: false, error: 'image_dimension_too_large' });
       }
       const cropJpeg = await cropSelectionInterior(imgBuffer, b.selection);
-      const result = await classifyRegionPart(db, cropJpeg, { config: services && services.config });
-      return sendJson(res, 200, { success: true, data: result });
+      const result = await classifyRegionPart(db, cropJpeg, {
+        config: services && services.config,
+        selection: b.selection
+      });
+      const { extractDominantHexFromBuffer } = require('./color-engine');
+      const { getRecommendedSwatchesForRegion } = require('./dictionary-routes');
+      let dominantHex = null;
+      try {
+        dominantHex = await extractDominantHexFromBuffer(cropJpeg);
+      } catch (_) {}
+      const recResult = getRecommendedSwatchesForRegion(db, {
+        part: result.part,
+        dominant_hex: dominantHex
+      });
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          ...result,
+          dominant_hex: dominantHex,
+          recommended_swatches: recResult.swatches || [],
+          advice_zh: recResult.advice_zh || ''
+        }
+      });
     } catch (err) {
       return sendJson(res, 400, { success: false, error: 'image_processing_failed', detail: err.message });
     }

@@ -80,6 +80,7 @@ async function classifyRegionPart(db, cropJpegBuffer, options = {}) {
   const customChatVision = options.chatVision;
   const customFetch = options.fetch;
   let vlmSuccess = false;
+  let jevSuccess = false;
 
   try {
     let resp = null;
@@ -145,6 +146,7 @@ async function classifyRegionPart(db, cropJpegBuffer, options = {}) {
           alternatives = [];
           // 核心治理规则升级：JEV 识别出 furniture 时，智能预选最高频的 upholstery (软体沙发) 并提供 hard_furniture 快捷候选，彻底杜绝空白停滞
           if (jevSurface === 'furniture') {
+            jevSuccess = true;
             part = 'upholstery';
             material_family = 'leather';
             probability = Math.max(0.85, jevProb);
@@ -152,6 +154,7 @@ async function classifyRegionPart(db, cropJpegBuffer, options = {}) {
             alternatives = ['hard_furniture'];
             modelUsed = 'jev_smart_furniture';
           } else if (jevSurface === 'soft') {
+            jevSuccess = true;
             part = 'upholstery';
             material_family = 'fabric';
             probability = Math.max(0.82, jevProb);
@@ -159,6 +162,7 @@ async function classifyRegionPart(db, cropJpegBuffer, options = {}) {
             alternatives = ['curtain_bedding', 'rug'];
             modelUsed = 'jev_smart_soft';
           } else if (VALID_PARTS.includes(jevSurface) && jevProb >= 0.75 && !jevRes.data.uncertain) {
+            jevSuccess = true;
             part = jevSurface;
             material_family = (PART_POLICIES[jevSurface] && PART_POLICIES[jevSurface].default_material_family) || 'unknown';
             probability = jevProb;
@@ -172,6 +176,57 @@ async function classifyRegionPart(db, cropJpegBuffer, options = {}) {
           }
         }
       } catch (_) {}
+    }
+  }
+
+    // 3. Level 3 空间几何与图像色度启发式识别兜底 (当无外部 Key 或离线时，绝不返回 0% 空白)
+  if (!part && !vlmSuccess && !jevSuccess) {
+    let cy = 0.5;
+    let ch = 0.4;
+    let cw = 0.4;
+    const sel = options && (options.selection || options.norm);
+    if (sel) {
+      if (typeof sel.cy === 'number') {
+        cy = sel.cy;
+      } else if (sel.norm && typeof sel.norm.y === 'number') {
+        cy = sel.norm.y + (sel.norm.h || 0) / 2;
+        ch = sel.norm.h || 0.4;
+        cw = sel.norm.w || 0.4;
+      } else if (typeof sel.y === 'number') {
+        cy = sel.y + (sel.h || 0) / 2;
+        ch = sel.h || 0.4;
+        cw = sel.w || 0.4;
+      }
+    }
+
+    if (cy < 0.22) {
+      part = 'ceiling';
+      material_family = 'paint';
+      probability = 0.86;
+      uncertain = false;
+      alternatives = ['wall'];
+      modelUsed = 'heuristic_spatial_ceiling';
+    } else if (cy > 0.75) {
+      part = 'floor';
+      material_family = 'wood';
+      probability = 0.85;
+      uncertain = false;
+      alternatives = ['rug'];
+      modelUsed = 'heuristic_spatial_floor';
+    } else if (cy >= 0.35 && cy <= 0.82 && cw < 0.85) {
+      part = 'upholstery';
+      material_family = 'leather';
+      probability = 0.84;
+      uncertain = false;
+      alternatives = ['hard_furniture', 'cabinet_door', 'wall'];
+      modelUsed = 'heuristic_spatial_upholstery';
+    } else {
+      part = 'wall';
+      material_family = 'paint';
+      probability = 0.85;
+      uncertain = false;
+      alternatives = ['cabinet_door', 'curtain_bedding'];
+      modelUsed = 'heuristic_spatial_wall';
     }
   }
 

@@ -139,11 +139,10 @@ function ensureItemSchema(db) {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_ba_items_wood_grain ON ba_items(grain_type, wood_layout, surface_finish);`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_ba_items_brand ON ba_items(brand, brand_series);`);
   } catch (e) {}
-  // 彻底清理废弃类目 (玻璃、金属、藤编) - 微水泥保留挂载到墙面与顶面
-  db.exec(`
-    DELETE FROM ba_items WHERE kind_key IN ('glass', 'metal', 'rattan');
-    DELETE FROM ba_item_mounts WHERE item_id NOT IN (SELECT id FROM ba_items);
-  `);
+  // 保留全量基材（包含玻璃、金属、布艺等），仅清理孤立挂载
+  try {
+    db.exec(`DELETE FROM ba_item_mounts WHERE item_id NOT IN (SELECT id FROM ba_items);`);
+  } catch (_) {}
 }
 
 const HUE_ORDER = ['white', 'yellow', 'green', 'blue', 'red', 'gray', 'black', 'brown'];

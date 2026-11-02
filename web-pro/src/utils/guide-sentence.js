@@ -92,13 +92,20 @@ export function guideSentence(region) {
       parts.push(`颜色改为 ${colorHex}，保持原有材质结构`);
     }
 
-    if (guide.process) {
+    if (guide.finish_name) {
+      parts.push(`工艺采用${guide.finish_name}`);
+    } else if (guide.process) {
       const processMap = {
         roller_matte: '工艺采用标准滚筒平涂哑光',
         eggshell: '工艺采用丝光蛋壳光',
         trowel_microcement: '工艺采用艺术漆批刮微水泥',
         velvet: '工艺采用天鹅绒艺术漆',
-        lime_rammed: '工艺采用粗粝石灰夯土'
+        lime_rammed: '工艺采用粗粝石灰夯土',
+        nappa_full_grain: '工艺采用意大利纳帕头层皮',
+        vintage_oil_wax: '工艺采用复古油蜡牛皮质感',
+        floor_plank_straight: '工艺采用工字平铺大板',
+        floor_herringbone: '工艺采用法式人字拼',
+        floor_chevron: '工艺采用45度鱼骨拼'
       };
       if (processMap[guide.process]) parts.push(processMap[guide.process]);
     }

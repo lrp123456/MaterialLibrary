@@ -1,48 +1,48 @@
 <template>
-  <div class="flex flex-col gap-3 text-xs min-w-0 select-none">
-    <!-- 1. 顶部：部位识别状态与快捷切换 -->
-    <div class="flex flex-col gap-2 p-2.5 rounded-xl bg-studio-900 border border-studio-750">
-      <div class="flex items-center justify-between gap-2">
-        <div class="min-w-0 flex items-center gap-1.5">
-          <span class="inline-block w-2 h-2 rounded-full" :class="uncertain && !activePart ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'"></span>
-          <span class="font-bold text-slate-100 truncate">
-            {{ headerTitle }}
-          </span>
-          <span v-if="confidencePercent" class="text-[10px] text-slate-400 font-mono">
-            {{ confidencePercent }}%
-          </span>
-        </div>
+  <div class="resurface-drawer flex flex-col gap-3 text-slate-100 select-none text-xs">
+    <!-- 1. 顶部：部位指示与切换 (含 JEV 快速候选胶囊) -->
+    <div class="p-2.5 rounded-xl bg-studio-900 border border-studio-800 flex flex-col gap-1.5">
+      <div class="flex items-center justify-between">
         <div class="flex items-center gap-2">
-          <!-- JEV 备选推荐胶囊 (如检测到家具时一键切硬家具) -->
-          <button
-            v-if="alternativePart"
-            type="button"
-            class="px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px] font-medium hover:bg-amber-500/25 transition cursor-pointer"
-            @click="selectPart(alternativePart)"
-          >
-            切为 {{ getPartLabel(alternativePart) }}
-          </button>
-          <button
-            type="button"
-            class="text-[11px] text-studio-cyan shrink-0 cursor-pointer hover:underline"
-            @click="showPartSelector = !showPartSelector"
-          >
-            {{ showPartSelector ? '收起部位' : '切换部位' }}
-          </button>
+          <span class="w-2.5 h-2.5 rounded-full" :class="uncertain ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'"></span>
+          <span class="font-bold text-slate-200 text-xs">{{ headerTitle }}</span>
+          <span v-if="!uncertain && confidencePercent" class="text-[10px] font-mono text-studio-cyan bg-studio-cyan/10 px-1.5 py-0.2 rounded border border-studio-cyan/20">
+            {{ confidencePercent }}% 置信度
+          </span>
         </div>
+        <button
+          type="button"
+          class="text-[11px] text-studio-cyan hover:underline cursor-pointer font-medium"
+          @click="showPartSelector = !showPartSelector"
+        >
+          {{ showPartSelector ? '收起' : '切换部位' }}
+        </button>
       </div>
 
-      <!-- 8 部位快捷选择网格 -->
-      <div v-if="showPartSelector || !activePart" class="grid grid-cols-4 gap-1 pt-1 border-t border-studio-800">
+      <!-- 快速候选胶囊 (如 JEV 识别家具时提示切为 硬质家具) -->
+      <div v-if="alternativePart" class="flex items-center gap-1.5 pt-1 text-[11px] text-slate-400">
+        <span>建议候选:</span>
+        <button
+          type="button"
+          class="px-2 py-0.5 rounded-full bg-studio-800 hover:bg-studio-700 text-amber-300 border border-amber-400/30 text-[10px] cursor-pointer"
+          @click="selectPart(alternativePart)"
+        >
+          切为 {{ getPartLabel(alternativePart) }}
+        </button>
+      </div>
+
+      <!-- 下拉选择全部部位 -->
+      <div v-if="showPartSelector" class="pt-2 border-t border-studio-800/80 grid grid-cols-2 gap-1.5">
         <button
           v-for="p in allParts"
           :key="p.id"
           type="button"
-          class="px-2 py-1.5 rounded-lg text-[11px] font-medium transition cursor-pointer truncate text-center"
-          :class="activePart === p.id ? 'bg-studio-accent text-white font-bold shadow-sm' : 'bg-studio-800 text-slate-300 hover:bg-studio-750'"
+          class="px-2.5 py-1.5 rounded-lg text-left text-[11px] transition cursor-pointer flex items-center justify-between"
+          :class="activePart === p.id ? 'bg-studio-accent text-white font-bold' : 'bg-studio-850 text-slate-300 hover:bg-studio-800'"
           @click="selectPart(p.id)"
         >
-          {{ p.name_zh.split('/')[0] }}
+          <span>{{ p.name_zh.split('/')[0] }}</span>
+          <span v-if="activePart === p.id" class="text-xs">✓</span>
         </button>
       </div>
     </div>
@@ -67,202 +67,257 @@
       </div>
     </div>
 
-    <!-- 3. 主面板：当前基材的专属色卡与花色资产 -->
+    <!-- 3. 主面板：当前基材的专属色卡、调色盘与工艺 -->
     <div class="space-y-3 p-3 rounded-xl bg-studio-950/70 border border-studio-800">
-      <!-- 顶部：自定义调色盘 + 吸管取色 (AI 识色入库) -->
-      <div class="flex flex-col gap-2 p-2 rounded-lg bg-studio-900 border border-studio-800">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2">
+      <!-- A. 可视化调色盘与实时色彩大卡片 (杜绝纵向单字挤压) -->
+      <div class="flex flex-col gap-2.5 p-2.5 rounded-lg bg-studio-900 border border-studio-800">
+        <!-- 实时色彩预览大色块 + 色名/HEX展示 + 吸管工具 -->
+        <div class="flex items-center justify-between gap-2.5">
+          <div class="relative w-11 h-11 rounded-lg border-2 border-white/20 shadow-inner shrink-0 overflow-hidden" :style="{ backgroundColor: activeHex || '#8B4A2B' }">
             <input
               type="color"
               :value="activeHex || '#8B4A2B'"
-              @input="pickCustomColor($event.target.value)"
-              class="w-6 h-6 rounded border border-studio-700 bg-transparent cursor-pointer"
-              title="点击打开系统调色盘"
+              @input="onNativeColorInput($event.target.value)"
+              class="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              title="点击唤起系统调色盘"
             />
-            <span class="text-[11px] text-slate-300 font-medium">调色盘 / 吸管取色</span>
           </div>
 
-          <div class="flex items-center gap-1.5">
+          <div class="flex-1 min-w-0">
+            <div class="font-bold text-slate-100 text-xs truncate" :title="activeDisplayName || '自定义色彩'">
+              {{ activeDisplayName || '自定义色彩' }}
+            </div>
+            <div class="text-[10px] font-mono text-slate-400 flex items-center gap-1.5 mt-0.5">
+              <span>{{ activeHex || '#8B4A2B' }}</span>
+              <span class="text-slate-500">·</span>
+              <span>LRV {{ currentLrv }}%</span>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               @click="triggerEyeDropper"
-              class="px-2 py-0.5 rounded bg-studio-800 hover:bg-studio-700 text-studio-cyan text-[10px] font-medium flex items-center gap-1 cursor-pointer transition border border-studio-700"
-              title="使用屏幕吸管取色，并由 VLM 自动识别室内美学色名"
+              class="px-2.5 py-1 rounded-lg bg-studio-800 hover:bg-studio-700 text-studio-cyan text-[10px] font-medium flex items-center gap-1 cursor-pointer transition border border-studio-700"
+              title="使用屏幕吸管取色，并由 AI 自动赋名入库"
             >
-              <span>🎯 吸管取色 (AI识色)</span>
+              <span>🎯 吸管取色</span>
             </button>
+          </div>
+        </div>
+
+        <!-- 交互式色相光谱滑条 (Hue 0~360°) -->
+        <div class="space-y-1">
+          <div class="flex items-center justify-between text-[10px] text-slate-400">
+            <span>色相 Spectrum</span>
+            <span class="font-mono text-[9px]">{{ currentHue }}°</span>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="360"
+            step="1"
+            :value="currentHue"
+            @input="onHueSliderInput(Number($event.target.value))"
+            class="w-full h-2 rounded-lg appearance-none cursor-pointer hue-slider"
+          />
+        </div>
+
+        <!-- 交互式明度滑条 (Lightness 10%~95%) -->
+        <div class="space-y-1">
+          <div class="flex items-center justify-between text-[10px] text-slate-400">
+            <span>明度 Lightness</span>
+            <span class="font-mono text-[9px]">{{ currentLightness }}%</span>
+          </div>
+          <input
+            type="range"
+            min="10"
+            max="95"
+            step="1"
+            :value="currentLightness"
+            @input="onLightnessSliderInput(Number($event.target.value))"
+            class="w-full h-2 rounded-lg appearance-none cursor-pointer lightness-slider"
+            :style="{ background: lightnessSliderGradient }"
+          />
+        </div>
+
+        <!-- HEX 文本直接修改与选区原色快捷按钮 -->
+        <div class="flex items-center justify-between pt-1 border-t border-studio-800/60 text-[10px]">
+          <div class="flex items-center gap-1">
+            <span class="text-slate-400">输入HEX:</span>
             <input
               type="text"
               :value="activeHex || ''"
               placeholder="#HEX"
               maxlength="9"
-              @change="pickCustomColor($event.target.value)"
-              class="w-18 px-1.5 py-0.5 rounded bg-studio-850 border border-studio-700 font-mono text-[10px] text-slate-200 uppercase text-center"
-            />
-            <span v-if="activeHex" class="w-3.5 h-3.5 rounded-full border border-black/30 shadow-sm shrink-0" :style="{ backgroundColor: activeHex }"></span>
-          </div>
-        </div>
-
-        <!-- 选区原色提取建议按钮 (如果有裁剪图主色) -->
-        <div v-if="sampledDominantHex" class="flex items-center justify-between pt-1.5 border-t border-studio-800/80 text-[10px]">
-          <span class="text-slate-400 flex items-center gap-1">
-            <span>🎯 选区原图主色:</span>
-            <span class="font-mono text-slate-200 font-bold">{{ sampledDominantHex }}</span>
-            <span v-if="sampledDominantName" class="text-studio-cyan">({{ sampledDominantName }})</span>
-          </span>
-          <button
-            type="button"
-            class="text-amber-400 hover:underline cursor-pointer font-bold"
-            @click="applySampledHex"
-          >
-            一键设为基色
-          </button>
-        </div>
-      </div>
-
-      <!-- AI 识色与入库临时卡片 (取色后展开确认) -->
-      <div v-if="vlmCard" class="p-2.5 rounded-lg bg-studio-900 border border-amber-500/40 space-y-2 animate-fadeIn">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-1.5">
-            <span class="text-amber-400">✨</span>
-            <span class="font-bold text-xs text-slate-100">AI 室内设计色彩识别</span>
-          </div>
-          <button type="button" class="text-slate-500 hover:text-slate-300 text-xs cursor-pointer" @click="vlmCard = null">✕</button>
-        </div>
-        <div class="grid grid-cols-2 gap-2 text-[11px]">
-          <div>
-            <div class="text-[10px] text-slate-500">美学色名</div>
-            <input
-              v-model="vlmCard.name_zh"
-              type="text"
-              class="w-full mt-0.5 px-1.5 py-0.5 rounded bg-studio-850 border border-studio-700 text-slate-200 text-xs font-bold"
+              @change="onHexTextInput($event.target.value)"
+              class="w-20 px-1.5 py-0.5 rounded bg-studio-850 border border-studio-700 font-mono text-[10px] text-slate-200 uppercase text-center focus:border-studio-cyan outline-none"
             />
           </div>
-          <div>
-            <div class="text-[10px] text-slate-500">近似品牌色号</div>
-            <div class="mt-1 text-slate-300 font-mono text-[10px] truncate">
-              {{ (vlmCard.closest_brand_matches && vlmCard.closest_brand_matches[0]?.name_zh) || '专属定制' }}
-            </div>
-          </div>
-        </div>
-        <!-- 备选美学名推荐 -->
-        <div v-if="vlmCard.poetic_alternatives && vlmCard.poetic_alternatives.length" class="flex items-center gap-1 flex-wrap">
-          <span class="text-[9px] text-slate-500">备选色名:</span>
-          <button
-            v-for="alt in vlmCard.poetic_alternatives"
-            :key="alt"
-            type="button"
-            @click="vlmCard.name_zh = alt"
-            class="px-1.5 py-0.5 rounded bg-studio-800 text-[9px] text-slate-300 hover:text-white cursor-pointer"
-          >
-            {{ alt }}
-          </button>
-        </div>
-        <button
-          type="button"
-          @click="saveVlmSwatchAndApply"
-          class="w-full py-1.5 rounded-lg bg-studio-accent hover:brightness-110 text-white font-bold text-xs shadow transition cursor-pointer"
-        >
-          保存到我的专属色卡并立即应用
-        </button>
-      </div>
 
-      <!-- 专属色卡库：色系分类切换 + 搜索 -->
-      <div class="space-y-2">
-        <div class="flex items-center justify-between gap-1">
-          <div class="flex flex-wrap gap-1">
+          <div v-if="sampledDominantHex" class="flex items-center gap-1">
+            <span class="text-slate-400">选区原色:</span>
             <button
-              v-for="fam in COLOR_FAMILIES"
-              :key="fam.key"
               type="button"
-              class="px-2 py-0.5 rounded text-[10px] transition cursor-pointer"
-              :class="selectedFamilyKey === fam.key ? 'bg-studio-accent/20 text-studio-cyan font-bold border border-studio-cyan/40' : 'bg-studio-850 text-slate-400 hover:text-slate-200'"
-              @click="selectedFamilyKey = selectedFamilyKey === fam.key ? '' : fam.key"
+              class="font-mono text-amber-300 font-bold hover:underline cursor-pointer flex items-center gap-1"
+              @click="applySampledHex"
+              title="点击一键设为基色"
             >
-              {{ fam.label }}
+              <span class="w-2 h-2 rounded-full inline-block border border-black/40" :style="{ backgroundColor: sampledDominantHex }"></span>
+              <span>{{ sampledDominantHex }}</span>
             </button>
           </div>
         </div>
+      </div>
 
-        <!-- 专属色卡与花色网格 (只展示当前基材品类拥有的资产) -->
-        <div v-if="loadingDictionary" class="text-[11px] text-slate-500 py-6 text-center">
-          正在读取基材专属色卡…
+      <!-- B. ✨ 框选区域智能建议配色 (随部位与基材动态联动) -->
+      <div class="p-2.5 rounded-lg bg-studio-900/90 border border-studio-800 space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="font-bold text-slate-200 text-[11px] flex items-center gap-1">
+            <span class="text-amber-400">✨</span>
+            <span>框选区域建议配色</span>
+          </span>
+          <span class="text-[10px] text-slate-500">随材质联动</span>
         </div>
-        <div v-else-if="filteredSwatches.length === 0" class="text-[11px] text-slate-500 py-6 text-center">
-          当前基材品类暂无专属色卡，可使用上方「吸管取色」即时录入
-        </div>
-        <div v-else class="grid grid-cols-4 gap-1.5 max-h-56 overflow-y-auto pr-1 scrollbar-thin">
+
+        <p v-if="regionAdviceText" class="text-[10px] text-slate-400 leading-tight">
+          {{ regionAdviceText }}
+        </p>
+
+        <!-- 建议配色胶囊 -->
+        <div class="flex flex-wrap gap-1.5">
           <button
-            v-for="swatch in filteredSwatches"
-            :key="swatch.id"
+            v-for="rec in regionRecommendations"
+            :key="rec.id"
             type="button"
-            class="group relative flex flex-col items-center p-1.5 rounded-lg border transition cursor-pointer text-left"
-            :class="activeSwatchId === swatch.id || activeHex === swatch.hex ? 'border-studio-cyan bg-studio-cyan/10 ring-1 ring-studio-cyan' : 'border-studio-800 bg-studio-850 hover:border-studio-700'"
-            @click="pickSwatch(swatch)"
+            class="px-2 py-1 rounded-lg border text-[11px] flex items-center gap-1.5 transition cursor-pointer group"
+            :class="activeHex === rec.hex ? 'bg-studio-800 border-amber-400 text-white shadow-xs' : 'bg-studio-850 border-studio-700/80 text-slate-300 hover:border-studio-600'"
+            @click="pickSwatch(rec)"
+            :title="rec.recommend_reason || rec.name_zh"
           >
-            <!-- 纹理贴图预览 / 纯色色块 -->
-            <div
-              v-if="swatch.item_type === 'texture_map' && swatch.texture_1k_path"
-              class="w-full h-8 rounded shadow-inner border border-black/20 mb-1 bg-cover bg-center"
-              :style="{ backgroundImage: `url(${swatch.preview_path || swatch.texture_1k_path})` }"
-            ></div>
-            <div
-              v-else
-              class="w-full h-8 rounded shadow-inner border border-black/20 mb-1"
-              :style="{ backgroundColor: swatch.hex }"
-            ></div>
-
-            <div class="w-full truncate text-[10px] font-medium text-slate-200 text-center" :title="swatch.name_zh">
-              {{ swatch.name_zh }}
-            </div>
-            <div class="text-[9px] text-slate-400 font-mono truncate max-w-full">
-              {{ swatch.code || ('L' + Math.round(swatch.lrv || 0)) }}
-            </div>
+            <span class="w-2.5 h-2.5 rounded-full border border-black/30 shrink-0" :style="{ backgroundColor: rec.hex }"></span>
+            <span class="truncate max-w-[85px]">{{ rec.name_zh }}</span>
+            <span v-if="rec.badge" class="px-1 py-0.2 rounded text-[9px] font-normal" :class="rec.badge === '原色同频' ? 'bg-amber-400/20 text-amber-300' : 'bg-studio-cyan/20 text-studio-cyan'">
+              {{ rec.badge }}
+            </span>
           </button>
         </div>
       </div>
 
-      <!-- 4. 专属表面工艺 / 铺法 / 肌理 (由当前基材动态决定：真皮出纳帕/油蜡，木地板出工字/人字拼，乳胶漆出滚涂/蛋壳光) -->
-      <div v-if="currentCategory && currentCategory.finishes && currentCategory.finishes.length" class="space-y-1.5 pt-2 border-t border-studio-850">
-        <div class="flex items-center justify-between text-[10px]">
-          <span class="font-medium text-slate-400">专属表面工艺 / 铺贴肌理</span>
-          <span class="text-studio-cyan text-[9px]">{{ currentFinishName }}</span>
+      <!-- C. 表面专属表面工艺 -->
+      <div v-if="currentCategory && currentCategory.finishes && currentCategory.finishes.length" class="space-y-1.5">
+        <div class="flex items-center justify-between text-[11px] text-slate-400 px-0.5">
+          <span class="font-medium text-slate-300">表面工艺</span>
+          <span class="text-[10px] text-studio-cyan truncate max-w-[180px]">{{ currentFinishName }}</span>
         </div>
         <div class="flex flex-wrap gap-1">
           <button
             v-for="fin in currentCategory.finishes"
             :key="fin.id"
             type="button"
-            class="px-2 py-1 rounded text-[10px] cursor-pointer transition"
-            :class="selectedFinishId === fin.id ? 'bg-studio-accent text-white font-bold shadow-xs' : 'bg-studio-850 text-slate-300 hover:bg-studio-800'"
+            class="px-2.5 py-1 rounded-lg text-[10px] transition cursor-pointer"
+            :class="selectedFinishId === fin.id ? 'bg-studio-accent text-white font-bold' : 'bg-studio-900 border border-studio-800 text-slate-400 hover:text-white'"
             @click="selectFinish(fin.id)"
+            :title="fin.prompt_zh"
           >
             {{ fin.name_zh }}
           </button>
         </div>
       </div>
 
-      <!-- 5. 表面光泽感控制 -->
-      <div class="flex items-center justify-between pt-2 border-t border-studio-850 text-[10px] text-slate-400">
-        <span>表面光泽感</span>
-        <div class="flex gap-1">
+      <!-- D. 专属常用色卡库 (色随材走) -->
+      <div class="space-y-2">
+        <div class="flex items-center justify-between text-[11px] text-slate-300 px-0.5">
+          <span class="font-bold flex items-center gap-1.5">
+            <span>专属常用色卡</span>
+            <span class="text-[10px] text-slate-500 font-mono">({{ activeCategorySwatches.length }}款)</span>
+          </span>
           <button
             type="button"
-            class="px-2.5 py-0.5 rounded transition cursor-pointer"
-            :class="selectedGloss === 'matte' ? 'bg-studio-800 text-studio-cyan font-bold' : 'text-slate-400'"
-            @click="selectedGloss = 'matte'; emitChange();"
+            @click="openAddSwatchModal"
+            class="text-[10px] text-studio-cyan hover:underline cursor-pointer font-medium"
           >
-            自然哑光
+            + 新建色卡
           </button>
+        </div>
+
+        <!-- 色系筛选 Tab (动态计算：自动隐藏数量为 0 的空色系 Tab) -->
+        <div class="flex flex-wrap gap-1">
           <button
             type="button"
-            class="px-2.5 py-0.5 rounded transition cursor-pointer"
-            :class="selectedGloss === 'satin' ? 'bg-studio-800 text-studio-cyan font-bold' : 'text-slate-400'"
-            @click="selectedGloss = 'satin'; emitChange();"
+            class="px-2 py-0.5 rounded text-[10px] transition cursor-pointer"
+            :class="!selectedFamilyKey ? 'bg-studio-accent text-white font-bold' : 'bg-studio-900 border border-studio-800 text-slate-400 hover:text-white'"
+            @click="selectedFamilyKey = ''"
           >
-            柔光丝光
+            全部 ({{ activeCategorySwatches.length }})
           </button>
+          <button
+            v-for="fam in dynamicActiveFamilies"
+            :key="fam.key"
+            type="button"
+            class="px-2 py-0.5 rounded text-[10px] transition cursor-pointer"
+            :class="selectedFamilyKey === fam.key ? 'bg-studio-accent text-white font-bold' : 'bg-studio-900 border border-studio-800 text-slate-400 hover:text-white'"
+            @click="selectedFamilyKey = fam.key"
+          >
+            {{ fam.label }} ({{ fam.count }})
+          </button>
+        </div>
+
+        <!-- 色卡网格 -->
+        <div v-if="filteredSwatches.length === 0" class="py-6 text-center text-slate-500 text-[11px]">
+          当前基材暂无该色系色卡，可使用上方「吸管取色」即时录入
+        </div>
+        <div v-else class="grid grid-cols-3 sm:grid-cols-4 gap-1.5 max-h-56 overflow-y-auto pr-0.5 scrollbar-thin">
+          <div
+            v-for="swatch in filteredSwatches"
+            :key="swatch.id"
+            class="p-1.5 rounded-lg border flex flex-col gap-1 cursor-pointer transition relative group"
+            :class="activeSwatchId === swatch.id ? 'border-amber-400 bg-studio-850 shadow-xs' : 'border-studio-800 bg-studio-900/80 hover:border-studio-700'"
+            @click="pickSwatch(swatch)"
+          >
+            <!-- 色块预览 -->
+            <div class="w-full aspect-[4/3] rounded border border-black/20 flex items-center justify-center relative overflow-hidden" :style="{ backgroundColor: swatch.hex }">
+              <span v-if="swatch.pinned" class="absolute top-0.5 right-0.5 text-[8px] bg-black/60 text-amber-300 px-1 rounded">常用</span>
+            </div>
+            <!-- 信息 -->
+            <div class="min-w-0">
+              <div class="font-bold text-[10px] text-slate-200 truncate" :title="swatch.name_zh">{{ swatch.name_zh }}</div>
+              <div class="text-[9px] font-mono text-slate-400 truncate">{{ swatch.code || swatch.hex }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- E. 1K 具象肌理贴图 (当基材支持纹理贴图时清晰展示，支持叠加选色) -->
+      <div v-if="textureSwatches.length > 0" class="pt-2 border-t border-studio-800 space-y-2">
+        <div class="flex items-center justify-between text-[11px] text-slate-300 px-0.5">
+          <span class="font-bold">具象肌理贴图 (1K)</span>
+          <label class="flex items-center gap-1 text-[10px] text-slate-400 cursor-pointer">
+            <input type="checkbox" v-model="applyTintToTexture" @change="emitChange" />
+            <span>叠加所选颜色预染色</span>
+          </label>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <div
+            v-for="tex in textureSwatches"
+            :key="tex.id"
+            class="p-1.5 rounded-lg border flex flex-col gap-1 cursor-pointer transition relative"
+            :class="activeTextureCode === tex.code ? 'border-studio-cyan bg-studio-850' : 'border-studio-800 bg-studio-900/60 hover:border-studio-700'"
+            @click="pickTexture(tex)"
+          >
+            <div class="w-full aspect-[4/3] rounded overflow-hidden bg-studio-950 flex items-center justify-center border border-white/10">
+              <img
+                v-if="tex.preview_path"
+                :src="tex.preview_path"
+                class="w-full h-full object-cover"
+                :alt="tex.name_zh"
+                @error="$event.target.style.display='none'"
+              />
+              <span v-else class="text-xs font-mono text-slate-500">1K贴图</span>
+            </div>
+            <div class="font-medium text-[10px] text-slate-200 truncate">{{ tex.name_zh }}</div>
+          </div>
         </div>
       </div>
     </div>
@@ -270,35 +325,21 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 import { getToken } from '../../api';
 
 const props = defineProps({
-  guide: {
-    type: Object,
-    default: () => ({})
-  },
-  surface: {
-    type: String,
-    default: 'wall'
-  },
-  subclass: {
-    type: String,
-    default: ''
-  },
-  inferredProb: {
-    type: Number,
-    default: 0
-  }
+  guide: { type: Object, default: () => ({}) },
+  surface: { type: String, default: '' },
+  subclass: { type: String, default: '' },
+  inferredProb: { type: Number, default: 0 }
 });
 
 const emit = defineEmits([
   'update:guide',
   'change',
-  'surface',
-  'subclass',
-  'material',
   'color',
+  'surface',
   'finish',
   'roughness',
   'aging'
@@ -314,7 +355,7 @@ const COLOR_FAMILIES = [
   { key: 'yellow_gold', label: '黄铜金属' }
 ];
 
-// 状态定义
+// 核心字典数据
 const loadingDictionary = ref(false);
 const showPartSelector = ref(false);
 
@@ -322,30 +363,42 @@ const allParts = ref([]);
 const allCategories = ref([]);
 const swatchesMap = ref({});
 
+// 选定状态
 const activePart = ref('wall');
 const alternativePart = ref('');
 const selectedCategoryId = ref('');
 const activeSwatchId = ref('');
 const activeHex = ref('#8B4A2B');
-const activeDisplayName = ref('');
+const activeDisplayName = ref('意式马鞍棕');
 const selectedFamilyKey = ref('');
 const selectedFinishId = ref('');
 const selectedGloss = ref('matte');
 
+// 纹理模式
+const isTextureMode = ref(false);
+const activeTextureCode = ref('');
+const activeTextureSwatch = ref(null);
+const applyTintToTexture = ref(true);
+
+// 调色盘滑条状态 (HSL)
+const currentHue = ref(20);
+const currentLightness = ref(36);
+const currentLrv = ref(14);
+
+// 选区智能推荐与原色
 const sampledDominantHex = ref('');
-const sampledDominantName = ref('');
-const vlmCard = ref(null);
+const regionRecommendations = ref([]);
+const regionAdviceText = ref('');
 
 const uncertain = computed(() => {
-  return (!props.guide?.part && !activePart.value) || props.inferredProb < 0.75;
+  return (!props.guide?.part && !activePart.value) || (props.inferredProb > 0 && props.inferredProb < 0.75);
 });
 
 const confidencePercent = computed(() => {
-  return Math.round((props.inferredProb || 0) * 100);
+  return Math.round((props.inferredProb || 0.85) * 100);
 });
 
 const headerTitle = computed(() => {
-  if (uncertain.value && !activePart.value) return '❓ 待确认部位（请点选下方部位）';
   const partObj = allParts.value.find(p => p.id === activePart.value);
   const partName = partObj ? partObj.name_zh.split('/')[0] : '选区部位';
   const catName = currentCategory.value ? currentCategory.value.name_zh.split('/')[0] : '表面';
@@ -367,16 +420,113 @@ const currentFinishName = computed(() => {
   return match ? match.name_zh : '';
 });
 
-const filteredSwatches = computed(() => {
+const activeCategorySwatches = computed(() => {
   if (!selectedCategoryId.value) return [];
   const list = swatchesMap.value[selectedCategoryId.value] || [];
+  return list.filter(s => s.item_type !== 'texture_map');
+});
+
+const dynamicActiveFamilies = computed(() => {
+  const swatches = activeCategorySwatches.value;
+  return COLOR_FAMILIES.map(fam => {
+    const count = swatches.filter(s => s.color_family === fam.key).length;
+    return { ...fam, count };
+  }).filter(f => f.count > 0);
+});
+
+const filteredSwatches = computed(() => {
+  const list = activeCategorySwatches.value;
   if (!selectedFamilyKey.value) return list;
   return list.filter(s => s.color_family === selectedFamilyKey.value);
+});
+
+const textureSwatches = computed(() => {
+  if (!selectedCategoryId.value) return [];
+  const list = swatchesMap.value[selectedCategoryId.value] || [];
+  return list.filter(s => s.item_type === 'texture_map');
+});
+
+const lightnessSliderGradient = computed(() => {
+  const hue = currentHue.value;
+  return `linear-gradient(to right, #000000 0%, hsl(${hue}, 70%, 50%) 50%, #ffffff 100%)`;
 });
 
 function getPartLabel(partKey) {
   const p = allParts.value.find(item => item.id === partKey);
   return p ? p.name_zh.split('/')[0] : partKey;
+}
+
+// 颜色工具转换
+function hexToHsl(hex) {
+  let c = hex.replace(/^#/, '');
+  if (c.length === 3) c = c.split('').map(x => x + x).join('');
+  const num = parseInt(c, 16);
+  const r = (num >> 16) / 255;
+  const g = ((num >> 8) & 255) / 255;
+  const b = (num & 255) / 255;
+
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  let h = 0, s = 0, l = (max + min) / 2;
+
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+      case g: h = (b - r) / d + 2; break;
+      case b: h = (r - g) / d + 4; break;
+    }
+    h /= 6;
+  }
+  return {
+    h: Math.round(h * 360),
+    s: Math.round(s * 100),
+    l: Math.round(l * 100)
+  };
+}
+
+function hslToHex(h, s, l) {
+  h = h / 360;
+  s = s / 100;
+  l = l / 100;
+  let r, g, b;
+
+  if (s === 0) {
+    r = g = b = l;
+  } else {
+    const hue2rgb = (p, q, t) => {
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1 / 6) return p + (q - p) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+      return p;
+    };
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1 / 3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1 / 3);
+  }
+
+  const toHex = x => {
+    const hex = Math.round(x * 255).toString(16);
+    return hex.length === 1 ? '0' + hex : hex;
+  };
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`.toUpperCase();
+}
+
+function approxLrv(hex) {
+  let c = hex.replace(/^#/, '');
+  if (c.length === 3) c = c.split('').map(x => x + x).join('');
+  const num = parseInt(c, 16);
+  const r = (num >> 16) / 255;
+  const g = ((num >> 8) & 255) / 255;
+  const b = (num & 255) / 255;
+  const srgb = v => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+  const Y = 0.2126 * srgb(r) + 0.7152 * srgb(g) + 0.0722 * srgb(b);
+  return Math.round(Y * 100);
 }
 
 // 统一字典拉取
@@ -391,7 +541,7 @@ async function fetchMasterDictionary() {
       const json = await res.json();
       if (json && json.data) {
         allParts.value = json.data.parts || [];
-        allCategories.value = json.data.all_categories || json.data.categories || [];
+        allCategories.value = json.data.categories || [];
         swatchesMap.value = json.data.swatches || {};
 
         // 智能初始化当前品类
@@ -409,18 +559,42 @@ async function fetchMasterDictionary() {
   }
 }
 
+// 拉取区域配色建议
+async function fetchRegionRecommendations() {
+  try {
+    const token = getToken();
+    const res = await fetch('/api/base-library/swatches/recommend-for-region', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: token ? `Bearer ${token}` : ''
+      },
+      body: JSON.stringify({
+        part: activePart.value,
+        category_id: selectedCategoryId.value,
+        dominant_hex: sampledDominantHex.value
+      })
+    });
+    if (res.ok) {
+      const json = await res.json();
+      if (json && json.data) {
+        regionRecommendations.value = json.data.swatches || [];
+        regionAdviceText.value = json.data.advice_zh || '';
+      }
+    }
+  } catch (_) {}
+}
+
 function selectPart(partKey) {
   activePart.value = partKey;
   alternativePart.value = '';
   showPartSelector.value = false;
 
-  // 联动切换该部位下的首选品类
   const available = allCategories.value.filter(c => (c.allowed_parts || []).includes(partKey));
   if (available.length > 0) {
     selectedCategoryId.value = available[0].id;
     selectedFinishId.value = available[0].default_finish_id || (available[0].finishes && available[0].finishes[0]?.id) || '';
-    // 默认高亮第一个专属色卡
-    const swatches = swatchesMap.value[selectedCategoryId.value] || [];
+    const swatches = (swatchesMap.value[selectedCategoryId.value] || []).filter(s => s.item_type !== 'texture_map');
     if (swatches.length > 0) {
       pickSwatch(swatches[0]);
     } else {
@@ -429,20 +603,28 @@ function selectPart(partKey) {
   } else {
     emitChange();
   }
+  fetchRegionRecommendations();
 }
 
 function selectCategory(catId) {
   selectedCategoryId.value = catId;
+  selectedFamilyKey.value = '';
+  isTextureMode.value = false;
+  activeTextureCode.value = '';
+  activeTextureSwatch.value = null;
+
   const cat = allCategories.value.find(c => c.id === catId);
   if (cat) {
     selectedFinishId.value = cat.default_finish_id || (cat.finishes && cat.finishes[0]?.id) || '';
   }
-  const swatches = swatchesMap.value[catId] || [];
+
+  const swatches = (swatchesMap.value[catId] || []).filter(s => s.item_type !== 'texture_map');
   if (swatches.length > 0) {
     pickSwatch(swatches[0]);
   } else {
     emitChange();
   }
+  fetchRegionRecommendations();
 }
 
 function selectFinish(finishId) {
@@ -451,169 +633,212 @@ function selectFinish(finishId) {
 }
 
 function pickSwatch(swatch) {
+  if (!swatch) return;
   activeSwatchId.value = swatch.id;
-  activeHex.value = swatch.hex;
+  activeHex.value = swatch.hex.toUpperCase();
   activeDisplayName.value = swatch.name_zh;
-  if (swatch.finish_override) {
-    selectedFinishId.value = swatch.finish_override;
+  currentLrv.value = typeof swatch.lrv === 'number' ? swatch.lrv : approxLrv(swatch.hex);
+
+  // 同步 HSL 滑条
+  const hsl = hexToHsl(swatch.hex);
+  currentHue.value = hsl.h;
+  currentLightness.value = hsl.l;
+
+  emitChange();
+}
+
+function pickTexture(tex) {
+  if (!tex) return;
+  isTextureMode.value = true;
+  activeTextureCode.value = tex.code;
+  activeTextureSwatch.value = tex;
+  if (!applyTintToTexture.value) {
+    activeHex.value = tex.hex || '';
+    activeDisplayName.value = tex.name_zh;
   }
   emitChange();
 }
 
-function pickCustomColor(hex) {
-  if (!hex) return;
-  activeHex.value = hex.toUpperCase();
-  activeSwatchId.value = '';
-  activeDisplayName.value = '自定义色';
+function onNativeColorInput(newHex) {
+  applyNewHex(newHex);
+}
+
+function onHexTextInput(val) {
+  let hex = String(val || '').trim();
+  if (!hex.startsWith('#')) hex = '#' + hex;
+  if (/^#[0-9A-Fa-f]{6}$/.test(hex)) {
+    applyNewHex(hex);
+  }
+}
+
+function onHueSliderInput(h) {
+  currentHue.value = h;
+  const hex = hslToHex(currentHue.value, 60, currentLightness.value);
+  applyNewHex(hex, false);
+}
+
+function onLightnessSliderInput(l) {
+  currentLightness.value = l;
+  const hex = hslToHex(currentHue.value, 60, currentLightness.value);
+  applyNewHex(hex, false);
+}
+
+function applyNewHex(hex, syncHsl = true) {
+  hex = hex.toUpperCase();
+  activeHex.value = hex;
+  currentLrv.value = approxLrv(hex);
+
+  if (syncHsl) {
+    const hsl = hexToHsl(hex);
+    currentHue.value = hsl.h;
+    currentLightness.value = hsl.l;
+  }
+
+  // 尝试在当前分类中寻找匹配的最相近色名
+  const swatches = activeCategorySwatches.value;
+  const exact = swatches.find(s => s.hex.toUpperCase() === hex);
+  if (exact) {
+    activeDisplayName.value = exact.name_zh;
+    activeSwatchId.value = exact.id;
+  } else {
+    activeDisplayName.value = `自定义色 (${hex})`;
+    activeSwatchId.value = '';
+  }
+
   emitChange();
 }
 
 function applySampledHex() {
   if (!sampledDominantHex.value) return;
-  pickCustomColor(sampledDominantHex.value);
-  if (sampledDominantName.value) {
-    activeDisplayName.value = sampledDominantName.value;
-  }
+  applyNewHex(sampledDominantHex.value);
 }
 
-// 屏幕原生吸管取色 + VLM 识色
 async function triggerEyeDropper() {
-  let hex = '';
   if (window.EyeDropper) {
     try {
       const eyeDropper = new window.EyeDropper();
       const result = await eyeDropper.open();
-      hex = result?.sRGBHex || '';
-    } catch (_) {
-      // 用户取消取色
-      return;
-    }
-  } else {
-    hex = prompt('请输入你要识别的 HEX 颜色代码（如 #8B4A2B）：', activeHex.value || '#8B4A2B') || '';
-  }
-
-  if (!hex) return;
-  hex = hex.trim().toUpperCase();
-  pickCustomColor(hex);
-
-  // 调用 VLM 识色接口
-  try {
-    const token = getToken();
-    const res = await fetch('/api/base-library/swatches/recognize-vlm', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: token ? `Bearer ${token}` : ''
-      },
-      body: JSON.stringify({
-        hex,
-        partHint: activePart.value || 'upholstery'
-      })
-    });
-    if (res.ok) {
-      const json = await res.json();
-      if (json && json.data) {
-        vlmCard.value = json.data;
-        if (json.data.name_zh) {
-          activeDisplayName.value = json.data.name_zh;
-        }
+      if (result && result.sRGBHex) {
+        applyNewHex(result.sRGBHex);
+        // 调用 VLM 识别赋名
+        fetch('/api/base-library/swatches/recognize-vlm', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: getToken() ? `Bearer ${getToken()}` : ''
+          },
+          body: JSON.stringify({
+            hex: result.sRGBHex,
+            partHint: activePart.value
+          })
+        }).then(r => r.json()).then(j => {
+          if (j && j.data && j.data.name_zh) {
+            activeDisplayName.value = j.data.name_zh;
+            emitChange();
+          }
+        }).catch(() => {});
       }
-    }
-  } catch (err) {
-    console.warn('[ResurfaceDrawer] recognize-vlm error:', err.message);
+    } catch (_) {}
+  } else {
+    const input = prompt('请输入您要吸取的十六进制颜色值 (如 #8B4A2B):', activeHex.value);
+    if (input) onHexTextInput(input);
   }
 }
 
-async function saveVlmSwatchAndApply() {
-  if (!vlmCard.value) return;
-  try {
-    const token = getToken();
-    const payload = {
-      category_id: vlmCard.value.recommended_category_id || selectedCategoryId.value,
-      name_zh: vlmCard.value.name_zh || '灵感美学色',
-      hex: vlmCard.value.hex || activeHex.value,
-      brand: '灵感AI取色',
-      code: (vlmCard.value.closest_brand_matches && vlmCard.value.closest_brand_matches[0]?.code) || '',
-      color_family: vlmCard.value.color_family,
-      style_tags: vlmCard.value.style_tags || [],
-      finish_override: vlmCard.value.recommended_finish_id || ''
-    };
-    const res = await fetch('/api/base-library/swatches', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: token ? `Bearer ${token}` : ''
-      },
-      body: JSON.stringify(payload)
-    });
-    if (res.ok) {
-      const json = await res.json();
-      if (json && json.data) {
-        // 重新拉取字典并应用该色卡
-        await fetchMasterDictionary();
-        pickSwatch(json.data);
-        vlmCard.value = null;
-      }
+function openAddSwatchModal() {
+  const name = prompt('请输入新色卡名称 (如：高级复古焦糖):');
+  if (!name) return;
+  const token = getToken();
+  fetch('/api/base-library/swatches', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: token ? `Bearer ${token}` : ''
+    },
+    body: JSON.stringify({
+      category_id: selectedCategoryId.value,
+      name_zh: name,
+      hex: activeHex.value,
+      brand: '自建色卡',
+      code: 'CUSTOM-' + Date.now().toString().slice(-4),
+      item_type: 'solid_color',
+      pinned: 1
+    })
+  }).then(r => r.json()).then(j => {
+    if (j && j.data) {
+      if (!swatchesMap.value[selectedCategoryId.value]) swatchesMap.value[selectedCategoryId.value] = [];
+      swatchesMap.value[selectedCategoryId.value].unshift(j.data);
+      pickSwatch(j.data);
     }
-  } catch (err) {
-    alert('保存色卡失败：' + err.message);
-  }
+  }).catch(() => {});
 }
 
 function emitChange() {
   const currentCat = currentCategory.value;
   const currentFin = currentCat?.finishes?.find(f => f.id === selectedFinishId.value);
+  const isTex = isTextureMode.value && activeTextureSwatch.value;
 
-  const payload = {
-    mode: currentCat?.track_mode === 'track_b' ? 'rematerial' : 'recolor',
+  const matName = isTex
+    ? `${activeTextureSwatch.value?.name_zh || currentCat?.name_zh}${activeHex.value && applyTintToTexture.value ? ' (' + (activeDisplayName.value || activeHex.value) + ')' : ''}`
+    : `${currentCat?.name_zh?.split('/')[0] || ''} · ${activeDisplayName.value || activeHex.value}`;
+
+  const guidePatch = {
+    type: 'resurface',
+    mode: isTex ? 'rematerial' : 'recolor',
+    track: isTex ? 'B' : 'A',
     part: activePart.value,
     surface: activePart.value,
     category_id: selectedCategoryId.value,
-    category_name: currentCat?.name_zh || '',
+    category_name: currentCat?.name_zh?.split('/')[0] || '',
     finish_id: selectedFinishId.value,
-    finish: selectedGloss.value,
+    finish_name: currentFin?.name_zh || '',
     finish_prompt: currentFin?.prompt_zh || '',
-    swatch_id: activeSwatchId.value,
-    color_name: activeDisplayName.value,
-    display_name: activeDisplayName.value,
-    hex: activeHex.value,
     process: selectedFinishId.value,
-    material_family: currentCat?.track_mode === 'track_b' ? 'texture' : 'color'
+    gloss: selectedGloss.value,
+    finish: selectedGloss.value,
+    swatch_id: activeSwatchId.value,
+    assetId: isTex ? activeTextureSwatch.value.code : activeSwatchId.value,
+    materialName: matName,
+    displayName: activeDisplayName.value,
+    color_name: activeDisplayName.value,
+    colorHex: activeHex.value,
+    hex: activeHex.value
   };
 
-  emit('change', payload);
+  emit('update:guide', guidePatch);
+  emit('change', guidePatch);
   emit('color', activeHex.value);
   emit('surface', activePart.value);
   emit('finish', selectedGloss.value);
 }
 
-// 监听 props
+// 监听 props.guide，处理异步识别回填
 watch(() => props.guide, (g) => {
   if (g) {
-    if (g.part) activePart.value = g.part;
+    if (g.part && g.part !== activePart.value) {
+      selectPart(g.part);
+    }
     if (g.alternatives && g.alternatives.length) {
       alternativePart.value = g.alternatives[0];
     }
-    if (g.hex) activeHex.value = g.hex;
-    if (g.display_name || g.color_name) activeDisplayName.value = g.display_name || g.color_name;
-    if (g.cropDataUrl || g.crop_base64) {
-      // 触发物理采样
-      fetch('/api/base-library/swatches/recognize-vlm', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: getToken() ? `Bearer ${getToken()}` : ''
-        },
-        body: JSON.stringify({
-          cropDataUrl: g.cropDataUrl || g.crop_base64,
-          partHint: activePart.value
-        })
-      }).then(r => r.json()).then(j => {
-        if (j && j.data && j.data.hex) {
-          sampledDominantHex.value = j.data.hex;
-          sampledDominantName.value = j.data.name_zh || '';
-        }
-      }).catch(() => {});
+    if (g.dominant_hex) {
+      sampledDominantHex.value = g.dominant_hex;
+    }
+    if (g.recommended_swatches && g.recommended_swatches.length) {
+      regionRecommendations.value = g.recommended_swatches;
+    }
+    if (g.advice_zh) {
+      regionAdviceText.value = g.advice_zh;
+    }
+    if (g.colorHex || g.hex) {
+      activeHex.value = (g.colorHex || g.hex).toUpperCase();
+      const hsl = hexToHsl(activeHex.value);
+      currentHue.value = hsl.h;
+      currentLightness.value = hsl.l;
+      currentLrv.value = approxLrv(activeHex.value);
+    }
+    if (g.displayName || g.color_name) {
+      activeDisplayName.value = g.displayName || g.color_name;
     }
   }
 }, { immediate: true, deep: true });
@@ -621,15 +846,30 @@ watch(() => props.guide, (g) => {
 onMounted(async () => {
   await fetchMasterDictionary();
   emitChange();
+  fetchRegionRecommendations();
 });
 </script>
 
 <style scoped>
+.hue-slider {
+  background: linear-gradient(to right, #ff0000 0%, #ffff00 17%, #00ff00 33%, #00ffff 50%, #0000ff 67%, #ff00ff 83%, #ff0000 100%);
+}
+.hue-slider::-webkit-slider-thumb,
+.lightness-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid #000000;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
 .scrollbar-thin::-webkit-scrollbar {
   width: 4px;
 }
 .scrollbar-thin::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.2);
   border-radius: 9999px;
 }
 </style>

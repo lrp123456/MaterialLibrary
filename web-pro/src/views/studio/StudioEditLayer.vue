@@ -475,6 +475,7 @@
             <img
               ref="baseImageRef"
               :src="imageSrc"
+              crossorigin="anonymous"
               @load="onImageLoad"
               class="block max-h-[calc(100vh-210px)] max-w-[calc(100vw-450px)] object-contain pointer-events-none select-none"
               alt="编辑底图"
@@ -1186,6 +1187,20 @@
             <div class="flex flex-wrap gap-1">
               <button v-for="skin in skinChoices" :key="skin.key" type="button" class="px-2 py-1 rounded text-[10px] cursor-pointer" :class="activeGuide.subclass === skin.key ? 'bg-studio-accent text-white' : 'bg-studio-850 text-slate-300'" @click="setGuideSkin(activeRegion, skin)">{{ skin.label }}</button>
             </div>
+            <!-- 材质专属常用色快捷胶囊 -->
+            <div v-if="SKIN_COLOR_PRESETS[activeGuide.subclass]" class="flex flex-wrap gap-1.5 pt-0.5">
+              <button
+                v-for="sw in SKIN_COLOR_PRESETS[activeGuide.subclass]"
+                :key="sw.hex"
+                type="button"
+                class="px-2 py-0.5 rounded text-[10px] flex items-center gap-1 border transition cursor-pointer"
+                :class="activeGuide.colorHex === sw.hex ? 'border-amber-400 bg-studio-800 text-white font-bold' : 'border-studio-800 bg-studio-900 text-slate-300 hover:border-studio-700'"
+                @click="setGuideColor(activeRegion, sw.hex, sw.label)"
+              >
+                <span class="w-2 h-2 rounded-full border border-black/40" :style="{ backgroundColor: sw.hex }"></span>
+                <span>{{ sw.label }}</span>
+              </button>
+            </div>
             <label class="flex items-center justify-between text-[11px] text-slate-300">
               <span>自定义颜色</span>
               <input type="color" :value="activeGuide.colorHex || '#d8cbb7'" class="w-8 h-8 bg-transparent cursor-pointer" @input="setGuideColor(activeRegion, $event.target.value)" />
@@ -1680,6 +1695,35 @@ const skinChoices = [
   { key: 'soft_veneer', label: '木皮' },
   { key: 'soft_metal', label: '金属' }
 ];
+const SKIN_COLOR_PRESETS = {
+  soft_leather: [
+    { label: '曜石黑', hex: '#232325' },
+    { label: '马鞍棕', hex: '#8B4A2B' },
+    { label: '焦糖棕', hex: '#A65E36' },
+    { label: '大象灰', hex: '#8D847B' },
+    { label: '象牙白', hex: '#EFEBE3' }
+  ],
+  soft_fabric: [
+    { label: '云朵白', hex: '#F4EFE6' },
+    { label: '燕麦麻', hex: '#DFD3C3' },
+    { label: '暖杏色', hex: '#CFBFA8' },
+    { label: '炭灰', hex: '#585654' },
+    { label: '墨绿丝绒', hex: '#4A5D4E' }
+  ],
+  soft_veneer: [
+    { label: '白橡木', hex: '#DFCBB2' },
+    { label: '原木橡', hex: '#C8A97E' },
+    { label: '樱桃木', hex: '#B37A4C' },
+    { label: '黑胡桃', hex: '#5C4030' },
+    { label: '炭化乌木', hex: '#362D28' }
+  ],
+  soft_metal: [
+    { label: '拉丝黄铜', hex: '#C59B5F' },
+    { label: '香槟暗金', hex: '#B8A282' },
+    { label: '哑光黑钛', hex: '#28282A' },
+    { label: '电镀银', hex: '#D8DCDF' }
+  ]
+};
 const objectCatalog = [
   { key: 'sofa', label: '沙发', items: [
     { name: '单人电动科技沙发', url: '/models/sofa_electric_single.glb' },
@@ -1771,9 +1815,15 @@ function setGuideSkin(reg, skin) {
   const guide = ensureGuide(reg);
   guide.subclass = skin.key;
   guide.materialName = skin.label;
+  if (SKIN_COLOR_PRESETS[skin.key] && SKIN_COLOR_PRESETS[skin.key].length > 0) {
+    guide.colorHex = SKIN_COLOR_PRESETS[skin.key][0].hex;
+    guide.colorName = SKIN_COLOR_PRESETS[skin.key][0].label;
+  }
 }
-function setGuideColor(reg, hex) {
-  ensureGuide(reg).colorHex = hex;
+function setGuideColor(reg, hex, label = '') {
+  const guide = ensureGuide(reg);
+  guide.colorHex = hex;
+  if (label) guide.colorName = label;
 }
 function setGuideYaw(reg, value) {
   const guide = ensureGuide(reg);
@@ -2264,6 +2314,9 @@ async function triggerRegionClassification(reg) {
       const ctx = c.getContext('2d');
       ctx.drawImage(img, minX, minY, w, h, 0, 0, c.width, c.height);
       payload.crop_base64 = c.toDataURL('image/jpeg', 0.88);
+      if (!reg.guide) reg.guide = emptyGuide();
+      reg.guide.crop_base64 = payload.crop_base64;
+      reg.guide.cropDataUrl = payload.crop_base64;
     }
   } catch (_) {}
 
@@ -2282,14 +2335,19 @@ async function triggerRegionClassification(reg) {
     if (!json.success || !json.data) return;
     if (!reg.guide) reg.guide = emptyGuide();
     if (reg.guide.surfaceSource === 'manual') return;
-    if (!json.data.uncertain && (json.data.part || json.data.surface) && (json.data.probability >= 0.75)) {
+
+    if (json.data.part || json.data.surface) {
       const part = json.data.part || json.data.surface;
       reg.inferredSurface = json.data.surface || part;
-      reg.inferredProb = json.data.probability;
+      reg.inferredProb = json.data.probability || 0.85;
       reg.guide.part = part;
       reg.guide.surface = part;
       reg.guide.materialFamily = json.data.material_family || '';
       reg.guide.surfaceSource = 'auto';
+      if (json.data.alternatives) reg.guide.alternatives = json.data.alternatives;
+      if (json.data.dominant_hex) reg.guide.dominant_hex = json.data.dominant_hex;
+      if (json.data.recommended_swatches) reg.guide.recommended_swatches = json.data.recommended_swatches;
+      if (json.data.advice_zh) reg.guide.advice_zh = json.data.advice_zh;
     } else {
       reg.inferredSurface = '';
       reg.inferredProb = 0;

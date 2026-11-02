@@ -802,6 +802,11 @@ function migrate(dataDir, { doBackup = true } = {}) {
         CREATE INDEX IF NOT EXISTS idx_product_presets_sort ON product_presets(sort);
       `);
 
+      // 软装模型预设：只保留真实存在的 1 款 3D 单品 (sofa_default.glb)，清理历史模拟占位
+      try {
+        db.prepare("DELETE FROM product_presets WHERE id IN ('chair_nordic_lounge', 'table_stone_coffee', 'chair_lecorbusier', 'table_minimalist')").run();
+      } catch (_) {}
+
       const count = db.prepare('SELECT COUNT(*) as c FROM product_presets').get().c;
       if (count === 0) {
         const insPreset = db.prepare(`
@@ -823,35 +828,7 @@ function migrate(dataDir, { doBackup = true } = {}) {
           now,
           now
         );
-        insPreset.run(
-          'chair_nordic_lounge',
-          '意式轻奢休闲单椅',
-          'chair',
-          0,
-          'chair_01.png',
-          'sofa_default.glb',
-          JSON.stringify(['单椅', '千鸟格', '黑胡桃木', '实木框架']),
-          JSON.stringify({ width: 780, depth: 820, height: 760 }),
-          20,
-          1,
-          now,
-          now
-        );
-        insPreset.run(
-          'table_stone_coffee',
-          '极简悬浮岩板茶几',
-          'table',
-          90,
-          'table_01.png',
-          'sofa_default.glb',
-          JSON.stringify(['茶几', '劳伦黑金岩板', '悬浮设计']),
-          JSON.stringify({ width: 1200, depth: 600, height: 420 }),
-          30,
-          1,
-          now,
-          now
-        );
-        console.log('[migrate] product_presets 软装模型预设已种子化 (3款模型)');
+        console.log('[migrate] product_presets 软装模型已种子化 (真实单品: 极简单人电动真皮沙发)');
       }
     } catch (e) {
       console.warn('[migrate] product_presets 表迁移警告:', e.message);

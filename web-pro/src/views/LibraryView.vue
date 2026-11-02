@@ -1422,7 +1422,7 @@
 
     <!-- 基础素材专属内容呈现区 (彻底隔离 DAM 资产) -->
     <div class="library-main" v-if="libraryRail === 'items'">
-      <div class="library-toolbar">
+      <div class="library-toolbar" v-if="baseSection !== 'product'">
         <label class="toolbar-search">
           <StudioIcon name="search" :size="16" />
           <input v-model="keyword" type="text" placeholder="搜索基础素材" aria-label="搜索" />
@@ -1463,6 +1463,22 @@
           @click="styleStudioOpen = true"
         >
           <span>入库</span>
+        </button>
+        <button
+          type="button"
+          class="tool-btn text-studio-cyan"
+          title="使用屏幕吸管取色，并由 AI 自动识别赋名入库"
+          @click="triggerBaseEyedropper"
+        >
+          <span>🎯 吸管取色</span>
+        </button>
+        <button
+          type="button"
+          class="tool-btn text-amber-300"
+          title="新建或录入自定义材质色卡"
+          @click="openCreateBaseSwatchModal"
+        >
+          <span>+ 新建色卡</span>
         </button>
         <div class="toolbar-count">
           <span>{{ baseSection === 'scheme' ? `共 ${displayedBaseItems.length} 套方案` : `共 ${displayedBaseItems.length} 条` }}</span>
@@ -5836,6 +5852,79 @@ function chooseBaseSection(key) {
   baseSection.value = key;
   clearBaseFilters();
   loadBaseCatalog();
+}
+
+async function triggerBaseEyedropper() {
+  if (window.EyeDropper) {
+    try {
+      const eyeDropper = new window.EyeDropper();
+      const result = await eyeDropper.open();
+      if (result && result.sRGBHex) {
+        const hex = result.sRGBHex.toUpperCase();
+        const res = await fetch('/api/base-library/swatches/recognize-vlm', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${getToken()}`
+          },
+          body: JSON.stringify({ hex })
+        });
+        const json = await res.json();
+        const name = (json && json.data && json.data.name_zh) || 'AI识别色卡';
+        const catId = (json && json.data && json.data.recommended_category_id) || 'mat_cat_latex';
+        const brand = (json && json.data && json.data.closest_brand_matches && json.data.closest_brand_matches[0]?.brand) || 'AI识色';
+        const code = (json && json.data && json.data.closest_brand_matches && json.data.closest_brand_matches[0]?.code) || hex;
+
+        await fetch('/api/base-library/swatches', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${getToken()}`
+          },
+          body: JSON.stringify({
+            category_id: catId,
+            name_zh: name,
+            hex,
+            brand,
+            code,
+            item_type: 'solid_color',
+            pinned: 1
+          })
+        });
+        loadBaseCatalog();
+      }
+    } catch (_) {}
+  } else {
+    openCreateBaseSwatchModal();
+  }
+}
+
+async function openCreateBaseSwatchModal() {
+  const name = prompt('请输入新色卡名称 (如：高级原麻米褐):');
+  if (!name) return;
+  const hex = prompt('请输入十六进制颜色 (如 #DFD3C3):', '#DFD3C3');
+  if (!hex) return;
+  try {
+    await fetch('/api/base-library/swatches', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${getToken()}`
+      },
+      body: JSON.stringify({
+        category_id: 'mat_cat_latex',
+        name_zh: name,
+        hex: hex.toUpperCase(),
+        brand: '自建色卡',
+        code: 'CUSTOM-' + Date.now().toString().slice(-4),
+        item_type: 'solid_color',
+        pinned: 1
+      })
+    });
+    loadBaseCatalog();
+  } catch (err) {
+    console.warn('新增色卡失败:', err);
+  }
 }
 function applyLibraryLane(lane) {
   const key = lane || 'image';
