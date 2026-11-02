@@ -11,7 +11,11 @@ const { resolveActiveVlmConfig } = require('../providers');
 const { inspect, hamming } = require('../qc');
 const { calculateOriginOrientation, classifyOrientation, HARD_MATERIALS, SOFT_MATERIALS } = require('../tags-seed');
 const { createDerivative, setMainDerivative, markKindRecast, getDerivatives } = require('../derivatives');
-const { executeAdapter } = require('../gen');
+const gen = require('../gen');
+function executeAdapter(svc, ...args) {
+  if (svc && typeof svc.executeAdapter === 'function') return svc.executeAdapter(svc, ...args);
+  return gen.executeAdapter(svc, ...args);
+}
 const { getAssetTags } = require('../cluster');
 const { ensureOriginalFile } = require('../originals');
 const { calibrateGeneratedImage, pixelSizeFor, agnesSizeForPreset, kindForRatio, restagePromptForRatio, restageNegativePrompt } = require('../ratio');
@@ -322,18 +326,56 @@ async function executeGate(services, nodeConfig = {}, asset = {}, runCtx = {}) {
   const { db, config, logger } = services;
   const isSandbox = Boolean(runCtx && runCtx.sandbox);
 
-  // 预置防御：拦截明确的调试/测试截屏文件
-  if (asset.file_name && /^(ml_debug|screencap_test)/i.test(asset.file_name)) {
+  // 预置防御 1：黑名单素材拦截（宽容入库后由工作流判定移入垃圾站）
+  try {
+    const { isBlacklisted, itemKeyOf } = require('../assets-delete');
+    if (isBlacklisted(db, { sha256: asset.sha256, itemKey: itemKeyOf(asset.file_name, asset.size), clientAssetId: asset.client_asset_id })) {
+      logger?.info?.(`[gate] 资产命中黑名单，移入垃圾站: fid=${asset.fid}`);
+      if (!isSandbox) {
+        try {
+          const gw = require('../gateway');
+          gw.markRejected(services, asset.fid, {
+            reason: 'blacklisted',
+            fileName: asset.file_name,
+            detail: { message: '该素材已被删除并加入黑名单', model: 'gate_blacklist' }
+          });
+        } catch (_) {}
+      }
+      return {
+        success: true,
+        excluded: true,
+        category: 'none',
+        reason: '该素材已被删除并加入黑名单',
+        rejectReason: 'blacklisted',
+        output: { excluded: true, category: 'none', reason: '该素材已被删除并加入黑名单', rejectReason: 'blacklisted' }
+      };
+    }
+  } catch (_) {}
+
+  // 预置防御 2：拦截截图/UI与调试文件（宽容入库后由工作流判定移入垃圾站）
+  const fn = String(asset.file_name || '');
+  if (/^(screen[_-]|current_screen|install_ui|ml_debug|screencap_test)/i.test(fn) || /^Screenshot_/i.test(fn) || /_emu\.png$/i.test(fn)) {
+    logger?.info?.(`[gate] 资产判定为截图/UI，移入垃圾站: fid=${asset.fid} name=${fn}`);
     if (!isSandbox) {
-      db.prepare("UPDATE assets SET status='excluded', error_note=?, updated_at=? WHERE fid=?")
-        .run('调试工具测试截图(自动排除)', Date.now(), asset.fid);
+      try {
+        const gw = require('../gateway');
+        gw.markRejected(services, asset.fid, {
+          reason: 'non_interior_ui',
+          fileName: asset.file_name,
+          detail: { message: '截图/UI素材，自动移入垃圾站', model: 'gate_screenshot' }
+        });
+      } catch (_) {
+        db.prepare("UPDATE assets SET status='rejected', reject_reason='non_interior_ui', error_note=?, rejected_at=?, updated_at=? WHERE fid=?")
+          .run('截图/UI素材(自动排除)', Date.now(), Date.now(), asset.fid);
+      }
     }
     return {
       success: true,
       excluded: true,
       category: 'none',
-      reason: '调试工具测试截图',
-      output: { excluded: true, category: 'none', reason: '调试工具测试截图' }
+      reason: '截图/UI素材',
+      rejectReason: 'non_interior_ui',
+      output: { excluded: true, category: 'none', reason: '截图/UI素材，自动移入垃圾站', rejectReason: 'non_interior_ui' }
     };
   }
 
@@ -460,9 +502,9 @@ async function executeGate(services, nodeConfig = {}, asset = {}, runCtx = {}) {
   } catch (_) {}
   if (!isSandbox) {
     if (categoryLocked) {
-      db.prepare("UPDATE assets SET status='processing', updated_at=? WHERE fid=?").run(Date.now(), asset.fid);
+      db.prepare("UPDATE assets SET status=CASE WHEN status='ready' THEN 'ready' ELSE 'processing' END, updated_at=? WHERE fid=?").run(Date.now(), asset.fid);
     } else {
-      db.prepare("UPDATE assets SET status='processing', category=?, updated_at=? WHERE fid=?")
+      db.prepare("UPDATE assets SET status=CASE WHEN status='ready' THEN 'ready' ELSE 'processing' END, category=?, updated_at=? WHERE fid=?")
         .run(validCategory, Date.now(), asset.fid);
     }
   }
@@ -1417,32 +1459,30 @@ async function executeRestage9x16(services, nodeConfig, asset, runCtx) {
   }
 
   // 2. 检查适配器 (若指定适配器未启用或未配置，安全跳过构图回退原图)
-  //    ★ 多模型挂载：优先按挂载点里勾选的模型链反查适配器（每条自带自己的模型）
+  //    ★ 级联多组模型回退：挂载点里勾选的模型链优先，备用本地 Qwen，以及所有启用的 image 适配器全量兜底
   const adapterId = nodeConfig.adapterId;
   const imageAdapters = db.prepare("SELECT * FROM gen_adapters WHERE kind='image' AND enabled=1").all();
+  const fallback = imageAdapters.find(a => a.id === 'qwenimage_local') || db.prepare("SELECT * FROM gen_adapters WHERE id=? AND enabled=1").get('qwenimage_local');
+  const primary = adapterId ? imageAdapters.find(a => a.id === adapterId) : null;
   const modelChain = buildModelChain(nodeModelIds(nodeConfig), imageAdapters);
   let chain = modelChain.map((c) => ({ adapter: c.adapter, model: c.model }));
   if (!chain.length) {
-    if (!adapterId || adapterId === 'builtin_none') {
-      return {
-        success: true,
-        nonFatal: true,
-        flags: ['restage_skipped_no_adapter'],
-        output: { restaged: false, fallback: 'origin' }
-      };
+    if (primary) chain.push({ adapter: primary, model: cfgDefaultModel(primary) });
+    if (fallback && !chain.some(c => c.adapter.id === fallback.id)) chain.push({ adapter: fallback, model: cfgDefaultModel(fallback) });
+  }
+  for (const a of imageAdapters) {
+    if (!chain.some(c => c.adapter.id === a.id)) {
+      chain.push({ adapter: a, model: cfgDefaultModel(a) });
     }
-    const adapter = db.prepare('SELECT * FROM gen_adapters WHERE id=? AND enabled=1').get(adapterId);
-    if (!adapter) {
-      logger?.info?.(`[restage_9_16] 指定的生图适配器 (${adapterId}) 未启用，跳过重构图回退原图`);
-      return {
-        success: true,
-        nonFatal: true,
-        flags: ['restage_adapter_disabled'],
-        error: `生图适配器 ${adapterId} 未启用`,
-        output: { restaged: false, fallback: 'origin' }
-      };
-    }
-    chain = [{ adapter, model: cfgDefaultModel(adapter) }];
+  }
+  if (!chain.length) {
+    logger?.info?.(`[restage_9_16] 无可用生图适配器，跳过重构图回退原图`);
+    return {
+      success: true,
+      nonFatal: true,
+      flags: ['restage_skipped_no_adapter'],
+      output: { restaged: false, fallback: 'origin' }
+    };
   }
 
   const refPath = await resolveRestageRef(services, asset, runCtx);
@@ -1464,34 +1504,36 @@ async function executeRestage9x16(services, nodeConfig, asset, runCtx) {
   const negativePrompt = buildRestageNegative(nodeConfig);
 
   try {
-    // 多模型挂载：逐条通道尝试，主通道失败自动切下一条（每条带自己的模型）
+    // 级联多组模型回退：逐条通道尝试，某条失败自动切下一条通道
     let genFile = null;
     let usedAdapterId = chain[0] ? chain[0].adapter.id : '';
     let lastErr = null;
     for (const cand of chain) {
       if (!cand || !cand.adapter) continue;
+      const candAdapter = cand.adapter;
+      const candModel = cand.model || nodeConfig.model || cfgDefaultModel(candAdapter);
       try {
-        const res = await executeAdapter(services, cand.adapter, {
+        const res = await executeAdapter(services, candAdapter, {
           kind: 'image',
           mode: 'ref',
           gpuPriority: 'low',
           prompt,
           negativePrompt,
-          model: cand.model || nodeConfig.model,
+          model: candModel,
           ratio: '9:16',
           size: agnesSizeForPreset(nodeConfig.sizePreset || '1080p'),
           imageLocalPaths: [refPath]
         });
         if (res.ok && res.files?.[0]?.localPath) {
           genFile = res.files[0];
-          usedAdapterId = cand.adapter.id;
+          usedAdapterId = candAdapter.id;
           break;
         }
         lastErr = new Error((res && res.error) || '生图服务未返回产物文件');
       } catch (e) {
         lastErr = e;
       }
-      logger?.info?.(`[restage_9_16] 资产 ${asset.fid} 通道 ${cand.adapter.id} 未能产出，切换下一通道`);
+      logger?.info?.(`[restage_9_16] 资产 ${asset.fid} 通道 ${candAdapter.id} 未能产出(${lastErr?.message || ''})，切换下一通道`);
     }
     if (!genFile) throw lastErr || new Error('生图服务未返回产物文件');
 
@@ -1568,14 +1610,12 @@ function isTransientErrorText(text) {
 
 /** 池满 / 无可用配额 —— 与 vlm.js 的 poolFullError 同义，治理台与流水线必须同一把尺子 */
 function poolFullErrorText(s) {
-  return /No deployments available|no available deployment|queue is full|image queue|队列已满|HTTP 429|HTTP 503/i.test(String(s || ''));
+  return /No deployments available|no available deployment|queue is full|image queue|队列已满|HTTP 429|HTTP 503|HTTP 403|leaked|free[_ ]?tier/i.test(String(s || ''));
 }
 
 /**
  * 确定性错误：重试多少次都是同样结果，只能靠改配置/改数据解决。
- *
- * 注意 `download file size limit` 这类：文件超限，重试还是超限。
- * 「模型没部署」不要列在这里 —— 见 isTransientErrorText 的血泪教训二。
+ * 注意：free_tier / 403 等已移至可回退范畴，不列为直接终止的确定性死锁
  */
 function isDeterministicErrorText(text) {
   const s = String(text || '');
@@ -1586,7 +1626,7 @@ function isDeterministicErrorText(text) {
   if (/缺少可用画面|无有效画面|缺少画面/i.test(s)) return true;
   // 代码级 ReferenceError / TypeError：重一万次也是同样报错，只能改代码
   if (/is not defined|ReferenceError|TypeError|Cannot read propert/i.test(s)) return true;
-  return /对应资产记录不存在|文件找不到|free_tier|未配置|无适配器|unsupported|参数错误|400\b|资产已删除|已拉黑/i.test(s);
+  return /对应资产记录不存在|文件找不到|未配置|无适配器|unsupported|参数错误|400\b|资产已删除|已拉黑/i.test(s);
 }
 
 /** 本地通道自带重试价值更高（不受云端限流约束），多给几次机会 */
@@ -1792,14 +1832,14 @@ async function executeRestageDual(services, nodeConfig, asset, runCtx) {
   // 1. CONFLICT-002：重复组退役——原「组员切片跳过生图、共享代表图成果」逻辑已移除，
   //    每个素材独立判断是否需要画幅重构（P2 去重工作台将另行提供批量去重生图）。
 
-  // 2. 检查适配器 —— 构造「主通道 + 降级通道」候选链
+  // 2. 检查适配器 —— 构造「主通道 + 降级通道」级联多组候选链
   const adapterId = nodeConfig.adapterId || 'agnes_image';
-  const primary = db.prepare('SELECT * FROM gen_adapters WHERE id=? AND enabled=1').get(adapterId);
-  const fallback = db.prepare("SELECT * FROM gen_adapters WHERE id=? AND enabled=1").get('qwenimage_local');
-
-  // ★ 多模型挂载：挂载点里勾选的模型链优先（每条自带自己的模型 + 适配器），
-  //   用户没勾（或模型反查不到适配器）时才回落到既有的「主通道 → 本地 Qwen」链。
   const imageAdapters = db.prepare("SELECT * FROM gen_adapters WHERE kind='image' AND enabled=1").all();
+  const primary = imageAdapters.find(a => a.id === adapterId) || db.prepare('SELECT * FROM gen_adapters WHERE id=? AND enabled=1').get(adapterId);
+  const fallback = imageAdapters.find(a => a.id === 'qwenimage_local') || db.prepare("SELECT * FROM gen_adapters WHERE id=? AND enabled=1").get('qwenimage_local');
+
+  // ★ 级联多组模型挂载：挂载点里勾选的模型链优先（每条自带自己的模型 + 适配器），
+  //   用户没勾（或模型反查不到适配器）时才回落到既有的「主通道 → 本地 Qwen」链。
   const modelChain = buildModelChain(nodeModelIds(nodeConfig), imageAdapters);
 
   const chain = [];
@@ -1810,11 +1850,18 @@ async function executeRestageDual(services, nodeConfig, asset, runCtx) {
   } else {
     // 降级顺序：主通道 → 本地 QwenImage。批量灌入时可配 fallbackFirst 让本机先消化。
     if (nodeConfig.fallbackFirst && fallback) chain.push({ adapter: fallback, model: cfgDefaultModel(fallback) });
-    if (primary) chain.push({ adapter: primary, model: cfgDefaultModel(primary) });
-    if (!nodeConfig.fallbackFirst && fallback) chain.push({ adapter: fallback, model: cfgDefaultModel(fallback) });
+    if (primary && !chain.some(c => c.adapter.id === primary.id)) chain.push({ adapter: primary, model: cfgDefaultModel(primary) });
+    if (!nodeConfig.fallbackFirst && fallback && !chain.some(c => c.adapter.id === fallback.id)) chain.push({ adapter: fallback, model: cfgDefaultModel(fallback) });
     if (!chain.length) {
       const anyAdapter = db.prepare("SELECT * FROM gen_adapters WHERE kind='image' AND enabled=1 ORDER BY builtin DESC LIMIT 1").get();
       if (anyAdapter) chain.push({ adapter: anyAdapter, model: cfgDefaultModel(anyAdapter) });
+    }
+  }
+
+  // ★ 级联多组模型回退：将所有启用的生图适配器全量追加到链末尾作为多级兜底
+  for (const a of imageAdapters) {
+    if (!chain.some(c => c.adapter.id === a.id)) {
+      chain.push({ adapter: a, model: cfgDefaultModel(a) });
     }
   }
   const adapter = chain.find(Boolean) ? chain[0].adapter : null;
@@ -1902,19 +1949,17 @@ async function executeRestageDual(services, nodeConfig, asset, runCtx) {
     // ★ 核心修复：净画重构直接传清晰原图 refPath 做图生图，彻底砍掉 高斯模糊垫边画布函数 的 blur(28) 高斯模糊垫边！
     const composedPath = refPath;
     let genPath = null;
-    let usedAdapterId = adapter.id;
-    // 实际产出用的模型：候选通道自带 model 优先，其次节点配置，最后适配器默认。
-    // 手动请求要把「到底走了哪条通道」回显给用户，否则降级了也看不出来。
+    let usedAdapterId = (chain[0] && chain[0].adapter.id) || adapter.id;
     let usedModel = '';
     let lastErrText = '';
+    let hadQueueFull = false;
+    let lastQueueFullError = null;
     try {
-      // 逐个通道尝试；每个通道内部对偶发错误做有限次退避重试。
-      // 偶发性故障（TLS 断连 / 超时 / 429 / 503）不应该把任务留在异常态，
-      // 退避后重试即可恢复；只有确定性错误才立即换下一条通道。
+      // 级联多组通道尝试：每个通道内部对偶发错误做退避重试，
+      // 当通道遇到 429/503 限流或故障时，记录后继续级联尝试下一个通道，绝不提前掐断回退链！
       for (const cand of chain) {
         if (!cand || !cand.adapter) continue;
         const candAdapter = cand.adapter;
-        // 每条候选用自己的模型（多选挂载时主/备模型各自对应自己的适配器）
         const candModel = cand.model || nodeConfig.model || cfgDefaultModel(candAdapter);
         const maxTry = isTransientAdapterError(candAdapter.id) ? (Number(nodeConfig.retryTimes) || 3) : 1;
         for (let attempt = 1; attempt <= maxTry; attempt++) {
@@ -1923,7 +1968,6 @@ async function executeRestageDual(services, nodeConfig, asset, runCtx) {
             const res = await executeAdapter(services, candAdapter, {
               kind: 'image',
               mode: 'ref',
-              // 批量灌入默认 low 让出队头；用户手动点的图由 api.js 显式传 high
               gpuPriority: nodeConfig.gpuPriority || 'low',
               prompt,
               negativePrompt,
@@ -1943,6 +1987,10 @@ async function executeRestageDual(services, nodeConfig, asset, runCtx) {
             }
             const errText = (res && res.error) || '生图服务未返回产物';
             lastErrText = errText;
+            if (isQueueFullError(errText)) {
+              hadQueueFull = true;
+              lastQueueFullError = errText;
+            }
             if (isTransientErrorText(errText) && attempt < maxTry) {
               const waitMs = transientBackoffMs(attempt);
               logger?.warn?.(`[restage_dual] 资产 ${asset.fid} ${ratio} ${candAdapter.id} 偶发失败(${attempt}/${maxTry})，${waitMs}ms 后重试: ${errText}`);
@@ -1954,8 +2002,9 @@ async function executeRestageDual(services, nodeConfig, asset, runCtx) {
           } catch (e) {
             lastErrText = e.message;
             if (isQueueFullError(e)) {
-              requeue = true;
-              requeueError = e.message;
+              hadQueueFull = true;
+              lastQueueFullError = e.message;
+              logger?.warn?.(`[restage_dual] 资产 ${asset.fid} ${ratio} 通道 ${candAdapter.id} 队列满/限流(${e.message})，级联回退下一通道`);
               break;
             }
             if (isTransientErrorText(e.message) && attempt < maxTry) {
@@ -1969,8 +2018,16 @@ async function executeRestageDual(services, nodeConfig, asset, runCtx) {
             break;
           }
         }
-        if (genPath || requeue) break;
-        logger?.info?.(`[restage_dual] 资产 ${asset.fid} ${ratio} 通道 ${candAdapter.id} 未能产出，切换下一通道`);
+        if (genPath) {
+          logger?.info?.(`[restage_dual] 资产 ${asset.fid} ${ratio} 成功通过通道 ${candAdapter.id}(${candModel || 'default'}) 产出`);
+          break;
+        }
+        logger?.info?.(`[restage_dual] 资产 ${asset.fid} ${ratio} 通道 ${candAdapter.id} 未能产出，级联切换下一通道`);
+      }
+      // 只有在所有通道遍历完毕后仍未产出，且遇到过 429/503 排队满时，才触发整体 requeue
+      if (!genPath && hadQueueFull) {
+        requeue = true;
+        requeueError = lastQueueFullError || lastErrText;
       }
     } catch (e) {
       logger?.warn?.(`[restage_dual] 资产 ${asset.fid} 生成 ${ratio} 异常: ${e.message}`);

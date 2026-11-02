@@ -14,9 +14,27 @@ function stripThinking(text) {
   return s.trim();
 }
 
-function poolFullError(err) {
+/**
+ * 判断视觉模型错误是否可触发级联回退到备用模型
+ * 包含：403（密钥泄露/免费额度不可用/无权限/账单问题）、429（限流/配额用尽/排队满）、
+ * 500/502/503/504（网关与服务异常）、超时（timeout/aborted）、网络中断（fetch failed/ECONNRESET/ECONNREFUSED）
+ */
+function isVlmFallbackableError(err) {
   const m = String((err && err.message) || err || '');
-  return /HTTP 429|HTTP 503|queue is full|no deployments available|no available deployment|overloaded/i.test(m);
+  if (!m) return false;
+  // 403 专属识别：Google/Gemini 报告 key leaked 或 free tier 不可用或 permission_denied/forbidden
+  if (/HTTP 403|leaked|free[_ ]?tier|permission_denied|forbidden|billing|quota/i.test(m)) return true;
+  // 429 / 503 / 500 / 502 / 504 / 池满 / 部署满 / 速率限制
+  if (/HTTP 429|HTTP 500|HTTP 502|HTTP 503|HTTP 504|queue is full|no deployments available|no available deployment|overloaded|rate[_ ]?limit/i.test(m)) return true;
+  // 401 密钥失效伪装（若 upstream 返回 invalid token 且有备用通道时应尝试兜底）
+  if (/HTTP 401|invalid[_ ]?token|无效的令牌/i.test(m)) return true;
+  // 超时与网络中断
+  if (/aborted due to timeout|timeout|ETIMEDOUT|fetch failed|ECONNRESET|ECONNREFUSED|socket hang up/i.test(m)) return true;
+  return false;
+}
+
+function poolFullError(err) {
+  return isVlmFallbackableError(err);
 }
 
 function extractJson(text) {
@@ -159,49 +177,62 @@ async function chatVisionOnce({ baseUrl, apiKey, model, prompt, images, timeoutM
 }
 
 /**
- * 无人值守视觉作业的降级链。
- *
- * 背景（2026-10-03 实测）：主组 workflow_vision 有 17 个 deployment
- * （gemini-flash-lite ×7 / gemma-4-26b-a4b ×7 / agnes-3.0-flash ×3），
- * 而 workflow_vision_low 原本 7 个 deployment **全部指向同一个 gemma-4-31b-it**。
- * 该模型 Google 端免费额度一旦耗尽，low 组就是「7 个尸体」，
- * 于是主组 429 → 降级 low → low 必挂 → 最终抛出误导性的
- * 「No deployments available」（看起来像没部署，实际是额度打满）。
- *
- * 因此降级必须是一条**异构链**：每个候选来自不同后端，
- * 避免整组共享同一份配额/故障域。
- *
- * 顺序按「实测速度 + 故障域独立性」排（2026-10-03 实测同一张图）：
- *   agnes-3.0-flash  0.6s  独立后端（api.agnes-ai.cn），不受 Google 额度影响 → 首选兜底
- *   model_image_input 31.3s 与主组同源（Gemini），只是多一层壳，慢且不独立 → 放最后
+ * 视觉大模型级联多组回退候选池。
+ * 异构候选后端，避免整组共享同一份配额/故障域：
+ *   agnes-3.0-flash   独立后端（api.agnes-ai.cn），不受 Google 额度影响
+ *   workflow_vision   主组轮转
+ *   workflow_vision_low 低优先组
+ *   model_image_input 兜底模型
  */
 const VISION_FALLBACK_CHAIN = ['agnes-3.0-flash', 'workflow_vision_low', 'model_image_input'];
 
+function buildVisionChain(requestedModel, customChain = null) {
+  if (Array.isArray(customChain) && customChain.length > 0) {
+    return customChain.filter(Boolean);
+  }
+  const primary = requestedModel || 'workflow_vision';
+  const chain = [primary];
+  const defaultFallbacks = ['agnes-3.0-flash', 'workflow_vision', 'workflow_vision_low', 'model_image_input'];
+  for (const fb of defaultFallbacks) {
+    if (fb && !chain.includes(fb)) {
+      chain.push(fb);
+    }
+  }
+  return chain;
+}
+
 /**
- * 无人值守只打 workflow_vision。池满/配额耗尽时按异构链依次降级。
- * 其它模型名（含原名、含用户手选的 31B）不会被改道。
+ * 视觉大模型统一调用（含级联多组模型回退策略）。
+ * 针对 Gemini / workflow_vision 等模型，若遇到 403 泄露/429限流/超时/网络异常，
+ * 自动级联回退到备用异构模型链（agnes-3.0-flash 等），保障服务不中断。
  */
 async function chatVision(opts) {
-  const chain = (opts && opts.model === 'workflow_vision')
-    ? ['workflow_vision', ...VISION_FALLBACK_CHAIN]
-    : [opts && opts.model];
+  const primaryModel = (opts && opts.model) || 'workflow_vision';
+  const enableFallback = !(opts && opts.disableFallback === true);
+  const chain = enableFallback
+    ? buildVisionChain(primaryModel, opts && (opts.fallbackChain || opts.modelChain))
+    : [primaryModel];
+
   let lastErr = null;
   const tried = [];
   for (const model of chain) {
     if (!model) continue;
-    // 同一模型不重复试（链上偶有重复项）
     if (tried.includes(model)) continue;
     tried.push(model);
     try {
-      return await chatVisionOnce({ ...opts, model });
+      const fn = (module.exports && module.exports.chatVisionOnce) || chatVisionOnce;
+      return await fn({ ...opts, model });
     } catch (e) {
       lastErr = e;
-      // 只在「池满/配额/过载」这类瞬时或配额问题上换组；
-      // 参数错、JSON 不合法等确定性错误直接上抛，换组也没用。
-      if (!(opts && opts.model === 'workflow_vision') || !poolFullError(e)) throw e;
+      if (!enableFallback || !isVlmFallbackableError(e)) {
+        throw e;
+      }
+      try {
+        console.warn(`[vlm] 模型 ${model} 失败 (${e.message})，级联回退到备用视觉模型...`);
+      } catch (_) {}
     }
   }
-  throw lastErr || new Error('VLM 调用失败');
+  throw lastErr || new Error('VLM 级联回退全部失败');
 }
 
 module.exports = {
@@ -212,5 +243,7 @@ module.exports = {
   stripThinking,
   resolveChatCompletionsUrl,
   poolFullError,
+  isVlmFallbackableError,
+  buildVisionChain,
   VISION_FALLBACK_CHAIN,
 };

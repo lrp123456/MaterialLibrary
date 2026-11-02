@@ -136,62 +136,9 @@ async function registerMediaAsset(services, {
   const fid = `local_${sha256.slice(0, 24)}`;
   const now = Date.now();
 
-  // 0. 全局黑名单：用户已删除的素材禁止再次入库
-  try {
-    const { isBlacklisted, itemKeyOf } = require('./assets-delete');
-    if (isBlacklisted(db, { sha256, itemKey: itemKeyOf(fileName, size), clientAssetId })) {
-      logger?.info?.(`[stream-upload] 黑名单拦截 sha=${sha256.slice(0, 12)} name=${fileName}`);
-      try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (_) {}
-      const err = new Error('该素材已被删除并加入黑名单，拒绝入库');
-      err.code = 'blacklisted';
-      throw err;
-    }
-  } catch (e) {
-    if (e.code === 'blacklisted') throw e;
-  }
-
-  // 0a. 非室内素材/截图 UI（音频不检查）
-  if (!isAudio) {
-    const fn = String(fileName || '');
-    if (/^(screen[_-]|current_screen|install_ui)/i.test(fn) || /^Screenshot_/i.test(fn) || /_emu\.png$/i.test(fn)) {
-      logger?.info?.(`[stream-upload] 非室内/UI 截图拒绝入库 name=${fileName}`);
-      try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (_) {}
-      const err = new Error('截图/UI 素材，拒绝入库');
-      err.code = 'non_interior_ui';
-      throw err;
-    }
-  }
-  // 0b. 导出标记（MLX1）：本端保存到相册的文件，拒绝再次入库
-  try {
-    const { extractExportTag } = require('./export-tag');
-    const fd = fs.openSync(filePath, 'r');
-    let tagBuf;
-    try {
-      tagBuf = Buffer.alloc(Math.min(65536, size || 65536));
-      fs.readSync(fd, tagBuf, 0, tagBuf.length, 0);
-    } finally {
-      fs.closeSync(fd);
-    }
-    const tag = extractExportTag(tagBuf);
-    if (tag && (tag.fid || tag.kind)) {
-      logger?.info?.(`[stream-upload] 导出标记拦截 name=${fileName} fid=${tag.fid || ''} kind=${tag.kind || ''}`);
-      try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (_) {}
-      const err = new Error('本端导出件，拒绝重复入库');
-      err.code = 'export_tag';
-      throw err;
-    }
-  } catch (e) {
-    if (e.code === 'export_tag') throw e;
-  }
-
-  // 0c. ML_SAVED_ 文件名识别拦截（本端保存素材）
-  if (/^ML_SAVED_/i.test(String(fileName || ''))) {
-    logger?.info?.(`[stream-upload] ML_SAVED_ 文件名拦截 name=${fileName}`);
-    try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (_) {}
-    const err = new Error('本端导出件（文件名包含 ML_SAVED_），拒绝重复入库');
-    err.code = 'export_saved_name';
-    throw err;
-  }
+  // ★ 宽容入库策略（Store-First, Gate-Later）：
+  // 所有上传图片入库时先不筛选、不物理删除，确保文件完整安全落盘并生成资产与衍生记录。
+  // 成功触发工作流后，由 Gate 节点统一进行黑名单、截图防御与质量判定，若判定不合格再移入垃圾站。
 
   // 0d. 检查 export_registry、预览图/缩略图以及全部衍生图绝对哈希
   try {
@@ -385,7 +332,8 @@ async function registerMediaAsset(services, {
     targetCategory = (normalizedCategory && normalizedCategory !== 'none' ? normalizedCategory : 'interior');
   }
   const isFinished = targetCategory === 'finished' || isAudio;
-  const initialStatus = (isVideo || isAudio || isDirectAppUpload || isFinished) ? 'ready' : 'discovered';
+  // ★ 宽容入库：所有上传素材初始状态均为 ready，入库立即可见，工作流触发后再行判定
+  const initialStatus = 'ready';
 
   // 3. 写入 assets 表
   db.prepare(`
@@ -526,12 +474,10 @@ async function registerMediaAsset(services, {
     }
   }
 
-  // 视频、用户App主动上传或成品库：立即标记为 ready 可浏览（否则停在 discovered 等待AI打标）
-  if (isVideo || isDirectAppUpload || isFinished) {
-    db.prepare(`
-      UPDATE assets SET status='ready', updated_at=? WHERE fid=?
-    `).run(Date.now(), fid);
-  }
+  // ★ 宽容入库：所有上传素材入库后立即标记为 ready 可浏览（工作流触发后再判定是否移入垃圾站）
+  db.prepare(`
+    UPDATE assets SET status='ready', updated_at=? WHERE fid=?
+  `).run(Date.now(), fid);
 
   // 货架归属：编辑器导出/备份等入口通过 shelf 直接指定成品库等货架
   const shelfName = ['original', 'retouched', 'finished'].includes(String(shelf || ''))
