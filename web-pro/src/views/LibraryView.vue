@@ -1517,6 +1517,9 @@
             </div>
           </article>
         </div>
+        <div v-else-if="baseSection === 'product'" class="product-3d-flow flex-1 h-full min-h-[500px]">
+          <Product3DManager />
+        </div>
         <div v-else v-for="tier in baseTiers" :key="tier.key" class="base-tier-section mb-6">
           <!-- 三段式板块 Sticky Header -->
           <div
@@ -2623,6 +2626,7 @@ import BaseLibraryPane from './library/BaseLibraryPane.vue';
 import CatalogIngestPanel from './library/CatalogIngestPanel.vue';
 import StyleSchemeStudio from './library/StyleSchemeStudio.vue';
 import LineageGraph from '../components/LineageGraph.vue';
+import Product3DManager from '../components/library/Product3DManager.vue';
 import { buildSchemeBrowse } from '../../../src/base-library/scheme-browse.mjs';
 import SimilarityWorkbenchModal from '../components/SimilarityWorkbenchModal.vue';
 import { processClientVocalPreview } from '../utils/audio-preview-webgpu.js';
@@ -5637,7 +5641,7 @@ watch(sentinelRef, () => {
 const BASE_SECTIONS = [
   { key: 'material', label: '材质' },
   { key: 'design', label: '做法' },
-  { key: 'product', label: '选品' },
+  { key: 'product', label: '3D选品' },
   { key: 'scheme', label: '风格方案' }
 ];
 const STYLE_LEAF_LABELS = { american_country: '美式乡村' };

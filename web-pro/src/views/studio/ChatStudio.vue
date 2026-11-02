@@ -839,14 +839,40 @@
           <!-- @ 符号悬浮快捷引用浮层 (看图区已有图时展现，底部为「从素材库添加」) -->
           <div
             v-if="showAtMenu"
-            class="absolute bottom-full left-4 mb-2 w-80 bg-studio-900 border border-studio-700 rounded-xl shadow-2xl p-2 z-40 max-h-80 overflow-y-auto scrollbar-thin select-none"
+            class="absolute bottom-full left-4 mb-2 w-88 bg-studio-900 border border-studio-700 rounded-xl shadow-2xl p-2 z-40 max-h-96 overflow-y-auto scrollbar-thin select-none"
           >
-            <div class="text-[11px] text-slate-400 font-mono px-2 py-1 border-b border-studio-800 flex items-center justify-between">
-              <span>引用参考图或局部区域:</span>
-              <span class="text-studio-cyan font-bold">{{ referenceTray.length }} 张可用</span>
+            <!-- 顶部 Tab：已挂载参考图 vs 本会话产物图 -->
+            <div class="flex items-center justify-between pb-1.5 mb-1.5 border-b border-studio-800">
+              <div class="flex items-center gap-1">
+                <button
+                  type="button"
+                  @mousedown.prevent
+                  @click="atMenuTab = 'tray'"
+                  class="px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer transition"
+                  :class="atMenuTab === 'tray' ? 'bg-studio-accent/20 text-studio-cyan border border-studio-cyan/40' : 'text-slate-400 hover:text-slate-200'"
+                >
+                  已挂载参考图 ({{ referenceTray.length }})
+                </button>
+                <button
+                  type="button"
+                  @mousedown.prevent
+                  @click="atMenuTab = 'history'"
+                  class="px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer transition flex items-center gap-1"
+                  :class="atMenuTab === 'history' ? 'bg-studio-accent/20 text-studio-cyan border border-studio-cyan/40' : 'text-slate-400 hover:text-slate-200'"
+                >
+                  <span>本会话生图</span>
+                  <span v-if="sessionGeneratedImages.length" class="px-1 rounded bg-studio-800 text-[9px]">{{ sessionGeneratedImages.length }}</span>
+                </button>
+              </div>
+              <button type="button" class="text-slate-500 hover:text-slate-300 text-xs cursor-pointer px-1" @click="showAtMenu = false">✕</button>
             </div>
-            <div class="py-1 space-y-1">
-              <template v-for="(item, idx) in referenceTray" :key="item.url || idx">
+
+            <!-- 分组 1：已挂载看图区参考图 -->
+            <div v-if="atMenuTab === 'tray'" class="py-1 space-y-1">
+              <div v-if="referenceTray.length === 0" class="py-4 text-center text-xs text-slate-500">
+                看图区暂无挂载图，可从下方或会话产物添加
+              </div>
+              <template v-else v-for="(item, idx) in referenceTray" :key="item.url || idx">
                 <button
                   type="button"
                   @mousedown.prevent
@@ -896,7 +922,36 @@
                 </div>
               </template>
             </div>
-            <div class="pt-1 border-t border-studio-800">
+
+            <!-- 分组 2：本会话已有生图结果 (一键挂载并引用) -->
+            <div v-else-if="atMenuTab === 'history'" class="py-1 space-y-1">
+              <div v-if="sessionGeneratedImages.length === 0" class="py-4 text-center text-xs text-slate-500">
+                本会话暂未生成图片
+              </div>
+              <button
+                v-for="(gen, gIdx) in sessionGeneratedImages"
+                :key="gen.url || gIdx"
+                type="button"
+                @mousedown.prevent
+                @click="selectGeneratedImageMention(gen)"
+                class="w-full px-2.5 py-1.5 rounded-lg hover:bg-studio-800 cursor-pointer text-xs text-slate-200 flex items-center space-x-2.5 transition-colors text-left group"
+                :title="`引用本会话生成的图片: ${gen.name}`"
+              >
+                <img :src="gen.fullUrl || gen.url" class="w-8 h-8 rounded object-cover border border-studio-700 shrink-0" />
+                <div class="flex-1 min-w-0">
+                  <div class="font-bold text-amber-300 font-mono flex items-center justify-between text-[11px]">
+                    <span class="truncate">{{ gen.name }}</span>
+                    <span class="text-[9px] px-1 rounded bg-studio-800 text-slate-400 font-normal shrink-0 ml-1">+ 挂载引用</span>
+                  </div>
+                  <div class="text-[10px] text-slate-400 flex items-center justify-between">
+                    <span>{{ gen.model }}</span>
+                    <span class="font-mono text-slate-500">{{ formatGenTime(gen.time) }}</span>
+                  </div>
+                </div>
+              </button>
+            </div>
+
+            <div class="pt-1.5 mt-1 border-t border-studio-800">
               <button
                 type="button"
                 @mousedown.prevent
@@ -904,7 +959,7 @@
                 class="w-full px-2.5 py-1.5 rounded-lg hover:bg-studio-800 cursor-pointer text-xs text-studio-accent hover:text-white flex items-center justify-center gap-1.5 transition-colors font-bold"
               >
                 <StudioIcon name="plus" :size="13" />
-                <span>从素材库挂载新参考图...</span>
+                <span>从全库素材库挑选挂载...</span>
               </button>
             </div>
           </div>
@@ -2581,6 +2636,38 @@ const currentEditingImage = computed(() => {
   return referenceTray.value[idx] || null;
 });
 const showAtMenu = ref(false);
+const atMenuTab = ref('tray'); // 'tray' | 'history'
+
+// 智能提取当前会话历史已生成的全部产物图片（供 @ 悬浮菜单一键直接引用）
+const sessionGeneratedImages = computed(() => {
+  const list = [];
+  const seen = new Set();
+  const msgs = messages.value || [];
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const msg = msgs[i];
+    if (msg.role === 'assistant' && msg.imageUrl && (msg.modality === 'image' || !msg.modality)) {
+      const url = authedMediaUrl(msg.imageUrl);
+      if (!seen.has(url)) {
+        seen.add(url);
+        list.push({
+          url: msg.imageUrl,
+          fullUrl: url,
+          name: msg.userPrompt ? (msg.userPrompt.slice(0, 16) + '…') : `生成图 #${list.length + 1}`,
+          model: msg.model || 'Seedream 5.0 Flash',
+          time: msg.startTime || Date.now(),
+          assetFid: msg.assetFid || ''
+        });
+      }
+    }
+  }
+  return list;
+});
+
+function formatGenTime(t) {
+  if (!t) return '';
+  const d = new Date(t);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
 
 // 阶段 2 状态：配方句、请求审查与抽屉联动
 const recipePrompt = ref('');
@@ -3579,18 +3666,42 @@ function getRegionOpDisplayName(op) {
 }
 
 function toggleAtMentionMenu() {
-  if (referenceTray.value.length > 0) {
+  if (referenceTray.value.length > 0 || sessionGeneratedImages.value.length > 0) {
     showAtMenu.value = !showAtMenu.value;
     if (showAtMenu.value) {
+      atMenuTab.value = referenceTray.value.length > 0 ? 'tray' : 'history';
       saveEditorSelection();
     }
   } else {
-    // 托盘中尚无挂载图，直接唤起素材挂载器
+    // 托盘与会话产物均为空，唤起素材挂载器
     openAssetSelectorModal();
   }
 }
 
 function selectAtMention(item, idx) {
+  showAtMenu.value = false;
+  hoveredRegionKey.value = null;
+  insertChipToEditor(item, `@图${idx + 1}`);
+}
+
+function selectGeneratedImageMention(genItem) {
+  if (!genItem || !genItem.url) return;
+  // 检查是否已经在看图区托盘中，避免重复冗余
+  let idx = referenceTray.value.findIndex(r => r.url === genItem.url || (genItem.assetFid && r.fid === genItem.assetFid));
+  if (idx < 0) {
+    idx = referenceTray.value.length;
+    referenceTray.value.push({
+      name: genItem.name || `产物图${idx + 1}`,
+      url: genItem.url,
+      thumbUrl: genItem.fullUrl || genItem.url,
+      tag: `@图${idx + 1}`,
+      origin: 'generation',
+      fid: genItem.assetFid || ''
+    });
+    viewerCollapsed.value = false;
+    selectedImageIndex.value = idx;
+  }
+  const item = referenceTray.value[idx];
   showAtMenu.value = false;
   hoveredRegionKey.value = null;
   insertChipToEditor(item, `@图${idx + 1}`);
@@ -5607,11 +5718,17 @@ function pushPromptHistory(text, tray, extra = {}) {
   historyIndex.value = promptHistory.value.length;
 }
 
+const CHINESE_NUM_MAP = { '一': '1', '二': '2', '两': '2', '三': '3', '四': '4', '五': '5', '六': '6', '七': '7', '八': '8', '九': '9', '十': '10' };
+
 function normalizeRefMentions(text) {
-  return String(text || '').replace(/<(Picture|Audio|Video)\s+(\d+)\s*>/gi, (_, kind, n) => {
+  let s = String(text || '').replace(/<(Picture|Audio|Video)\s+(\d+)\s*>/gi, (_, kind, n) => {
     const word = { picture: '图片', audio: '音频', video: '视频' }[String(kind).toLowerCase()] || '图片';
     return `@${word}${n}`;
   });
+  // 自然语言口语化映射：如“第1张图”、“第2张图片”、“图一”、“图二”
+  s = s.replace(/第\s*([一二两三四五六七八九十\d]+)\s*张\s*(?:图片|图)/g, (_, d) => `@图${CHINESE_NUM_MAP[d] || d}`);
+  s = s.replace(/(?:图片|图)\s*([一二两三四五六七八九十])(?!\w)/g, (_, d) => `@图${CHINESE_NUM_MAP[d] || d}`);
+  return s;
 }
 
 function mentionedRefNumbers(text) {
@@ -7227,7 +7344,8 @@ async function sendMessage() {
       return;
     }
     const fullPromptForCheck = ((richEditorRef.value ? richEditorRef.value.innerText : '') + ' ' + (rawContent || ''));
-    const tagMatches = fullPromptForCheck.matchAll(/@图(\d+)/g);
+    const normalizedCheck = normalizeRefMentions(fullPromptForCheck);
+    const tagMatches = normalizedCheck.matchAll(/@图(\d+)/g);
     for (const match of tagMatches) {
       const tagNum = parseInt(match[1], 10);
       const targetTag = `@图${tagNum}`;
@@ -7495,7 +7613,7 @@ async function sendMessage() {
           imageUrls.push(u);
         }
       }
-      let promptForModel = promptWithPriorAnalysis(rawContent, usedPriorMedia ? currentTray.length : 0);
+      let promptForModel = promptWithPriorAnalysis(normalizeRefMentions(rawContent), usedPriorMedia ? currentTray.length : 0);
       currentTray.forEach((img, idx) => {
         const regionsToCompile = (img?.regions && img.regions.length > 0)
           ? img.regions

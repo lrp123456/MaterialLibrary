@@ -4203,8 +4203,10 @@ async function handleApi(services, req, res, prefix = '/api') {
     const presets = rows.map(r => {
       let tags = [];
       let dimensions = null;
+      let snapshots = {};
       try { tags = JSON.parse(r.tags_json || '[]'); } catch {}
       try { dimensions = JSON.parse(r.dimensions_json || '{}'); } catch {}
+      try { snapshots = JSON.parse(r.snapshots_json || '{}'); } catch {}
       return {
         id: r.id,
         name: r.name,
@@ -4213,13 +4215,14 @@ async function handleApi(services, req, res, prefix = '/api') {
         preview_url: `/api/viewer/products/previews/${r.preview_file || (r.id + '.png')}`,
         model_url: `/api/viewer/products/models/${r.model_file || 'sofa_default.glb'}`,
         tags,
-        dimensions
+        dimensions,
+        snapshots
       };
     });
     return sendJson(res, 200, { success: true, data: presets });
   }
 
-  const mProdPreview = pathname.match(/^\/products\/previews\/([^\/]+)$/);
+  const mProdPreview = pathname.match(/^\/(?:viewer\/)?products\/previews\/([^\/]+)$/);
   if (mProdPreview && req.method === 'GET') {
     // SEC-003：先解码再取 basename，杜绝 ..%2F..%2F 型 URL 编码路径穿越。
     const fn = path.basename(decodeURIComponent(mProdPreview[1]));
@@ -4239,6 +4242,7 @@ async function handleApi(services, req, res, prefix = '/api') {
       'Access-Control-Allow-Origin': '*',
       'Cache-Control': 'public, max-age=86400'
     });
+    if (req.method === 'HEAD') return res.end();
     return fs.createReadStream(found).pipe(res);
   }
 
@@ -4303,7 +4307,7 @@ async function handleApi(services, req, res, prefix = '/api') {
     if (req.method === 'HEAD') return res.end();
     return fs.createReadStream(found).pipe(res);
   }
-  const mProdGlb = pathname.match(/^\/products\/models\/([^\/]+)$/);
+  const mProdGlb = pathname.match(/^\/(?:viewer\/)?products\/models\/([^\/]+)$/);
   if (mProdGlb && req.method === 'GET') {
     // SEC-003：同 previews，basename 防穿越。
     const fn = path.basename(decodeURIComponent(mProdGlb[1]));
@@ -4402,6 +4406,94 @@ async function handleApi(services, req, res, prefix = '/api') {
           preview_url: previewFile ? `/api/viewer/products/previews/${previewFile}` : null,
         },
       });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 3D 单品家具单项管理：PUT /products/presets/:id
+  const mPutPreset = pathname.match(/^\/products\/presets\/([^\/]+)$/);
+  if (mPutPreset && req.method === 'PUT') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const id = decodeURIComponent(mPutPreset[1]);
+    const b = await parseBody(req);
+    try {
+      const existing = db.prepare('SELECT * FROM product_presets WHERE id=?').get(id);
+      if (!existing) return sendJson(res, 404, { error: '未找到该 3D 模型单品' });
+
+      const name = b.name !== undefined ? String(b.name).slice(0, 80) : existing.name;
+      const category = b.category !== undefined ? String(b.category) : existing.category;
+      const facing = b.facing !== undefined ? Number(b.facing) : existing.facing;
+      const enabled = b.enabled !== undefined ? (b.enabled ? 1 : 0) : existing.enabled;
+      const sort = b.sort !== undefined ? Number(b.sort) : existing.sort;
+      const tags_json = b.tags ? JSON.stringify(b.tags) : existing.tags_json;
+      const dimensions_json = b.dimensions ? JSON.stringify(b.dimensions) : existing.dimensions_json;
+      const snapshots_json = b.snapshots ? JSON.stringify(b.snapshots) : (existing.snapshots_json || '{}');
+
+      try {
+        db.prepare('ALTER TABLE product_presets ADD COLUMN snapshots_json TEXT').run();
+      } catch (_) {}
+
+      db.prepare(`
+        UPDATE product_presets
+        SET name=?, category=?, facing=?, tags_json=?, dimensions_json=?, snapshots_json=?, enabled=?, sort=?
+        WHERE id=?
+      `).run(name, category, facing, tags_json, dimensions_json, snapshots_json, enabled, sort, id);
+
+      return sendJson(res, 200, { success: true, message: '更新 3D 单品成功' });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 3D 单品家具删除：DELETE /products/presets/:id
+  if (mPutPreset && req.method === 'DELETE') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const id = decodeURIComponent(mPutPreset[1]);
+    try {
+      db.prepare('DELETE FROM product_presets WHERE id=?').run(id);
+      return sendJson(res, 200, { success: true, message: '已删除 3D 单品' });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 3D 单品家具标准视角快照存储：POST /products/presets/:id/snapshots
+  const mSnapshots = pathname.match(/^\/products\/presets\/([^\/]+)\/snapshots$/);
+  if (mSnapshots && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const id = decodeURIComponent(mSnapshots[1]);
+    const b = await parseBody(req, 32 * 1024 * 1024);
+    try {
+      const existing = db.prepare('SELECT * FROM product_presets WHERE id=?').get(id);
+      if (!existing) return sendJson(res, 404, { error: '未找到该 3D 模型单品' });
+
+      // snapshots: { front_0?: base64, right_45?: base64, right_90?: base64, ... }
+      const incomingSnapshots = b.snapshots || {};
+      const previewsDir = path.join(
+        process.env.ML_DATA_DIR || path.join(require('os').homedir(), '.dsh-material-library'),
+        'previews'
+      );
+      fs.mkdirSync(previewsDir, { recursive: true });
+
+      let currentMap = {};
+      try { currentMap = JSON.parse(existing.snapshots_json || '{}'); } catch (_) {}
+
+      for (const [angleKey, b64Data] of Object.entries(incomingSnapshots)) {
+        if (!b64Data) continue;
+        const raw = String(b64Data).replace(/^data:[^,]+,/, '');
+        const snapFileName = `${id}_${angleKey}.png`;
+        fs.writeFileSync(path.join(previewsDir, snapFileName), Buffer.from(raw, 'base64'));
+        currentMap[angleKey] = `/api/viewer/products/previews/${snapFileName}`;
+      }
+
+      try {
+        db.prepare('ALTER TABLE product_presets ADD COLUMN snapshots_json TEXT').run();
+      } catch (_) {}
+
+      db.prepare('UPDATE product_presets SET snapshots_json=? WHERE id=?').run(JSON.stringify(currentMap), id);
+
+      return sendJson(res, 200, { success: true, data: { snapshots: currentMap } });
     } catch (e) {
       return sendJson(res, 500, { error: e.message });
     }
