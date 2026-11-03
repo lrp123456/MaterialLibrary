@@ -1572,10 +1572,9 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     ['GET', /^\/products\/presets$/],
     ['GET', /^\/products\/models\/[^\/]+$/],
     ['GET', /^\/products\/previews\/[^\/]+$/],
-    // R6：治理台 9 个读接口处理器均要求 admin（viewer 命中白名单也只吃 403），
-    // 统一移出 viewer 白名单；管理员经 /api/* 根路径访问。
-    // 唯一例外：prompts/preview-compile 是 viewer 编辑器内显式放行的编译预览（见下方 isGovernanceWrite 豁免）。
-    ['POST', /^\/governance\/prompts\/preview-compile$/],
+    // R6：治理台读接口（9 个 GET）与 prompts/preview-compile 处理器均要求 admin
+    // （preview-compile 虽在 isGovernanceWrite 前置闸门被豁免，但处理器内部仍 403），
+    // viewer 命中白名单也只吃 403，故全部移出；管理员经 /api/* 根路径访问。
     ['GET', /^\/thumbs\/[^\/]+$/],
     ['HEAD', /^\/thumbs\/[^\/]+$/],
     ['POST', /^\/gen\/preview$/],
@@ -1603,7 +1602,9 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     ['POST', /^\/tools\/extract-frames$/],
     ['POST', /^\/tools\/convert-video$/],
     ['GET', /^\/assets\/similarity-workbench$/],
-    // R6：resolve/clean-exact/ignored 读写均为 admin 处理器，viewer 调则 404（根路径不受影响）
+    // R6：resolve/clean-exact/ignored 的写操作均为 admin 处理器，已移出白名单；
+    // 唯 GET ignored 处理器无 admin 守卫（登录即可读忽略对列表），保留。
+    ['GET', /^\/assets\/similarity-workbench\/ignored$/],
     ['GET', /^\/assets\/[^\/]+\/quality$/]
   ];
   if (pathname === '/viewer' || pathname.startsWith('/viewer/')) {

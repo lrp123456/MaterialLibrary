@@ -1,31 +1,31 @@
 {
-  "generatedAt": "2026-11-03T07:37:22.402Z",
+  "generatedAt": "2026-11-03T08:51:01.488Z",
   "generator": "scripts/gen-contract-manifest.js",
   "counts": {
     "routes": 371,
     "routesExact": 239,
     "routesPrefix": 6,
     "routesRegex": 126,
-    "adminGuarded": 157,
-    "whitelist": 138,
+    "adminGuarded": 156,
+    "whitelist": 123,
     "whitelistDuplicated": 2,
     "clients": {
-      "web": 129,
+      "web": 126,
       "web-pro": 99,
       "app-uniapp": 35,
       "harmony": 2
     },
-    "findings": 27,
+    "findings": 2,
     "bySeverity": {
-      "high": 1,
-      "medium": 22,
-      "low": 4
+      "high": 0,
+      "medium": 0,
+      "low": 2
     }
   },
   "routes": [
     {
       "file": "src/api.js",
-      "line": 1581,
+      "line": 1610,
       "method": "*",
       "kind": "exact",
       "pattern": "/viewer",
@@ -33,7 +33,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1581,
+      "line": 1610,
       "method": "*",
       "kind": "prefix",
       "pattern": "/viewer/",
@@ -41,7 +41,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1592,
+      "line": 1621,
       "method": "*",
       "kind": "prefix",
       "pattern": "/governance/",
@@ -49,7 +49,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1594,
+      "line": 1623,
       "method": "*",
       "kind": "exact",
       "pattern": "/skills/create",
@@ -57,7 +57,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1597,
+      "line": 1626,
       "method": "*",
       "kind": "prefix",
       "pattern": "/v1/gen/",
@@ -65,7 +65,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1602,
+      "line": 1631,
       "method": "GET",
       "kind": "exact",
       "pattern": "/health",
@@ -73,7 +73,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1602,
+      "line": 1631,
       "method": "GET",
       "kind": "exact",
       "pattern": "/api/health",
@@ -81,7 +81,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1607,
+      "line": 1636,
       "method": "GET",
       "kind": "exact",
       "pattern": "/events",
@@ -89,7 +89,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1659,
+      "line": 1688,
       "method": "*",
       "kind": "exact",
       "pattern": "/asr/status",
@@ -97,7 +97,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1659,
+      "line": 1688,
       "method": "*",
       "kind": "exact",
       "pattern": "/asr/transcribe",
@@ -105,7 +105,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1672,
+      "line": 1701,
       "method": "POST",
       "kind": "exact",
       "pattern": "/system/restart",
@@ -113,7 +113,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1701,
+      "line": 1730,
       "method": "*",
       "kind": "prefix",
       "pattern": "/portrait-library",
@@ -121,7 +121,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1712,
+      "line": 1741,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/frames\\/([^/]+)\\/([^/]+)$",
@@ -129,7 +129,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1712,
+      "line": 1741,
       "method": "HEAD",
       "kind": "regex",
       "pattern": "^\\/frames\\/([^/]+)\\/([^/]+)$",
@@ -137,7 +137,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1722,
+      "line": 1751,
       "method": "POST",
       "kind": "exact",
       "pattern": "/auth/login",
@@ -145,7 +145,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1738,
+      "line": 1767,
       "method": "POST",
       "kind": "exact",
       "pattern": "/auth/logout",
@@ -153,7 +153,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1745,
+      "line": 1774,
       "method": "GET",
       "kind": "exact",
       "pattern": "/app/update",
@@ -161,7 +161,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1765,
+      "line": 1794,
       "method": "GET",
       "kind": "exact",
       "pattern": "/app/update/state",
@@ -169,7 +169,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1773,
+      "line": 1802,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/app\\/update\\/files\\/([^\\/]+)$",
@@ -177,7 +177,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1808,
+      "line": 1837,
       "method": "GET",
       "kind": "exact",
       "pattern": "/library/catalog",
@@ -185,7 +185,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1817,
+      "line": 1846,
       "method": "GET",
       "kind": "exact",
       "pattern": "/dict/menu-tree",
@@ -193,7 +193,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1826,
+      "line": 1855,
       "method": "GET",
       "kind": "exact",
       "pattern": "/studio/schema",
@@ -201,7 +201,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1838,
+      "line": 1867,
       "method": "*",
       "kind": "exact",
       "pattern": "/studio/catalog",
@@ -209,7 +209,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1838,
+      "line": 1867,
       "method": "*",
       "kind": "regex",
       "pattern": "^\\/base-library\\/items\\/[^\\/]+\\/(preview|scene)$",
@@ -217,7 +217,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1838,
+      "line": 1867,
       "method": "*",
       "kind": "regex",
       "pattern": "^\\/base-library\\/materials\\/[^\\/]+\\/preview$",
@@ -225,7 +225,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1838,
+      "line": 1867,
       "method": "*",
       "kind": "regex",
       "pattern": "^\\/products\\/(previews|models)\\/[^\\/]+$",
@@ -233,7 +233,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1841,
+      "line": 1870,
       "method": "*",
       "kind": "regex",
       "pattern": "^\\/assets\\/([^\\/]+)\\/(?:image|file)(?:\\/([^\\/]+))?$",
@@ -241,7 +241,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1842,
+      "line": 1871,
       "method": "*",
       "kind": "regex",
       "pattern": "^\\/ai\\/masks\\/([^\\/]+)$",
@@ -249,7 +249,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1843,
+      "line": 1872,
       "method": "*",
       "kind": "regex",
       "pattern": "^\\/cache\\/temp\\/([^\\/]+)$",
@@ -257,7 +257,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1856,
+      "line": 1885,
       "method": "GET",
       "kind": "exact",
       "pattern": "/auth/me",
@@ -265,7 +265,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1861,
+      "line": 1890,
       "method": "GET",
       "kind": "exact",
       "pattern": "/studio/presets",
@@ -273,7 +273,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1871,
+      "line": 1900,
       "method": "POST",
       "kind": "exact",
       "pattern": "/studio/presets",
@@ -281,7 +281,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1882,
+      "line": 1911,
       "method": "DELETE",
       "kind": "regex",
       "pattern": "^\\/studio\\/presets\\/([^\\/]+)$",
@@ -289,7 +289,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1908,
+      "line": 1937,
       "method": "POST",
       "kind": "exact",
       "pattern": "/tools/upload",
@@ -297,7 +297,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1919,
+      "line": 1951,
       "method": "POST",
       "kind": "exact",
       "pattern": "/tools/extract-frames",
@@ -305,7 +305,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1948,
+      "line": 1980,
       "method": "GET",
       "kind": "exact",
       "pattern": "/tools/lip-sync/status",
@@ -313,7 +313,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1973,
+      "line": 2005,
       "method": "GET",
       "kind": "prefix",
       "pattern": "/tools/lip-sync/tasks/",
@@ -321,7 +321,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 1981,
+      "line": 2013,
       "method": "POST",
       "kind": "exact",
       "pattern": "/tools/lip-sync",
@@ -329,7 +329,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2071,
+      "line": 2103,
       "method": "POST",
       "kind": "exact",
       "pattern": "/tools/convert-video",
@@ -337,7 +337,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2111,
+      "line": 2143,
       "method": "GET",
       "kind": "exact",
       "pattern": "/studio/catalog",
@@ -345,7 +345,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2127,
+      "line": 2159,
       "method": "DELETE",
       "kind": "regex",
       "pattern": "^\\/assets\\/([^\\/]+)$",
@@ -353,7 +353,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2153,
+      "line": 2185,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/assets\\/([^\\/]+)\\/delete$",
@@ -361,7 +361,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2178,
+      "line": 2210,
       "method": "POST",
       "kind": "exact",
       "pattern": "/assets/batch-delete",
@@ -369,7 +369,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2207,
+      "line": 2239,
       "method": "GET",
       "kind": "exact",
       "pattern": "/assets/blacklist",
@@ -377,7 +377,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2218,
+      "line": 2250,
       "method": "GET",
       "kind": "exact",
       "pattern": "/assets/trash",
@@ -385,7 +385,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2235,
+      "line": 2267,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/assets\\/trash\\/([^/]+)$",
@@ -393,7 +393,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2248,
+      "line": 2280,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/assets\\/([^\\/]+)\\/favorite$",
@@ -401,7 +401,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2264,
+      "line": 2296,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/assets\\/([^\\/]+)\\/library-prep$",
@@ -409,7 +409,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2278,
+      "line": 2310,
       "method": "POST",
       "kind": "exact",
       "pattern": "/assets/trash/rehome-gate",
@@ -417,7 +417,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2289,
+      "line": 2321,
       "method": "POST",
       "kind": "exact",
       "pattern": "/assets/shelf",
@@ -425,7 +425,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2305,
+      "line": 2337,
       "method": "POST",
       "kind": "exact",
       "pattern": "/assets/classify",
@@ -433,7 +433,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2342,
+      "line": 2374,
       "method": "POST",
       "kind": "exact",
       "pattern": "/assets/retag",
@@ -441,7 +441,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2366,
+      "line": 2398,
       "method": "POST",
       "kind": "exact",
       "pattern": "/assets/from-generation",
@@ -449,7 +449,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2378,
+      "line": 2410,
       "method": "POST",
       "kind": "exact",
       "pattern": "/assets/trash/restore",
@@ -457,7 +457,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2392,
+      "line": 2424,
       "method": "POST",
       "kind": "exact",
       "pattern": "/assets/trash/purge",
@@ -465,7 +465,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2407,
+      "line": 2439,
       "method": "GET",
       "kind": "exact",
       "pattern": "/assets/similarity-workbench",
@@ -473,7 +473,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2421,
+      "line": 2453,
       "method": "POST",
       "kind": "exact",
       "pattern": "/assets/similarity-workbench/resolve",
@@ -481,7 +481,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2433,
+      "line": 2465,
       "method": "POST",
       "kind": "exact",
       "pattern": "/assets/similarity-workbench/clean-exact",
@@ -489,7 +489,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2444,
+      "line": 2476,
       "method": "GET",
       "kind": "exact",
       "pattern": "/assets/similarity-workbench/ignored",
@@ -497,7 +497,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2454,
+      "line": 2486,
       "method": "DELETE",
       "kind": "exact",
       "pattern": "/assets/similarity-workbench/ignored",
@@ -505,7 +505,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2467,
+      "line": 2499,
       "method": "POST",
       "kind": "exact",
       "pattern": "/assets/dedupe-scan",
@@ -513,7 +513,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2604,
+      "line": 2636,
       "method": "GET",
       "kind": "exact",
       "pattern": "/rejected",
@@ -521,7 +521,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2615,
+      "line": 2647,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/rejected\\/([^\\/]+)\\/restore$",
@@ -529,7 +529,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2633,
+      "line": 2665,
       "method": "POST",
       "kind": "exact",
       "pattern": "/rejected/restore-batch",
@@ -537,7 +537,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2650,
+      "line": 2682,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/rejected\\/([^\\/]+)$",
@@ -545,26 +545,10 @@
     },
     {
       "file": "src/api.js",
-      "line": 2663,
+      "line": 2695,
       "method": "GET",
       "kind": "exact",
       "pattern": "/gateway/config",
-      "admin": false
-    },
-    {
-      "file": "src/api.js",
-      "line": 2674,
-      "method": "POST",
-      "kind": "exact",
-      "pattern": "/assets/dedupe-library",
-      "admin": false
-    },
-    {
-      "file": "src/api.js",
-      "line": 2702,
-      "method": "GET",
-      "kind": "exact",
-      "pattern": "/auth/quark-status",
       "admin": false
     },
     {
@@ -572,12 +556,28 @@
       "line": 2706,
       "method": "POST",
       "kind": "exact",
+      "pattern": "/assets/dedupe-library",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2734,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/auth/quark-status",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2738,
+      "method": "POST",
+      "kind": "exact",
       "pattern": "/auth/quark-login",
       "admin": true
     },
     {
       "file": "src/api.js",
-      "line": 2713,
+      "line": 2745,
       "method": "POST",
       "kind": "exact",
       "pattern": "/auth/quark-install",
@@ -585,7 +585,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2731,
+      "line": 2763,
       "method": "POST",
       "kind": "exact",
       "pattern": "/auth/reset",
@@ -593,7 +593,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2742,
+      "line": 2774,
       "method": "GET",
       "kind": "exact",
       "pattern": "/assets",
@@ -601,7 +601,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2749,
+      "line": 2781,
       "method": "GET",
       "kind": "exact",
       "pattern": "/assets/timeline-days",
@@ -609,7 +609,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2788,
+      "line": 2820,
       "method": "GET",
       "kind": "exact",
       "pattern": "/stats",
@@ -617,7 +617,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2793,
+      "line": 2825,
       "method": "POST",
       "kind": "exact",
       "pattern": "/snapshot",
@@ -625,7 +625,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2809,
+      "line": 2841,
       "method": "POST",
       "kind": "exact",
       "pattern": "/sync/reconcile",
@@ -633,7 +633,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2809,
+      "line": 2841,
       "method": "GET",
       "kind": "exact",
       "pattern": "/sync/reconcile",
@@ -641,7 +641,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2843,
+      "line": 2875,
       "method": "POST",
       "kind": "exact",
       "pattern": "/sync/upload",
@@ -649,7 +649,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2855,
+      "line": 2890,
       "method": "POST",
       "kind": "exact",
       "pattern": "/sync/chunk",
@@ -657,7 +657,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2870,
+      "line": 2909,
       "method": "POST",
       "kind": "exact",
       "pattern": "/sync/complete",
@@ -665,7 +665,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2890,
+      "line": 2929,
       "method": "GET",
       "kind": "exact",
       "pattern": "/presets",
@@ -673,7 +673,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2895,
+      "line": 2934,
       "method": "POST",
       "kind": "exact",
       "pattern": "/presets",
@@ -681,7 +681,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2907,
+      "line": 2946,
       "method": "DELETE",
       "kind": "regex",
       "pattern": "^\\/presets\\/([^\\/]+)$",
@@ -689,7 +689,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2919,
+      "line": 2958,
       "method": "POST",
       "kind": "exact",
       "pattern": "/app/update",
@@ -697,7 +697,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2931,
+      "line": 2970,
       "method": "POST",
       "kind": "exact",
       "pattern": "/app/update/quick-push",
@@ -705,7 +705,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 2945,
+      "line": 2984,
       "method": "POST",
       "kind": "exact",
       "pattern": "/app/update/upload",
@@ -713,15 +713,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 3012,
-      "method": "GET",
-      "kind": "exact",
-      "pattern": "/app/update/state",
-      "admin": false
-    },
-    {
-      "file": "src/api.js",
-      "line": 3022,
+      "line": 3047,
       "method": "POST",
       "kind": "exact",
       "pattern": "/app/update/promote",
@@ -729,7 +721,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 3033,
+      "line": 3058,
       "method": "POST",
       "kind": "exact",
       "pattern": "/app/update/revoke-canary",
@@ -737,7 +729,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 3045,
+      "line": 3070,
       "method": "GET",
       "kind": "exact",
       "pattern": "/lab/capabilities",
@@ -745,7 +737,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 3056,
+      "line": 3081,
       "method": "GET",
       "kind": "exact",
       "pattern": "/lab/model-caps",
@@ -753,7 +745,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 3074,
+      "line": 3099,
       "method": "GET",
       "kind": "exact",
       "pattern": "/lab/quick-models",
@@ -761,7 +753,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 3106,
+      "line": 3131,
       "method": "GET",
       "kind": "exact",
       "pattern": "/lab/filter-vocabulary",
@@ -769,7 +761,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 3120,
+      "line": 3145,
       "method": "POST",
       "kind": "exact",
       "pattern": "/lab/gate-preview",
@@ -777,7 +769,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 3140,
+      "line": 3165,
       "method": "POST",
       "kind": "exact",
       "pattern": "/lab/stale-tags",
@@ -785,7 +777,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 3164,
+      "line": 3189,
       "method": "GET",
       "kind": "exact",
       "pattern": "/lab/local-models",
@@ -793,7 +785,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 3175,
+      "line": 3200,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/lab\\/local-models\\/([^\\/]+)\\/download$",
@@ -801,7 +793,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 3222,
+      "line": 3247,
       "method": "POST",
       "kind": "exact",
       "pattern": "/lab/runs",
@@ -809,7 +801,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 3267,
+      "line": 3292,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/lab\\/runs\\/([^\\/]+)\\/([^\\/]+)$",
@@ -817,7 +809,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 3282,
+      "line": 3307,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/process\\/jobs\\/([^\\/]+)$",
@@ -825,7 +817,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 3305,
+      "line": 3330,
       "method": "GET",
       "kind": "exact",
       "pattern": "/chat/sessions",
@@ -833,7 +825,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 3322,
+      "line": 3347,
       "method": "POST",
       "kind": "exact",
       "pattern": "/chat/sessions",
@@ -841,7 +833,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 3337,
+      "line": 3362,
       "method": "DELETE",
       "kind": "regex",
       "pattern": "^\\/chat\\/sessions\\/([^\\/]+)$",
@@ -849,7 +841,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 3348,
+      "line": 3373,
       "method": "GET",
       "kind": "exact",
       "pattern": "/chat/messages",
@@ -857,7 +849,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 3370,
+      "line": 3395,
       "method": "POST",
       "kind": "exact",
       "pattern": "/chat/messages",
@@ -865,7 +857,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 3455,
+      "line": 3480,
       "method": "DELETE",
       "kind": "exact",
       "pattern": "/chat/messages",
@@ -873,7 +865,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 3464,
+      "line": 3489,
       "method": "POST",
       "kind": "exact",
       "pattern": "/chat/optimize-prompt",
@@ -881,7 +873,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 3549,
+      "line": 3574,
       "method": "GET",
       "kind": "exact",
       "pattern": "/creation-templates",
@@ -889,7 +881,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 3771,
+      "line": 3796,
       "method": "POST",
       "kind": "exact",
       "pattern": "/creation-templates",
@@ -897,7 +889,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 3838,
+      "line": 3863,
       "method": "PATCH",
       "kind": "regex",
       "pattern": "^\\/creation-templates\\/([^\\/]+)$",
@@ -905,7 +897,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 3957,
+      "line": 3982,
       "method": "DELETE",
       "kind": "regex",
       "pattern": "^\\/creation-templates\\/([^\\/]+)$",
@@ -913,7 +905,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 3987,
+      "line": 4012,
       "method": "*",
       "kind": "prefix",
       "pattern": "/base-library/",
@@ -921,7 +913,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 4000,
+      "line": 4025,
       "method": "POST",
       "kind": "exact",
       "pattern": "/ai/segment",
@@ -929,7 +921,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 4000,
+      "line": 4025,
       "method": "POST",
       "kind": "exact",
       "pattern": "/ai/detect",
@@ -937,7 +929,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 4150,
+      "line": 4175,
       "method": "GET",
       "kind": "exact",
       "pattern": "/products/presets",
@@ -945,7 +937,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 4205,
+      "line": 4230,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/(?:viewer\\/)?products\\/previews\\/([^\\/]+)$",
@@ -953,7 +945,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 4231,
+      "line": 4256,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/thumbs\\/([^\\/]+)$",
@@ -961,7 +953,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 4231,
+      "line": 4256,
       "method": "HEAD",
       "kind": "regex",
       "pattern": "^\\/thumbs\\/([^\\/]+)$",
@@ -969,7 +961,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 4292,
+      "line": 4317,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/(?:viewer\\/)?products\\/models\\/([^\\/]+)$",
@@ -977,7 +969,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 4321,
+      "line": 4346,
       "method": "POST",
       "kind": "exact",
       "pattern": "/products/upload",
@@ -985,7 +977,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 4442,
+      "line": 4467,
       "method": "PUT",
       "kind": "regex",
       "pattern": "^\\/products\\/presets\\/([^\\/]+)$",
@@ -993,7 +985,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 4442,
+      "line": 4467,
       "method": "PATCH",
       "kind": "regex",
       "pattern": "^\\/products\\/presets\\/([^\\/]+)$",
@@ -1001,7 +993,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 4442,
+      "line": 4467,
       "method": "DELETE",
       "kind": "regex",
       "pattern": "^\\/products\\/presets\\/([^\\/]+)$",
@@ -1009,7 +1001,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 4516,
+      "line": 4541,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/products\\/presets\\/([^\\/]+)\\/snapshots?$",
@@ -1017,7 +1009,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 4597,
+      "line": 4622,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/assets\\/([^\\/]+)\\/process$",
@@ -1025,7 +1017,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 4597,
+      "line": 4622,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/assets\\/([^\\/]+)\\/process$",
@@ -1033,7 +1025,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 4620,
+      "line": 4645,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/ai\\/masks\\/([^\\/]+)$",
@@ -1041,7 +1033,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 4633,
+      "line": 4658,
       "method": "POST",
       "kind": "exact",
       "pattern": "/ai/upload",
@@ -1049,7 +1041,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 4654,
+      "line": 4679,
       "method": "GET",
       "kind": "exact",
       "pattern": "/ai/capabilities",
@@ -1057,7 +1049,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 4660,
+      "line": 4685,
       "method": "POST",
       "kind": "exact",
       "pattern": "/exports/register",
@@ -1065,7 +1057,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 4699,
+      "line": 4724,
       "method": "POST",
       "kind": "exact",
       "pattern": "/edit/run",
@@ -1073,7 +1065,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 4788,
+      "line": 4813,
       "method": "GET",
       "kind": "exact",
       "pattern": "/custom-styles",
@@ -1081,7 +1073,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 4797,
+      "line": 4822,
       "method": "POST",
       "kind": "exact",
       "pattern": "/custom-styles",
@@ -1089,7 +1081,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 4813,
+      "line": 4838,
       "method": "PUT",
       "kind": "regex",
       "pattern": "^\\/custom-styles\\/([^/]+)$",
@@ -1097,7 +1089,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 4813,
+      "line": 4838,
       "method": "DELETE",
       "kind": "regex",
       "pattern": "^\\/custom-styles\\/([^/]+)$",
@@ -1105,7 +1097,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 4841,
+      "line": 4866,
       "method": "POST",
       "kind": "exact",
       "pattern": "/ai/style/analyze",
@@ -1113,7 +1105,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 4870,
+      "line": 4895,
       "method": "POST",
       "kind": "exact",
       "pattern": "/ai/expand-jimeng",
@@ -1121,7 +1113,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 4948,
+      "line": 4973,
       "method": "POST",
       "kind": "exact",
       "pattern": "/ai/vlm-describe",
@@ -1129,7 +1121,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 4986,
+      "line": 5011,
       "method": "POST",
       "kind": "exact",
       "pattern": "/ai/walkthrough/infer-topology",
@@ -1137,7 +1129,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 5005,
+      "line": 5030,
       "method": "POST",
       "kind": "exact",
       "pattern": "/ai/walkthrough/generate-3d",
@@ -1145,7 +1137,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 5018,
+      "line": 5043,
       "method": "POST",
       "kind": "exact",
       "pattern": "/ai/walkthrough/confirm-topology",
@@ -1153,7 +1145,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 5040,
+      "line": 5065,
       "method": "POST",
       "kind": "exact",
       "pattern": "/ai/walkthrough/infer-sequence",
@@ -1161,7 +1153,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 5057,
+      "line": 5082,
       "method": "POST",
       "kind": "exact",
       "pattern": "/ai/walkthrough/confirm-sequence",
@@ -1169,7 +1161,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 5091,
+      "line": 5116,
       "method": "POST",
       "kind": "exact",
       "pattern": "/ai/tasks",
@@ -1177,7 +1169,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 5112,
+      "line": 5137,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/ai\\/tasks\\/([^\\/]+)$",
@@ -1185,7 +1177,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 5122,
+      "line": 5147,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/assets\\/([^\\/]+)\\/ai\\/tasks$",
@@ -1193,7 +1185,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 5135,
+      "line": 5160,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/assets\\/([^\\/]+)\\/poster$",
@@ -1201,7 +1193,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 5135,
+      "line": 5160,
       "method": "HEAD",
       "kind": "regex",
       "pattern": "^\\/assets\\/([^\\/]+)\\/poster$",
@@ -1209,7 +1201,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 5227,
+      "line": 5252,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/assets\\/([^\\/]+)$",
@@ -1217,7 +1209,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 5244,
+      "line": 5269,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/assets\\/([^\\/]+)\\/similar$",
@@ -1225,7 +1217,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 5253,
+      "line": 5278,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/assets\\/([^\\/]+)\\/quality$",
@@ -1233,7 +1225,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 5282,
+      "line": 5307,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/assets\\/([^\\/]+)\\/tags$",
@@ -1241,7 +1233,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 5291,
+      "line": 5316,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/assets\\/([^\\/]+)\\/restage$",
@@ -1249,7 +1241,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 5407,
+      "line": 5432,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/assets\\/([^\\/]+)\\/(image|file|video)(?:\\/([^\\/]+))?$",
@@ -1257,7 +1249,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 5407,
+      "line": 5432,
       "method": "HEAD",
       "kind": "regex",
       "pattern": "^\\/assets\\/([^\\/]+)\\/(image|file|video)(?:\\/([^\\/]+))?$",
@@ -1265,7 +1257,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 5860,
+      "line": 5885,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/cache\\/temp\\/([^/]+)$",
@@ -1273,7 +1265,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 5860,
+      "line": 5885,
       "method": "HEAD",
       "kind": "regex",
       "pattern": "^\\/cache\\/temp\\/([^/]+)$",
@@ -1281,7 +1273,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 5911,
+      "line": 5936,
       "method": "POST",
       "kind": "exact",
       "pattern": "/scan",
@@ -1289,15 +1281,23 @@
     },
     {
       "file": "src/api.js",
-      "line": 5920,
-      "method": "GET",
-      "kind": "regex",
-      "pattern": "^\\/workflows\\/([^\\/]+)$",
-      "admin": true
+      "line": 5948,
+      "method": "*",
+      "kind": "exact",
+      "pattern": "/workflows/default",
+      "admin": false
     },
     {
       "file": "src/api.js",
-      "line": 5974,
+      "line": 5951,
+      "method": "*",
+      "kind": "regex",
+      "pattern": "^\\/workflows\\/([^\\/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 6028,
       "method": "PUT",
       "kind": "exact",
       "pattern": "/workflows/video",
@@ -1305,7 +1305,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 5993,
+      "line": 6047,
       "method": "POST",
       "kind": "exact",
       "pattern": "/workflows/video/start",
@@ -1313,7 +1313,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6021,
+      "line": 6075,
       "method": "GET",
       "kind": "exact",
       "pattern": "/workflows/video/assets",
@@ -1321,7 +1321,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6050,
+      "line": 6104,
       "method": "GET",
       "kind": "exact",
       "pattern": "/workflows/catalog",
@@ -1329,7 +1329,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6056,
+      "line": 6110,
       "method": "POST",
       "kind": "exact",
       "pattern": "/workflows",
@@ -1337,7 +1337,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6075,
+      "line": 6129,
       "method": "GET",
       "kind": "exact",
       "pattern": "/settings/runtime-config",
@@ -1345,7 +1345,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6081,
+      "line": 6135,
       "method": "PUT",
       "kind": "exact",
       "pattern": "/settings/runtime-config",
@@ -1353,7 +1353,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6081,
+      "line": 6135,
       "method": "POST",
       "kind": "exact",
       "pattern": "/settings/runtime-config",
@@ -1361,7 +1361,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6090,
+      "line": 6144,
       "method": "GET",
       "kind": "exact",
       "pattern": "/runs",
@@ -1369,7 +1369,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6218,
+      "line": 6272,
       "method": "POST",
       "kind": "exact",
       "pattern": "/runs",
@@ -1377,7 +1377,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6233,
+      "line": 6287,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/runs\\/([^\\/]+)\\/graph$",
@@ -1385,7 +1385,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6384,
+      "line": 6438,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/runs\\/([^\\/]+)$",
@@ -1393,7 +1393,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6445,
+      "line": 6499,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/runs\\/([^\\/]+)\\/unpack$",
@@ -1401,7 +1401,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6514,
+      "line": 6568,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/runs\\/([^\\/]+)\\/rerun-gen$",
@@ -1409,7 +1409,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6615,
+      "line": 6669,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/runs\\/([^\\/]+)\\/assets\\/([^\\/]+)$",
@@ -1417,7 +1417,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6641,
+      "line": 6695,
       "method": "GET",
       "kind": "exact",
       "pattern": "/exceptions",
@@ -1425,7 +1425,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6784,
+      "line": 6838,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/exceptions\\/(\\d+)\\/retry$",
@@ -1433,7 +1433,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6794,
+      "line": 6848,
       "method": "GET",
       "kind": "exact",
       "pattern": "/adapters",
@@ -1441,7 +1441,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6836,
+      "line": 6890,
       "method": "POST",
       "kind": "exact",
       "pattern": "/adapters",
@@ -1449,7 +1449,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6855,
+      "line": 6909,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/adapters\\/([^\\/]+)\\/toggle$",
@@ -1457,7 +1457,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6864,
+      "line": 6918,
       "method": "DELETE",
       "kind": "regex",
       "pattern": "^\\/adapters\\/([^\\/]+)$",
@@ -1465,7 +1465,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6875,
+      "line": 6929,
       "method": "POST",
       "kind": "exact",
       "pattern": "/adapters/test",
@@ -1473,7 +1473,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6905,
+      "line": 6959,
       "method": "GET",
       "kind": "exact",
       "pattern": "/providers",
@@ -1481,7 +1481,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6911,
+      "line": 6965,
       "method": "GET",
       "kind": "exact",
       "pattern": "/providers/newapi/models",
@@ -1489,7 +1489,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6931,
+      "line": 6985,
       "method": "GET",
       "kind": "exact",
       "pattern": "/providers/env-keys",
@@ -1497,7 +1497,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6937,
+      "line": 6991,
       "method": "GET",
       "kind": "exact",
       "pattern": "/providers/env-secrets",
@@ -1505,7 +1505,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6951,
+      "line": 7005,
       "method": "POST",
       "kind": "exact",
       "pattern": "/providers/env-secrets",
@@ -1513,7 +1513,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6963,
+      "line": 7017,
       "method": "POST",
       "kind": "exact",
       "pattern": "/providers",
@@ -1521,7 +1521,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6975,
+      "line": 7029,
       "method": "DELETE",
       "kind": "regex",
       "pattern": "^\\/providers\\/([^\\/]+)$",
@@ -1529,7 +1529,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 6988,
+      "line": 7042,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/providers\\/([^\\/]+)\\/toggle$",
@@ -1537,7 +1537,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7003,
+      "line": 7057,
       "method": "POST",
       "kind": "exact",
       "pattern": "/providers/litellm/toggle-batch",
@@ -1545,7 +1545,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7012,
+      "line": 7066,
       "method": "GET",
       "kind": "exact",
       "pattern": "/models",
@@ -1553,7 +1553,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7020,
+      "line": 7074,
       "method": "POST",
       "kind": "exact",
       "pattern": "/models",
@@ -1561,7 +1561,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7032,
+      "line": 7086,
       "method": "DELETE",
       "kind": "regex",
       "pattern": "^\\/models\\/([^\\/]+)$",
@@ -1569,7 +1569,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7041,
+      "line": 7095,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/models\\/([^\\/]+)\\/toggle$",
@@ -1577,7 +1577,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7051,
+      "line": 7105,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/models\\/([^\\/]+)\\/test$",
@@ -1585,7 +1585,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7065,
+      "line": 7119,
       "method": "POST",
       "kind": "exact",
       "pattern": "/models/sync-litellm",
@@ -1593,7 +1593,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7079,
+      "line": 7133,
       "method": "POST",
       "kind": "exact",
       "pattern": "/runs/retry-all-failed",
@@ -1601,7 +1601,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7131,
+      "line": 7185,
       "method": "PUT",
       "kind": "exact",
       "pattern": "/gateway/config",
@@ -1609,7 +1609,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7131,
+      "line": 7185,
       "method": "POST",
       "kind": "exact",
       "pattern": "/gateway/config",
@@ -1617,7 +1617,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7143,
+      "line": 7197,
       "method": "POST",
       "kind": "exact",
       "pattern": "/gateway/purge",
@@ -1625,7 +1625,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7155,
+      "line": 7209,
       "method": "POST",
       "kind": "exact",
       "pattern": "/gateway/regurgitate",
@@ -1633,7 +1633,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7171,
+      "line": 7225,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/assets\\/([^\\/]+)\\/main-derivative$",
@@ -1641,7 +1641,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7189,
+      "line": 7243,
       "method": "POST",
       "kind": "exact",
       "pattern": "/assets/ingest",
@@ -1649,7 +1649,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7226,
+      "line": 7281,
       "method": "GET",
       "kind": "exact",
       "pattern": "/tag-vocab",
@@ -1657,7 +1657,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7239,
+      "line": 7294,
       "method": "POST",
       "kind": "exact",
       "pattern": "/ba-resource/pull",
@@ -1665,7 +1665,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7255,
+      "line": 7310,
       "method": "GET",
       "kind": "exact",
       "pattern": "/ba-resource/recent",
@@ -1673,7 +1673,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7268,
+      "line": 7323,
       "method": "GET",
       "kind": "exact",
       "pattern": "/settings/backup",
@@ -1681,7 +1681,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7273,
+      "line": 7328,
       "method": "POST",
       "kind": "exact",
       "pattern": "/settings/backup",
@@ -1689,7 +1689,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7281,
+      "line": 7336,
       "method": "GET",
       "kind": "exact",
       "pattern": "/snapshot-status",
@@ -1697,7 +1697,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7305,
+      "line": 7360,
       "method": "GET",
       "kind": "exact",
       "pattern": "/sync-log",
@@ -1705,7 +1705,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7318,
+      "line": 7373,
       "method": "GET",
       "kind": "exact",
       "pattern": "/vectors/status",
@@ -1713,7 +1713,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7331,
+      "line": 7386,
       "method": "POST",
       "kind": "exact",
       "pattern": "/vectors/recompute",
@@ -1721,7 +1721,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7393,
+      "line": 7448,
       "method": "POST",
       "kind": "exact",
       "pattern": "/runs/restage-backfill",
@@ -1729,7 +1729,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7402,
+      "line": 7457,
       "method": "GET",
       "kind": "exact",
       "pattern": "/governance/gen-models",
@@ -1737,7 +1737,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7411,
+      "line": 7466,
       "method": "GET",
       "kind": "exact",
       "pattern": "/governance/litellm-groups",
@@ -1745,7 +1745,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7427,
+      "line": 7482,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/governance\\/litellm-groups\\/([^/]+)\\/members$",
@@ -1753,7 +1753,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7445,
+      "line": 7500,
       "method": "DELETE",
       "kind": "regex",
       "pattern": "^\\/governance\\/litellm-groups\\/([^/]+)\\/members\\/([^/]+)$",
@@ -1761,7 +1761,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7461,
+      "line": 7516,
       "method": "POST",
       "kind": "exact",
       "pattern": "/governance/gen-models/preview-convert",
@@ -1769,7 +1769,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7498,
+      "line": 7553,
       "method": "POST",
       "kind": "exact",
       "pattern": "/governance/gen-models",
@@ -1777,7 +1777,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7510,
+      "line": 7565,
       "method": "PUT",
       "kind": "regex",
       "pattern": "^\\/governance\\/gen-models\\/([^/]+)\\/schema$",
@@ -1785,7 +1785,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7521,
+      "line": 7576,
       "method": "DELETE",
       "kind": "regex",
       "pattern": "^\\/governance\\/gen-models\\/([^/]+)$",
@@ -1793,7 +1793,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7533,
+      "line": 7588,
       "method": "PUT",
       "kind": "regex",
       "pattern": "^\\/governance\\/gen-models\\/([^/]+)\\/polish$",
@@ -1801,7 +1801,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7545,
+      "line": 7600,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/governance\\/gen-models\\/([^/]+)\\/toggle$",
@@ -1809,7 +1809,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7561,
+      "line": 7616,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/governance\\/gen-models\\/([^/]+)\\/polish\\/reset$",
@@ -1817,7 +1817,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7573,
+      "line": 7628,
       "method": "GET",
       "kind": "exact",
       "pattern": "/governance/workflows",
@@ -1825,7 +1825,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7582,
+      "line": 7637,
       "method": "PUT",
       "kind": "exact",
       "pattern": "/governance/workflows",
@@ -1833,7 +1833,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7582,
+      "line": 7637,
       "method": "POST",
       "kind": "exact",
       "pattern": "/governance/workflows",
@@ -1841,7 +1841,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7595,
+      "line": 7650,
       "method": "GET",
       "kind": "exact",
       "pattern": "/governance/prompts",
@@ -1849,7 +1849,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7604,
+      "line": 7659,
       "method": "POST",
       "kind": "exact",
       "pattern": "/governance/prompts",
@@ -1857,7 +1857,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7615,
+      "line": 7670,
       "method": "DELETE",
       "kind": "regex",
       "pattern": "^\\/governance\\/prompts\\/([^/]+)$",
@@ -1865,7 +1865,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7627,
+      "line": 7682,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/governance\\/prompts\\/([^/]+)\\/restore$",
@@ -1873,7 +1873,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7641,
+      "line": 7696,
       "method": "GET",
       "kind": "exact",
       "pattern": "/governance/mount-points",
@@ -1881,7 +1881,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7650,
+      "line": 7705,
       "method": "POST",
       "kind": "exact",
       "pattern": "/governance/mount-points",
@@ -1889,7 +1889,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7661,
+      "line": 7716,
       "method": "DELETE",
       "kind": "regex",
       "pattern": "^\\/governance\\/mount-points\\/([^/]+)$",
@@ -1897,7 +1897,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7673,
+      "line": 7728,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/governance\\/mount-points\\/([^/]+)\\/modules$",
@@ -1905,7 +1905,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7673,
+      "line": 7728,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/governance\\/mount-points\\/([^/]+)\\/modules$",
@@ -1913,7 +1913,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7696,
+      "line": 7751,
       "method": "DELETE",
       "kind": "regex",
       "pattern": "^\\/governance\\/mount-points\\/([^/]+)\\/modules\\/([^/]+)$",
@@ -1921,7 +1921,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7708,
+      "line": 7763,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/governance\\/mount-points\\/([^/]+)\\/reorder$",
@@ -1929,7 +1929,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7722,
+      "line": 7777,
       "method": "GET",
       "kind": "exact",
       "pattern": "/governance/operators",
@@ -1937,7 +1937,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7732,
+      "line": 7787,
       "method": "GET",
       "kind": "exact",
       "pattern": "/governance/dict-macros",
@@ -1945,7 +1945,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7742,
+      "line": 7797,
       "method": "GET",
       "kind": "exact",
       "pattern": "/governance/snippets",
@@ -1953,7 +1953,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7751,
+      "line": 7806,
       "method": "POST",
       "kind": "exact",
       "pattern": "/governance/snippets",
@@ -1961,7 +1961,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7762,
+      "line": 7817,
       "method": "DELETE",
       "kind": "regex",
       "pattern": "^\\/governance\\/snippets\\/([^/]+)$",
@@ -1969,7 +1969,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7774,
+      "line": 7829,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/governance\\/snippets\\/([^/]+)\\/restore$",
@@ -1977,7 +1977,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7787,
+      "line": 7842,
       "method": "POST",
       "kind": "exact",
       "pattern": "/governance/prompts/preview-compile",
@@ -1985,7 +1985,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7818,
+      "line": 7873,
       "method": "POST",
       "kind": "exact",
       "pattern": "/governance/sandbox/run-node",
@@ -1993,7 +1993,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 7985,
+      "line": 8040,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/governance\\/mount-points\\/([^/]+)\\/execute$",
@@ -2001,7 +2001,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8045,
+      "line": 8100,
       "method": "GET",
       "kind": "exact",
       "pattern": "/governance/gen-jobs",
@@ -2009,7 +2009,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8053,
+      "line": 8108,
       "method": "PUT",
       "kind": "regex",
       "pattern": "^\\/governance\\/gen-jobs\\/([^/]+)$",
@@ -2017,7 +2017,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8064,
+      "line": 8119,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/governance\\/gen-jobs\\/([^/]+)\\/reset$",
@@ -2025,7 +2025,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8076,
+      "line": 8131,
       "method": "GET",
       "kind": "exact",
       "pattern": "/governance/manual-defaults",
@@ -2033,7 +2033,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8084,
+      "line": 8139,
       "method": "PUT",
       "kind": "exact",
       "pattern": "/governance/manual-defaults",
@@ -2041,7 +2041,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8096,
+      "line": 8151,
       "method": "POST",
       "kind": "exact",
       "pattern": "/governance/draft-from-doc",
@@ -2049,7 +2049,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8113,
+      "line": 8168,
       "method": "GET",
       "kind": "exact",
       "pattern": "/governance/skill-drafts",
@@ -2057,7 +2057,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8163,
+      "line": 8218,
       "method": "POST",
       "kind": "exact",
       "pattern": "/governance/skill-drafts",
@@ -2065,7 +2065,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8247,
+      "line": 8302,
       "method": "PUT",
       "kind": "regex",
       "pattern": "^\\/governance\\/skill-drafts\\/([^/]+)$",
@@ -2073,7 +2073,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8247,
+      "line": 8302,
       "method": "DELETE",
       "kind": "regex",
       "pattern": "^\\/governance\\/skill-drafts\\/([^/]+)$",
@@ -2081,7 +2081,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8284,
+      "line": 8339,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/governance\\/skill-drafts\\/([^/]+)\\/accept$",
@@ -2089,7 +2089,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8296,
+      "line": 8351,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/governance\\/models\\/([^/]+)\\/deprecate-skill$",
@@ -2097,7 +2097,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8311,
+      "line": 8366,
       "method": "GET",
       "kind": "exact",
       "pattern": "/studio/color-schemes",
@@ -2105,7 +2105,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8333,
+      "line": 8388,
       "method": "PUT",
       "kind": "exact",
       "pattern": "/studio/color-schemes",
@@ -2113,7 +2113,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8376,
+      "line": 8431,
       "method": "POST",
       "kind": "exact",
       "pattern": "/chat/suggest-prompts",
@@ -2121,7 +2121,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8441,
+      "line": 8496,
       "method": "POST",
       "kind": "exact",
       "pattern": "/gen/preview",
@@ -2129,7 +2129,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8517,
+      "line": 8572,
       "method": "POST",
       "kind": "exact",
       "pattern": "/gen/images",
@@ -2137,7 +2137,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8622,
+      "line": 8677,
       "method": "POST",
       "kind": "exact",
       "pattern": "/gen/videos",
@@ -2145,7 +2145,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8740,
+      "line": 8795,
       "method": "POST",
       "kind": "exact",
       "pattern": "/gen/audio",
@@ -2153,7 +2153,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8797,
+      "line": 8852,
       "method": "POST",
       "kind": "exact",
       "pattern": "/gen/chat",
@@ -2161,7 +2161,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8886,
+      "line": 8941,
       "method": "POST",
       "kind": "exact",
       "pattern": "/skills/create",
@@ -2169,7 +2169,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8899,
+      "line": 8954,
       "method": "GET",
       "kind": "exact",
       "pattern": "/dict",
@@ -2177,7 +2177,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8908,
+      "line": 8963,
       "method": "POST",
       "kind": "exact",
       "pattern": "/dict",
@@ -2185,7 +2185,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8918,
+      "line": 8973,
       "method": "POST",
       "kind": "exact",
       "pattern": "/dict/deprecate",
@@ -2193,7 +2193,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8928,
+      "line": 8983,
       "method": "POST",
       "kind": "exact",
       "pattern": "/dict/restore",
@@ -2201,7 +2201,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8938,
+      "line": 8993,
       "method": "POST",
       "kind": "exact",
       "pattern": "/dict/retag/estimate",
@@ -2209,7 +2209,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8949,
+      "line": 9004,
       "method": "POST",
       "kind": "exact",
       "pattern": "/dict/retag",
@@ -2217,7 +2217,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8976,
+      "line": 9031,
       "method": "GET",
       "kind": "exact",
       "pattern": "/dict/retag/jobs",
@@ -2225,7 +2225,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8980,
+      "line": 9035,
       "method": "GET",
       "kind": "exact",
       "pattern": "/dict/audit",
@@ -2233,7 +2233,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8985,
+      "line": 9040,
       "method": "POST",
       "kind": "exact",
       "pattern": "/dict/draft-criteria",
@@ -2241,7 +2241,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8990,
+      "line": 9045,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/dict\\/audit\\/(\\d+)\\/assets$",
@@ -2249,7 +2249,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 8995,
+      "line": 9050,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/assets\\/([^\\/]+)\\/tag-history$",
@@ -2257,7 +2257,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 9003,
+      "line": 9058,
       "method": "GET",
       "kind": "exact",
       "pattern": "/users",
@@ -2265,7 +2265,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 9009,
+      "line": 9064,
       "method": "POST",
       "kind": "exact",
       "pattern": "/users",
@@ -2273,7 +2273,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 9022,
+      "line": 9077,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/users\\/(\\d+)\\/password$",
@@ -2281,7 +2281,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 9022,
+      "line": 9077,
       "method": "PUT",
       "kind": "regex",
       "pattern": "^\\/users\\/(\\d+)\\/password$",
@@ -2289,7 +2289,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 9037,
+      "line": 9092,
       "method": "POST",
       "kind": "exact",
       "pattern": "/users/password",
@@ -2297,7 +2297,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 9037,
+      "line": 9092,
       "method": "PUT",
       "kind": "exact",
       "pattern": "/users/password",
@@ -2305,7 +2305,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 9056,
+      "line": 9111,
       "method": "DELETE",
       "kind": "regex",
       "pattern": "^\\/users\\/(\\d+)$",
@@ -2313,7 +2313,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 9056,
+      "line": 9111,
       "method": "PUT",
       "kind": "regex",
       "pattern": "^\\/users\\/(\\d+)$",
@@ -2321,7 +2321,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 9086,
+      "line": 9141,
       "method": "POST",
       "kind": "exact",
       "pattern": "/upload",
@@ -2337,7 +2337,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 89,
+      "line": 100,
       "method": "PATCH",
       "kind": "regex",
       "pattern": "^\\/base-library\\/items\\/([^/]+)$",
@@ -2345,7 +2345,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 89,
+      "line": 100,
       "method": "DELETE",
       "kind": "regex",
       "pattern": "^\\/base-library\\/items\\/([^/]+)$",
@@ -2353,7 +2353,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 115,
+      "line": 126,
       "method": "GET",
       "kind": "exact",
       "pattern": "/base-library/schemes",
@@ -2361,7 +2361,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 124,
+      "line": 135,
       "method": "GET",
       "kind": "exact",
       "pattern": "/base-library/styles",
@@ -2369,7 +2369,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 130,
+      "line": 141,
       "method": "POST",
       "kind": "exact",
       "pattern": "/base-library/styles",
@@ -2377,7 +2377,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 141,
+      "line": 152,
       "method": "POST",
       "kind": "exact",
       "pattern": "/base-library/styles/analyze",
@@ -2385,7 +2385,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 155,
+      "line": 166,
       "method": "PATCH",
       "kind": "regex",
       "pattern": "^\\/base-library\\/styles\\/([^/]+)$",
@@ -2393,7 +2393,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 155,
+      "line": 166,
       "method": "DELETE",
       "kind": "regex",
       "pattern": "^\\/base-library\\/styles\\/([^/]+)$",
@@ -2401,7 +2401,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 165,
+      "line": 176,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/base-library\\/schemes\\/([^/]+)\\/compile$",
@@ -2409,7 +2409,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 178,
+      "line": 189,
       "method": "GET",
       "kind": "exact",
       "pattern": "/base-library/suggest",
@@ -2417,7 +2417,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 192,
+      "line": 203,
       "method": "POST",
       "kind": "exact",
       "pattern": "/base-library/space/extract",
@@ -2425,7 +2425,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 211,
+      "line": 222,
       "method": "GET",
       "kind": "exact",
       "pattern": "/base-library/space/recommend",
@@ -2433,7 +2433,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 223,
+      "line": 234,
       "method": "GET",
       "kind": "exact",
       "pattern": "/base-library/guides",
@@ -2441,7 +2441,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 228,
+      "line": 239,
       "method": "POST",
       "kind": "exact",
       "pattern": "/base-library/guides",
@@ -2449,7 +2449,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 238,
+      "line": 249,
       "method": "PATCH",
       "kind": "regex",
       "pattern": "^\\/base-library\\/guides\\/([^/]+)$",
@@ -2457,7 +2457,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 238,
+      "line": 249,
       "method": "DELETE",
       "kind": "regex",
       "pattern": "^\\/base-library\\/guides\\/([^/]+)$",
@@ -2465,7 +2465,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 259,
+      "line": 270,
       "method": "GET",
       "kind": "exact",
       "pattern": "/base-library/taxonomy",
@@ -2473,7 +2473,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 265,
+      "line": 276,
       "method": "GET",
       "kind": "exact",
       "pattern": "/base-library/dictionary",
@@ -2481,7 +2481,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 273,
+      "line": 284,
       "method": "POST",
       "kind": "exact",
       "pattern": "/base-library/parts",
@@ -2489,7 +2489,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 284,
+      "line": 295,
       "method": "PATCH",
       "kind": "regex",
       "pattern": "^\\/base-library\\/parts\\/([^\\/]+)$",
@@ -2497,7 +2497,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 284,
+      "line": 295,
       "method": "DELETE",
       "kind": "regex",
       "pattern": "^\\/base-library\\/parts\\/([^\\/]+)$",
@@ -2505,7 +2505,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 303,
+      "line": 314,
       "method": "POST",
       "kind": "exact",
       "pattern": "/base-library/categories",
@@ -2513,7 +2513,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 314,
+      "line": 325,
       "method": "PATCH",
       "kind": "regex",
       "pattern": "^\\/base-library\\/categories\\/([^\\/]+)$",
@@ -2521,7 +2521,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 314,
+      "line": 325,
       "method": "DELETE",
       "kind": "regex",
       "pattern": "^\\/base-library\\/categories\\/([^\\/]+)$",
@@ -2529,7 +2529,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 333,
+      "line": 344,
       "method": "GET",
       "kind": "exact",
       "pattern": "/base-library/swatches",
@@ -2537,7 +2537,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 347,
+      "line": 358,
       "method": "POST",
       "kind": "exact",
       "pattern": "/base-library/swatches",
@@ -2545,7 +2545,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 358,
+      "line": 369,
       "method": "PATCH",
       "kind": "regex",
       "pattern": "^\\/base-library\\/swatches\\/([^\\/]+)$",
@@ -2553,7 +2553,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 358,
+      "line": 369,
       "method": "DELETE",
       "kind": "regex",
       "pattern": "^\\/base-library\\/swatches\\/([^\\/]+)$",
@@ -2561,7 +2561,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 377,
+      "line": 388,
       "method": "POST",
       "kind": "exact",
       "pattern": "/base-library/swatches/recommend-for-region",
@@ -2569,7 +2569,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 395,
+      "line": 406,
       "method": "POST",
       "kind": "exact",
       "pattern": "/base-library/swatches/recognize-vlm",
@@ -2577,7 +2577,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 413,
+      "line": 424,
       "method": "GET",
       "kind": "exact",
       "pattern": "/base-library/part-policy",
@@ -2585,7 +2585,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 428,
+      "line": 439,
       "method": "GET",
       "kind": "exact",
       "pattern": "/base-library/materials",
@@ -2593,7 +2593,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 456,
+      "line": 467,
       "method": "PATCH",
       "kind": "regex",
       "pattern": "^\\/base-library\\/materials\\/([^/]+)$",
@@ -2601,7 +2601,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 477,
+      "line": 488,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/base-library\\/materials\\/([^\\/]+)\\/basecolor$",
@@ -2609,7 +2609,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 477,
+      "line": 488,
       "method": "HEAD",
       "kind": "regex",
       "pattern": "^\\/base-library\\/materials\\/([^\\/]+)\\/basecolor$",
@@ -2617,7 +2617,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 513,
+      "line": 524,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/base-library\\/items\\/([^/]+)\\/(preview|scene)$",
@@ -2625,7 +2625,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 513,
+      "line": 524,
       "method": "HEAD",
       "kind": "regex",
       "pattern": "^\\/base-library\\/items\\/([^/]+)\\/(preview|scene)$",
@@ -2633,7 +2633,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 626,
+      "line": 637,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/base-library\\/materials\\/([^\\/]+)\\/preview$",
@@ -2641,7 +2641,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 626,
+      "line": 637,
       "method": "HEAD",
       "kind": "regex",
       "pattern": "^\\/base-library\\/materials\\/([^\\/]+)\\/preview$",
@@ -2649,7 +2649,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 649,
+      "line": 660,
       "method": "POST",
       "kind": "exact",
       "pattern": "/base-library/materials/search",
@@ -2657,7 +2657,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 649,
+      "line": 660,
       "method": "GET",
       "kind": "exact",
       "pattern": "/base-library/materials/search",
@@ -2665,7 +2665,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 693,
+      "line": 704,
       "method": "POST",
       "kind": "exact",
       "pattern": "/base-library/materials/draft",
@@ -2673,7 +2673,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 768,
+      "line": 779,
       "method": "POST",
       "kind": "exact",
       "pattern": "/base-library/materials/confirm",
@@ -2681,7 +2681,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 791,
+      "line": 802,
       "method": "GET",
       "kind": "exact",
       "pattern": "/base-library/paints",
@@ -2689,7 +2689,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 825,
+      "line": 836,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/base-library\\/paints\\/([^\\/]+)\\/swatch$",
@@ -2697,7 +2697,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 825,
+      "line": 836,
       "method": "HEAD",
       "kind": "regex",
       "pattern": "^\\/base-library\\/paints\\/([^\\/]+)\\/swatch$",
@@ -2705,7 +2705,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 851,
+      "line": 862,
       "method": "PATCH",
       "kind": "regex",
       "pattern": "^\\/base-library\\/paints\\/([^\\/]+)$",
@@ -2713,7 +2713,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 910,
+      "line": 921,
       "method": "GET",
       "kind": "exact",
       "pattern": "/base-library/paints/mirror",
@@ -2721,7 +2721,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 910,
+      "line": 921,
       "method": "POST",
       "kind": "exact",
       "pattern": "/base-library/paints/mirror",
@@ -2729,7 +2729,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 950,
+      "line": 961,
       "method": "GET",
       "kind": "exact",
       "pattern": "/base-library/lights",
@@ -2737,16 +2737,8 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 956,
+      "line": 967,
       "method": "GET",
-      "kind": "exact",
-      "pattern": "/base-library/models",
-      "admin": false
-    },
-    {
-      "file": "src/base-library/routes.js",
-      "line": 956,
-      "method": "POST",
       "kind": "exact",
       "pattern": "/base-library/models",
       "admin": false
@@ -2754,6 +2746,14 @@
     {
       "file": "src/base-library/routes.js",
       "line": 967,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/base-library/models",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 978,
       "method": "GET",
       "kind": "exact",
       "pattern": "/base-library/preset-slots",
@@ -2761,7 +2761,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 973,
+      "line": 984,
       "method": "GET",
       "kind": "exact",
       "pattern": "/base-library/flags",
@@ -2769,7 +2769,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 978,
+      "line": 989,
       "method": "PUT",
       "kind": "exact",
       "pattern": "/base-library/flags",
@@ -2777,7 +2777,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 992,
+      "line": 1003,
       "method": "PUT",
       "kind": "regex",
       "pattern": "^\\/base-library\\/flags\\/([^\\/]+)$",
@@ -2785,7 +2785,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 1004,
+      "line": 1015,
       "method": "POST",
       "kind": "exact",
       "pattern": "/base-library/classify-region",
@@ -2793,7 +2793,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 1145,
+      "line": 1156,
       "method": "GET",
       "kind": "exact",
       "pattern": "/base-library/catalog/sources",
@@ -2801,7 +2801,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 1151,
+      "line": 1162,
       "method": "POST",
       "kind": "exact",
       "pattern": "/base-library/catalog/pull",
@@ -2809,7 +2809,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 1202,
+      "line": 1213,
       "method": "POST",
       "kind": "exact",
       "pattern": "/base-library/catalog/extract-preview",
@@ -2817,7 +2817,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 1223,
+      "line": 1234,
       "method": "POST",
       "kind": "exact",
       "pattern": "/base-library/catalog/extract",
@@ -2825,7 +2825,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 1272,
+      "line": 1283,
       "method": "POST",
       "kind": "exact",
       "pattern": "/base-library/catalog/distill-preview",
@@ -2833,7 +2833,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 1295,
+      "line": 1306,
       "method": "POST",
       "kind": "exact",
       "pattern": "/base-library/catalog/distill",
@@ -2841,7 +2841,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 1350,
+      "line": 1361,
       "method": "POST",
       "kind": "exact",
       "pattern": "/base-library/schemes/draft",
@@ -2849,7 +2849,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 1358,
+      "line": 1369,
       "method": "POST",
       "kind": "exact",
       "pattern": "/base-library/schemes",
@@ -2857,7 +2857,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 1370,
+      "line": 1381,
       "method": "PUT",
       "kind": "regex",
       "pattern": "^\\/base-library\\/schemes\\/([^/]+)\\/slots$",
@@ -2865,7 +2865,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 1381,
+      "line": 1392,
       "method": "PATCH",
       "kind": "regex",
       "pattern": "^\\/base-library\\/schemes\\/([^/]+)$",
@@ -2873,7 +2873,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 1381,
+      "line": 1392,
       "method": "DELETE",
       "kind": "regex",
       "pattern": "^\\/base-library\\/schemes\\/([^/]+)$",
@@ -2881,7 +2881,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 1398,
+      "line": 1409,
       "method": "GET",
       "kind": "exact",
       "pattern": "/base-library/bindings",
@@ -2889,7 +2889,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 1412,
+      "line": 1423,
       "method": "PUT",
       "kind": "regex",
       "pattern": "^\\/base-library\\/bindings\\/([^\\/]+)$",
@@ -2897,7 +2897,7 @@
     },
     {
       "file": "src/base-library/routes.js",
-      "line": 1436,
+      "line": 1447,
       "method": "POST",
       "kind": "exact",
       "pattern": "/base-library/compile",
@@ -3031,16 +3031,6 @@
     {
       "method": "POST",
       "source": "^\\/assets\\/trash\\/restore$",
-      "duplicated": false
-    },
-    {
-      "method": "POST",
-      "source": "^\\/assets\\/trash\\/purge$",
-      "duplicated": false
-    },
-    {
-      "method": "POST",
-      "source": "^\\/assets\\/trash\\/rehome-gate$",
       "duplicated": false
     },
     {
@@ -3284,6 +3274,11 @@
       "duplicated": false
     },
     {
+      "method": "GET",
+      "source": "^\\/lab\\/local-models\\/[^\\/]+\\/download$",
+      "duplicated": false
+    },
+    {
       "method": "POST",
       "source": "^\\/lab\\/gate-preview$",
       "duplicated": false
@@ -3475,61 +3470,6 @@
     },
     {
       "method": "GET",
-      "source": "^\\/governance\\/gen-models$",
-      "duplicated": false
-    },
-    {
-      "method": "GET",
-      "source": "^\\/governance\\/gen-jobs$",
-      "duplicated": false
-    },
-    {
-      "method": "GET",
-      "source": "^\\/governance\\/workflows$",
-      "duplicated": false
-    },
-    {
-      "method": "GET",
-      "source": "^\\/governance\\/prompts$",
-      "duplicated": false
-    },
-    {
-      "method": "GET",
-      "source": "^\\/governance\\/mount-points$",
-      "duplicated": false
-    },
-    {
-      "method": "GET",
-      "source": "^\\/governance\\/mount-points\\/[^\\/]+\\/modules$",
-      "duplicated": false
-    },
-    {
-      "method": "GET",
-      "source": "^\\/governance\\/operators$",
-      "duplicated": false
-    },
-    {
-      "method": "GET",
-      "source": "^\\/governance\\/dict-macros$",
-      "duplicated": false
-    },
-    {
-      "method": "GET",
-      "source": "^\\/governance\\/snippets$",
-      "duplicated": false
-    },
-    {
-      "method": "POST",
-      "source": "^\\/governance\\/prompts\\/preview-compile$",
-      "duplicated": false
-    },
-    {
-      "method": "GET",
-      "source": "^\\/runs\\/[^\\/]+\\/unpack$",
-      "duplicated": false
-    },
-    {
-      "method": "GET",
       "source": "^\\/thumbs\\/[^\\/]+$",
       "duplicated": false
     },
@@ -3659,22 +3599,7 @@
       "duplicated": false
     },
     {
-      "method": "POST",
-      "source": "^\\/assets\\/similarity-workbench\\/resolve$",
-      "duplicated": false
-    },
-    {
-      "method": "POST",
-      "source": "^\\/assets\\/similarity-workbench\\/clean-exact$",
-      "duplicated": false
-    },
-    {
       "method": "GET",
-      "source": "^\\/assets\\/similarity-workbench\\/ignored$",
-      "duplicated": false
-    },
-    {
-      "method": "DELETE",
       "source": "^\\/assets\\/similarity-workbench\\/ignored$",
       "duplicated": false
     },
@@ -3696,7 +3621,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/auth/login@src/api.js:1722"
+        "route": "exact:/auth/login@src/api.js:1751"
       },
       {
         "file": "web/src/api.js",
@@ -3708,7 +3633,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/auth/logout@src/api.js:1738"
+        "route": "exact:/auth/logout@src/api.js:1767"
       },
       {
         "file": "web/src/api.js",
@@ -3720,7 +3645,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/auth/me@src/api.js:1856"
+        "route": "exact:/auth/me@src/api.js:1885"
       },
       {
         "file": "web/src/api.js",
@@ -3732,7 +3657,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/auth/quark-status@src/api.js:2702"
+        "route": "exact:/auth/quark-status@src/api.js:2734"
       },
       {
         "file": "web/src/api.js",
@@ -3744,7 +3669,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/auth/quark-login@src/api.js:2706"
+        "route": "exact:/auth/quark-login@src/api.js:2738"
       },
       {
         "file": "web/src/api.js",
@@ -3756,7 +3681,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/auth/quark-install@src/api.js:2713"
+        "route": "exact:/auth/quark-install@src/api.js:2745"
       },
       {
         "file": "web/src/api.js",
@@ -3768,7 +3693,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/assets@src/api.js:2742"
+        "route": "exact:/assets@src/api.js:2774"
       },
       {
         "file": "web/src/api.js",
@@ -3780,7 +3705,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/assets\\/([^\\/]+)$@src/api.js:5227"
+        "route": "regex:^\\/assets\\/([^\\/]+)$@src/api.js:5252"
       },
       {
         "file": "web/src/api.js",
@@ -3804,7 +3729,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/assets\\/([^\\/]+)\\/similar$@src/api.js:5244"
+        "route": "regex:^\\/assets\\/([^\\/]+)\\/similar$@src/api.js:5269"
       },
       {
         "file": "web/src/api.js",
@@ -3816,7 +3741,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/assets\\/([^\\/]+)\\/tags$@src/api.js:5282"
+        "route": "regex:^\\/assets\\/([^\\/]+)\\/tags$@src/api.js:5307"
       },
       {
         "file": "web/src/api.js",
@@ -3828,7 +3753,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/assets\\/([^\\/]+)\\/restage$@src/api.js:5291"
+        "route": "regex:^\\/assets\\/([^\\/]+)\\/restage$@src/api.js:5316"
       },
       {
         "file": "web/src/api.js",
@@ -3840,7 +3765,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/assets\\/([^\\/]+)\\/main-derivative$@src/api.js:7171"
+        "route": "regex:^\\/assets\\/([^\\/]+)\\/main-derivative$@src/api.js:7225"
       },
       {
         "file": "web/src/api.js",
@@ -3852,7 +3777,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/assets/ingest@src/api.js:7189"
+        "route": "exact:/assets/ingest@src/api.js:7243"
       },
       {
         "file": "web/src/api.js",
@@ -3864,7 +3789,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/ba-resource/pull@src/api.js:7239"
+        "route": "exact:/ba-resource/pull@src/api.js:7294"
       },
       {
         "file": "web/src/api.js",
@@ -3876,7 +3801,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/settings/backup@src/api.js:7268"
+        "route": "exact:/settings/backup@src/api.js:7323"
       },
       {
         "file": "web/src/api.js",
@@ -3888,7 +3813,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/settings/backup@src/api.js:7273"
+        "route": "exact:/settings/backup@src/api.js:7328"
       },
       {
         "file": "web/src/api.js",
@@ -3900,35 +3825,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/snapshot-status@src/api.js:7281"
+        "route": "exact:/snapshot-status@src/api.js:7336"
       },
       {
         "file": "web/src/api.js",
         "line": 81,
-        "method": "POST",
-        "pattern": "^/dup-groups/[^/]+/ungroup$",
-        "example": "/dup-groups/example/ungroup",
-        "concrete": false,
-        "viewer": false,
-        "via": "web",
-        "matched": false,
-        "route": null
-      },
-      {
-        "file": "web/src/api.js",
-        "line": 82,
-        "method": "POST",
-        "pattern": "^/dup-groups/recluster$",
-        "example": "/dup-groups/recluster",
-        "concrete": true,
-        "viewer": false,
-        "via": "web",
-        "matched": false,
-        "route": null
-      },
-      {
-        "file": "web/src/api.js",
-        "line": 83,
         "method": "GET",
         "pattern": "^/runs/[^/]+/assets/[^/]+$",
         "example": "/runs/example/assets/example",
@@ -3936,11 +3837,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/runs\\/([^\\/]+)\\/assets\\/([^\\/]+)$@src/api.js:6615"
+        "route": "regex:^\\/runs\\/([^\\/]+)\\/assets\\/([^\\/]+)$@src/api.js:6669"
       },
       {
         "file": "web/src/api.js",
-        "line": 84,
+        "line": 82,
         "method": "GET",
         "pattern": "^/workflows/catalog$",
         "example": "/workflows/catalog",
@@ -3948,11 +3849,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/workflows/catalog@src/api.js:6050"
+        "route": "exact:/workflows/catalog@src/api.js:6104"
       },
       {
         "file": "web/src/api.js",
-        "line": 129,
+        "line": 127,
         "method": "GET",
         "pattern": "^/stats$",
         "example": "/stats",
@@ -3960,11 +3861,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/stats@src/api.js:2788"
+        "route": "exact:/stats@src/api.js:2820"
       },
       {
         "file": "web/src/api.js",
-        "line": 130,
+        "line": 128,
         "method": "POST",
         "pattern": "^/scan$",
         "example": "/scan",
@@ -3972,11 +3873,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/scan@src/api.js:5911"
+        "route": "exact:/scan@src/api.js:5936"
       },
       {
         "file": "web/src/api.js",
-        "line": 133,
+        "line": 131,
         "method": "GET",
         "pattern": "^/workflows/default$",
         "example": "/workflows/default",
@@ -3984,11 +3885,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/workflows\\/([^\\/]+)$@src/api.js:5920"
+        "route": "exact:/workflows/default@src/api.js:5948"
       },
       {
         "file": "web/src/api.js",
-        "line": 134,
+        "line": 132,
         "method": "GET",
         "pattern": "^/workflows/[^/]+$",
         "example": "/workflows/example",
@@ -3996,11 +3897,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/workflows\\/([^\\/]+)$@src/api.js:5920"
+        "route": "regex:^\\/workflows\\/([^\\/]+)$@src/api.js:5951"
       },
       {
         "file": "web/src/api.js",
-        "line": 135,
+        "line": 133,
         "method": "POST",
         "pattern": "^/workflows$",
         "example": "/workflows",
@@ -4008,11 +3909,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/workflows@src/api.js:6056"
+        "route": "exact:/workflows@src/api.js:6110"
       },
       {
         "file": "web/src/api.js",
-        "line": 136,
+        "line": 134,
         "method": "PUT",
         "pattern": "^/workflows/video$",
         "example": "/workflows/video",
@@ -4020,11 +3921,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/workflows/video@src/api.js:5974"
+        "route": "exact:/workflows/video@src/api.js:6028"
       },
       {
         "file": "web/src/api.js",
-        "line": 137,
+        "line": 135,
         "method": "POST",
         "pattern": "^/workflows/video/start$",
         "example": "/workflows/video/start",
@@ -4032,11 +3933,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/workflows/video/start@src/api.js:5993"
+        "route": "exact:/workflows/video/start@src/api.js:6047"
       },
       {
         "file": "web/src/api.js",
-        "line": 138,
+        "line": 136,
         "method": "GET",
         "pattern": "^/workflows/video/assets\\$",
         "example": "/workflows/video/assets",
@@ -4044,11 +3945,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/workflows/video/assets@src/api.js:6021"
+        "route": "exact:/workflows/video/assets@src/api.js:6075"
       },
       {
         "file": "web/src/api.js",
-        "line": 141,
+        "line": 139,
         "method": "GET",
         "pattern": "^/settings/runtime-config$",
         "example": "/settings/runtime-config",
@@ -4056,11 +3957,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/settings/runtime-config@src/api.js:6075"
+        "route": "exact:/settings/runtime-config@src/api.js:6129"
       },
       {
         "file": "web/src/api.js",
-        "line": 142,
+        "line": 140,
         "method": "PUT",
         "pattern": "^/settings/runtime-config$",
         "example": "/settings/runtime-config",
@@ -4068,11 +3969,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/settings/runtime-config@src/api.js:6081"
+        "route": "exact:/settings/runtime-config@src/api.js:6135"
       },
       {
         "file": "web/src/api.js",
-        "line": 145,
+        "line": 143,
         "method": "GET",
         "pattern": "^/runs$",
         "example": "/runs",
@@ -4080,11 +3981,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/runs@src/api.js:6090"
+        "route": "exact:/runs@src/api.js:6144"
       },
       {
         "file": "web/src/api.js",
-        "line": 146,
+        "line": 144,
         "method": "GET",
         "pattern": "^/runs/[^/]+\\$",
         "example": "/runs/example",
@@ -4092,11 +3993,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/runs\\/([^\\/]+)$@src/api.js:6384"
+        "route": "regex:^\\/runs\\/([^\\/]+)$@src/api.js:6438"
       },
       {
         "file": "web/src/api.js",
-        "line": 147,
+        "line": 145,
         "method": "POST",
         "pattern": "^/runs$",
         "example": "/runs",
@@ -4104,11 +4005,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/runs@src/api.js:6218"
+        "route": "exact:/runs@src/api.js:6272"
       },
       {
         "file": "web/src/api.js",
-        "line": 148,
+        "line": 146,
         "method": "GET",
         "pattern": "^/exceptions$",
         "example": "/exceptions",
@@ -4116,11 +4017,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/exceptions@src/api.js:6641"
+        "route": "exact:/exceptions@src/api.js:6695"
       },
       {
         "file": "web/src/api.js",
-        "line": 154,
+        "line": 152,
         "method": "GET",
         "pattern": "^/exceptions\\$",
         "example": "/exceptions",
@@ -4128,11 +4029,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/exceptions@src/api.js:6641"
+        "route": "exact:/exceptions@src/api.js:6695"
       },
       {
         "file": "web/src/api.js",
-        "line": 159,
+        "line": 157,
         "method": "POST",
         "pattern": "^/exceptions/[^/]+/retry$",
         "example": "/exceptions/example/retry",
@@ -4140,11 +4041,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/exceptions\\/(\\d+)\\/retry$@src/api.js:6784"
+        "route": "regex:^\\/exceptions\\/(\\d+)\\/retry$@src/api.js:6838"
       },
       {
         "file": "web/src/api.js",
-        "line": 164,
+        "line": 162,
         "method": "GET",
         "pattern": "^/adapters$",
         "example": "/adapters",
@@ -4152,11 +4053,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/adapters@src/api.js:6794"
+        "route": "exact:/adapters@src/api.js:6848"
       },
       {
         "file": "web/src/api.js",
-        "line": 173,
+        "line": 171,
         "method": "POST",
         "pattern": "^/adapters$",
         "example": "/adapters",
@@ -4164,11 +4065,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/adapters@src/api.js:6836"
+        "route": "exact:/adapters@src/api.js:6890"
       },
       {
         "file": "web/src/api.js",
-        "line": 174,
+        "line": 172,
         "method": "DELETE",
         "pattern": "^/adapters/[^/]+$",
         "example": "/adapters/example",
@@ -4176,11 +4077,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/adapters\\/([^\\/]+)$@src/api.js:6864"
+        "route": "regex:^\\/adapters\\/([^\\/]+)$@src/api.js:6918"
       },
       {
         "file": "web/src/api.js",
-        "line": 175,
+        "line": 173,
         "method": "POST",
         "pattern": "^/adapters/[^/]+/toggle$",
         "example": "/adapters/example/toggle",
@@ -4188,11 +4089,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/adapters\\/([^\\/]+)\\/toggle$@src/api.js:6855"
+        "route": "regex:^\\/adapters\\/([^\\/]+)\\/toggle$@src/api.js:6909"
       },
       {
         "file": "web/src/api.js",
-        "line": 176,
+        "line": 174,
         "method": "POST",
         "pattern": "^/adapters/test$",
         "example": "/adapters/test",
@@ -4200,47 +4101,47 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/adapters/test@src/api.js:6875"
+        "route": "exact:/adapters/test@src/api.js:6929"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 177,
+        "method": "GET",
+        "pattern": "^/providers$",
+        "example": "/providers",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/providers@src/api.js:6959"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 178,
+        "method": "GET",
+        "pattern": "^/providers/env-secrets$",
+        "example": "/providers/env-secrets",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/providers/env-secrets@src/api.js:6991"
       },
       {
         "file": "web/src/api.js",
         "line": 179,
-        "method": "GET",
-        "pattern": "^/providers$",
-        "example": "/providers",
+        "method": "POST",
+        "pattern": "^/providers/env-secrets$",
+        "example": "/providers/env-secrets",
         "concrete": true,
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/providers@src/api.js:6905"
+        "route": "exact:/providers/env-secrets@src/api.js:7005"
       },
       {
         "file": "web/src/api.js",
         "line": 180,
-        "method": "GET",
-        "pattern": "^/providers/env-secrets$",
-        "example": "/providers/env-secrets",
-        "concrete": true,
-        "viewer": false,
-        "via": "web",
-        "matched": true,
-        "route": "exact:/providers/env-secrets@src/api.js:6937"
-      },
-      {
-        "file": "web/src/api.js",
-        "line": 181,
-        "method": "POST",
-        "pattern": "^/providers/env-secrets$",
-        "example": "/providers/env-secrets",
-        "concrete": true,
-        "viewer": false,
-        "via": "web",
-        "matched": true,
-        "route": "exact:/providers/env-secrets@src/api.js:6951"
-      },
-      {
-        "file": "web/src/api.js",
-        "line": 182,
         "method": "POST",
         "pattern": "^/providers$",
         "example": "/providers",
@@ -4248,11 +4149,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/providers@src/api.js:6963"
+        "route": "exact:/providers@src/api.js:7017"
       },
       {
         "file": "web/src/api.js",
-        "line": 183,
+        "line": 181,
         "method": "DELETE",
         "pattern": "^/providers/[^/]+$",
         "example": "/providers/example",
@@ -4260,11 +4161,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/providers\\/([^\\/]+)$@src/api.js:6975"
+        "route": "regex:^\\/providers\\/([^\\/]+)$@src/api.js:7029"
       },
       {
         "file": "web/src/api.js",
-        "line": 184,
+        "line": 182,
         "method": "POST",
         "pattern": "^/providers/[^/]+/toggle$",
         "example": "/providers/example/toggle",
@@ -4272,11 +4173,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/providers\\/([^\\/]+)\\/toggle$@src/api.js:6988"
+        "route": "regex:^\\/providers\\/([^\\/]+)\\/toggle$@src/api.js:7042"
       },
       {
         "file": "web/src/api.js",
-        "line": 188,
+        "line": 186,
         "method": "GET",
         "pattern": "^/models$",
         "example": "/models",
@@ -4284,11 +4185,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/models@src/api.js:7012"
+        "route": "exact:/models@src/api.js:7066"
       },
       {
         "file": "web/src/api.js",
-        "line": 190,
+        "line": 188,
         "method": "POST",
         "pattern": "^/models$",
         "example": "/models",
@@ -4296,11 +4197,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/models@src/api.js:7020"
+        "route": "exact:/models@src/api.js:7074"
       },
       {
         "file": "web/src/api.js",
-        "line": 191,
+        "line": 189,
         "method": "DELETE",
         "pattern": "^/models/[^/]+$",
         "example": "/models/example",
@@ -4308,11 +4209,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/models\\/([^\\/]+)$@src/api.js:7032"
+        "route": "regex:^\\/models\\/([^\\/]+)$@src/api.js:7086"
       },
       {
         "file": "web/src/api.js",
-        "line": 192,
+        "line": 190,
         "method": "POST",
         "pattern": "^/models/[^/]+/toggle$",
         "example": "/models/example/toggle",
@@ -4320,11 +4221,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/models\\/([^\\/]+)\\/toggle$@src/api.js:7041"
+        "route": "regex:^\\/models\\/([^\\/]+)\\/toggle$@src/api.js:7095"
       },
       {
         "file": "web/src/api.js",
-        "line": 193,
+        "line": 191,
         "method": "POST",
         "pattern": "^/models/[^/]+/test$",
         "example": "/models/example/test",
@@ -4332,11 +4233,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/models\\/([^\\/]+)\\/test$@src/api.js:7051"
+        "route": "regex:^\\/models\\/([^\\/]+)\\/test$@src/api.js:7105"
       },
       {
         "file": "web/src/api.js",
-        "line": 194,
+        "line": 192,
         "method": "POST",
         "pattern": "^/models/sync-litellm$",
         "example": "/models/sync-litellm",
@@ -4344,11 +4245,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/models/sync-litellm@src/api.js:7065"
+        "route": "exact:/models/sync-litellm@src/api.js:7119"
       },
       {
         "file": "web/src/api.js",
-        "line": 195,
+        "line": 193,
         "method": "POST",
         "pattern": "^/providers/litellm/toggle-batch$",
         "example": "/providers/litellm/toggle-batch",
@@ -4356,11 +4257,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/providers/litellm/toggle-batch@src/api.js:7003"
+        "route": "exact:/providers/litellm/toggle-batch@src/api.js:7057"
       },
       {
         "file": "web/src/api.js",
-        "line": 196,
+        "line": 194,
         "method": "POST",
         "pattern": "^/runs/retry-all-failed$",
         "example": "/runs/retry-all-failed",
@@ -4368,11 +4269,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/runs/retry-all-failed@src/api.js:7079"
+        "route": "exact:/runs/retry-all-failed@src/api.js:7133"
       },
       {
         "file": "web/src/api.js",
-        "line": 203,
+        "line": 201,
         "method": "GET",
         "pattern": "^/runs/[^/]+/graph$",
         "example": "/runs/example/graph",
@@ -4380,11 +4281,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/runs\\/([^\\/]+)\\/graph$@src/api.js:6233"
+        "route": "regex:^\\/runs\\/([^\\/]+)\\/graph$@src/api.js:6287"
       },
       {
         "file": "web/src/api.js",
-        "line": 205,
+        "line": 203,
         "method": "POST",
         "pattern": "^/runs/restage-backfill$",
         "example": "/runs/restage-backfill",
@@ -4392,11 +4293,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/runs/restage-backfill@src/api.js:7393"
+        "route": "exact:/runs/restage-backfill@src/api.js:7448"
       },
       {
         "file": "web/src/api.js",
-        "line": 206,
+        "line": 204,
         "method": "GET",
         "pattern": "^/vectors/status$",
         "example": "/vectors/status",
@@ -4404,11 +4305,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/vectors/status@src/api.js:7318"
+        "route": "exact:/vectors/status@src/api.js:7373"
       },
       {
         "file": "web/src/api.js",
-        "line": 207,
+        "line": 205,
         "method": "POST",
         "pattern": "^/vectors/recompute$",
         "example": "/vectors/recompute",
@@ -4416,23 +4317,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/vectors/recompute@src/api.js:7331"
+        "route": "exact:/vectors/recompute@src/api.js:7386"
       },
       {
         "file": "web/src/api.js",
-        "line": 210,
-        "method": "POST",
-        "pattern": "^/dup-groups/[^/]+/representative$",
-        "example": "/dup-groups/example/representative",
-        "concrete": false,
-        "viewer": false,
-        "via": "web",
-        "matched": false,
-        "route": null
-      },
-      {
-        "file": "web/src/api.js",
-        "line": 213,
+        "line": 208,
         "method": "GET",
         "pattern": "^/dict\\$",
         "example": "/dict",
@@ -4440,11 +4329,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/dict@src/api.js:8899"
+        "route": "exact:/dict@src/api.js:8954"
       },
       {
         "file": "web/src/api.js",
-        "line": 214,
+        "line": 209,
         "method": "POST",
         "pattern": "^/dict$",
         "example": "/dict",
@@ -4452,11 +4341,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/dict@src/api.js:8908"
+        "route": "exact:/dict@src/api.js:8963"
       },
       {
         "file": "web/src/api.js",
-        "line": 215,
+        "line": 210,
         "method": "POST",
         "pattern": "^/dict/deprecate$",
         "example": "/dict/deprecate",
@@ -4464,11 +4353,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/dict/deprecate@src/api.js:8918"
+        "route": "exact:/dict/deprecate@src/api.js:8973"
       },
       {
         "file": "web/src/api.js",
-        "line": 216,
+        "line": 211,
         "method": "POST",
         "pattern": "^/dict/restore$",
         "example": "/dict/restore",
@@ -4476,11 +4365,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/dict/restore@src/api.js:8928"
+        "route": "exact:/dict/restore@src/api.js:8983"
       },
       {
         "file": "web/src/api.js",
-        "line": 217,
+        "line": 212,
         "method": "POST",
         "pattern": "^/dict/draft-criteria$",
         "example": "/dict/draft-criteria",
@@ -4488,11 +4377,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/dict/draft-criteria@src/api.js:8985"
+        "route": "exact:/dict/draft-criteria@src/api.js:9040"
       },
       {
         "file": "web/src/api.js",
-        "line": 218,
+        "line": 213,
         "method": "POST",
         "pattern": "^/dict/retag/estimate$",
         "example": "/dict/retag/estimate",
@@ -4500,11 +4389,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/dict/retag/estimate@src/api.js:8938"
+        "route": "exact:/dict/retag/estimate@src/api.js:8993"
       },
       {
         "file": "web/src/api.js",
-        "line": 219,
+        "line": 214,
         "method": "POST",
         "pattern": "^/dict/retag$",
         "example": "/dict/retag",
@@ -4512,11 +4401,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/dict/retag@src/api.js:8949"
+        "route": "exact:/dict/retag@src/api.js:9004"
       },
       {
         "file": "web/src/api.js",
-        "line": 220,
+        "line": 215,
         "method": "GET",
         "pattern": "^/dict/retag/jobs$",
         "example": "/dict/retag/jobs",
@@ -4524,11 +4413,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/dict/retag/jobs@src/api.js:8976"
+        "route": "exact:/dict/retag/jobs@src/api.js:9031"
       },
       {
         "file": "web/src/api.js",
-        "line": 221,
+        "line": 216,
         "method": "GET",
         "pattern": "^/dict/audit$",
         "example": "/dict/audit",
@@ -4536,11 +4425,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/dict/audit@src/api.js:8980"
+        "route": "exact:/dict/audit@src/api.js:9035"
       },
       {
         "file": "web/src/api.js",
-        "line": 222,
+        "line": 217,
         "method": "GET",
         "pattern": "^/dict/audit/[^/]+/assets$",
         "example": "/dict/audit/example/assets",
@@ -4548,11 +4437,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/dict\\/audit\\/(\\d+)\\/assets$@src/api.js:8990"
+        "route": "regex:^\\/dict\\/audit\\/(\\d+)\\/assets$@src/api.js:9045"
       },
       {
         "file": "web/src/api.js",
-        "line": 223,
+        "line": 218,
         "method": "GET",
         "pattern": "^/assets/[^/]+/tag-history$",
         "example": "/assets/example/tag-history",
@@ -4560,11 +4449,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/assets\\/([^\\/]+)\\/tag-history$@src/api.js:8995"
+        "route": "regex:^\\/assets\\/([^\\/]+)\\/tag-history$@src/api.js:9050"
       },
       {
         "file": "web/src/api.js",
-        "line": 224,
+        "line": 219,
         "method": "GET",
         "pattern": "^/users$",
         "example": "/users",
@@ -4572,11 +4461,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/users@src/api.js:9003"
+        "route": "exact:/users@src/api.js:9058"
       },
       {
         "file": "web/src/api.js",
-        "line": 225,
+        "line": 220,
         "method": "POST",
         "pattern": "^/users$",
         "example": "/users",
@@ -4584,11 +4473,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/users@src/api.js:9009"
+        "route": "exact:/users@src/api.js:9064"
       },
       {
         "file": "web/src/api.js",
-        "line": 226,
+        "line": 221,
         "method": "POST",
         "pattern": "^/users/[^/]+/password$",
         "example": "/users/example/password",
@@ -4596,11 +4485,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/users\\/(\\d+)\\/password$@src/api.js:9022"
+        "route": "regex:^\\/users\\/(\\d+)\\/password$@src/api.js:9077"
       },
       {
         "file": "web/src/api.js",
-        "line": 227,
+        "line": 222,
         "method": "DELETE",
         "pattern": "^/users/[^/]+$",
         "example": "/users/example",
@@ -4608,11 +4497,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/users\\/(\\d+)$@src/api.js:9056"
+        "route": "regex:^\\/users\\/(\\d+)$@src/api.js:9111"
       },
       {
         "file": "web/src/api.js",
-        "line": 228,
+        "line": 223,
         "method": "PUT",
         "pattern": "^/users/[^/]+$",
         "example": "/users/example",
@@ -4620,11 +4509,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/users\\/(\\d+)$@src/api.js:9056"
+        "route": "regex:^\\/users\\/(\\d+)$@src/api.js:9111"
       },
       {
         "file": "web/src/api.js",
-        "line": 231,
+        "line": 226,
         "method": "GET",
         "pattern": "^/lab/capabilities$",
         "example": "/lab/capabilities",
@@ -4632,11 +4521,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/lab/capabilities@src/api.js:3045"
+        "route": "exact:/lab/capabilities@src/api.js:3070"
       },
       {
         "file": "web/src/api.js",
-        "line": 232,
+        "line": 227,
         "method": "POST",
         "pattern": "^/lab/runs$",
         "example": "/lab/runs",
@@ -4644,11 +4533,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/lab/runs@src/api.js:3222"
+        "route": "exact:/lab/runs@src/api.js:3247"
       },
       {
         "file": "web/src/api.js",
-        "line": 234,
+        "line": 229,
         "method": "GET",
         "pattern": "^/lab/runs/[^/]+/[^/]+$",
         "example": "/lab/runs/example/example",
@@ -4656,11 +4545,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/lab\\/runs\\/([^\\/]+)\\/([^\\/]+)$@src/api.js:3267"
+        "route": "regex:^\\/lab\\/runs\\/([^\\/]+)\\/([^\\/]+)$@src/api.js:3292"
       },
       {
         "file": "web/src/api.js",
-        "line": 235,
+        "line": 230,
         "method": "GET",
         "pattern": "^/process/jobs/[^/]+$",
         "example": "/process/jobs/example",
@@ -4668,11 +4557,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/process\\/jobs\\/([^\\/]+)$@src/api.js:3282"
+        "route": "regex:^\\/process\\/jobs\\/([^\\/]+)$@src/api.js:3307"
       },
       {
         "file": "web/src/api.js",
-        "line": 237,
+        "line": 232,
         "method": "GET",
         "pattern": "^/governance/gen-models$",
         "example": "/governance/gen-models",
@@ -4680,11 +4569,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/governance/gen-models@src/api.js:7402"
+        "route": "exact:/governance/gen-models@src/api.js:7457"
       },
       {
         "file": "web/src/api.js",
-        "line": 240,
+        "line": 235,
         "method": "GET",
         "pattern": "^/governance/litellm-groups\\$",
         "example": "/governance/litellm-groups",
@@ -4692,11 +4581,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/governance/litellm-groups@src/api.js:7411"
+        "route": "exact:/governance/litellm-groups@src/api.js:7466"
       },
       {
         "file": "web/src/api.js",
-        "line": 247,
+        "line": 242,
         "method": "POST",
         "pattern": "^/governance/litellm-groups/[^/]+/members$",
         "example": "/governance/litellm-groups/example/members",
@@ -4704,11 +4593,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "prefix:/governance/@src/api.js:1592"
+        "route": "prefix:/governance/@src/api.js:1621"
       },
       {
         "file": "web/src/api.js",
-        "line": 254,
+        "line": 249,
         "method": "DELETE",
         "pattern": "^/governance/litellm-groups/[^/]+/members/[^/]+$",
         "example": "/governance/litellm-groups/example/members/example",
@@ -4716,11 +4605,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "prefix:/governance/@src/api.js:1592"
+        "route": "prefix:/governance/@src/api.js:1621"
       },
       {
         "file": "web/src/api.js",
-        "line": 259,
+        "line": 254,
         "method": "POST",
         "pattern": "^/governance/gen-models$",
         "example": "/governance/gen-models",
@@ -4728,11 +4617,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/governance/gen-models@src/api.js:7498"
+        "route": "exact:/governance/gen-models@src/api.js:7553"
       },
       {
         "file": "web/src/api.js",
-        "line": 260,
+        "line": 255,
         "method": "POST",
         "pattern": "^/governance/gen-models/preview-convert$",
         "example": "/governance/gen-models/preview-convert",
@@ -4740,11 +4629,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/governance/gen-models/preview-convert@src/api.js:7461"
+        "route": "exact:/governance/gen-models/preview-convert@src/api.js:7516"
       },
       {
         "file": "web/src/api.js",
-        "line": 261,
+        "line": 256,
         "method": "PUT",
         "pattern": "^/governance/gen-models/[^/]+/schema$",
         "example": "/governance/gen-models/example/schema",
@@ -4752,11 +4641,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "prefix:/governance/@src/api.js:1592"
+        "route": "prefix:/governance/@src/api.js:1621"
       },
       {
         "file": "web/src/api.js",
-        "line": 262,
+        "line": 257,
         "method": "DELETE",
         "pattern": "^/governance/gen-models/[^/]+$",
         "example": "/governance/gen-models/example",
@@ -4764,11 +4653,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "prefix:/governance/@src/api.js:1592"
+        "route": "prefix:/governance/@src/api.js:1621"
       },
       {
         "file": "web/src/api.js",
-        "line": 263,
+        "line": 258,
         "method": "PUT",
         "pattern": "^/governance/gen-models/[^/]+/polish$",
         "example": "/governance/gen-models/example/polish",
@@ -4776,11 +4665,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "prefix:/governance/@src/api.js:1592"
+        "route": "prefix:/governance/@src/api.js:1621"
       },
       {
         "file": "web/src/api.js",
-        "line": 264,
+        "line": 259,
         "method": "GET",
         "pattern": "^/governance/gen-jobs$",
         "example": "/governance/gen-jobs",
@@ -4788,11 +4677,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/governance/gen-jobs@src/api.js:8045"
+        "route": "exact:/governance/gen-jobs@src/api.js:8100"
       },
       {
         "file": "web/src/api.js",
-        "line": 265,
+        "line": 260,
         "method": "PUT",
         "pattern": "^/governance/gen-jobs/[^/]+$",
         "example": "/governance/gen-jobs/example",
@@ -4800,11 +4689,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "prefix:/governance/@src/api.js:1592"
+        "route": "prefix:/governance/@src/api.js:1621"
       },
       {
         "file": "web/src/api.js",
-        "line": 266,
+        "line": 261,
         "method": "POST",
         "pattern": "^/governance/gen-jobs/[^/]+/reset$",
         "example": "/governance/gen-jobs/example/reset",
@@ -4812,11 +4701,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "prefix:/governance/@src/api.js:1592"
+        "route": "prefix:/governance/@src/api.js:1621"
       },
       {
         "file": "web/src/api.js",
-        "line": 267,
+        "line": 262,
         "method": "GET",
         "pattern": "^/governance/manual-defaults$",
         "example": "/governance/manual-defaults",
@@ -4824,11 +4713,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/governance/manual-defaults@src/api.js:8076"
+        "route": "exact:/governance/manual-defaults@src/api.js:8131"
       },
       {
         "file": "web/src/api.js",
-        "line": 268,
+        "line": 263,
         "method": "PUT",
         "pattern": "^/governance/manual-defaults$",
         "example": "/governance/manual-defaults",
@@ -4836,11 +4725,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/governance/manual-defaults@src/api.js:8084"
+        "route": "exact:/governance/manual-defaults@src/api.js:8139"
       },
       {
         "file": "web/src/api.js",
-        "line": 271,
+        "line": 266,
         "method": "GET",
         "pattern": "^/providers/env-keys$",
         "example": "/providers/env-keys",
@@ -4848,11 +4737,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/providers/env-keys@src/api.js:6931"
+        "route": "exact:/providers/env-keys@src/api.js:6985"
       },
       {
         "file": "web/src/api.js",
-        "line": 272,
+        "line": 267,
         "method": "GET",
         "pattern": "^/governance/workflows$",
         "example": "/governance/workflows",
@@ -4860,11 +4749,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/governance/workflows@src/api.js:7573"
+        "route": "exact:/governance/workflows@src/api.js:7628"
       },
       {
         "file": "web/src/api.js",
-        "line": 273,
+        "line": 268,
         "method": "PUT",
         "pattern": "^/governance/workflows$",
         "example": "/governance/workflows",
@@ -4872,11 +4761,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/governance/workflows@src/api.js:7582"
+        "route": "exact:/governance/workflows@src/api.js:7637"
       },
       {
         "file": "web/src/api.js",
-        "line": 274,
+        "line": 269,
         "method": "GET",
         "pattern": "^/runs/[^/]+/unpack$",
         "example": "/runs/example/unpack",
@@ -4884,11 +4773,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/runs\\/([^\\/]+)\\/unpack$@src/api.js:6445"
+        "route": "regex:^\\/runs\\/([^\\/]+)\\/unpack$@src/api.js:6499"
       },
       {
         "file": "web/src/api.js",
-        "line": 275,
+        "line": 270,
         "method": "POST",
         "pattern": "^/runs/[^/]+/rerun-gen$",
         "example": "/runs/example/rerun-gen",
@@ -4896,11 +4785,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/runs\\/([^\\/]+)\\/rerun-gen$@src/api.js:6514"
+        "route": "regex:^\\/runs\\/([^\\/]+)\\/rerun-gen$@src/api.js:6568"
       },
       {
         "file": "web/src/api.js",
-        "line": 276,
+        "line": 271,
         "method": "POST",
         "pattern": "^/governance/draft-from-doc$",
         "example": "/governance/draft-from-doc",
@@ -4908,11 +4797,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/governance/draft-from-doc@src/api.js:8096"
+        "route": "exact:/governance/draft-from-doc@src/api.js:8151"
       },
       {
         "file": "web/src/api.js",
-        "line": 277,
+        "line": 272,
         "method": "GET",
         "pattern": "^/governance/skill-drafts$",
         "example": "/governance/skill-drafts",
@@ -4920,11 +4809,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/governance/skill-drafts@src/api.js:8113"
+        "route": "exact:/governance/skill-drafts@src/api.js:8168"
       },
       {
         "file": "web/src/api.js",
-        "line": 278,
+        "line": 273,
         "method": "POST",
         "pattern": "^/governance/skill-drafts$",
         "example": "/governance/skill-drafts",
@@ -4932,11 +4821,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/governance/skill-drafts@src/api.js:8163"
+        "route": "exact:/governance/skill-drafts@src/api.js:8218"
       },
       {
         "file": "web/src/api.js",
-        "line": 279,
+        "line": 274,
         "method": "PUT",
         "pattern": "^/governance/skill-drafts/[^/]+$",
         "example": "/governance/skill-drafts/example",
@@ -4944,11 +4833,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "prefix:/governance/@src/api.js:1592"
+        "route": "prefix:/governance/@src/api.js:1621"
       },
       {
         "file": "web/src/api.js",
-        "line": 280,
+        "line": 275,
         "method": "DELETE",
         "pattern": "^/governance/skill-drafts/[^/]+$",
         "example": "/governance/skill-drafts/example",
@@ -4956,11 +4845,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "prefix:/governance/@src/api.js:1592"
+        "route": "prefix:/governance/@src/api.js:1621"
       },
       {
         "file": "web/src/api.js",
-        "line": 281,
+        "line": 276,
         "method": "POST",
         "pattern": "^/governance/skill-drafts/[^/]+/accept$",
         "example": "/governance/skill-drafts/example/accept",
@@ -4968,11 +4857,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "prefix:/governance/@src/api.js:1592"
+        "route": "prefix:/governance/@src/api.js:1621"
       },
       {
         "file": "web/src/api.js",
-        "line": 282,
+        "line": 277,
         "method": "POST",
         "pattern": "^/governance/gen-models/[^/]+/toggle$",
         "example": "/governance/gen-models/example/toggle",
@@ -4980,11 +4869,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "prefix:/governance/@src/api.js:1592"
+        "route": "prefix:/governance/@src/api.js:1621"
       },
       {
         "file": "web/src/api.js",
-        "line": 283,
+        "line": 278,
         "method": "POST",
         "pattern": "^/chat/optimize-prompt$",
         "example": "/chat/optimize-prompt",
@@ -4992,11 +4881,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/chat/optimize-prompt@src/api.js:3464"
+        "route": "exact:/chat/optimize-prompt@src/api.js:3489"
       },
       {
         "file": "web/src/api.js",
-        "line": 286,
+        "line": 281,
         "method": "GET",
         "pattern": "^/governance/operators$",
         "example": "/governance/operators",
@@ -5004,11 +4893,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/governance/operators@src/api.js:7722"
+        "route": "exact:/governance/operators@src/api.js:7777"
       },
       {
         "file": "web/src/api.js",
-        "line": 287,
+        "line": 282,
         "method": "GET",
         "pattern": "^/governance/dict-macros$",
         "example": "/governance/dict-macros",
@@ -5016,11 +4905,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/governance/dict-macros@src/api.js:7732"
+        "route": "exact:/governance/dict-macros@src/api.js:7787"
       },
       {
         "file": "web/src/api.js",
-        "line": 288,
+        "line": 283,
         "method": "GET",
         "pattern": "^/governance/snippets$",
         "example": "/governance/snippets",
@@ -5028,11 +4917,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/governance/snippets@src/api.js:7742"
+        "route": "exact:/governance/snippets@src/api.js:7797"
       },
       {
         "file": "web/src/api.js",
-        "line": 289,
+        "line": 284,
         "method": "POST",
         "pattern": "^/governance/snippets$",
         "example": "/governance/snippets",
@@ -5040,11 +4929,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/governance/snippets@src/api.js:7751"
+        "route": "exact:/governance/snippets@src/api.js:7806"
       },
       {
         "file": "web/src/api.js",
-        "line": 290,
+        "line": 285,
         "method": "DELETE",
         "pattern": "^/governance/snippets/[^/]+$",
         "example": "/governance/snippets/example",
@@ -5052,11 +4941,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "prefix:/governance/@src/api.js:1592"
+        "route": "prefix:/governance/@src/api.js:1621"
       },
       {
         "file": "web/src/api.js",
-        "line": 291,
+        "line": 286,
         "method": "POST",
         "pattern": "^/governance/snippets/[^/]+/restore$",
         "example": "/governance/snippets/example/restore",
@@ -5064,11 +4953,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "prefix:/governance/@src/api.js:1592"
+        "route": "prefix:/governance/@src/api.js:1621"
       },
       {
         "file": "web/src/api.js",
-        "line": 292,
+        "line": 287,
         "method": "POST",
         "pattern": "^/governance/prompts/preview-compile$",
         "example": "/governance/prompts/preview-compile",
@@ -5076,11 +4965,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/governance/prompts/preview-compile@src/api.js:7787"
+        "route": "exact:/governance/prompts/preview-compile@src/api.js:7842"
       },
       {
         "file": "web/src/api.js",
-        "line": 293,
+        "line": 288,
         "method": "POST",
         "pattern": "^/governance/sandbox/run-node$",
         "example": "/governance/sandbox/run-node",
@@ -5088,11 +4977,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/governance/sandbox/run-node@src/api.js:7818"
+        "route": "exact:/governance/sandbox/run-node@src/api.js:7873"
       },
       {
         "file": "web/src/api.js",
-        "line": 296,
+        "line": 291,
         "method": "GET",
         "pattern": "^/governance/prompts$",
         "example": "/governance/prompts",
@@ -5100,11 +4989,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/governance/prompts@src/api.js:7595"
+        "route": "exact:/governance/prompts@src/api.js:7650"
       },
       {
         "file": "web/src/api.js",
-        "line": 297,
+        "line": 292,
         "method": "POST",
         "pattern": "^/governance/prompts$",
         "example": "/governance/prompts",
@@ -5112,11 +5001,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/governance/prompts@src/api.js:7604"
+        "route": "exact:/governance/prompts@src/api.js:7659"
       },
       {
         "file": "web/src/api.js",
-        "line": 298,
+        "line": 293,
         "method": "DELETE",
         "pattern": "^/governance/prompts/[^/]+$",
         "example": "/governance/prompts/example",
@@ -5124,11 +5013,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "prefix:/governance/@src/api.js:1592"
+        "route": "prefix:/governance/@src/api.js:1621"
       },
       {
         "file": "web/src/api.js",
-        "line": 299,
+        "line": 294,
         "method": "POST",
         "pattern": "^/governance/prompts/[^/]+/restore$",
         "example": "/governance/prompts/example/restore",
@@ -5136,11 +5025,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "prefix:/governance/@src/api.js:1592"
+        "route": "prefix:/governance/@src/api.js:1621"
       },
       {
         "file": "web/src/api.js",
-        "line": 302,
+        "line": 297,
         "method": "GET",
         "pattern": "^/governance/mount-points$",
         "example": "/governance/mount-points",
@@ -5148,11 +5037,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/governance/mount-points@src/api.js:7641"
+        "route": "exact:/governance/mount-points@src/api.js:7696"
       },
       {
         "file": "web/src/api.js",
-        "line": 303,
+        "line": 298,
         "method": "POST",
         "pattern": "^/governance/mount-points$",
         "example": "/governance/mount-points",
@@ -5160,11 +5049,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/governance/mount-points@src/api.js:7650"
+        "route": "exact:/governance/mount-points@src/api.js:7705"
       },
       {
         "file": "web/src/api.js",
-        "line": 304,
+        "line": 299,
         "method": "DELETE",
         "pattern": "^/governance/mount-points/[^/]+$",
         "example": "/governance/mount-points/example",
@@ -5172,11 +5061,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "prefix:/governance/@src/api.js:1592"
+        "route": "prefix:/governance/@src/api.js:1621"
       },
       {
         "file": "web/src/api.js",
-        "line": 305,
+        "line": 300,
         "method": "GET",
         "pattern": "^/governance/mount-points/[^/]+/modules$",
         "example": "/governance/mount-points/example/modules",
@@ -5184,11 +5073,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "prefix:/governance/@src/api.js:1592"
+        "route": "prefix:/governance/@src/api.js:1621"
       },
       {
         "file": "web/src/api.js",
-        "line": 306,
+        "line": 301,
         "method": "POST",
         "pattern": "^/governance/mount-points/[^/]+/modules$",
         "example": "/governance/mount-points/example/modules",
@@ -5196,11 +5085,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "prefix:/governance/@src/api.js:1592"
+        "route": "prefix:/governance/@src/api.js:1621"
       },
       {
         "file": "web/src/api.js",
-        "line": 307,
+        "line": 302,
         "method": "DELETE",
         "pattern": "^/governance/mount-points/[^/]+/modules/[^/]+$",
         "example": "/governance/mount-points/example/modules/example",
@@ -5208,11 +5097,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "prefix:/governance/@src/api.js:1592"
+        "route": "prefix:/governance/@src/api.js:1621"
       },
       {
         "file": "web/src/api.js",
-        "line": 308,
+        "line": 303,
         "method": "POST",
         "pattern": "^/governance/mount-points/[^/]+/reorder$",
         "example": "/governance/mount-points/example/reorder",
@@ -5220,11 +5109,11 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "prefix:/governance/@src/api.js:1592"
+        "route": "prefix:/governance/@src/api.js:1621"
       },
       {
         "file": "web/src/api.js",
-        "line": 309,
+        "line": 304,
         "method": "POST",
         "pattern": "^/governance/mount-points/[^/]+/execute$",
         "example": "/governance/mount-points/example/execute",
@@ -5232,7 +5121,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "prefix:/governance/@src/api.js:1592"
+        "route": "prefix:/governance/@src/api.js:1621"
       }
     ],
     "web-pro": [
@@ -5246,7 +5135,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/auth/login@src/api.js:1722"
+        "route": "exact:/auth/login@src/api.js:1751"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5258,7 +5147,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/auth/logout@src/api.js:1738"
+        "route": "exact:/auth/logout@src/api.js:1767"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5270,7 +5159,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/auth/me@src/api.js:1856"
+        "route": "exact:/auth/me@src/api.js:1885"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5282,7 +5171,7 @@
         "viewer": true,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/assets@src/api.js:2742"
+        "route": "exact:/assets@src/api.js:2774"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5294,7 +5183,7 @@
         "viewer": true,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/assets/trash@src/api.js:2218"
+        "route": "exact:/assets/trash@src/api.js:2250"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5306,7 +5195,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/assets/trash/restore@src/api.js:2378"
+        "route": "exact:/assets/trash/restore@src/api.js:2410"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5318,7 +5207,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/assets/trash/purge@src/api.js:2392"
+        "route": "exact:/assets/trash/purge@src/api.js:2424"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5330,7 +5219,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "regex:^\\/assets\\/([^\\/]+)\\/delete$@src/api.js:2153"
+        "route": "regex:^\\/assets\\/([^\\/]+)\\/delete$@src/api.js:2185"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5342,7 +5231,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/assets/batch-delete@src/api.js:2178"
+        "route": "exact:/assets/batch-delete@src/api.js:2210"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5354,7 +5243,7 @@
         "viewer": true,
         "via": "web-pro",
         "matched": true,
-        "route": "regex:^\\/assets\\/([^\\/]+)\\/favorite$@src/api.js:2248"
+        "route": "regex:^\\/assets\\/([^\\/]+)\\/favorite$@src/api.js:2280"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5366,7 +5255,7 @@
         "viewer": true,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/dict/menu-tree@src/api.js:1817"
+        "route": "exact:/dict/menu-tree@src/api.js:1846"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5378,7 +5267,7 @@
         "viewer": true,
         "via": "web-pro",
         "matched": true,
-        "route": "regex:^\\/assets\\/([^\\/]+)$@src/api.js:5227"
+        "route": "regex:^\\/assets\\/([^\\/]+)$@src/api.js:5252"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5390,7 +5279,7 @@
         "viewer": true,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/assets/timeline-days@src/api.js:2749"
+        "route": "exact:/assets/timeline-days@src/api.js:2781"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5402,7 +5291,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/ai/expand-jimeng@src/api.js:4870"
+        "route": "exact:/ai/expand-jimeng@src/api.js:4895"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5414,7 +5303,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/edit/run@src/api.js:4699"
+        "route": "exact:/edit/run@src/api.js:4724"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5426,7 +5315,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/custom-styles@src/api.js:4788"
+        "route": "exact:/custom-styles@src/api.js:4813"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5438,7 +5327,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/custom-styles@src/api.js:4797"
+        "route": "exact:/custom-styles@src/api.js:4822"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5450,7 +5339,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "regex:^\\/custom-styles\\/([^/]+)$@src/api.js:4813"
+        "route": "regex:^\\/custom-styles\\/([^/]+)$@src/api.js:4838"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5462,7 +5351,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "regex:^\\/custom-styles\\/([^/]+)$@src/api.js:4813"
+        "route": "regex:^\\/custom-styles\\/([^/]+)$@src/api.js:4838"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5474,7 +5363,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/ai/style/analyze@src/api.js:4841"
+        "route": "exact:/ai/style/analyze@src/api.js:4866"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5486,7 +5375,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/ai/detect@src/api.js:4000"
+        "route": "exact:/ai/detect@src/api.js:4025"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5498,7 +5387,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/library/catalog@src/api.js:1808"
+        "route": "exact:/library/catalog@src/api.js:1837"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5510,7 +5399,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/studio/catalog@src/api.js:1838"
+        "route": "exact:/studio/catalog@src/api.js:1867"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5522,7 +5411,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/gen/preview@src/api.js:8441"
+        "route": "exact:/gen/preview@src/api.js:8496"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5534,7 +5423,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/gen/images@src/api.js:8517"
+        "route": "exact:/gen/images@src/api.js:8572"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5546,7 +5435,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/gen/audio@src/api.js:8740"
+        "route": "exact:/gen/audio@src/api.js:8795"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5558,7 +5447,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/gen/videos@src/api.js:8622"
+        "route": "exact:/gen/videos@src/api.js:8677"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5570,7 +5459,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/gen/chat@src/api.js:8797"
+        "route": "exact:/gen/chat@src/api.js:8852"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5582,7 +5471,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/chat/sessions@src/api.js:3305"
+        "route": "exact:/chat/sessions@src/api.js:3330"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5594,7 +5483,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/chat/messages@src/api.js:3348"
+        "route": "exact:/chat/messages@src/api.js:3373"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5606,7 +5495,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/chat/messages@src/api.js:3370"
+        "route": "exact:/chat/messages@src/api.js:3395"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5618,7 +5507,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "regex:^\\/chat\\/sessions\\/([^\\/]+)$@src/api.js:3337"
+        "route": "regex:^\\/chat\\/sessions\\/([^\\/]+)$@src/api.js:3362"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5630,7 +5519,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/assets/similarity-workbench@src/api.js:2407"
+        "route": "exact:/assets/similarity-workbench@src/api.js:2439"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5642,7 +5531,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/assets/similarity-workbench/resolve@src/api.js:2421"
+        "route": "exact:/assets/similarity-workbench/resolve@src/api.js:2453"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5654,7 +5543,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/assets/similarity-workbench/clean-exact@src/api.js:2433"
+        "route": "exact:/assets/similarity-workbench/clean-exact@src/api.js:2465"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5666,7 +5555,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/assets/similarity-workbench/ignored@src/api.js:2444"
+        "route": "exact:/assets/similarity-workbench/ignored@src/api.js:2476"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5678,7 +5567,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/assets/similarity-workbench/ignored@src/api.js:2454"
+        "route": "exact:/assets/similarity-workbench/ignored@src/api.js:2486"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5690,7 +5579,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/settings/runtime-config@src/api.js:6075"
+        "route": "exact:/settings/runtime-config@src/api.js:6129"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5702,7 +5591,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/settings/runtime-config@src/api.js:6081"
+        "route": "exact:/settings/runtime-config@src/api.js:6135"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5714,7 +5603,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/users/password@src/api.js:9037"
+        "route": "exact:/users/password@src/api.js:9092"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5726,7 +5615,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/app/update/state@src/api.js:1765"
+        "route": "exact:/app/update/state@src/api.js:1794"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5738,7 +5627,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/providers/env-secrets@src/api.js:6937"
+        "route": "exact:/providers/env-secrets@src/api.js:6991"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5750,7 +5639,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/providers/env-secrets@src/api.js:6951"
+        "route": "exact:/providers/env-secrets@src/api.js:7005"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5762,7 +5651,7 @@
         "viewer": true,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/studio/color-schemes@src/api.js:8311"
+        "route": "exact:/studio/color-schemes@src/api.js:8366"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5774,7 +5663,7 @@
         "viewer": true,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/studio/color-schemes@src/api.js:8333"
+        "route": "exact:/studio/color-schemes@src/api.js:8388"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5786,7 +5675,7 @@
         "viewer": true,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/chat/suggest-prompts@src/api.js:8376"
+        "route": "exact:/chat/suggest-prompts@src/api.js:8431"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5798,7 +5687,7 @@
         "viewer": true,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/gen/preview@src/api.js:8441"
+        "route": "exact:/gen/preview@src/api.js:8496"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5810,7 +5699,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "prefix:/base-library/@src/api.js:3987"
+        "route": "prefix:/base-library/@src/api.js:4012"
       },
       {
         "file": "web-pro/src/api.js",
@@ -5822,7 +5711,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "prefix:/base-library/@src/api.js:3987"
+        "route": "prefix:/base-library/@src/api.js:4012"
       },
       {
         "file": "web-pro/src/components/library/Product3DManager.vue",
@@ -5834,7 +5723,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/products/presets@src/api.js:4150"
+        "route": "exact:/products/presets@src/api.js:4175"
       },
       {
         "file": "web-pro/src/components/library/Product3DManager.vue",
@@ -5846,7 +5735,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "regex:^\\/products\\/presets\\/([^\\/]+)\\/snapshots?$@src/api.js:4516"
+        "route": "regex:^\\/products\\/presets\\/([^\\/]+)\\/snapshots?$@src/api.js:4541"
       },
       {
         "file": "web-pro/src/components/library/Product3DManager.vue",
@@ -5858,7 +5747,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "regex:^\\/products\\/presets\\/([^\\/]+)$@src/api.js:4442"
+        "route": "regex:^\\/products\\/presets\\/([^\\/]+)$@src/api.js:4467"
       },
       {
         "file": "web-pro/src/components/library/Product3DManager.vue",
@@ -5870,7 +5759,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/products/upload@src/api.js:4321"
+        "route": "exact:/products/upload@src/api.js:4346"
       },
       {
         "file": "web-pro/src/components/library/Product3DManager.vue",
@@ -5882,7 +5771,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "regex:^\\/products\\/presets\\/([^\\/]+)$@src/api.js:4442"
+        "route": "regex:^\\/products\\/presets\\/([^\\/]+)$@src/api.js:4467"
       },
       {
         "file": "web-pro/src/components/studio/ResurfaceDrawer.vue",
@@ -5894,7 +5783,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/base-library/dictionary@src/base-library/routes.js:265"
+        "route": "exact:/base-library/dictionary@src/base-library/routes.js:276"
       },
       {
         "file": "web-pro/src/components/studio/ResurfaceDrawer.vue",
@@ -5906,7 +5795,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/base-library/swatches/recommend-for-region@src/base-library/routes.js:377"
+        "route": "exact:/base-library/swatches/recommend-for-region@src/base-library/routes.js:388"
       },
       {
         "file": "web-pro/src/components/studio/ResurfaceDrawer.vue",
@@ -5918,7 +5807,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/base-library/swatches/recognize-vlm@src/base-library/routes.js:395"
+        "route": "exact:/base-library/swatches/recognize-vlm@src/base-library/routes.js:406"
       },
       {
         "file": "web-pro/src/components/studio/ResurfaceDrawer.vue",
@@ -5930,7 +5819,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "prefix:/base-library/@src/api.js:3987"
+        "route": "prefix:/base-library/@src/api.js:4012"
       },
       {
         "file": "web-pro/src/components/studio/ResurfaceDrawer.vue",
@@ -5942,7 +5831,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/base-library/swatches@src/base-library/routes.js:347"
+        "route": "exact:/base-library/swatches@src/base-library/routes.js:358"
       },
       {
         "file": "web-pro/src/components/VoiceInputButton.vue",
@@ -5954,7 +5843,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/asr/status@src/api.js:1659"
+        "route": "exact:/asr/status@src/api.js:1688"
       },
       {
         "file": "web-pro/src/views/library/BaseLibraryPane.vue",
@@ -5966,7 +5855,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/base-library/taxonomy@src/base-library/routes.js:259"
+        "route": "exact:/base-library/taxonomy@src/base-library/routes.js:270"
       },
       {
         "file": "web-pro/src/views/library/BaseLibraryPane.vue",
@@ -5978,7 +5867,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/base-library/materials@src/base-library/routes.js:428"
+        "route": "exact:/base-library/materials@src/base-library/routes.js:439"
       },
       {
         "file": "web-pro/src/views/library/BaseLibraryPane.vue",
@@ -5990,7 +5879,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/base-library/paints@src/base-library/routes.js:791"
+        "route": "exact:/base-library/paints@src/base-library/routes.js:802"
       },
       {
         "file": "web-pro/src/views/library/BaseLibraryPane.vue",
@@ -6002,7 +5891,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/base-library/lights@src/base-library/routes.js:950"
+        "route": "exact:/base-library/lights@src/base-library/routes.js:961"
       },
       {
         "file": "web-pro/src/views/library/BaseLibraryPane.vue",
@@ -6014,7 +5903,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "prefix:/base-library/@src/api.js:3987"
+        "route": "prefix:/base-library/@src/api.js:4012"
       },
       {
         "file": "web-pro/src/views/library/BaseLibrarySearch.vue",
@@ -6026,7 +5915,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/base-library/materials/search@src/base-library/routes.js:649"
+        "route": "exact:/base-library/materials/search@src/base-library/routes.js:660"
       },
       {
         "file": "web-pro/src/views/library/BaseLibrarySearch.vue",
@@ -6038,7 +5927,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/base-library/materials/draft@src/base-library/routes.js:693"
+        "route": "exact:/base-library/materials/draft@src/base-library/routes.js:704"
       },
       {
         "file": "web-pro/src/views/library/BaseLibrarySearch.vue",
@@ -6050,7 +5939,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/base-library/materials/confirm@src/base-library/routes.js:768"
+        "route": "exact:/base-library/materials/confirm@src/base-library/routes.js:779"
       },
       {
         "file": "web-pro/src/views/library/BaseLibrarySearch.vue",
@@ -6062,7 +5951,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/base-library/paints/mirror@src/base-library/routes.js:910"
+        "route": "exact:/base-library/paints/mirror@src/base-library/routes.js:921"
       },
       {
         "file": "web-pro/src/views/library/CatalogIngestPanel.vue",
@@ -6074,7 +5963,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/base-library/catalog/sources@src/base-library/routes.js:1145"
+        "route": "exact:/base-library/catalog/sources@src/base-library/routes.js:1156"
       },
       {
         "file": "web-pro/src/views/library/CatalogIngestPanel.vue",
@@ -6086,7 +5975,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/base-library/catalog/pull@src/base-library/routes.js:1151"
+        "route": "exact:/base-library/catalog/pull@src/base-library/routes.js:1162"
       },
       {
         "file": "web-pro/src/views/library/CatalogIngestPanel.vue",
@@ -6098,7 +5987,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/base-library/catalog/distill-preview@src/base-library/routes.js:1272"
+        "route": "exact:/base-library/catalog/distill-preview@src/base-library/routes.js:1283"
       },
       {
         "file": "web-pro/src/views/library/CatalogIngestPanel.vue",
@@ -6110,7 +5999,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/base-library/catalog/distill@src/base-library/routes.js:1295"
+        "route": "exact:/base-library/catalog/distill@src/base-library/routes.js:1306"
       },
       {
         "file": "web-pro/src/views/library/CatalogIngestPanel.vue",
@@ -6122,7 +6011,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/base-library/schemes/draft@src/base-library/routes.js:1350"
+        "route": "exact:/base-library/schemes/draft@src/base-library/routes.js:1361"
       },
       {
         "file": "web-pro/src/views/library/CatalogIngestPanel.vue",
@@ -6134,7 +6023,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/base-library/schemes@src/base-library/routes.js:1358"
+        "route": "exact:/base-library/schemes@src/base-library/routes.js:1369"
       },
       {
         "file": "web-pro/src/views/LibraryView.vue",
@@ -6146,7 +6035,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/tools/upload@src/api.js:1908"
+        "route": "exact:/tools/upload@src/api.js:1937"
       },
       {
         "file": "web-pro/src/views/LibraryView.vue",
@@ -6158,7 +6047,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/tools/convert-video@src/api.js:2071"
+        "route": "exact:/tools/convert-video@src/api.js:2103"
       },
       {
         "file": "web-pro/src/views/LibraryView.vue",
@@ -6170,7 +6059,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/upload@src/api.js:9086"
+        "route": "exact:/upload@src/api.js:9141"
       },
       {
         "file": "web-pro/src/views/LibraryView.vue",
@@ -6182,7 +6071,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "prefix:/base-library/@src/api.js:3987"
+        "route": "prefix:/base-library/@src/api.js:4012"
       },
       {
         "file": "web-pro/src/views/SettingsView.vue",
@@ -6194,7 +6083,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/providers/newapi/models@src/api.js:6911"
+        "route": "exact:/providers/newapi/models@src/api.js:6965"
       },
       {
         "file": "web-pro/src/views/studio/ChatStudio.vue",
@@ -6206,7 +6095,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/asr/transcribe@src/api.js:1659"
+        "route": "exact:/asr/transcribe@src/api.js:1688"
       },
       {
         "file": "web-pro/src/views/studio/ChatStudio.vue",
@@ -6218,7 +6107,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "regex:^\\/creation-templates\\/([^\\/]+)$@src/api.js:3838"
+        "route": "regex:^\\/creation-templates\\/([^\\/]+)$@src/api.js:3863"
       },
       {
         "file": "web-pro/src/views/studio/ChatStudio.vue",
@@ -6230,7 +6119,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/tag-vocab@src/api.js:7226"
+        "route": "exact:/tag-vocab@src/api.js:7281"
       },
       {
         "file": "web-pro/src/views/studio/ChatStudio.vue",
@@ -6242,7 +6131,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/chat/sessions@src/api.js:3322"
+        "route": "exact:/chat/sessions@src/api.js:3347"
       },
       {
         "file": "web-pro/src/views/studio/ChatStudio.vue",
@@ -6254,7 +6143,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/chat/optimize-prompt@src/api.js:3464"
+        "route": "exact:/chat/optimize-prompt@src/api.js:3489"
       },
       {
         "file": "web-pro/src/views/studio/ChatStudio.vue",
@@ -6266,7 +6155,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "regex:^\\/assets\\/([^\\/]+)$@src/api.js:5227"
+        "route": "regex:^\\/assets\\/([^\\/]+)$@src/api.js:5252"
       },
       {
         "file": "web-pro/src/views/studio/ChatStudio.vue",
@@ -6278,7 +6167,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/creation-templates@src/api.js:3771"
+        "route": "exact:/creation-templates@src/api.js:3796"
       },
       {
         "file": "web-pro/src/views/studio/ChatStudio.vue",
@@ -6290,7 +6179,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "regex:^\\/creation-templates\\/([^\\/]+)$@src/api.js:3957"
+        "route": "regex:^\\/creation-templates\\/([^\\/]+)$@src/api.js:3982"
       },
       {
         "file": "web-pro/src/views/studio/QuickStudio.vue",
@@ -6302,7 +6191,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/base-library/classify-region@src/base-library/routes.js:1004"
+        "route": "exact:/base-library/classify-region@src/base-library/routes.js:1015"
       },
       {
         "file": "web-pro/src/views/studio/StudioEditLayer.vue",
@@ -6314,7 +6203,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/base-library/guides@src/base-library/routes.js:223"
+        "route": "exact:/base-library/guides@src/base-library/routes.js:234"
       },
       {
         "file": "web-pro/src/views/studio/StudioEditLayer.vue",
@@ -6326,7 +6215,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/base-library/guides@src/base-library/routes.js:228"
+        "route": "exact:/base-library/guides@src/base-library/routes.js:239"
       },
       {
         "file": "web-pro/src/views/studio/StudioEditLayer.vue",
@@ -6338,7 +6227,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "prefix:/base-library/@src/api.js:3987"
+        "route": "prefix:/base-library/@src/api.js:4012"
       },
       {
         "file": "web-pro/src/views/studio/StudioEditLayer.vue",
@@ -6350,7 +6239,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/base-library/styles@src/base-library/routes.js:124"
+        "route": "exact:/base-library/styles@src/base-library/routes.js:135"
       },
       {
         "file": "web-pro/src/views/studio/StudioEditLayer.vue",
@@ -6362,7 +6251,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/base-library/schemes@src/base-library/routes.js:115"
+        "route": "exact:/base-library/schemes@src/base-library/routes.js:126"
       },
       {
         "file": "web-pro/src/views/studio/StudioEditLayer.vue",
@@ -6374,7 +6263,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/base-library/compile@src/base-library/routes.js:1436"
+        "route": "exact:/base-library/compile@src/base-library/routes.js:1447"
       },
       {
         "file": "web-pro/src/views/studio/StudioEditLayer.vue",
@@ -6386,7 +6275,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "prefix:/base-library/@src/api.js:3987"
+        "route": "prefix:/base-library/@src/api.js:4012"
       },
       {
         "file": "web-pro/src/views/studio/StudioGlobalDrawer.vue",
@@ -6398,7 +6287,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "prefix:/base-library/@src/api.js:3987"
+        "route": "prefix:/base-library/@src/api.js:4012"
       },
       {
         "file": "web-pro/src/views/studio/StudioGlobalDrawer.vue",
@@ -6410,7 +6299,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/base-library/space/extract@src/base-library/routes.js:192"
+        "route": "exact:/base-library/space/extract@src/base-library/routes.js:203"
       },
       {
         "file": "web-pro/src/views/studio/StudioGlobalDrawer.vue",
@@ -6422,7 +6311,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/base-library/space/recommend@src/base-library/routes.js:211"
+        "route": "exact:/base-library/space/recommend@src/base-library/routes.js:222"
       }
     ],
     "app-uniapp": [
@@ -6436,7 +6325,7 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "exact:/auth/login@src/api.js:1722"
+        "route": "exact:/auth/login@src/api.js:1751"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
@@ -6448,7 +6337,7 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "exact:/auth/me@src/api.js:1856"
+        "route": "exact:/auth/me@src/api.js:1885"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
@@ -6460,7 +6349,7 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "exact:/auth/logout@src/api.js:1738"
+        "route": "exact:/auth/logout@src/api.js:1767"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
@@ -6472,7 +6361,7 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "exact:/assets@src/api.js:2742"
+        "route": "exact:/assets@src/api.js:2774"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
@@ -6484,7 +6373,7 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "regex:^\\/assets\\/([^\\/]+)$@src/api.js:5227"
+        "route": "regex:^\\/assets\\/([^\\/]+)$@src/api.js:5252"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
@@ -6496,7 +6385,7 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "regex:^\\/assets\\/([^\\/]+)\\/quality$@src/api.js:5253"
+        "route": "regex:^\\/assets\\/([^\\/]+)\\/quality$@src/api.js:5278"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
@@ -6508,7 +6397,7 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "exact:/ai/tasks@src/api.js:5091"
+        "route": "exact:/ai/tasks@src/api.js:5116"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
@@ -6520,7 +6409,7 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "regex:^\\/assets\\/([^\\/]+)\\/ai\\/tasks$@src/api.js:5122"
+        "route": "regex:^\\/assets\\/([^\\/]+)\\/ai\\/tasks$@src/api.js:5147"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
@@ -6532,7 +6421,7 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "regex:^\\/ai\\/tasks\\/([^\\/]+)$@src/api.js:5112"
+        "route": "regex:^\\/ai\\/tasks\\/([^\\/]+)$@src/api.js:5137"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
@@ -6544,7 +6433,7 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "regex:^\\/assets\\/([^\\/]+)\\/restage$@src/api.js:5291"
+        "route": "regex:^\\/assets\\/([^\\/]+)\\/restage$@src/api.js:5316"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
@@ -6556,7 +6445,7 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "exact:/ai/capabilities@src/api.js:4654"
+        "route": "exact:/ai/capabilities@src/api.js:4679"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
@@ -6568,7 +6457,7 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "exact:/lab/capabilities@src/api.js:3045"
+        "route": "exact:/lab/capabilities@src/api.js:3070"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
@@ -6616,7 +6505,7 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "prefix:/portrait-library@src/api.js:1701"
+        "route": "prefix:/portrait-library@src/api.js:1730"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
@@ -6628,7 +6517,7 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "prefix:/portrait-library@src/api.js:1701"
+        "route": "prefix:/portrait-library@src/api.js:1730"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
@@ -6640,7 +6529,7 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "exact:/lab/runs@src/api.js:3222"
+        "route": "exact:/lab/runs@src/api.js:3247"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
@@ -6652,7 +6541,7 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "regex:^\\/lab\\/runs\\/([^\\/]+)\\/([^\\/]+)$@src/api.js:3267"
+        "route": "regex:^\\/lab\\/runs\\/([^\\/]+)\\/([^\\/]+)$@src/api.js:3292"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
@@ -6664,7 +6553,7 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "exact:/chat/sessions@src/api.js:3305"
+        "route": "exact:/chat/sessions@src/api.js:3330"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
@@ -6676,7 +6565,7 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "exact:/chat/sessions@src/api.js:3322"
+        "route": "exact:/chat/sessions@src/api.js:3347"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
@@ -6688,7 +6577,7 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "regex:^\\/chat\\/sessions\\/([^\\/]+)$@src/api.js:3337"
+        "route": "regex:^\\/chat\\/sessions\\/([^\\/]+)$@src/api.js:3362"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
@@ -6700,7 +6589,7 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "exact:/chat/messages@src/api.js:3348"
+        "route": "exact:/chat/messages@src/api.js:3373"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
@@ -6712,7 +6601,7 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "exact:/chat/messages@src/api.js:3370"
+        "route": "exact:/chat/messages@src/api.js:3395"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
@@ -6724,7 +6613,7 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "exact:/gen/chat@src/api.js:8797"
+        "route": "exact:/gen/chat@src/api.js:8852"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
@@ -6736,7 +6625,7 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "exact:/edit/run@src/api.js:4699"
+        "route": "exact:/edit/run@src/api.js:4724"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
@@ -6748,7 +6637,7 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "exact:/ai/segment@src/api.js:4000"
+        "route": "exact:/ai/segment@src/api.js:4025"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
@@ -6760,11 +6649,11 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "exact:/chat/optimize-prompt@src/api.js:3464"
+        "route": "exact:/chat/optimize-prompt@src/api.js:3489"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
-        "line": 584,
+        "line": 581,
         "method": "DELETE",
         "pattern": "^/chat/messages$",
         "example": "/chat/messages",
@@ -6772,11 +6661,11 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "exact:/chat/messages@src/api.js:3455"
+        "route": "exact:/chat/messages@src/api.js:3480"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
-        "line": 676,
+        "line": 673,
         "method": "GET",
         "pattern": "^/lab/local-models$",
         "example": "/lab/local-models",
@@ -6784,11 +6673,11 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "exact:/lab/local-models@src/api.js:3164"
+        "route": "exact:/lab/local-models@src/api.js:3189"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
-        "line": 699,
+        "line": 696,
         "method": "GET",
         "pattern": "^/products/presets$",
         "example": "/products/presets",
@@ -6796,11 +6685,11 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "exact:/products/presets@src/api.js:4150"
+        "route": "exact:/products/presets@src/api.js:4175"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
-        "line": 707,
+        "line": 704,
         "method": "DELETE",
         "pattern": "^/assets/[^/]+$",
         "example": "/assets/example",
@@ -6808,11 +6697,11 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "regex:^\\/assets\\/([^\\/]+)$@src/api.js:2127"
+        "route": "regex:^\\/assets\\/([^\\/]+)$@src/api.js:2159"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
-        "line": 717,
+        "line": 714,
         "method": "POST",
         "pattern": "^/assets/[^/]+/main-derivative$",
         "example": "/assets/example/main-derivative",
@@ -6820,11 +6709,11 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "regex:^\\/assets\\/([^\\/]+)\\/main-derivative$@src/api.js:7171"
+        "route": "regex:^\\/assets\\/([^\\/]+)\\/main-derivative$@src/api.js:7225"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
-        "line": 731,
+        "line": 728,
         "method": "GET",
         "pattern": "^/dict/menu-tree$",
         "example": "/dict/menu-tree",
@@ -6832,11 +6721,11 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "exact:/dict/menu-tree@src/api.js:1817"
+        "route": "exact:/dict/menu-tree@src/api.js:1846"
       },
       {
         "file": "app-uniapp/src/service/ViewerApi.js",
-        "line": 736,
+        "line": 733,
         "method": "GET",
         "pattern": "^/studio/schema$",
         "example": "/studio/schema",
@@ -6844,7 +6733,7 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "exact:/studio/schema@src/api.js:1826"
+        "route": "exact:/studio/schema@src/api.js:1855"
       }
     ],
     "harmony": [
@@ -6858,11 +6747,11 @@
         "viewer": false,
         "via": "harmony",
         "matched": true,
-        "route": "exact:/auth/login@src/api.js:1722"
+        "route": "exact:/auth/login@src/api.js:1751"
       },
       {
         "file": "harmony/material_sync/entry/src/main/ets/services/Api.ets",
-        "line": 55,
+        "line": 64,
         "method": "POST",
         "pattern": "^/api/assets/ingest$",
         "example": "/assets/ingest",
@@ -6870,7 +6759,7 @@
         "viewer": false,
         "via": "harmony",
         "matched": true,
-        "route": "exact:/assets/ingest@src/api.js:7189"
+        "route": "exact:/assets/ingest@src/api.js:7243"
       }
     ]
   },
@@ -6899,204 +6788,6 @@
   ],
   "findings": [
     {
-      "severity": "high",
-      "kind": "wrong-base-url",
-      "client": "harmony",
-      "path": "http://127.0.0.1:8787",
-      "detail": "默认 BASE_URL=http://127.0.0.1:8787 端口错误，素材库正式端口为 30001；出厂配置不可用",
-      "ref": "R1"
-    },
-    {
-      "severity": "medium",
-      "kind": "dead-alias",
-      "client": "app-uniapp",
-      "path": "ViewerApi.js:580",
-      "detail": "export const aiEditVerify = verifyPasteback，但 verifyPasteback 全文件未定义也未导入；模块加载即 ReferenceError（白屏风险），且全仓无人使用",
-      "ref": "R2"
-    },
-    {
-      "severity": "medium",
-      "kind": "dynamic-capture",
-      "client": "web",
-      "method": "GET",
-      "path": "/workflows/default",
-      "detail": "GET /workflows/default 无精确分支，被 /^\\/workflows\\/([^/]+)$/ 捕获（src/api.js:5952），default 行缺失时静默兜底返空",
-      "ref": "R5"
-    },
-    {
-      "severity": "medium",
-      "kind": "missing-route",
-      "client": "web",
-      "method": "POST",
-      "path": "/dup-groups/example/representative",
-      "detail": "重复组概念已退役（src/api.js:7158 注释），旧管理台仍在调用：旧管理台调用在服务端无对应路由（web/src/api.js:210），运行时 404",
-      "ref": "R4"
-    },
-    {
-      "severity": "medium",
-      "kind": "missing-route",
-      "client": "web",
-      "method": "POST",
-      "path": "/dup-groups/example/ungroup",
-      "detail": "重复组概念已退役（src/api.js:7158 注释），旧管理台仍在调用：旧管理台调用在服务端无对应路由（web/src/api.js:81），运行时 404",
-      "ref": "R4"
-    },
-    {
-      "severity": "medium",
-      "kind": "missing-route",
-      "client": "web",
-      "method": "POST",
-      "path": "/dup-groups/recluster",
-      "detail": "重复组概念已退役（src/api.js:7158 注释），旧管理台仍在调用：旧管理台调用在服务端无对应路由（web/src/api.js:82），运行时 404",
-      "ref": "R4"
-    },
-    {
-      "severity": "medium",
-      "kind": "viewer-admin",
-      "client": "(白名单审计)",
-      "method": "POST",
-      "path": "/assets/similarity-workbench/clean-exact",
-      "detail": "白名单条目放行，但 src/api.js:2433 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web-pro/src/api.js:772 直接调用"
-    },
-    {
-      "severity": "medium",
-      "kind": "viewer-admin",
-      "client": "(白名单审计)",
-      "method": "DELETE",
-      "path": "/assets/similarity-workbench/ignored",
-      "detail": "白名单条目放行，但 src/api.js:2454 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web-pro/src/api.js:785 直接调用"
-    },
-    {
-      "severity": "medium",
-      "kind": "viewer-admin",
-      "client": "(白名单审计)",
-      "method": "POST",
-      "path": "/assets/similarity-workbench/resolve",
-      "detail": "白名单条目放行，但 src/api.js:2421 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web-pro/src/api.js:763 直接调用"
-    },
-    {
-      "severity": "medium",
-      "kind": "viewer-admin",
-      "client": "(白名单审计)",
-      "method": "POST",
-      "path": "/assets/trash/purge",
-      "detail": "白名单条目放行，但 src/api.js:2392 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web-pro/src/api.js:310 直接调用",
-      "ref": "R6"
-    },
-    {
-      "severity": "medium",
-      "kind": "viewer-admin",
-      "client": "(白名单审计)",
-      "method": "POST",
-      "path": "/assets/trash/rehome-gate",
-      "detail": "白名单条目放行，但 src/api.js:2278 处理器要求 admin，viewer 账号 403"
-    },
-    {
-      "severity": "medium",
-      "kind": "viewer-admin",
-      "client": "(白名单审计)",
-      "method": "GET",
-      "path": "/governance/dict-macros",
-      "detail": "白名单条目放行，但 src/api.js:7732 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web/src/api.js:287 直接调用"
-    },
-    {
-      "severity": "medium",
-      "kind": "viewer-admin",
-      "client": "(白名单审计)",
-      "method": "GET",
-      "path": "/governance/gen-jobs",
-      "detail": "白名单条目放行，但 src/api.js:8045 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web/src/api.js:264 直接调用"
-    },
-    {
-      "severity": "medium",
-      "kind": "viewer-admin",
-      "client": "(白名单审计)",
-      "method": "GET",
-      "path": "/governance/gen-models",
-      "detail": "白名单条目放行，但 src/api.js:7402 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web/src/api.js:237 直接调用"
-    },
-    {
-      "severity": "medium",
-      "kind": "viewer-admin",
-      "client": "(白名单审计)",
-      "method": "GET",
-      "path": "/governance/mount-points",
-      "detail": "白名单条目放行，但 src/api.js:7641 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web/src/api.js:302 直接调用"
-    },
-    {
-      "severity": "medium",
-      "kind": "viewer-admin",
-      "client": "(白名单审计)",
-      "method": "GET",
-      "path": "/governance/mount-points/example/modules",
-      "detail": "白名单条目放行，但 src/api.js:7673 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web/src/api.js:305 直接调用"
-    },
-    {
-      "severity": "medium",
-      "kind": "viewer-admin",
-      "client": "(白名单审计)",
-      "method": "GET",
-      "path": "/governance/operators",
-      "detail": "白名单条目放行，但 src/api.js:7722 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web/src/api.js:286 直接调用"
-    },
-    {
-      "severity": "medium",
-      "kind": "viewer-admin",
-      "client": "(白名单审计)",
-      "method": "GET",
-      "path": "/governance/prompts",
-      "detail": "白名单条目放行，但 src/api.js:7595 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web/src/api.js:296 直接调用"
-    },
-    {
-      "severity": "medium",
-      "kind": "viewer-admin",
-      "client": "(白名单审计)",
-      "method": "POST",
-      "path": "/governance/prompts/preview-compile",
-      "detail": "白名单条目放行，但 src/api.js:7787 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web/src/api.js:292 直接调用"
-    },
-    {
-      "severity": "medium",
-      "kind": "viewer-admin",
-      "client": "(白名单审计)",
-      "method": "GET",
-      "path": "/governance/snippets",
-      "detail": "白名单条目放行，但 src/api.js:7742 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web/src/api.js:288 直接调用"
-    },
-    {
-      "severity": "medium",
-      "kind": "viewer-admin",
-      "client": "(白名单审计)",
-      "method": "GET",
-      "path": "/governance/workflows",
-      "detail": "白名单条目放行，但 src/api.js:7573 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web/src/api.js:272 直接调用"
-    },
-    {
-      "severity": "medium",
-      "kind": "viewer-admin",
-      "client": "(白名单审计)",
-      "method": "GET",
-      "path": "/runs/example/unpack",
-      "detail": "白名单条目放行，但 src/api.js:6445 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web/src/api.js:274 直接调用"
-    },
-    {
-      "severity": "medium",
-      "kind": "whitelist-gap",
-      "client": "(潜在)app-uniapp",
-      "method": "GET",
-      "path": "/lab/local-models/example/download",
-      "detail": "路由存在（src/api.js:3175）但不在 viewer 白名单；移动端将来直连必 404（当前走原生桥）",
-      "ref": "R3"
-    },
-    {
-      "severity": "low",
-      "kind": "duplicate-route",
-      "method": "GET",
-      "path": "/app/update/state",
-      "detail": "在 src/api.js:1765 与 src/api.js:3012 重复注册，后者永远不可达",
-      "ref": "R10"
-    },
-    {
       "severity": "low",
       "kind": "duplicate-whitelist",
       "method": "POST",
@@ -7109,13 +6800,6 @@
       "method": "POST",
       "path": "/tools/extract-frames",
       "detail": "VIEWER_WHITELIST 重复条目 POST ^\\/tools\\/extract-frames$"
-    },
-    {
-      "severity": "low",
-      "kind": "unguarded-json-parse",
-      "client": "harmony",
-      "path": "Api.ets login()/ingestFile()",
-      "detail": "2 处 JSON.parse 无 try/catch，错误页 HTML / 代理 502 会直接抛异常（B8 修）"
     }
   ]
 }

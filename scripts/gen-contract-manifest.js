@@ -5,7 +5,7 @@
  * 服务端输入：
  *   src/api.js（只扫 viewer 前缀剥离之后的主分发区，1581 行起）
  *   src/base-library/routes.js、src/asr.js、src/portrait-library.js（同表全路径分发）
- *   VIEWER_WHITELIST（src/api.js:1436-1580，事实移动端契约）
+ *   VIEWER_WHITELIST（src/api.js handleApiImpl 内，事实移动端契约；B6 后 123 条）
  *
  * 客户端输入：
  *   web/src/api.js               旧管理台（request('/x')，运行时拼 /api）
@@ -16,16 +16,16 @@
  * 输出 docs/contract-manifest.json：
  *   counts / routes / whitelist / clients / findings / otherEndpoints
  *
- * finding 类型：
- *   missing-route        客户端调用在服务端找不到任何路由（R4：dup-groups 三调用）
- *   dynamic-capture      纯字面量调用仅被动态/前缀路由接住（R5：/workflows/default 被 /:id 吞）
- *   whitelist-gap        viewer 调用未命中 VIEWER_WHITELIST（R3：local-model 下载）
- *   viewer-admin         白名单放行但处理器要 admin（R6：purge → viewer 403）
- *   duplicate-route      同 method+精确路径注册两次（R10：/app/update/state）
- *   duplicate-whitelist  白名单重复条目（tools/convert-video、extract-frames）
- *   wrong-base-url       鸿蒙默认 8787（R1，应为 30001）
- *   unguarded-json-parse 鸿蒙 JSON.parse 无保护（错误页 HTML 即崩）
- *   dead-alias           客户端导出引用了不存在的符号（R2：aiEditVerify = verifyPasteback）
+ * finding 类型（R1-R6/R10 已在 B6 清零，selfCheck 含正向在轨断言防回归）：
+ *   missing-route        客户端调用在服务端找不到任何路由（R4：dup-groups 三调用，已删）
+ *   dynamic-capture      纯字面量调用仅被动态/前缀路由接住（R5：/workflows/default，已精确化）
+ *   whitelist-gap        viewer 调用未命中 VIEWER_WHITELIST（R3：local-model 下载，已补）
+ *   viewer-admin         白名单放行但处理器要 admin（R6：16 条 admin 条目，已移除）
+ *   duplicate-route      同 method+精确路径注册两次（R10：/app/update/state，已删）
+ *   duplicate-whitelist  白名单重复条目（tools/convert-video、extract-frames，人工核实保留）
+ *   wrong-base-url       鸿蒙默认 8787（R1，已改 30001）
+ *   unguarded-json-parse 鸿蒙 JSON.parse 无保护（R1，两处均已加 try/catch）
+ *   dead-alias           客户端导出引用了不存在的符号（R2：aiEditVerify，已删）
  *
  * 用法：
  *   node scripts/gen-contract-manifest.js           生成 manifest（基线不过则退出码 1）
@@ -37,6 +37,53 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** 从 { 位置做配准（跳过字符串/模板/注释），返回匹配 } 的下标，失败 -1 */
+function matchBrace(text, openIdx) {
+  let depth = 0;
+  for (let i = openIdx; i < text.length; i++) {
+    const ch = text[i];
+    const nx = text[i + 1];
+    if (ch === '/' && nx === '/') { const e = text.indexOf('\n', i); i = e < 0 ? text.length : e; continue; }
+    if (ch === '/' && nx === '*') { const e = text.indexOf('*/', i + 2); i = e < 0 ? text.length : e + 1; continue; }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      const q = ch;
+      i++;
+      while (i < text.length && text[i] !== q) { if (text[i] === '\\') i++; i++; }
+      continue;
+    }
+    if (ch === '{') depth++;
+    else if (ch === '}') { depth--; if (depth === 0) return i; }
+  }
+  return -1;
+}
+
+/**
+ * 返回源码中所有未被 try/catch 保护的 JSON.parse( 位置（行号）。
+ * 落在某个「后接 catch 的 try 块」内才算已保护；try/finally 不算。
+ */
+function findUnguardedJsonParses(text) {
+  const guardedRanges = [];
+  const tryRe = /\btry\s*\{/g;
+  let tm;
+  while ((tm = tryRe.exec(text))) {
+    const open = tm.index + tm[0].length - 1;
+    const close = matchBrace(text, open);
+    if (close < 0) continue;
+    const after = text.slice(close + 1, close + 32);
+    if (/^\s*catch\b/.test(after)) guardedRanges.push([tm.index, close]);
+  }
+  const out = [];
+  const parseRe = /JSON\.parse\(/g;
+  let pm;
+  while ((pm = parseRe.exec(text))) {
+    const idx = pm.index;
+    if (!guardedRanges.some(([s, e]) => idx > s && idx < e)) {
+      out.push({ line: text.slice(0, idx).split(/\r?\n/).length });
+    }
+  }
+  return out;
+}
 
 /* ================================================================== */
 /* 服务端路由                                                          */
@@ -625,7 +672,7 @@ function generate() {
     if (f.kind === 'dynamic-capture' && f.path === '/workflows/default') {
       f.ref = 'R5';
       f.severity = 'medium';
-      f.detail = 'GET /workflows/default 无精确分支，被 /^\\/workflows\\/([^/]+)$/ 捕获（src/api.js:5952），default 行缺失时静默兜底返空';
+      f.detail = 'GET /workflows/default 无精确分支，被 /^\\/workflows\\/([^/]+)$/ 捕获，default 行缺失时静默兜底返空（B6 已精确化，此为回归告警）';
     }
     if (f.kind === 'viewer-admin' && f.path === '/assets/trash/purge') f.ref = 'R6';
     if (f.kind === 'duplicate-route' && f.path === '/app/update/state') f.ref = 'R10';
@@ -645,14 +692,19 @@ function generate() {
       ref: 'R1',
     });
   }
-  const parseCount = (harmonyText.match(/JSON\.parse\(/g) || []).length;
-  add({
-    severity: 'low',
-    kind: 'unguarded-json-parse',
-    client: 'harmony',
-    path: 'Api.ets login()/ingestFile()',
-    detail: `${parseCount} 处 JSON.parse 无 try/catch，错误页 HTML / 代理 502 会直接抛异常（B8 修）`,
-  });
+  // R1（2026-11-03 B6 已修）：逐处验证 JSON.parse 是否落在带 catch 的 try 块内。
+  // 用括号配准找 try 块范围，并要求其后存在 catch（仅 finally 不算兜底）。
+  const unguardedParses = findUnguardedJsonParses(harmonyText);
+  if (unguardedParses.length) {
+    add({
+      severity: 'low',
+      kind: 'unguarded-json-parse',
+      client: 'harmony',
+      path: 'Api.ets JSON.parse @ ' + unguardedParses.map((p) => `line ${p.line}`).join(', '),
+      detail: `${unguardedParses.length} 处 JSON.parse 无 try/catch，错误页 HTML / 代理 502 会直接抛异常`,
+      ref: 'R1',
+    });
+  }
 
   // R2：死别名（导出指向未定义符号）
   const viewerApi = read('app-uniapp/src/service/ViewerApi.js');
@@ -722,43 +774,78 @@ function generate() {
 function selfCheck(m) {
   const errs = [];
   const c = m.counts;
-  // 计数下限：2026-11-03 实测 374/242/126 路由、138 白名单、268 客户端调用。
+  // 计数下限：B6 修后（2026-11-03）实测 371 路由（239 精确/126 正则/6 前缀）、
+  // 123 白名单、262 客户端调用（web 126/web-pro 99/app 35/harmony 2）。
   if (c.routes < 360) errs.push(`路由总数 ${c.routes} < 360`);
   if (c.routesExact < 230) errs.push(`精确路由 ${c.routesExact} < 230`);
   if (c.routesRegex < 110) errs.push(`正则路由 ${c.routesRegex} < 110`);
-  if (c.whitelist < 130) errs.push(`白名单条目 ${c.whitelist} < 130（区块 1437-1579）`);
+  if (c.whitelist < 118) errs.push(`白名单条目 ${c.whitelist} < 118（R6 后为 123）`);
   if (c.clients.web < 120) errs.push(`web 调用 ${c.clients.web} < 120`);
   if (c.clients['web-pro'] < 95) errs.push(`web-pro 调用 ${c.clients['web-pro']} < 95`);
   if (c.clients['app-uniapp'] < 35) errs.push(`app 调用 ${c.clients['app-uniapp']} < 35`);
   if (c.clients.harmony !== 2) errs.push(`harmony 应恰好 2 个端点，实得 ${c.clients.harmony}`);
-  if (c.bySeverity.high !== 1) errs.push(`高危 finding 应恰好 1（R1），实得 ${c.bySeverity.high}`);
 
-  // 精度锚点：以下事实均在 2026-11-03 逐条人工核实。
-  // B6/B8 修契约时必须同步更新这里——锚点漂移即说明扫描器或契约发生了变化。
+  // B6（R1-R6/R10）修后契约应为零高/中危；仅剩 2 条预存的白名单重复（low，人工核实保留）。
+  if (c.bySeverity.high !== 0) errs.push(`高危 finding 应为 0，实得 ${c.bySeverity.high}`);
+  if (c.bySeverity.medium !== 0) errs.push(`中危 finding 应为 0，实得 ${c.bySeverity.medium}`);
+  if (c.bySeverity.low !== 2) errs.push(`低危 finding 应恰好 2（两条预存重复白名单），实得 ${c.bySeverity.low}`);
+  if (c.whitelistDuplicated !== 2) errs.push(`白名单重复条目期望 2，实得 ${c.whitelistDuplicated}`);
+
   const byKind = {};
   for (const f of m.findings) byKind[f.kind] = (byKind[f.kind] || 0) + 1;
-  if (byKind['viewer-admin'] !== 16) errs.push(`viewer-admin 漂移：期望 16（16 个白名单放行/admin 处理器），实得 ${byKind['viewer-admin'] || 0}`);
-  if (byKind['missing-route'] !== 3) errs.push(`missing-route 漂移：期望仅 3 个 R4 dup-groups，实得 ${byKind['missing-route'] || 0}`);
-  const mr = m.findings.filter((f) => f.kind === 'missing-route');
-  if (mr.some((f) => !f.path.startsWith('/dup-groups/'))) errs.push('missing-route 出现非 R4 路径：' + mr.map((f) => f.path).join(','));
-  if (byKind['duplicate-route'] !== 1) errs.push(`duplicate-route 期望 1（R10），实得 ${byKind['duplicate-route'] || 0}`);
-  if (c.whitelistDuplicated !== 2) errs.push(`白名单重复条目期望 2，实得 ${c.whitelistDuplicated}`);
+  for (const k of ['viewer-admin', 'missing-route', 'duplicate-route', 'whitelist-gap',
+    'wrong-base-url', 'unguarded-json-parse', 'dead-alias', 'dynamic-capture']) {
+    if (byKind[k]) errs.push(`${k} 修后应为 0，实得 ${byKind[k]}`);
+  }
+
   const regressions = m.findings.filter((f) =>
     /paints\/mirror|custom-styles|users\/|exceptions\/|presets\/|dict\/audit/.test(f.path || ''));
   if (regressions.length) errs.push('已核实存在的路由被误报：' + regressions.map((f) => `${f.kind} ${f.path}`).join('; '));
-  const must = [
-    (f) => f.ref === 'R10' && f.path === '/app/update/state',
-    (f) => f.kind === 'duplicate-whitelist' && c.whitelistDuplicated === 2,
-    (f) => f.ref === 'R3',
-    (f) => f.ref === 'R4' && f.path.includes('/dup-groups/recluster'),
-    (f) => f.ref === 'R5' && f.path === '/workflows/default',
-    (f) => f.ref === 'R6' && f.path === '/assets/trash/purge',
-    (f) => f.ref === 'R1',
-    (f) => f.ref === 'R2',
-  ];
-  must.forEach((pred, i) => {
-    if (!m.findings.some(pred)) errs.push(`基线 finding #${i + 1} 缺失`);
-  });
+
+  // ── 正向在轨断言：修复被回滚/扫描器悄悄失效时必须报错（finding 清零本身不能作为依据）──
+  const routeHits = (method, p) => m.routes.filter((r) => r.method === method && r.pattern === p);
+  const stateRoutes = routeHits('GET', '/app/update/state');
+  if (stateRoutes.length !== 1) errs.push(`R10：GET /app/update/state 应恰好注册 1 次，实得 ${stateRoutes.length}`);
+  const wfDefault = m.routes.filter((r) => r.pattern === '/workflows/default' && (r.method === 'GET' || r.method === '*'));
+  const wfRegex = m.routes.find((r) => r.kind === 'regex' && r.pattern === '^\\/workflows\\/([^\\/]+)$');
+  const wfDefaultExact = wfDefault.find((r) => r.kind === 'exact');
+  if (!wfDefaultExact) {
+    errs.push('R5：/workflows/default 必须是 exact 路由（先于 /^\\/workflows\\/([^/]+)$/）');
+  } else if (wfRegex && wfDefaultExact.line >= wfRegex.line) {
+    errs.push(`R5：exact /workflows/default(${wfDefaultExact.line}) 必须排在正则分支(${wfRegex.line})之前`);
+  }
+  const wlHas = (method, reSrc) =>
+    m.whitelist.some((w) => w.method === method && w.source === reSrc);
+  if (!wlHas('GET', '^\\/lab\\/local-models\\/[^\\/]+\\/download$')) {
+    errs.push('R3：viewer 白名单必须含 GET /lab/local-models/:id/download');
+  }
+  for (const [method, reSrc] of [
+    ['POST', '^\\/assets\\/trash\\/purge$'],
+    ['POST', '^\\/assets\\/trash\\/rehome-gate$'],
+    ['POST', '^\\/governance\\/prompts\\/preview-compile$'],
+    ['GET', '^\\/governance\\/gen-models$'],
+    ['POST', '^\\/assets\\/similarity-workbench\\/resolve$'],
+    ['GET', '^\\/runs\\/[^\\/]+\\/unpack$'],
+  ]) {
+    if (wlHas(method, reSrc)) errs.push(`R6 回归：admin 处理器路由不应回到 viewer 白名单：${method} ${reSrc}`);
+  }
+  // R1/R2/R4 客户端在轨
+  const harmonyText = read('harmony/material_sync/entry/src/main/ets/services/Api.ets');
+  const baseMm = harmonyText.match(/BASE_URL[^=]*=\s*['"]([^'"]+)['"]/);
+  if (!baseMm || !/:30001\/?$/.test(baseMm[1])) errs.push('R1 回归：harmony BASE_URL 必须指向 30001');
+  const harmonyParses = harmonyText.match(/JSON\.parse\(/g) || [];
+  if (harmonyParses.length !== 2) errs.push(`R1：harmony 应恰好 2 处 JSON.parse，实得 ${harmonyParses.length}`);
+  if (findUnguardedJsonParses(harmonyText).length !== 0) errs.push('R1 回归：harmony 存在未加 try/catch 的 JSON.parse');
+  if (/aiEditVerify|=\s*verifyPasteback\b/.test(read('app-uniapp/src/service/ViewerApi.js'))) {
+    errs.push('R2 回归：ViewerApi.js 不应再出现 aiEditVerify 死别名');
+  }
+  const dupCallers = [];
+  for (const surface of Object.values(m.clients)) {
+    for (const call of surface || []) {
+      if (typeof call.example === 'string' && call.example.includes('/dup-groups/')) dupCallers.push(call.example);
+    }
+  }
+  if (dupCallers.length) errs.push('R4 回归：客户端仍在调用退役的 /dup-groups/*：' + dupCallers.join(','));
   return errs;
 }
 
