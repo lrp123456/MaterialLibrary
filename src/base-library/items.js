@@ -139,6 +139,8 @@ function ensureItemSchema(db) {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_ba_items_wood_species ON ba_items(wood_species, wood_tone);`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_ba_items_wood_grain ON ba_items(grain_type, wood_layout, surface_finish);`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_ba_items_brand ON ba_items(brand, brand_series);`);
+    // B6：按挂载部位反查条目（mount IN (...) 子查询）从全表扫变为索引覆盖
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_ba_item_mounts_mount_item ON ba_item_mounts(mount, item_id);`);
   } catch (e) {}
   // 保留全量基材（包含玻璃、金属、布艺等），仅清理孤立挂载
   try {
@@ -480,11 +482,26 @@ function ensureItems(db) {
   seedItems(db);
 }
 
-function listItems(db, {
-  kind, kindKey, mount, role, family, hue, gloss, pattern, q, hasPreview, pinned, sort,
+// B6：列表硬上限，防止无参全量拉取在库膨胀后阻塞事件循环
+const ITEMS_PAGE_HARD_CAP = 1000;
+
+function normalizePageLimit(v) {
+  if (v === undefined || v === null || v === '') return ITEMS_PAGE_HARD_CAP;
+  const n = parseInt(v, 10);
+  if (!Number.isFinite(n) || n <= 0) return ITEMS_PAGE_HARD_CAP;
+  return Math.min(n, ITEMS_PAGE_HARD_CAP);
+}
+
+function normalizePageOffset(v) {
+  if (v === undefined || v === null || v === '') return 0;
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function buildItemsFilter({
+  kind, kindKey, mount, role, family, hue, gloss, pattern, q, hasPreview, pinned,
   brand, brandSeries, woodSpecies, woodTone, grainType, grainScale, grainDirection, woodLayout, surfaceFinish, woodOnly
 } = {}) {
-  ensureItems(db);
   const where = [];
   const args = [];
   if (kind) { where.push('i.kind = ?'); args.push(kind); }
@@ -522,6 +539,13 @@ function listItems(db, {
     join = `JOIN (SELECT DISTINCT item_id FROM ba_item_mounts WHERE mount IN (${placeholders})) m ON m.item_id = i.id`;
     args.unshift(...mountKeys);
   }
+  return { where, args, join };
+}
+
+function listItems(db, opts = {}) {
+  ensureItems(db);
+  const { where, args, join } = buildItemsFilter(opts);
+  const { sort } = opts;
 
   let orderSql = `
     ORDER BY
@@ -555,6 +579,9 @@ function listItems(db, {
     `;
   }
 
+  // B6：limit/offset 分页；缺省也施加 1000 硬上限（与历史全量行为在既有数据规模下等价）
+  const lim = normalizePageLimit(opts.limit);
+  const off = normalizePageOffset(opts.offset);
   const sql = `
     SELECT i.*,
       (SELECT GROUP_CONCAT(bm.mount) FROM ba_item_mounts bm WHERE bm.item_id = i.id) AS mounts
@@ -562,8 +589,22 @@ function listItems(db, {
     ${join}
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
     ${orderSql}
+    LIMIT ? OFFSET ?
   `;
-  return db.prepare(sql).all(...args);
+  return db.prepare(sql).all(...args, lim, off);
+}
+
+// 与 listItems 同一套过滤条件下的总数，供分页元信息使用
+function countItems(db, opts = {}) {
+  ensureItems(db);
+  const { where, args, join } = buildItemsFilter(opts);
+  const row = db.prepare(`
+    SELECT COUNT(DISTINCT i.id) AS c
+    FROM ba_items i
+    ${join}
+    ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+  `).get(...args);
+  return row.c;
 }
 
 function updateItem(db, id, patch = {}) {
@@ -1061,6 +1102,8 @@ module.exports = {
   lightnessOf,
   ensureItems,
   listItems,
+  countItems,
+  ITEMS_PAGE_HARD_CAP,
   updateItem,
   listStyles,
   listSchemes,

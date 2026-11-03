@@ -47,6 +47,18 @@ const mediaTools = require('./media-tools');
 const studioPresets = require('./studio-presets');
 const menuTree = require('./menu-tree');
 
+// B6：上传体积上限（与 stream-upload 共享同一环境变量约定，默认 2GB）
+function resolveMlMaxUploadBytes() {
+  const v = parseInt(process.env.ML_MAX_UPLOAD_BYTES || '', 10);
+  return Number.isFinite(v) && v > 0 ? v : 2 * 1024 * 1024 * 1024;
+}
+const ML_MAX_UPLOAD_BYTES = resolveMlMaxUploadBytes();
+// Content-Length 预检：客户端虚报/实报超限直接 413，不进入接收流程（流式字节计数是第二道保险）
+function contentLengthExceeds(req, limit) {
+  const len = Number(req.headers && req.headers['content-length']);
+  return Number.isFinite(len) && len > limit;
+}
+
 // PERF-05：按 db 实例缓存表结构自检结果，避免每个 HTTP 请求重复跑 PRAGMA / 抛异常的 ALTER TABLE。
 const dbSchemaCache = new WeakMap();
 function schemaCheckedOnce(db, key) {
@@ -381,25 +393,36 @@ async function attachLocalVideoPoster(services, resultImages) {
 }
 
 function parseBody(req, limit = 2 * 1024 * 1024) {
-  return new Promise(resolve => {
+  return new Promise((resolve, reject) => {
     let b = '';
     let overflow = false;
+    let settled = false;
     req.on('data', c => {
-      if (overflow) return;
+      if (overflow || settled) return;
       b += c;
       if (b.length > limit) {
         overflow = true;
         b = '';
+        settled = true;
         try { req.destroy(); } catch (_) {}
+        // 保持历史哨兵约定：调用方按 __bodyTooLarge 显式回 413
         resolve({ __bodyTooLarge: true });
       }
     });
     req.on('end', () => {
-      if (overflow) return;
-      try { resolve(b ? JSON.parse(b) : {}); }
-      catch { resolve({}); }
+      if (overflow || settled) return;
+      if (!b) return resolve({});
+      try {
+        resolve(JSON.parse(b));
+      } catch {
+        // B6：坏 JSON 不再静默成 {}，显式 400（由 handleApi 兜底或各 handler catch 透传）
+        const err = new Error('请求体不是合法的 JSON');
+        err.statusCode = 400;
+        err.code = 'BAD_JSON';
+        reject(err);
+      }
     });
-    req.on('error', () => { if (!overflow) resolve({}); });
+    req.on('error', () => { if (!overflow && !settled) resolve({}); });
   });
 }
 
@@ -1397,7 +1420,22 @@ function requireAdmin(res, sessionUser) {
 }
 
 // 核心 HTTP 请求路由调度
+// B6：入口兜底 —— 未被各路由局部 try/catch 接住的 4xx 语义错误（如 parseBody 坏 JSON 的
+// statusCode=400）按其状态码返回；其余异常继续上抛由服务端 500 处理，避免坏请求体被静默当 {}。
 async function handleApi(services, req, res, prefix = '/api') {
+  try {
+    return await handleApiImpl(services, req, res, prefix);
+  } catch (e) {
+    if (res.headersSent) throw e;
+    const code = Number(e && e.statusCode);
+    if (code >= 400 && code < 500) {
+      return sendJson(res, code, { success: false, error: e.message });
+    }
+    throw e;
+  }
+}
+
+async function handleApiImpl(services, req, res, prefix = '/api') {
   const { db, config, interpreter } = services;
   const urlObj = new URL(req.url, 'http://127.0.0.1');
   let pathname = urlObj.pathname;
@@ -1442,8 +1480,8 @@ async function handleApi(services, req, res, prefix = '/api') {
     ['GET', /^\/assets\/trash$/],
     ['GET', /^\/assets\/trash\/[^\/]+$/],
     ['POST', /^\/assets\/trash\/restore$/],
-    ['POST', /^\/assets\/trash\/purge$/],
-    ['POST', /^\/assets\/trash\/rehome-gate$/],
+    // R6：purge / rehome-gate 处理器要求 admin，viewer 账号命中也只会吃 403；
+    // 管理员经 /api/* 根路径（绕过白名单）访问，故从 viewer 白名单移除（viewer 调则 404）。
     ['POST', /^\/assets\/[^\/]+\/favorite$/],
     ['POST', /^\/assets\/[^\/]+\/library-prep$/],
     ['GET', /^\/assets\/[^\/]+$/],
@@ -1493,6 +1531,8 @@ async function handleApi(services, req, res, prefix = '/api') {
     ['GET', /^\/lab\/filter-vocabulary$/],
     ['GET', /^\/lab\/quick-models$/],
     ['GET', /^\/lab\/local-models$/],
+    // R3：本地模型文件下载（viewer 视角端拉取已发布模型，路由仅要求 isViewerOrAdmin）
+    ['GET', /^\/lab\/local-models\/[^\/]+\/download$/],
     ['POST', /^\/lab\/gate-preview$/],
     ['POST', /^\/lab\/stale-tags$/],
     ['POST', /^\/lab\/runs$/],
@@ -1532,19 +1572,9 @@ async function handleApi(services, req, res, prefix = '/api') {
     ['GET', /^\/products\/presets$/],
     ['GET', /^\/products\/models\/[^\/]+$/],
     ['GET', /^\/products\/previews\/[^\/]+$/],
-    // SEC-007：治理台读接口对 viewer 保留，写接口（POST/PUT/DELETE/accept/沙盒）
-    // 一律移出白名单，仅管理员经 /api/* 访问。
-    ['GET', /^\/governance\/gen-models$/],
-    ['GET', /^\/governance\/gen-jobs$/],
-    ['GET', /^\/governance\/workflows$/],
-    ['GET', /^\/governance\/prompts$/],
-    ['GET', /^\/governance\/mount-points$/],
-    ['GET', /^\/governance\/mount-points\/[^\/]+\/modules$/],
-    ['GET', /^\/governance\/operators$/],
-    ['GET', /^\/governance\/dict-macros$/],
-    ['GET', /^\/governance\/snippets$/],
-    ['POST', /^\/governance\/prompts\/preview-compile$/],
-    ['GET', /^\/runs\/[^\/]+\/unpack$/],
+    // R6：治理台读接口（9 个 GET）与 prompts/preview-compile 处理器均要求 admin
+    // （preview-compile 虽在 isGovernanceWrite 前置闸门被豁免，但处理器内部仍 403），
+    // viewer 命中白名单也只吃 403，故全部移出；管理员经 /api/* 根路径访问。
     ['GET', /^\/thumbs\/[^\/]+$/],
     ['HEAD', /^\/thumbs\/[^\/]+$/],
     ['POST', /^\/gen\/preview$/],
@@ -1572,10 +1602,9 @@ async function handleApi(services, req, res, prefix = '/api') {
     ['POST', /^\/tools\/extract-frames$/],
     ['POST', /^\/tools\/convert-video$/],
     ['GET', /^\/assets\/similarity-workbench$/],
-    ['POST', /^\/assets\/similarity-workbench\/resolve$/],
-    ['POST', /^\/assets\/similarity-workbench\/clean-exact$/],
+    // R6：resolve/clean-exact/ignored 的写操作均为 admin 处理器，已移出白名单；
+    // 唯 GET ignored 处理器无 admin 守卫（登录即可读忽略对列表），保留。
     ['GET', /^\/assets\/similarity-workbench\/ignored$/],
-    ['DELETE', /^\/assets\/similarity-workbench\/ignored$/],
     ['GET', /^\/assets\/[^\/]+\/quality$/]
   ];
   if (pathname === '/viewer' || pathname.startsWith('/viewer/')) {
@@ -1907,12 +1936,15 @@ async function handleApi(services, req, res, prefix = '/api') {
   // 独立媒体工具免入库纯临时文件上传（支持格式转换、纯音频提炼、压缩等工坊使用）
   if (pathname === '/tools/upload' && req.method === 'POST') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    if (contentLengthExceeds(req, ML_MAX_UPLOAD_BYTES)) {
+      return sendJson(res, 413, { success: false, error: 'payload_too_large' });
+    }
     const { handleToolTempUpload } = require('./stream-upload');
     try {
       const data = await handleToolTempUpload(services, req);
       return sendJson(res, 200, { success: true, data });
     } catch (e) {
-      return sendJson(res, 400, { error: e.message });
+      return sendJson(res, e.statusCode || 400, { error: e.message });
     }
   }
 
@@ -2842,19 +2874,26 @@ async function handleApi(services, req, res, prefix = '/api') {
   // 手机端相册媒体文件直传落盘 NAS（单文件流式/multipart）
   if (pathname === '/sync/upload' && req.method === 'POST') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    if (contentLengthExceeds(req, ML_MAX_UPLOAD_BYTES)) {
+      return sendJson(res, 413, { success: false, error: 'payload_too_large' });
+    }
     const { handleDirectUpload } = require('./stream-upload');
     try {
       const data = await handleDirectUpload(services, req);
       return sendJson(res, 200, { success: true, data });
     } catch (e) {
-      return sendJson(res, 400, { error: e.message });
+      return sendJson(res, e.statusCode || 400, { error: e.message });
     }
   }
 
   // 手机端大视频/大文件分片上传
   if (pathname === '/sync/chunk' && req.method === 'POST') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
-    const { handleChunkUpload } = require('./stream-upload');
+    const { handleChunkUpload, MAX_CHUNK_BYTES } = require('./stream-upload');
+    // 单片 64MB + 1MB multipart 封装修边
+    if (contentLengthExceeds(req, MAX_CHUNK_BYTES + 1024 * 1024)) {
+      return sendJson(res, 413, { success: false, error: 'payload_too_large' });
+    }
     const uploadId = req.headers['x-upload-id'] || urlObj.searchParams.get('upload_id');
     const chunkIndex = req.headers['x-chunk-index'] || urlObj.searchParams.get('chunk_index');
     const totalChunks = req.headers['x-total-chunks'] || urlObj.searchParams.get('total_chunks');
@@ -2862,7 +2901,7 @@ async function handleApi(services, req, res, prefix = '/api') {
       const data = await handleChunkUpload(services, req, { uploadId, chunkIndex, totalChunks });
       return sendJson(res, 200, { success: true, data });
     } catch (e) {
-      return sendJson(res, 400, { error: e.message });
+      return sendJson(res, e.statusCode || 400, { error: e.message });
     }
   }
 
@@ -2944,79 +2983,66 @@ async function handleApi(services, req, res, prefix = '/api') {
   // 管理端：上传 wgt/apk 并自动写入清单
   if (pathname === '/app/update/upload' && req.method === 'POST') {
     if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    if (contentLengthExceeds(req, ML_MAX_UPLOAD_BYTES)) {
+      return sendJson(res, 413, { success: false, error: 'payload_too_large' });
+    }
+    // B6：raw/multipart 流式落 dataDir 临时文件后交给 publishFile（tmpPath copy），
+    // 不再 chunks+Buffer.concat 整个安装包；JSON base64 是少见路径，仍按封顶缓冲处理。
+    const { streamToTempFile, streamMultipartFile } = require('./stream-upload');
+    const { readRequestBuffer } = require('./ingest');
+    const tmpDir = path.join(config.dataDir, 'cache', 'temp_upload');
+    fs.mkdirSync(tmpDir, { recursive: true });
+    const tmpPath = path.join(tmpDir, `appupdate_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+    let streamed = false;
     try {
-      const chunks = [];
-      const raw = await new Promise((resolve, reject) => {
-        req.on('data', (c) => chunks.push(c));
-        req.on('end', () => resolve(Buffer.concat(chunks)));
-        req.on('error', reject);
-      });
-      // 支持 multipart/form-data 或 raw body + query
-      let buffer = raw;
       let fileName = urlObj.searchParams.get('fileName') || `app-${Date.now()}.wgt`;
       const fields = {};
+      let buffer = null;
       const ctype = String(req.headers['content-type'] || '');
       if (ctype.includes('multipart/form-data')) {
         const m = ctype.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
-        const boundary = (m && (m[1] || m[2])) || '';
-        if (boundary) {
-          const parts = raw.toString('binary').split('--' + boundary);
-          for (const part of parts) {
-            if (!part || part === '--\r\n' || part === '--') continue;
-            const headerEnd = part.indexOf('\r\n\r\n');
-            if (headerEnd < 0) continue;
-            const head = part.slice(0, headerEnd);
-            let body = part.slice(headerEnd + 4);
-            if (body.endsWith('\r\n')) body = body.slice(0, -2);
-            const nameM = head.match(/name="([^"]+)"/i);
-            const fileM = head.match(/filename="([^"]+)"/i);
-            const name = nameM ? nameM[1] : '';
-            if (fileM) {
-              fileName = fileM[1] || fileName;
-              buffer = Buffer.from(body, 'binary');
-            } else if (name) {
-              fields[name] = body.replace(/\r\n$/, '');
-            }
-          }
-        }
+        if (!m) return sendJson(res, 400, { error: '缺少 multipart boundary' });
+        const parsed = await streamMultipartFile(req, tmpPath, (m[1] || m[2]).trim(), {
+          maxBytes: ML_MAX_UPLOAD_BYTES,
+          extraFileNames: [],
+        });
+        streamed = true;
+        fileName = parsed.file.filename || fileName;
+        Object.assign(fields, parsed.fields);
+      } else if (ctype.includes('application/json')) {
+        // JSON 包 base64（少见路径）：整体封顶 ML_MAX_UPLOAD_BYTES，超限抛 413
+        const raw = await readRequestBuffer(req, ML_MAX_UPLOAD_BYTES);
+        const j = JSON.parse(raw.toString('utf8'));
+        if (j.fileName) fileName = j.fileName;
+        if (j.buffer || j.base64) buffer = Buffer.from(j.buffer || j.base64, 'base64');
+        Object.assign(fields, j.fields || {
+          versionCode: j.versionCode,
+          versionName: j.versionName,
+          wgtVersion: j.wgtVersion,
+          force: j.force,
+          note: j.note,
+          channel: j.channel,
+        });
       } else {
-        // JSON 包 base64，或 raw 二进制（Content-Type: application/octet-stream + ?fileName=）
-        try {
-          const j = JSON.parse(raw.toString('utf8'));
-          if (j.fileName) fileName = j.fileName;
-          if (j.buffer || j.base64) buffer = Buffer.from(j.buffer || j.base64, 'base64');
-          Object.assign(fields, j.fields || {
-            versionCode: j.versionCode,
-            versionName: j.versionName,
-            wgtVersion: j.wgtVersion,
-            force: j.force,
-            note: j.note,
-            channel: j.channel,
-          });
-        } catch {
-          // raw binary: keep buffer, read fields from query
-          for (const k of ['versionCode', 'versionName', 'wgtVersion', 'force', 'note', 'channel', 'releaseMode', 'targetDevices', 'rolloutPct']) {
-            const v = urlObj.searchParams.get(k);
-            if (v != null) fields[k] = v;
-          }
+        // raw 二进制（application/octet-stream + ?fileName=，pack-studio/curl 走这条）
+        // B6：流式落盘替代整包 Buffer.concat；rolloutPct（B8）随查询字段一并透传给 publishUpdate
+        await streamToTempFile(req, tmpPath, { maxBytes: ML_MAX_UPLOAD_BYTES });
+        streamed = true;
+        for (const k of ['versionCode', 'versionName', 'wgtVersion', 'force', 'note', 'channel', 'releaseMode', 'targetDevices', 'rolloutPct']) {
+          const v = urlObj.searchParams.get(k);
+          if (v != null) fields[k] = v;
         }
       }
-      const out = await appUpdate.publishFile(config, { fileName, buffer, fields });
+      const out = await appUpdate.publishFile(config, { fileName, tmpPath: streamed ? tmpPath : null, buffer, fields });
       return sendJson(res, 200, { success: true, data: out });
     } catch (e) {
-      return sendJson(res, 400, { error: e.message });
+      return sendJson(res, e.statusCode || 400, { error: e.message });
+    } finally {
+      if (streamed) { try { fs.unlinkSync(tmpPath); } catch (_) {} }
     }
   }
 
-  // 灰度版本状态获取（正式版 vs 灰度版）
-  if (pathname === '/app/update/state' && req.method === 'GET') {
-    try {
-      const state = appUpdate.getUpdateState(config);
-      return sendJson(res, 200, { success: true, data: state });
-    } catch (e) {
-      return sendJson(res, 500, { error: e.message });
-    }
-  }
+  // R10：/app/update/state 的重复分支已删除（首份完整实现在本文件前部，永不抵达此处）。
 
   // 管理端：一键将当前灰度版本转正为全量正式发布
   if (pathname === '/app/update/promote' && req.method === 'POST') {
@@ -4655,7 +4681,7 @@ async function handleApi(services, req, res, prefix = '/api') {
       const saved = await umbra.persistUploadedBuffer(db, config, file.data, ext);
       return sendJson(res, 200, { success: true, data: { id: saved.maskId, url: saved.url } });
     } catch (e) {
-      return sendJson(res, 400, { success: false, error: e.message });
+      return sendJson(res, e.statusCode || 400, { success: false, error: e.message });
     }
   }
 
@@ -5925,12 +5951,23 @@ async function handleApi(services, req, res, prefix = '/api') {
     return sendJson(res, 200, { success: true, data: scanStats });
   }
 
-  // 管理员专用：工作流管理
   // 管理员专用：工作流管理 (支持 default 图片产线与 video 视频空图产线)
-  const mWfGet = pathname.match(/^\/workflows\/([^\/]+)$/);
-  if (mWfGet && req.method === 'GET' && mWfGet[1] !== 'catalog') {
+  // R5：/workflows/default 为精确路由（web 工作流页默认拉它），必须先于正则捕获分支，
+  // default 行缺失时用内置默认图补种；补种仍失败才 404，绝不静默 data:null 让前端空画布。
+  let wfGetId = null;
+  if (req.method === 'GET') {
+    if (pathname === '/workflows/default') {
+      wfGetId = 'default';
+    } else {
+      const mWfGet = pathname.match(/^\/workflows\/([^\/]+)$/);
+      if (mWfGet && mWfGet[1] !== 'catalog' && mWfGet[1] !== 'default') {
+        wfGetId = decodeURIComponent(mWfGet[1]);
+      }
+    }
+  }
+  if (wfGetId) {
     if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
-    const wfId = decodeURIComponent(mWfGet[1]);
+    const wfId = wfGetId;
     let wf = db.prepare('SELECT * FROM workflows WHERE id=?').get(wfId);
     const now = Date.now();
 
@@ -5942,7 +5979,25 @@ async function handleApi(services, req, res, prefix = '/api') {
       wf = db.prepare("SELECT * FROM workflows WHERE id='video'").get();
     }
 
-    if (!wf) return sendJson(res, 200, { success: true, data: null });
+    if (!wf && wfId === 'default') {
+      try {
+        const { DEFAULT_WORKFLOW_GRAPH } = require('../scripts/migrate');
+        db.prepare(`
+          INSERT INTO workflows (id, name, version, is_default, graph_json, created_at, updated_at)
+          VALUES ('default', '默认工作流', 1, 1, ?, ?, ?)
+        `).run(JSON.stringify(DEFAULT_WORKFLOW_GRAPH), now, now);
+        wf = db.prepare("SELECT * FROM workflows WHERE id='default'").get();
+      } catch (seedErr) {
+        console.warn('[workflows] 默认工作流补种失败:', seedErr && seedErr.message);
+      }
+    }
+
+    if (!wf) {
+      if (wfId === 'default') {
+        return sendJson(res, 404, { success: false, error: '默认工作流不存在且补种失败' });
+      }
+      return sendJson(res, 200, { success: true, data: null });
+    }
     let graph = { nodes: [], edges: [] };
     try { graph = JSON.parse(wf.graph_json || '{"nodes":[],"edges":[]}'); } catch {}
 
@@ -7229,7 +7284,8 @@ async function handleApi(services, req, res, prefix = '/api') {
       }
       return sendJson(res, 400, { error: '请使用 multipart/form-data 或 octet-stream 上传原图' });
     } catch (e) {
-      return sendJson(res, 400, { error: e.message });
+      // B6：readRequestBuffer 超限时带 statusCode=413
+      return sendJson(res, e.statusCode || 400, { error: e.message });
     }
   }
 
@@ -9095,13 +9151,16 @@ module.exports = {
   // 这里复用流式上传（支持视频/图片、大文件），返回顶层 fid 供前端直接使用。
   if (pathname === '/upload' && req.method === 'POST') {
     if (!sessionUser) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    if (contentLengthExceeds(req, ML_MAX_UPLOAD_BYTES)) {
+      return sendJson(res, 413, { success: false, error: 'payload_too_large' });
+    }
     try {
       const { handleDirectUpload } = require('./stream-upload');
       const r = await handleDirectUpload(services, req, { source: 'edit' });
       if (!r || !r.fid) return sendJson(res, 400, { error: '入库失败' });
       return sendJson(res, 200, { success: true, ...r });
     } catch (e) {
-      return sendJson(res, 400, { error: e.message });
+      return sendJson(res, e.statusCode || 400, { error: e.message });
     }
   }
 
@@ -9119,8 +9178,10 @@ function register(services) {
     // 转换为原生 req/res 兼容对象
     await new Promise(resolve => {
       handleApi(services, c.req, c.res, P).then(resolve).catch(err => {
-        c.status = 500;
-        c.body = { error: err.message };
+        const code = Number(err && err.statusCode);
+        c.status = (code >= 400 && code < 500) ? code : 500;
+        // B6：4xx 可回显业务消息；500 不泄漏内部细节
+        c.body = (code >= 400 && code < 500) ? { error: err.message } : { error: '服务器内部错误' };
         resolve();
       });
     });

@@ -94,7 +94,11 @@ function readRequestBuffer(req, limit = MAX_BYTES) {
       if (size > limit) {
         rejected = true;
         const mb = Math.round(limit / (1024 * 1024));
-        reject(new Error(`上传文件体积超过限制 (${mb}MB)`));
+        const err = new Error(`上传文件体积超过限制 (${mb}MB)`);
+        // B6：统一 413 语义，调用方据此返回 Payload Too Large
+        err.statusCode = 413;
+        err.code = 'PAYLOAD_TOO_LARGE';
+        reject(err);
         return;
       }
       chunks.push(c);
@@ -263,28 +267,47 @@ async function ingestBuffer(services, {
 
   const originOrientation = calculateOriginOrientation(width, height);
 
-  db.prepare(`
-    INSERT INTO assets (
-      fid, kind, category, file_name, size, width, height, orientation, origin_orientation,
-      status, source, sha256, client_asset_id, created_at, discovered_at, updated_at
-    ) VALUES (?, 'image', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    fid,
-    targetCategory,
-    normalized.fileName,
-    normalized.buffer.length,
-    width,
-    height,
-    height && width && height > width * 1.05 ? 'portrait' : (width > height * 1.05 ? 'landscape' : 'square'),
-    originOrientation,
-    initialStatus,
-    source,
-    sha,
-    clientId || null,
-    takenAt || now,
-    now,
-    now
-  );
+  // B6：fid 由 sha256 决定，SELECT 查重与 INSERT 之间存在 await（指纹/sharp），
+  // 并发同图上传会撞 PRIMARY KEY/UNIQUE。捕获后回读既有行，按幂等去重返回，消除 500。
+  try {
+    db.prepare(`
+      INSERT INTO assets (
+        fid, kind, category, file_name, size, width, height, orientation, origin_orientation,
+        status, source, sha256, client_asset_id, created_at, discovered_at, updated_at
+      ) VALUES (?, 'image', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      fid,
+      targetCategory,
+      normalized.fileName,
+      normalized.buffer.length,
+      width,
+      height,
+      height && width && height > width * 1.05 ? 'portrait' : (width > height * 1.05 ? 'landscape' : 'square'),
+      originOrientation,
+      initialStatus,
+      source,
+      sha,
+      clientId || null,
+      takenAt || now,
+      now,
+      now
+    );
+  } catch (insErr) {
+    if (!/UNIQUE/i.test(String(insErr && insErr.message))) throw insErr;
+    // sha256 撞车：winner.fid 由同一 sha 派生，原文件路径与本次完全相同，
+    // 绝不能 unlink（否则会删掉成功者尚未复制的 originals 原文件）。
+    const winnerBySha = db.prepare('SELECT fid FROM assets WHERE sha256 = ?').get(sha);
+    if (winnerBySha) {
+      return { fid: winnerBySha.fid, deduped: true, reason: 'sha256_race' };
+    }
+    // client_asset_id 撞车（不同 sha）：本次落盘的原文件是孤立文件，清掉后按去重返回。
+    const winnerByClientId = db.prepare('SELECT fid FROM assets WHERE client_asset_id = ?').get(clientId || null);
+    if (winnerByClientId) {
+      try { fs.unlinkSync(absPath); } catch (_) {}
+      return { fid: winnerByClientId.fid, deduped: true, reason: 'client_asset_id_race' };
+    }
+    throw insErr;
+  }
 
   const relPath = path.join('cache', 'originals', destName);
   const deriv = await createDerivative(services, {

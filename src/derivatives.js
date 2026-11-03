@@ -6,6 +6,24 @@ const path = require('path');
 const fs = require('fs');
 const { Quark } = require('./quark');
 
+// B6：同一目标图的在途转码去重 —— 冷缓存时并发 <img> 首请求只做一次 sharp，
+// 其余请求共享同一个生产 Promise（完成后立即清表，命中缓存仍由调用方 existsSync 判定）。
+const transcodeInflight = new Map();
+function sharedTranscode(dest, producer) {
+  const existing = transcodeInflight.get(dest);
+  if (existing) return existing;
+  const p = (async () => {
+    try {
+      await producer();
+      return dest;
+    } finally {
+      transcodeInflight.delete(dest);
+    }
+  })();
+  transcodeInflight.set(dest, p);
+  return p;
+}
+
 function getDerivatives(db, assetFid) {
   return db.prepare('SELECT * FROM derivatives WHERE asset_fid = ? ORDER BY id ASC').all(assetFid);
 }
@@ -185,12 +203,15 @@ async function ensurePreviewJpeg(services, fid, derivative, filePath) {
   fs.mkdirSync(previewDir, { recursive: true });
   const dest = path.join(previewDir, `${fid}_${derivative.id}.jpg`);
   if (!fs.existsSync(dest)) {
-    const sharp = require('sharp');
-    await sharp(filePath, { failOn: 'none' })
-      .rotate()
-      .resize(1280, 1280, { fit: 'inside', withoutEnlargement: true })
-      .jpeg({ quality: 78 })
-      .toFile(dest);
+    await sharedTranscode(dest, async () => {
+      if (fs.existsSync(dest)) return; // 已被在途生产完成（竞态兜底）
+      const sharp = require('sharp');
+      await sharp(filePath, { failOn: 'none' })
+        .rotate()
+        .resize(1280, 1280, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 78 })
+        .toFile(dest);
+    });
   }
 
   if (dest && fs.existsSync(dest) && services?.db) {
@@ -228,12 +249,15 @@ async function ensureGridJpeg(services, fid, filePath, derivativeOrId) {
   const destName = derivId ? `${fid}_${derivId}.jpg` : `${fid}.jpg`;
   const dest = path.join(gridDir, destName);
   if (!fs.existsSync(dest)) {
-    const sharp = require('sharp');
-    await sharp(filePath, { failOn: 'none' })
-      .rotate()
-      .resize(256, 256, { fit: 'inside', withoutEnlargement: true })
-      .jpeg({ quality: 72 })
-      .toFile(dest);
+    await sharedTranscode(dest, async () => {
+      if (fs.existsSync(dest)) return;
+      const sharp = require('sharp');
+      await sharp(filePath, { failOn: 'none' })
+        .rotate()
+        .resize(256, 256, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 72 })
+        .toFile(dest);
+    });
   }
   return dest;
 }
@@ -242,14 +266,17 @@ async function ensureGridJpeg(services, fid, filePath, derivativeOrId) {
 async function ensureGridFromThumb(thumbPath, gridPath) {
   if (!thumbPath || !fs.existsSync(thumbPath)) return null;
   if (gridPath && fs.existsSync(gridPath)) return gridPath;
+  if (!gridPath) return null;
   try {
-    if (gridPath) fs.mkdirSync(path.dirname(gridPath), { recursive: true });
-    const sharp = require('sharp');
-    await sharp(thumbPath, { failOn: 'none' })
-      .resize(256, 256, { fit: 'inside', withoutEnlargement: true })
-      .jpeg({ quality: 72 })
-      .toFile(gridPath);
-    return gridPath;
+    fs.mkdirSync(path.dirname(gridPath), { recursive: true });
+    return await sharedTranscode(gridPath, async () => {
+      if (fs.existsSync(gridPath)) return;
+      const sharp = require('sharp');
+      await sharp(thumbPath, { failOn: 'none' })
+        .resize(256, 256, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 72 })
+        .toFile(gridPath);
+    });
   } catch (e) {
     console.warn('[derivatives] 网格档派生失败:', e && e.message);
     return null;
@@ -276,12 +303,15 @@ async function ensurePreviewWebp(services, fid, derivativeOrFilePath, maybeFileP
   const destName = derivative?.id ? `${fid}_${derivative.id}.webp` : `${fid}.webp`;
   const dest = path.join(previewDir, destName);
   if (!fs.existsSync(dest)) {
-    const sharp = require('sharp');
-    await sharp(filePath, { failOn: 'none' })
-      .rotate()
-      .resize(1280, 1280, { fit: 'inside', withoutEnlargement: true })
-      .webp({ quality: 80 })
-      .toFile(dest);
+    await sharedTranscode(dest, async () => {
+      if (fs.existsSync(dest)) return;
+      const sharp = require('sharp');
+      await sharp(filePath, { failOn: 'none' })
+        .rotate()
+        .resize(1280, 1280, { fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: 80 })
+        .toFile(dest);
+    });
   }
   return dest;
 }
@@ -298,12 +328,15 @@ async function ensureGridWebp(services, fid, filePath, derivativeOrId) {
   const destName = derivId ? `${fid}_${derivId}.webp` : `${fid}.webp`;
   const dest = path.join(gridDir, destName);
   if (!fs.existsSync(dest)) {
-    const sharp = require('sharp');
-    await sharp(filePath, { failOn: 'none' })
-      .rotate()
-      .resize(256, 256, { fit: 'inside', withoutEnlargement: true })
-      .webp({ quality: 75 })
-      .toFile(dest);
+    await sharedTranscode(dest, async () => {
+      if (fs.existsSync(dest)) return;
+      const sharp = require('sharp');
+      await sharp(filePath, { failOn: 'none' })
+        .rotate()
+        .resize(256, 256, { fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: 75 })
+        .toFile(dest);
+    });
   }
   return dest;
 }
@@ -312,14 +345,17 @@ async function ensureGridWebp(services, fid, filePath, derivativeOrId) {
 async function ensureGridWebpFromThumb(sourcePath, webpPath) {
   if (!sourcePath || !fs.existsSync(sourcePath)) return null;
   if (webpPath && fs.existsSync(webpPath)) return webpPath;
+  if (!webpPath) return null;
   try {
-    if (webpPath) fs.mkdirSync(path.dirname(webpPath), { recursive: true });
-    const sharp = require('sharp');
-    await sharp(sourcePath, { failOn: 'none' })
-      .resize(256, 256, { fit: 'inside', withoutEnlargement: true })
-      .webp({ quality: 75 })
-      .toFile(webpPath);
-    return webpPath;
+    fs.mkdirSync(path.dirname(webpPath), { recursive: true });
+    return await sharedTranscode(webpPath, async () => {
+      if (fs.existsSync(webpPath)) return;
+      const sharp = require('sharp');
+      await sharp(sourcePath, { failOn: 'none' })
+        .resize(256, 256, { fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: 75 })
+        .toFile(webpPath);
+    });
   } catch (e) {
     console.warn('[derivatives] WebP 网格档派生失败:', e && e.message);
     return null;

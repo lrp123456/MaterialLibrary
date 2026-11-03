@@ -433,7 +433,6 @@
           <p v-if="backup.effectiveQuarkFid && !backup.quarkFid" class="text-[10px] text-outline mt-1">当前实际目录：{{ backup.effectiveQuarkFid }}</p>
         </div>
         <button @click="saveBackup" class="px-4 py-2 bg-primary text-white rounded-xl font-medium">保存备份设置</button>
-        <button @click="runRecluster" class="ml-2 px-4 py-2 bg-surface border border-outline-variant rounded-xl">全库按新规则重算查重</button>
       </div>
       <div class="bg-surface-low border border-outline-variant rounded-2xl p-5 space-y-4 max-w-xl text-xs">
         <h3 class="text-sm font-bold text-white">从 Ba 资源库拉取</h3>
@@ -1344,16 +1343,6 @@ async function saveBackup() {
     alert('备份设置已保存')
   } catch (e) {
     alert('保存失败: ' + e.message)
-  }
-}
-
-async function runRecluster() {
-  if (!confirm('按新规则清空自动组并重算？人工设过的主图会尽量保留。')) return
-  try {
-    const r = await api.recluster()
-    alert(`重算完成：${r.totalGroups} 组`)
-  } catch (e) {
-    alert('重算失败: ' + e.message)
   }
 }
 

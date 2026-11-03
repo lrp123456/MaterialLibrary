@@ -56,34 +56,45 @@ async function handleBaseLibraryRoutes(services, req, res, pathname, urlObj, { s
 
   if (pathname === '/base-library/items' && req.method === 'GET') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
-    const { listItems } = require('./items');
-    return sendJson(res, 200, {
-      success: true,
-      data: listItems(db, {
-        kind: urlObj.searchParams.get('kind') || '',
-        kindKey: urlObj.searchParams.get('kind_key') || '',
-        mount: urlObj.searchParams.get('mount') || urlObj.searchParams.get('surface') || '',
-        role: urlObj.searchParams.get('role') || '',
-        family: urlObj.searchParams.get('family') || '',
-        hue: urlObj.searchParams.get('hue') || '',
-        gloss: urlObj.searchParams.get('gloss') || '',
-        pattern: urlObj.searchParams.get('pattern') || '',
-        brand: urlObj.searchParams.get('brand') || '',
-        brandSeries: urlObj.searchParams.get('brand_series') || '',
-        woodSpecies: urlObj.searchParams.get('wood_species') || '',
-        woodTone: urlObj.searchParams.get('wood_tone') || '',
-        grainType: urlObj.searchParams.get('grain_type') || '',
-        grainScale: urlObj.searchParams.get('grain_scale') || '',
-        grainDirection: urlObj.searchParams.get('grain_direction') || '',
-        woodLayout: urlObj.searchParams.get('wood_layout') || '',
-        surfaceFinish: urlObj.searchParams.get('surface_finish') || '',
-        woodOnly: urlObj.searchParams.get('wood_only') === '1',
-        hasPreview: urlObj.searchParams.get('has_preview') === '1',
-        pinned: urlObj.searchParams.get('pinned') === '1',
-        sort: urlObj.searchParams.get('sort') || '',
-        q: urlObj.searchParams.get('q') || ''
-      })
-    });
+    const { listItems, countItems, ITEMS_PAGE_HARD_CAP } = require('./items');
+    // B6：显式分页时回传 total/limit/offset；缺省仍返回数组（硬上限 1000）
+    const paginated = urlObj.searchParams.has('limit') || urlObj.searchParams.has('offset');
+    const query = {
+      kind: urlObj.searchParams.get('kind') || '',
+      kindKey: urlObj.searchParams.get('kind_key') || '',
+      mount: urlObj.searchParams.get('mount') || urlObj.searchParams.get('surface') || '',
+      role: urlObj.searchParams.get('role') || '',
+      family: urlObj.searchParams.get('family') || '',
+      hue: urlObj.searchParams.get('hue') || '',
+      gloss: urlObj.searchParams.get('gloss') || '',
+      pattern: urlObj.searchParams.get('pattern') || '',
+      brand: urlObj.searchParams.get('brand') || '',
+      brandSeries: urlObj.searchParams.get('brand_series') || '',
+      woodSpecies: urlObj.searchParams.get('wood_species') || '',
+      woodTone: urlObj.searchParams.get('wood_tone') || '',
+      grainType: urlObj.searchParams.get('grain_type') || '',
+      grainScale: urlObj.searchParams.get('grain_scale') || '',
+      grainDirection: urlObj.searchParams.get('grain_direction') || '',
+      woodLayout: urlObj.searchParams.get('wood_layout') || '',
+      surfaceFinish: urlObj.searchParams.get('surface_finish') || '',
+      woodOnly: urlObj.searchParams.get('wood_only') === '1',
+      hasPreview: urlObj.searchParams.get('has_preview') === '1',
+      pinned: urlObj.searchParams.get('pinned') === '1',
+      sort: urlObj.searchParams.get('sort') || '',
+      q: urlObj.searchParams.get('q') || ''
+    };
+    if (!paginated) {
+      return sendJson(res, 200, { success: true, data: listItems(db, query) });
+    }
+    const limitParam = urlObj.searchParams.get('limit');
+    const offsetParam = urlObj.searchParams.get('offset');
+    const limit = Math.min(Math.max(parseInt(limitParam, 10) || ITEMS_PAGE_HARD_CAP, 1), ITEMS_PAGE_HARD_CAP);
+    const offset = Math.max(parseInt(offsetParam, 10) || 0, 0);
+    const [rows, total] = [
+      listItems(db, { ...query, limit, offset }),
+      countItems(db, query)
+    ];
+    return sendJson(res, 200, { success: true, data: rows, total, limit, offset });
   }
 
   const mItemPatch = pathname.match(/^\/base-library\/items\/([^/]+)$/);

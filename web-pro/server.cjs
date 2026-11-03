@@ -221,11 +221,17 @@ function handleRequest(req, res) {
   }
 
   // 2. 静态资源托管
-  let filePath = path.join(DIST_DIR, pathname === '/' ? 'index.html' : pathname);
+  // B6：resolve 前缀深度校验（WHATWG URL 已折叠 '..'，这里是第二道保险）
+  const distRoot = path.resolve(DIST_DIR);
+  let filePath = path.resolve(distRoot, pathname === '/' ? 'index.html' : '.' + (pathname.startsWith('/') ? pathname : '/' + pathname));
+  if (filePath !== distRoot && !filePath.startsWith(distRoot + path.sep)) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end('Not Found');
+  }
 
   // SPA 路由 fallback 到 index.html
   if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-    filePath = path.join(DIST_DIR, 'index.html');
+    filePath = path.join(distRoot, 'index.html');
   }
 
   if (fs.existsSync(filePath)) {

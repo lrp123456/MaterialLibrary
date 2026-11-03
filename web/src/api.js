@@ -78,8 +78,6 @@ export const api = {
   saveBackupSettings: (body) => request('/settings/backup', { method: 'POST', body }),
   // 快照直收：App（素材库）直接推快照到本服务；此处仅剩设备状态查询
   snapshotStatus: () => request('/snapshot-status'),
-  ungroupAsset: (groupId, fid) => request(`/dup-groups/${encodeURIComponent(groupId)}/ungroup`, { method: 'POST', body: { fid } }),
-  recluster: () => request('/dup-groups/recluster', { method: 'POST' }),
   runAssetLineage: (runId, fid) => request(`/runs/${encodeURIComponent(runId)}/assets/${encodeURIComponent(fid)}`),
   workflowCatalog: () => request('/workflows/catalog'),
   imageUrl: (fid, derivativeId = null, dl = false, play = false) => {
@@ -205,9 +203,6 @@ export const api = {
   restageBackfill: (limit = 2000) => request('/runs/restage-backfill', { method: 'POST', body: { limit } }),
   vectorStatus: () => request('/vectors/status'),
   recomputeVectors: () => request('/vectors/recompute', { method: 'POST' }),
-
-  // Groups
-  setRepresentative: (groupId, fid) => request(`/dup-groups/${encodeURIComponent(groupId)}/representative`, { method: 'POST', body: { fid } }),
 
   // Dict & Users
   dict: (includeDeprecated = true) => request(`/dict?include_deprecated=${includeDeprecated ? '1' : '0'}`),

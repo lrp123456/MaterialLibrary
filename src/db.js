@@ -8,6 +8,35 @@ const Database = require('better-sqlite3');
 const { DIMENSIONS, VALUES, calculateOriginOrientation } = require('./tags-seed');
 const { migrate } = require('../scripts/migrate');
 
+// 批次 B6：统一连接级 PRAGMA（幂等，可被多入口重复 openDb 安全调用）
+const WAL_CHECKPOINT_INTERVAL_MS = 60 * 1000;
+// 记录已挂检查点定时器的连接，避免同一进程多次 openDb 堆叠定时器
+const checkpointTimers = new WeakSet();
+
+function applyConnectionPragmas(db) {
+  // 锁竞争等待 15s，减少 SQLITE_BUSY 直接失败
+  db.pragma('busy_timeout = 15000');
+  // WAL 累积约 1000 页自动做一次检查点
+  db.pragma('wal_autocheckpoint = 1000');
+  // WAL 下 NORMAL 安全且明显更快（commit 不再每次 fsync）
+  db.pragma('synchronous = NORMAL');
+}
+
+function startWalCheckpointTimer(db) {
+  if (checkpointTimers.has(db)) return;
+  const timer = setInterval(() => {
+    try {
+      // PASSIVE：不阻塞读写，能合多少合多少
+      db.pragma('wal_checkpoint(PASSIVE)');
+    } catch (e) {
+      console.warn('[db] WAL PASSIVE 检查点失败:', e.message);
+    }
+  }, WAL_CHECKPOINT_INTERVAL_MS);
+  // 不阻止进程退出（CLI/脚本/测试场景）
+  if (typeof timer.unref === 'function') timer.unref();
+  checkpointTimers.add(db);
+}
+
 function ensureUltimateSchema(db) {
   // ── Batch A & F：全量可见图绝对查重列、导出暗标列与高性能复合索引 ──
   const addColIfMissing = (table, col, def) => {
@@ -89,8 +118,14 @@ function openDb(dataDir) {
   // 幂等执行增量补齐与表结构保障
   const db = migrate(dataDir, { doBackup: false });
 
+  // B6：统一连接 PRAGMA（migrate 已开 WAL/FK；此处补齐超时/检查点/同步级别）
+  applyConnectionPragmas(db);
+
   // 保证 Batch A & F 必备字段、索引与查重表
   ensureUltimateSchema(db);
+
+  // B6：周期 PASSIVE WAL 检查点（定时器 unref，不阻止进程退出）
+  startWalCheckpointTimer(db);
 
   // export_registry 历史遗留两套列集，回填缺失的时间列
   try {
