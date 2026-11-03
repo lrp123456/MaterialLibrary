@@ -576,9 +576,6 @@ export async function aiTaskSubmit(payload = {}) {
   })
 }
 
-/** 贴回校验别名 */
-export const aiEditVerify = verifyPasteback
-
 /** 清空当前会话的消息 */
 export async function clearChatMessages(sessionId = 'default_session') {
   return request('/chat/messages', {
