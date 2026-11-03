@@ -1219,6 +1219,11 @@ import {
   deleteCustomStyle,
   analyzeStyle
 } from '../../api';
+import { ensureModelViewer } from '../../utils/model-viewer.js';
+
+// 冷导航修复：本组件模板含 <model-viewer>，挂载即确保自定义元素已注册，
+// 不再依赖本会话先打开过 StudioEditLayer
+onMounted(() => { ensureModelViewer(); });
 
 const props = defineProps({
   initialImage: { type: String, default: '' },

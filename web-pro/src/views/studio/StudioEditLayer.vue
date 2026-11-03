@@ -1435,6 +1435,7 @@ import { authFetch, getToken } from '../../api';
 import { mapSchemeToRegions } from '../../../../src/base-library/scheme-apply.mjs';
 import { REGION_COLORS, calculateNormalizedBbox, computeImageEntityBbox, getNearestCanonicalRatio, extractDominantScenePalette } from '../../utils/model-protocol';
 import { buildStructuredPrompt } from '../../utils/prompt-engine';
+import { ensureModelViewer } from '../../utils/model-viewer.js';
 import {
   BUILTIN_GUIDE_TEXT,
   GUIDE_TYPE_TO_OP,
@@ -4224,14 +4225,8 @@ onMounted(async () => {
     }
     renderMosaicCanvas();
   });
-  if (!props.cropOnly && typeof window !== 'undefined' && window.customElements && !window.customElements.get('model-viewer')) {
-    try {
-      await import('@google/model-viewer');
-    } catch (err) {
-      if (!window.customElements.get('model-viewer')) {
-        console.warn('Failed to load @google/model-viewer:', err);
-      }
-    }
+  if (!props.cropOnly) {
+    ensureModelViewer();
   }
 });
 </script>
