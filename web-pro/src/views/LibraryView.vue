@@ -5375,7 +5375,8 @@ function getThumbnailSrc(item) {
     const t = localStorage.getItem('ml_token');
     return t ? `${item.thumbUrl}&token=${encodeURIComponent(t)}` : item.thumbUrl;
   }
-  return getAssetImageUrl(item.fid, item.mediaToken);
+  // 列表卡片只取 256px grid 档；详情/全屏走 getModalMainImageUrl 的默认 preview 档
+  return getAssetImageUrl(item.fid, item.mediaToken, 'grid');
 }
 
 function ratioLabelFromSize(width, height) {

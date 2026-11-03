@@ -146,13 +146,19 @@ export async function authFetch(url, options = {}) {
 
 /**
  * 获取素材缩略图/大图 URL（双重附带 Token 与 MediaToken，确保 <img> 永不 401）
+ *
+ * tier：
+ *  - 'grid'    列表瀑布流卡片专用：服务端直发 256px grid 档（webp 优先），
+ *              相比默认 1280px preview 档单图省约 30 倍流量；
+ *  - 'preview' 1280px 预览档（默认，详情/全屏/聊天引用使用）。
  */
-export function getAssetImageUrl(fid, mediaToken = '') {
+export function getAssetImageUrl(fid, mediaToken = '', tier = '') {
   if (!fid) return '';
   const token = getToken();
   const q = new URLSearchParams();
   if (token) q.set('token', token);
   if (mediaToken) q.set('media_token', mediaToken);
+  if (tier === 'grid' || tier === 'preview') q.set('tier', tier);
   const qs = q.toString();
   return resolveApiUrl(`/api/viewer/assets/${encodeURIComponent(fid)}/image${qs ? `?${qs}` : ''}`);
 }
