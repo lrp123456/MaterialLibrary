@@ -247,6 +247,12 @@ async function pushUpdate(opt) {
     const td = Array.isArray(opt.targetDevices) ? opt.targetDevices.join(',') : String(opt.targetDevices);
     if (td.trim()) qs.set('targetDevices', td.trim());
   }
+  // 灰度比例：仅白名单留空时有意义（服务端在白名单模式下忽略该参数）。
+  // '' / null / undefined 不传，保持旧版服务端与全量发布的旧行为。
+  if (opt.rolloutPct !== '' && opt.rolloutPct != null) {
+    const n = Number(opt.rolloutPct);
+    if (Number.isFinite(n)) qs.set('rolloutPct', String(Math.max(0, Math.min(100, Math.trunc(n)))));
+  }
 
   const upUrl = server + '/api/app/update/upload?' + qs.toString();
 

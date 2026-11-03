@@ -45,6 +45,17 @@ function defaultManifest() {
   };
 }
 
+/**
+ * 百分比灰度的稳定分桶：同一 deviceId 永远落在同一桶（0-99）。
+ * 无设备号返回 null —— 不参与百分比（不能按请求随机漂移），白名单 UA/IP 仍可命中。
+ */
+function rolloutBucket(deviceId) {
+  const key = String(deviceId || '').trim().toLowerCase();
+  if (!key) return null;
+  const sum = crypto.createHash('sha256').update('canary-rollout:' + key).digest();
+  return sum.readUInt32BE(0) % 100;
+}
+
 function pickLatest(manifest, channel, deviceId, userAgent, clientIp) {
   const ch = String(channel || '').trim().toLowerCase();
   const dev = String(deviceId || '').trim().toLowerCase();
@@ -82,12 +93,21 @@ function pickLatest(manifest, channel, deviceId, userAgent, clientIp) {
       // 严格拦截：未命中白名单的设备，坚决不给灰度版本！即便客户端声明了 canary 通道也不给。
       // 保证灰度范围严格限制在白名单内，绝不全局扩散！
     } else {
-      // 2. 未指定白名单（留空表示所有参与尝鲜通道的设备生效）：
-      // 仅当客户端显式开启/声明 canary/beta/gray 通道时才下发灰度包；
-      // 普通正式版/内部默认通道设备绝不打扰，绝不全局推送！
+      // 2. 未指定白名单：仅对显式声明 canary/beta/gray 通道的设备生效，
+      // 普通正式版/内部默认通道设备绝不打扰。
       const isCanaryChannel = ch === 'canary' || ch === 'beta' || ch === 'gray';
       if (isCanaryChannel) {
-        return gray.latest;
+        // rolloutPct（0-100，缺省=100）：在尝鲜设备内再按 deviceId 稳定分桶。
+        // 0 = 暂停全部下发（可保留灰度配置不撤回）；100/缺省 = 全部尝鲜设备；
+        // 1-99 = 桶 < pct 的设备，无 deviceId 的旧客户端不参与（避免按请求漂移）。
+        const pct = Number(gray.rolloutPct);
+        if (!Number.isFinite(pct)) return gray.latest;
+        if (pct <= 0) { /* 暂停：落入正式版回落 */ }
+        else if (pct >= 100) return gray.latest;
+        else {
+          const bucket = rolloutBucket(dev);
+          if (bucket !== null && bucket < pct) return gray.latest;
+        }
       }
     }
   }
@@ -122,6 +142,76 @@ function writeManifest(config, manifest) {
   return p;
 }
 
+// ===== 设备名册：客户端每次 check 顺带报到，管理端据此复制设备号进灰度白名单 =====
+const DEVICES_MAX = 500;
+const DEVICES_WRITE_TTL_MS = 10 * 60 * 1000;
+
+function devicesPath(config) {
+  return path.join(updateDir(config), 'devices.json');
+}
+
+function maskIp(ip) {
+  const s = String(ip || '').split(',')[0].trim();
+  if (/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.\d{1,3}$/.test(s)) return s.replace(/\.\d{1,3}$/, '.0');
+  if (s.includes(':')) return s.replace(/[0-9a-fA-F]{1,4}$/, 'x000'); // IPv6 粗脱敏
+  return '';
+}
+
+function readDevices(config) {
+  try {
+    const p = devicesPath(config);
+    if (fs.existsSync(p)) {
+      const obj = JSON.parse(fs.readFileSync(p, 'utf8'));
+      if (obj && typeof obj === 'object' && obj.devices && typeof obj.devices === 'object') return obj;
+    }
+  } catch (e) {
+    console.warn('[app-update] devices.json 读取失败', e.message);
+  }
+  return { devices: {} };
+}
+
+/**
+ * 记录一次 check-in。轮询频繁，TTL 内不重复落盘；
+ * 首次见到或超过 TTL 才写，超出上限按最久未出现淘汰。
+ */
+function recordDeviceSeen(config, info = {}) {
+  const id = String(info.deviceId || '').trim();
+  if (!id) return;
+  try {
+    const now = Date.now();
+    const store = readDevices(config);
+    const key = id.slice(0, 200).toLowerCase();
+    const prev = store.devices[key];
+    if (prev && now - Number(prev.lastSeen || 0) < DEVICES_WRITE_TTL_MS) return;
+    store.devices[key] = {
+      deviceId: id.slice(0, 200),
+      platform: String(info.platform || '').slice(0, 20),
+      versionCode: Number(info.versionCode || 0),
+      wgtVersion: String(info.wgtVersion || '').slice(0, 40),
+      channel: String(info.channel || '').slice(0, 20),
+      userAgent: String(info.userAgent || '').slice(0, 300),
+      ip: maskIp(info.clientIp),
+      firstSeen: (prev && prev.firstSeen) || now,
+      lastSeen: now,
+      hits: Number((prev && prev.hits) || 0) + 1,
+    };
+    const keys = Object.keys(store.devices);
+    if (keys.length > DEVICES_MAX) {
+      keys.sort((a, b) => store.devices[a].lastSeen - store.devices[b].lastSeen);
+      for (let i = 0; i < keys.length - DEVICES_MAX; i++) delete store.devices[keys[i]];
+    }
+    fs.mkdirSync(updateDir(config), { recursive: true });
+    fs.writeFileSync(devicesPath(config), JSON.stringify(store, null, 2), 'utf8');
+  } catch (e) {
+    console.warn('[app-update] devices.json 写入失败', e.message);
+  }
+}
+
+function listDevices(config) {
+  const store = readDevices(config);
+  return Object.values(store.devices).sort((a, b) => b.lastSeen - a.lastSeen);
+}
+
 function fileMd5(filePath) {
   return new Promise((resolve, reject) => {
     const hash = crypto.createHash('md5');
@@ -153,6 +243,10 @@ async function checkUpdate(config, query = {}) {
   const userAgent = String(query.userAgent || '');
   const clientIp = String(query.clientIp || '');
   const manifest = readManifest(config);
+  // 设备报到（侧车文件，TTL 去抖；无 deviceId 的旧客户端跳过）
+  recordDeviceSeen(config, {
+    deviceId, platform, channel, versionCode: clientCode, wgtVersion: clientWgtRaw, userAgent, clientIp,
+  });
   if (manifest.platform && manifest.platform !== platform && platform !== 'android') {
     return { hasUpdate: false, reason: 'platform_mismatch' };
   }
@@ -267,6 +361,13 @@ function publishUpdate(config, body = {}) {
       latest,
       publishedAt: Date.now(),
     };
+    if (body.rolloutPct != null) {
+      const pct = Math.floor(Number(body.rolloutPct));
+      // 白名单模式下百分比无意义（白名单优先），仅无白名单时落盘
+      if (Number.isFinite(pct) && targets.length === 0) {
+        manifest.grayscale.rolloutPct = Math.max(0, Math.min(100, pct));
+      }
+    }
   } else {
     // 全量发布：写全局 latest（兼容全部常规客户端）
     manifest.latest = latest;
@@ -381,6 +482,9 @@ function resolveUpdateFilePath(config, name) {
 module.exports = {
   checkUpdate,
   pickLatest,
+  rolloutBucket,
+  recordDeviceSeen,
+  listDevices,
   publishUpdate,
   publishFile,
   promoteCanary,

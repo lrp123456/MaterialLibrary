@@ -377,6 +377,7 @@ function runPushOnly(kind, opt) {
     force: opt.force,
     releaseMode: opt.releaseMode,
     targetDevices: opt.targetDevices,
+    rolloutPct: opt.rolloutPct,
     appRoot: APP,
     onLog: (line) => appendLog(line),
   })
@@ -441,6 +442,7 @@ function runWgtPipeline(action, body, opt) {
           force: opt.force,
           releaseMode: opt.releaseMode,
           targetDevices: opt.targetDevices,
+          rolloutPct: opt.rolloutPct,
           appRoot: APP,
           onLog: (line) => appendLog(line),
         });
@@ -533,6 +535,7 @@ function runAction(action, body) {
       bumpVersion: !!body.bumpVersion,
       releaseMode: body.releaseMode || (channel === 'canary' ? 'canary' : 'full'),
       targetDevices: body.targetDevices || [],
+      rolloutPct: body.rolloutPct ?? '',
     });
   } else if (action === 'verify-wgt') {
     // 单独校验某个 wgt 是否与最近一次编译产物同源（排障用）
@@ -589,7 +592,8 @@ function runAction(action, body) {
       user,
       pass,
       releaseMode,
-      targetDevices: body.targetDevices || []
+      targetDevices: body.targetDevices || [],
+      rolloutPct: body.rolloutPct ?? ''
     });
   } else if (action === 'push-apk') {
     return runPushOnly('apk', { note, channel, force: true, server, user, pass });

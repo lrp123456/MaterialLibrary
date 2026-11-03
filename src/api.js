@@ -2995,7 +2995,7 @@ async function handleApi(services, req, res, prefix = '/api') {
           });
         } catch {
           // raw binary: keep buffer, read fields from query
-          for (const k of ['versionCode', 'versionName', 'wgtVersion', 'force', 'note', 'channel', 'releaseMode', 'targetDevices']) {
+          for (const k of ['versionCode', 'versionName', 'wgtVersion', 'force', 'note', 'channel', 'releaseMode', 'targetDevices', 'rolloutPct']) {
             const v = urlObj.searchParams.get(k);
             if (v != null) fields[k] = v;
           }
@@ -3037,6 +3037,16 @@ async function handleApi(services, req, res, prefix = '/api') {
       return sendJson(res, 200, { success: true, data: manifest });
     } catch (e) {
       return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  // 管理端：灰度设备名册（最近 check-in 的设备，便于复制设备号进白名单；含设备标识，不公开）
+  if (pathname === '/app/update/devices' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      return sendJson(res, 200, { success: true, data: { devices: appUpdate.listDevices(config) } });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
     }
   }
 

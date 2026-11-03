@@ -81,6 +81,7 @@ const MANIFEST = [
   ['integration', 'gen-video-payload-offline.test.js'],
   ['integration', 'clip-api.test.js'],
   ['integration', 'mlsclip.test.js'],
+  ['integration', 'app-update-canary.test.js'],
   ['integration', 'suite.js'],
 
   // ---------- e2e：起真实 HTTP 服务的端到端链路 ----------
