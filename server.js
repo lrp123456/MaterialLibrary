@@ -61,9 +61,11 @@ function maybeQueueRestageBackfill() {
     if (r.count) console.log(`[restage] 已入队 ${r.count} 张缺合格 AI 重构的代表图 (${r.runId})`);
   }).catch(e => console.warn('[restage] 补跑入队失败:', e.message));
 }
-setTimeout(() => {
+// B6：后台定时器一律 unref，不阻止进程退出
+const restageTimer = setTimeout(() => {
   if (!DISABLE_WORKERS) maybeQueueRestageBackfill();
 }, 1500);
+if (restageTimer.unref) restageTimer.unref();
 
 const { applyGovernance } = require('./src/governance');
 const { ProcessWorker, unfreezeVideos } = require('./src/process');
@@ -97,15 +99,17 @@ try {
 try {
   const assetsDelete = require('./src/assets-delete');
   assetsDelete.autoPurgeExpiredTrash(services);
-  setInterval(() => assetsDelete.autoPurgeExpiredTrash(services), 12 * 3600 * 1000);
+  const trashTimer = setInterval(() => assetsDelete.autoPurgeExpiredTrash(services), 12 * 3600 * 1000);
+  if (trashTimer.unref) trashTimer.unref();
   console.log('[trash-clean] 回收站 3 天自动清理定时器已启动');
 } catch (e) {
   console.warn('[trash-clean] 回收站清理定时器启动失败:', e.message);
 }
 }
 
-// 内置轻量 NAS 异步归档，避免外部独立 shell 循环造成多进程写锁冲突
-function syncOriginalsToNas(limit = 100) {
+// 内置轻量 NAS 异步归档，避免外部独立 shell 循环造成多进程写锁冲突。
+// B6：拷贝改为 fs.promises.copyFile（libuv 线程池），不再用 copyFileSync 阻塞事件循环。
+async function syncOriginalsToNas(limit = 100) {
   try {
     const { nasAvailable, nasOriginalPath, findNasOriginal } = require('./src/nasstore');
     if (!nasAvailable()) return;
@@ -120,7 +124,7 @@ function syncOriginalsToNas(limit = 100) {
       if (findNasOriginal(config, fid)) continue;
       const dest = nasOriginalPath(config, fid || base, f);
       try {
-        fs.copyFileSync(path.join(srcDir, f), dest);
+        await fs.promises.copyFile(path.join(srcDir, f), dest);
         copied++;
       } catch {}
     }
@@ -140,9 +144,10 @@ if (!DISABLE_WORKERS) {
   } catch (e) {
     console.warn('[process] 视频解冻失败:', e.message);
   }
-  setTimeout(() => syncOriginalsToNas(100), 5000);
+  const nasBootTimer = setTimeout(() => syncOriginalsToNas(100), 5000);
+  if (nasBootTimer.unref) nasBootTimer.unref();
 
-  setInterval(() => {
+  const govTimer = setInterval(() => {
     const r = applyGovernance(db);
     if (r.live || r.revoked || r.frozen || r.frozenRevoked || r.revived) {
       console.log(`[governance] 定时治理: live=${r.live} revoked=${r.revoked} frozen=${r.frozen} frozen_revoked=${r.frozenRevoked} revived=${r.revived}`);
@@ -153,6 +158,7 @@ if (!DISABLE_WORKERS) {
     } catch (e) {}
     syncOriginalsToNas(100);
   }, 3600_000);
+  if (govTimer.unref) govTimer.unref();
 }
 
 const MIME = {
@@ -228,6 +234,16 @@ function serveStaticFile(req, res, fp) {
   return fs.createReadStream(fp).pipe(res);
 }
 
+// B6：静态文件深度防御 —— WHATWG URL 已折叠 '..'，这里再做一次 resolve 前缀校验。
+// 返回 root 内的绝对路径；任何越界尝试（含编码/符号链接拼接）一律返回 null。
+function resolveStaticWithin(rootDir, urlPath) {
+  const root = path.resolve(rootDir);
+  const rel = urlPath === '/' ? 'index.html' : String(urlPath).replace(/^\/+/, '');
+  const fp = path.resolve(root, rel);
+  if (fp !== root && !fp.startsWith(root + path.sep)) return null;
+  return fp;
+}
+
 const server = http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://127.0.0.1');
   const p = u.pathname;
@@ -250,9 +266,14 @@ const server = http.createServer(async (req, res) => {
     }
 
     // 2. 静态托管 (web/dist)
-    let fp = path.join(__dirname, 'web/dist', p === '/' ? 'index.html' : p);
+    const webDistDir = path.join(__dirname, 'web/dist');
+    let fp = resolveStaticWithin(webDistDir, p);
+    if (!fp) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end('Not Found');
+    }
     if (!fs.existsSync(fp) || fs.statSync(fp).isDirectory()) {
-      fp = path.join(__dirname, 'web/dist/index.html');
+      fp = path.join(webDistDir, 'index.html');
     }
 
     if (fs.existsSync(fp)) {
@@ -269,10 +290,11 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('前端尚未构建（web/dist 不存在），请先在 web 目录执行 npm run build');
   } catch (e) {
+    // B6：服务端日志保留细节，对外不回显 e.message（防内部路径/SQL 等信息泄漏）
     console.error('[server] 请求处理异常:', e);
     if (!res.headersSent) {
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ error: e.message }));
+      res.end(JSON.stringify({ error: '服务器内部错误' }));
     }
   }
 });
@@ -399,8 +421,12 @@ const webProServer = http.createServer(async (req, res) => {
       return await handleApi(services, req, res, '');
     }
 
-    // 2. 静态资源托管 web-pro/dist
-    let fp = path.join(webProDir, p === '/' ? 'index.html' : p);
+    // 2. 静态资源托管 web-pro/dist（B6：resolve 前缀深度校验）
+    let fp = resolveStaticWithin(webProDir, p);
+    if (!fp) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end('Not Found');
+    }
     if (!fs.existsSync(fp) || fs.statSync(fp).isDirectory()) {
       fp = path.join(webProDir, 'index.html');
     }
@@ -410,10 +436,11 @@ const webProServer = http.createServer(async (req, res) => {
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('前端尚未构建（web-pro/dist 不存在）');
   } catch (e) {
+    // B6：对外统一 500 文案，细节只进服务端日志
     console.error('[web-pro] 请求处理异常:', e);
     if (!res.headersSent) {
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ error: e.message }));
+      res.end(JSON.stringify({ error: '服务器内部错误' }));
     }
   }
 });
