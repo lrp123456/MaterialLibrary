@@ -78,7 +78,8 @@ const db = new DatabaseSync(':memory:');
 db.exec(`
   CREATE TABLE assets (
     fid TEXT PRIMARY KEY, file_name TEXT, kind TEXT, width INTEGER, height INTEGER,
-    duration_s REAL, thumb_url TEXT, size INTEGER, updated_at INTEGER
+    duration_s REAL, thumb_url TEXT, size INTEGER, updated_at INTEGER,
+    status TEXT NOT NULL DEFAULT 'ready', source TEXT
   );
 `);
 db.prepare('INSERT INTO assets (fid,file_name,kind,width,height,duration_s,thumb_url,size,updated_at) VALUES (?,?,?,?,?,?,?,?,?)')

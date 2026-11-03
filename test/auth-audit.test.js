@@ -54,8 +54,9 @@ const exp = Math.floor(Date.now() / 1000) + 60;
 const secret = auth.getMediaSecret(null);
 const legacyMac = crypto.createHmac('sha256', secret).update(`ML_old:${exp}`).digest('hex').slice(0, 16);
 assert(auth.verifyMediaToken('ML_old', `${exp}:${legacyMac}`, null), '旧 64bit token 应兼容校验通过');
-// 篡改检测
-assert(!auth.verifyMediaToken('ML_old', `${exp}:${legacyMac.slice(0, 15)}f`, null), '篡改的 token 必须失败');
+// 篡改检测（末位字符无条件翻转，避免原签名末位恰为 f 时篡改变成 no-op 的 1/16 抖动）
+const flippedLast = legacyMac[15] === 'f' ? '0' : 'f';
+assert(!auth.verifyMediaToken('ML_old', `${exp}:${legacyMac.slice(0, 15)}${flippedLast}`, null), '篡改的 token 必须失败');
 
 // ---- 6) SEC-001：lanInternalSession 已从导出中移除 ----
 assert.strictEqual(auth.lanInternalSession, undefined, 'lanInternalSession 后门必须已删除（SEC-001）');

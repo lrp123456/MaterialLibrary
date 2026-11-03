@@ -92,7 +92,9 @@ async function main() {
   const clarityBlock = clarity.slice(clarity.indexOf("op === 'clarity'"), clarity.indexOf('const selection = normalizeSelection'));
   assert.ok(clarityBlock.includes('compileNodePrompt'));
   assert.ok(clarityBlock.includes('upscale_enhance'));
-  assert.ok(!clarityBlock.includes('8K'));
+  // 8K 只允许作为 Lanczos 目标长边档位存在（clarMap），不允许回到提示词空话
+  assert.ok(!clarityBlock.includes('8K超清'), 'clarity 不再塞 8K 空话');
+  assert.ok(clarityBlock.includes("'8K': 7680"), '8K 是真实的重采样目标档位');
 
   const lab = read('src/lab.js');
   assert.ok(!lab.includes("id.includes('agnes')"), '试验场不再按模型名改写引用');

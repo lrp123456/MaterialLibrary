@@ -172,10 +172,11 @@ function testSuspiciousPoints() {
   assert.ok(!agnesCreds.includes('provider_secrets'), 'agnes 不再引用密钥文件');
   assert.strictEqual(agnesCreds, '["AGNES_API_KEY"]');
 
-  // gemini 必须回到 DEFAULT_ENDPOINTS 里该接入点的 credentials，不能留下 STALE
+  // CONFLICT-001 后启动种子只补缺、不覆写：'STALE' 是环境变量插槽名而非明文密钥，
+  // 解析时若环境中无该变量则 fail-closed（无钥匙），启动期不得刷回默认值覆盖管理员配置；
+  // 误写明文仍由 scrubEndpointCredentials 清除（见 1a/1b 的国际站国内插槽隔离）。
   const geminiCreds = db.prepare("SELECT credentials_json FROM llm_endpoints WHERE id='gemini'").get().credentials_json;
-  assert.ok(!geminiCreds.includes('STALE'), 'gemini 不能留下 STALE');
-  assert.ok(geminiCreds.includes('GEMINI_API_KEY'), 'gemini 必须回到默认配置');
+  assert.strictEqual(geminiCreds, '["STALE"]', '启动期不覆写管理员自配的插槽名');
 
   // 2. seedStoredContract 每次启动保留用户改过的显示名、非 Seedance 的已有参数
   db.prepare("UPDATE model_contracts SET name='用户自定义名', params_json='[]' WHERE id='agnes-3.0-flash'").run();

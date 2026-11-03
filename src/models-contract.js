@@ -2113,6 +2113,10 @@ function scrubEndpointCredentials(db) {
     return;
   }
   const upd = db.prepare('UPDATE llm_endpoints SET credentials_json=? WHERE id=?');
+  // 国际站接入点绝不允许挂国内站密钥插槽：误复制会把国内 AGNES_API_KEY 发往
+  // apihub.agnes-ai.com（resolveEndpointAuth 会按插槽名读环境变量）。只剔国内插槽名，
+  // 国际站 AGNES_INTL_* 插槽与管理员自配的其它插槽保留。
+  const INTL_FORBIDDEN_SLOTS = new Set(['AGNES_API_KEY', 'AGNES_API_KEYS']);
   for (const row of rows) {
     let creds = [];
     try { creds = JSON.parse(row.credentials_json || '[]'); } catch { creds = []; }
@@ -2121,12 +2125,15 @@ function scrubEndpointCredentials(db) {
     let changed = false;
     for (const item of creds) {
       if (typeof item === 'string') {
+        if (row.id === 'agnes_intl' && INTL_FORBIDDEN_SLOTS.has(item)) { changed = true; continue; }
         if (looksLikeSecretString(item)) { changed = true; continue; }
         next.push(item);
         continue;
       }
       if (item && typeof item === 'object') {
         if (item.source === 'provider_secrets') { changed = true; continue; }
+        const slotEnv = item.env || item.env_var;
+        if (row.id === 'agnes_intl' && slotEnv && INTL_FORBIDDEN_SLOTS.has(slotEnv)) { changed = true; continue; }
         const copy = { ...item };
         for (const key of ['value', 'api_key', 'apiKey', 'ak', 'sk', 'key', 'token']) {
           if (Object.prototype.hasOwnProperty.call(copy, key)) {
