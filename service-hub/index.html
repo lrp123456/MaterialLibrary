@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-<title>服务启动面板</title>
+<title>素材库控制台</title>
 <style>
 :root{
   --bg:#060a12;--card:#0e1624;--line:#1c2940;--ink:#eef3ff;--mut:#8b9bb8;
@@ -13,13 +13,18 @@
 html,body{margin:0;min-height:100%;background:var(--bg);color:var(--ink);
   font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif}
 body{display:flex;flex-direction:column;min-height:100vh}
-header{padding:16px 16px 12px;border-bottom:1px solid var(--line);position:sticky;top:0;
+header{padding:16px 16px 10px;border-bottom:1px solid var(--line);position:sticky;top:0;
   background:rgba(6,10,18,.95);backdrop-filter:blur(10px);z-index:5}
 h1{margin:0;font-size:18px;font-weight:700}
 .sub{margin-top:4px;font-size:12px;color:var(--mut)}
-main{flex:1;padding:14px;max-width:560px;width:100%;margin:0 auto}
+nav{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+nav button{border:1px solid var(--line);background:#0b1322;color:var(--mut);
+  border-radius:999px;padding:7px 16px;font-size:13px;font-weight:700;cursor:pointer}
+nav button.on{background:var(--acc);border-color:var(--acc);color:#fff}
+main{flex:1;padding:14px;max-width:760px;width:100%;margin:0 auto}
 .card{background:var(--card);border:1px solid var(--line);border-radius:18px;
   padding:14px;margin-bottom:12px}
+.card h3{margin:0 0 10px;font-size:14px;display:flex;align-items:center;gap:8px}
 .svc{display:flex;flex-direction:column;gap:10px}
 .svc-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
 .svc-name{font-size:15px;font-weight:700}
@@ -27,94 +32,216 @@ main{flex:1;padding:14px;max-width:560px;width:100%;margin:0 auto}
 .port{font-size:11px;color:var(--mut);margin-top:4px;font-family:ui-monospace,monospace}
 .pill{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;
   font-size:11px;background:#152033;border:1px solid var(--line);white-space:nowrap}
+.pill.warn{border-color:#7c5a12;color:#fbbf24}
+.pill.err{border-color:#7f1d1d;color:#fca5a5}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--off)}
 .dot.on{background:var(--ok);box-shadow:0 0 10px rgba(16,185,129,.55)}
 .dot.busy{background:var(--warn);animation:blink 1s infinite}
+.dot.off{background:var(--off)}
 @keyframes blink{50%{opacity:.3}}
-.acts{display:flex;gap:8px;flex-wrap:wrap}
-.btn{border:0;border-radius:12px;padding:11px 14px;font-size:13px;font-weight:700;
-  cursor:pointer;color:#fff;background:var(--acc);min-width:88px}
+.acts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.btn{border:0;border-radius:12px;padding:10px 14px;font-size:13px;font-weight:700;
+  cursor:pointer;color:#fff;background:var(--acc);min-width:80px}
 .btn:active{transform:scale(.97)}
-.btn:disabled{opacity:.4}
+.btn:disabled{opacity:.4;cursor:not-allowed}
 .btn.go{background:linear-gradient(135deg,#059669,#34d399);color:#042f1a}
 .btn.stop{background:linear-gradient(135deg,#b91c1c,#f87171)}
 .btn.open{background:#152033;border:1px solid var(--line);color:var(--ink)}
+.btn.sm{padding:7px 11px;font-size:12px;min-width:0}
 .btn.all{width:100%;background:linear-gradient(135deg,#2563eb,#7c3aed);padding:14px;font-size:14px}
+.btn.danger{background:linear-gradient(135deg,#b91c1c,#dc2626)}
 .port-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .port-row label{font-size:12px;color:var(--mut)}
 .port-input{width:96px;background:#0b1322;border:1px solid var(--line);color:var(--ink);
   border-radius:10px;padding:8px 10px;font-size:13px;font-family:ui-monospace,monospace}
 .port-input:focus{outline:1px solid var(--acc)}
 .mut{font-size:12px;color:var(--mut)}
+.kv{display:grid;grid-template-columns:110px 1fr;gap:4px 10px;font-size:12.5px;margin:6px 0}
+.kv dt{color:var(--mut)}
+.kv dd{margin:0;font-family:ui-monospace,monospace;word-break:break-all}
+.warnings{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+.warn-line{font-size:12px;color:#fbbf24;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);
+  border-radius:10px;padding:8px 10px}
+.lane-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;font-size:12.5px;margin:6px 0 10px}
+.lane-grid .k{color:var(--mut)}
+.lane-grid .v{font-family:ui-monospace,monospace;text-align:right}
+.tag{font-size:10px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--mut)}
+.tag.legacy{border-color:#7f1d1d;color:#fca5a5}
+.tag.wsl{border-color:#1d4ed8;color:#93c5fd}
+label.chk{font-size:12px;color:var(--mut);display:inline-flex;gap:6px;align-items:center;cursor:pointer}
+pre.console{background:#05080f;border:1px solid var(--line);border-radius:12px;padding:10px;
+  font-size:11.5px;line-height:1.5;color:#b8c6e0;font-family:ui-monospace,monospace;
+  max-height:300px;overflow:auto;white-space:pre-wrap;word-break:break-all;margin:8px 0 0}
+.findings{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.finding{border:1px solid var(--line);border-radius:12px;padding:10px;font-size:12.5px;background:#0b1322}
+.finding.high{border-color:#7f1d1d}.finding.medium{border-color:#7c5a12}.finding.low{border-color:#1c2940}
+.finding .ftop{display:flex;gap:8px;align-items:center;margin-bottom:4px;flex-wrap:wrap}
+.sev{font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px}
+.sev.high{background:#7f1d1d;color:#fecaca}.sev.medium{background:#7c5a12;color:#fde68a}
+.sev.low{background:#1c2940;color:#a8b8d8}
 .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);
   background:#111827f0;border:1px solid var(--line);padding:10px 14px;border-radius:10px;
   font-size:12px;opacity:0;pointer-events:none;transition:.2s;z-index:20;max-width:92%}
 .toast.show{opacity:1}
 .hero{background:linear-gradient(135deg,rgba(37,99,246,.18),rgba(16,185,129,.12));
   border:1px solid rgba(99,102,241,.3);border-radius:16px;padding:14px;margin-bottom:12px}
+.tab{display:none}.tab.on{display:block}
+.stat-row{display:flex;gap:10px;flex-wrap:wrap;font-size:12px}
+.stat-row .pill{cursor:default}
 </style>
 </head>
 <body>
 <header>
-  <h1>服务启动面板</h1>
-  <div class="sub">素材库 · 打包台 · Web 端 · 统一启停</div>
+  <h1>素材库控制台</h1>
+  <div class="sub">正式端 (WSL) · 分支通道 · App 发布 · 三端契约 · 统一入口</div>
+  <nav>
+    <button data-tab="services" class="on">服务</button>
+    <button data-tab="channels">通道与发布</button>
+    <button data-tab="contract">三端对接契约</button>
+  </nav>
 </header>
 <main>
-  <div class="hero">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-      <div>
-        <b id="summary">检测中…</b>
-        <div class="mut" style="margin-top:4px">最后刷新 <span id="ts">—</span></div>
+  <!-- ======================== Tab 1：服务 ======================== -->
+  <section id="tab-services" class="tab on">
+    <div class="hero">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <div>
+          <b id="summary">检测中…</b>
+          <div class="mut" style="margin-top:4px">最后刷新 <span id="ts">—</span></div>
+        </div>
+        <button class="btn open" id="btnRefresh">刷新</button>
       </div>
-      <button class="btn open" id="btnRefresh">刷新</button>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn all" id="btnAll" style="flex:1;min-width:240px">一键启动全部（不会重启已在运行的正式端）</button>
+        <button class="btn open" id="btnRebuild">一键重建（web-pro + 剪辑器产物）</button>
+      </div>
     </div>
-    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn all" id="btnAll">一键启动全部</button>
-      <button class="btn open" id="btnRebuild">一键重建（构建最新代码并重启剪辑服务）</button>
+    <div id="list"></div>
+    <div class="mut" style="text-align:center;padding:8px 0 20px">
+      本机 Hub: http://127.0.0.1:3790 · 30001/30002 只能经 WSL start.sh 整组启停
     </div>
-  </div>
-  <div id="list"></div>
-  <div class="mut" style="text-align:center;padding:8px 0 20px">
-    本机 Hub: http://127.0.0.1:3790 · 桌面快捷方式「启动服务面板」
-  </div>
+  </section>
+
+  <!-- ======================== Tab 2：通道与发布 ======================== -->
+  <section id="tab-channels" class="tab">
+    <div class="card">
+      <h3>⚠️ 告警 <span id="warnCount" class="tag"></span></h3>
+      <div id="warnings" class="warnings"><div class="mut">检测中…</div></div>
+    </div>
+
+    <div class="card" id="prodCard">
+      <h3>正式端（生产） <span class="tag wsl">WSL/smu · watchdog</span></h3>
+      <div id="prodBody" class="mut">检测中…</div>
+      <div class="acts" style="margin-top:10px">
+        <button class="btn go sm" data-prod="start">启动（整组）</button>
+        <button class="btn stop sm" data-prod="restart">重启 30001+30002</button>
+        <button class="btn stop sm" data-prod="stop">停止（整组）</button>
+        <button class="btn open sm" data-prodlog="prod-server">server 日志</button>
+        <button class="btn open sm" data-prodlog="prod-web">web 日志</button>
+        <button class="btn open sm" data-prodlog="prod-watchdog">watchdog 日志</button>
+      </div>
+      <pre class="console" id="prodLog" style="display:none"></pre>
+    </div>
+
+    <div class="card" id="testCard">
+      <h3>test 分支通道 <span class="tag">Windows · worktree · 30000/30003</span></h3>
+      <div id="testBody" class="mut">检测中…</div>
+      <div class="acts" style="margin-top:10px">
+        <button class="btn go sm" data-test="start">启动</button>
+        <button class="btn stop sm" data-test="stop">停止</button>
+        <button class="btn open sm" data-test="restart">重启</button>
+        <label class="chk"><input type="checkbox" id="testBuild" checked />同时构建前端</label>
+        <label class="chk"><input type="checkbox" id="testTakeover" />端口冲突时自动停 gray</label>
+        <button class="btn open sm" data-lanelog="test-api">api 日志</button>
+        <button class="btn open sm" data-lanelog="test-web">web 日志</button>
+      </div>
+    </div>
+
+    <div class="card" id="grayCard">
+      <h3>gray 遗留同树通道 <span class="tag legacy">计划退役 (B4)</span></h3>
+      <div id="grayBody" class="mut">检测中…</div>
+      <div class="mut" style="margin-top:8px">面板不再提供 gray 启停；它与 test 共用 30000/30003，统一用 test worktree 通道。</div>
+    </div>
+
+    <div class="card">
+      <h3>test → master 合并发布</h3>
+      <div class="mut">合并前预演（merge-tree 冲突检查 + 差异），不改动任何代码。真合并会重建正式产物并整组重启 30001+30002。</div>
+      <div class="acts" style="margin-top:10px">
+        <button class="btn open sm" id="btnPromoteDry">合并预演 (dry-run)</button>
+        <button class="btn danger sm" id="btnPromoteGo">执行合并并发布</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>App 发布状态（只读 · 发布操作在 Pack Studio）</h3>
+      <div id="appBody" class="mut">检测中…</div>
+      <div class="acts" style="margin-top:10px">
+        <button class="btn open sm" id="btnOpenPack">打开 Pack Studio (3789)</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>任务输出</h3>
+      <pre class="console" id="jobConsole" style="max-height:340px">尚无任务。</pre>
+    </div>
+  </section>
+
+  <!-- ======================== Tab 3：三端契约 ======================== -->
+  <section id="tab-contract" class="tab">
+    <div class="card">
+      <h3>三端对接契约矩阵</h3>
+      <div id="contractBody" class="mut">检测中…</div>
+      <div class="acts" style="margin-top:10px">
+        <button class="btn open sm" id="btnContractReload">重新加载</button>
+      </div>
+    </div>
+  </section>
 </main>
 <div class="toast" id="toast"></div>
 <script>
 const $ = (id) => document.getElementById(id)
 const API = (location.port === '3790') ? '' : 'http://127.0.0.1:3790'
+let activeTab = 'services'
+let busyId = null
+let lastStatus = null
+let activeJobId = null
+let jobPollTimer = null
+let statusTimer = null
 
-function toast(m) {
+function toast(m, ms) {
   const t = $('toast'); t.textContent = m; t.classList.add('show')
-  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2200)
-}
-
-/**
- * 展示动作结果。以前只弹 result.note，启动失败时 note 是空字符串，
- * 界面就什么都不显示 —— 用户点「启动」看到的是「毫无反应」，
- * 真实原因（wsl.exe 被拉黑、端口占用、进程 exit=1）全在 service-hub/logs 里。
- * 现在失败会把 error 原样弹出来，并且 toast 显示更久，便于看清。
- */
-function showResult(d, fallbackMsg) {
-  const r = d && d.result
-  if (r && r.ok === false) {
-    toast('✗ ' + (r.error || '未知错误') + (r.log ? ' （日志 ' + r.log.split(/[\\/]/).pop() + '）' : ''))
-    const t = $('toast')
-    clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 9000)
-    return
-  }
-  if (d && d.ok === false) { toast('✗ ' + (d.error || '动作失败')); return }
-  toast((r && r.note) || fallbackMsg)
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), ms || 2200)
 }
 
 async function safeJson(r) {
   const text = await r.text()
   try { return JSON.parse(text) } catch (e) {
-    throw new Error('HTTP ' + r.status + ' ' + text.slice(0, 60))
+    throw new Error('HTTP ' + r.status + ' ' + text.slice(0, 80))
   }
 }
 
-let busyId = null
+function showResult(d, fallbackMsg) {
+  const r = d && d.result
+  if (r && r.ok === false) {
+    toast('✗ ' + (r.error || '未知错误') + (r.log ? ' （日志 ' + r.log.split(/[\\/]/).pop() + '）' : ''), 9000)
+    return
+  }
+  if (d && d.ok === false) { toast('✗ ' + (d.error || '动作失败'), 6000); return }
+  toast((r && r.note) || fallbackMsg)
+}
 
+/* ---------------- Tabs ---------------- */
+document.querySelectorAll('nav button').forEach((b) => {
+  b.onclick = () => {
+    activeTab = b.dataset.tab
+    document.querySelectorAll('nav button').forEach((x) => x.classList.toggle('on', x === b))
+    document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('on', x.id === 'tab-' + activeTab))
+    if (activeTab === 'channels') { loadChannels(); pollJob() }
+    if (activeTab === 'contract') loadContract()
+  }
+})
+
+/* ---------------- Tab 1: services ---------------- */
 function render(services) {
   const up = services.filter((s) => s.up).length
   $('summary').textContent = `在线 ${up} / ${services.length}`
@@ -122,10 +249,11 @@ function render(services) {
   $('list').innerHTML = services.map((s) => {
     const on = s.up
     const busy = busyId === s.id
+    const badge = s.delegated ? '<span class="tag wsl">WSL 委托 · 整组</span>' : ''
     return `<div class="card svc" data-id="${s.id}">
       <div class="svc-top">
         <div>
-          <div class="svc-name">${s.name}</div>
+          <div class="svc-name">${s.name} ${badge}</div>
           <div class="svc-desc">${s.desc}</div>
           <div class="port">:${s.port} · ${s.url}</div>
         </div>
@@ -147,17 +275,17 @@ function render(services) {
   }).join('')
 
   $('list').querySelectorAll('button[data-act]').forEach((btn) => {
-    btn.addEventListener('click', () => action(btn.dataset.id, btn.dataset.act))
+    btn.addEventListener('click', () => serviceAction(btn.dataset.id, btn.dataset.act))
   })
 }
 
-async function load() {
+async function loadServices() {
   try {
     const d = await safeJson(await fetch(API + '/api/services'))
     render(d.services || [])
   } catch (e) {
     $('summary').textContent = '无法连接面板服务'
-    $('list').innerHTML = `<div class="card mut">请先运行：<br/><code>node service-hub/server.js</code></div>`
+    $('list').innerHTML = `<div class="card mut">面板进程异常：<code>node service-hub/server.js</code></div>`
   }
 }
 
@@ -168,100 +296,308 @@ function readPort(id) {
   return Number.isFinite(n) && n > 0 && n < 65536 ? n : null
 }
 
-async function action(id, act) {
+async function serviceAction(id, act) {
   busyId = id
-  load()
+  loadServices()
   try {
     if (act === 'open') {
-      const port = readPort(id)
       await safeJson(await fetch(API + '/api/open', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, port }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
       }))
       toast('已在浏览器打开')
-    } else if (act === 'apply-port') {
+      return
+    }
+    if (act === 'apply-port') {
       const port = readPort(id)
-      if (port == null) {
-        toast('请输入 1–65535 的端口')
-        return
-      }
+      if (port == null) { toast('请输入 1–65535 的端口'); return }
       const d = await safeJson(await fetch(API + '/api/action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, action: 'start', port }),
       }))
       showResult(d, '已按端口 ' + port + ' 启动')
       if (d.services) render(d.services)
-    } else {
-      const port = readPort(id)
-      const d = await safeJson(await fetch(API + '/api/action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, action: act, port }),
-      }))
-      showResult(d, act + ' 完成')
-      if (d.services) render(d.services)
+      if (d.result && d.result.jobId) followJob(d.result.jobId)
+      return
     }
+    const d = await safeJson(await fetch(API + '/api/action', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, action: act }),
+    }))
+    showResult(d, act + ' 完成')
+    if (d.services) render(d.services)
+    if (d.result && d.result.jobId) followJob(d.result.jobId)
   } catch (e) {
-    toast(e.message)
+    toast(e.message, 6000)
   } finally {
     busyId = null
-    setTimeout(load, 600)
+    setTimeout(loadServices, 800)
   }
 }
 
-$('btnRefresh').onclick = load
+/* ---------------- Tab 2: channels & release ---------------- */
+function pdot(up) { return `<i class="dot ${up ? 'on' : 'off'}"></i>` }
+function fmtTs(v) { return v ? new Date(v).toLocaleString('zh-CN', { hour12: false }) : '—' }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])) }
+
+function laneHtml(r) {
+  const dist = r.dist
+    ? `${fmtTs(r.dist.builtAt).slice(5)} @${esc(r.dist.commit)}`
+    : r.distExists ? '产物在，缺 build-info' : '未构建'
+  return `<div class="lane-grid">
+    <span class="k">分支 / 提交</span><span class="v">${esc(r.branch)} @${esc(r.commit)}</span>
+    <span class="k">API / Web</span><span class="v">${pdot(r.apiUp)} :${r.apiPort} &nbsp; ${pdot(r.webUp)} :${r.webPort}</span>
+    <span class="k">PID</span><span class="v">${r.apiPid || '—'} / ${r.webPid || '—'}</span>
+    <span class="k">前端产物</span><span class="v" style="${r.stale ? 'color:#fbbf24' : ''}">${dist}${r.stale ? ' · 落后' : ''}</span>
+    <span class="k">未提交</span><span class="v">${r.dirtyCount} 项</span>
+    <span class="k">worktree</span><span class="v">${r.worktreeReady ? '就绪' : '缺失'}</span>
+  </div>`
+}
+
+async function loadChannels() {
+  let s
+  try {
+    const d = await safeJson(await fetch(API + '/api/mls/status'))
+    s = d.status
+    lastStatus = s
+  } catch (e) {
+    $('prodBody').textContent = '状态加载失败：' + e.message
+    return
+  }
+  // 告警
+  $('warnCount').textContent = s.warnings.length ? s.warnings.length + ' 条' : ''
+  $('warnings').innerHTML = s.warnings.length
+    ? s.warnings.map((w) => `<div class="warn-line">${esc(w)}</div>`).join('')
+    : '<div class="mut">无告警</div>'
+
+  // 正式端
+  const p = s.prod
+  if (!p.reachable) {
+    $('prodBody').innerHTML = '<div class="warn-line">WSL/smu 未运行。点「启动（整组）」会尝试经 start.sh 拉起；若 wsl.exe 被安全策略拦截，请改跑桌面「启动素材库.bat」。</div>'
+  } else {
+    $('prodBody').innerHTML = `<dl class="kv">
+      <dt>watchdog</dt><dd>${p.pids.watchdog || '—'}</dd>
+      <dt>server (30001)</dt><dd>${p.pids.server || '—'}</dd>
+      <dt>webpro (30002)</dt><dd>${p.pids.webpro || '—'}</dd>
+      <dt>停止标记</dt><dd style="color:${p.stopFlag ? '#fca5a5' : 'inherit'}">${p.stopFlag ? 'watchdog.stop 存在 ⚠' : '无'}</dd>
+      <dt>数据平面</dt><dd>${esc(p.dataUnc)}</dd>
+    </dl>`
+  }
+
+  // 通道
+  const test = s.lanes.find((x) => x.key === 'test')
+  const gray = s.lanes.find((x) => x.key === 'gray')
+  $('testBody').innerHTML = test ? laneHtml(test) : '未找到 test 通道'
+  $('grayBody').innerHTML = gray
+    ? laneHtml(gray) + (gray.apiUp || gray.webUp ? '<div class="warn-line" style="margin-top:8px">gray 正在运行，与 test 互斥；停止请用桌面「停止灰测通道.bat」(B4 将移除)</div>' : '')
+    : '未找到 gray 通道'
+
+  // App 发布
+  const a = s.app
+  let html = ''
+  if (!a.reachable) html += '<div class="warn-line">WSL 未运行，读不到线上 manifest（下方仅打包台本地状态）</div>'
+  html += '<dl class="kv">'
+  html += `<dt>全量指针</dt><dd>${a.full ? esc(a.full.versionCode) + ' · ' + esc(a.full.versionName) + ' · force=' + a.full.force + ' · ' + fmtTs(a.full.publishedAt) : '无'}</dd>`
+  if (a.grayscale && a.grayscale.active && a.grayscale.latest) {
+    html += `<dt>灰度指针</dt><dd style="color:#fbbf24">${esc(a.grayscale.latest.versionCode)} · 白名单 ${a.grayscale.targetDevices.length} 台：${esc(a.grayscale.targetDevices.join(', '))}</dd>`
+  } else {
+    html += '<dt>灰度</dt><dd>未激活</dd>'
+  }
+  if (a.pack && a.pack.version) {
+    const v = a.pack.version
+    html += `<dt>版本号机</dt><dd>lastIssued=${v.lastIssued} · ${esc(v.versionName)} · code ${v.versionCode}.${v.machineCode}</dd>`
+    html += `<dt>最近打包</dt><dd>${esc(a.pack.lastAction ? a.pack.lastAction.action : '—')} · ${esc(a.pack.lastAction && a.pack.lastAction.time || '—')}</dd>`
+  }
+  html += '</dl>'
+  $('appBody').innerHTML = html
+}
+
+async function postMls(pathname, body) {
+  return safeJson(await fetch(API + pathname, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}),
+  }))
+}
+
+function followJob(jobId) {
+  activeJobId = jobId
+  if (!jobPollTimer) jobPollTimer = setInterval(pollJob, 1500)
+  switchTab('channels')
+}
+function switchTab(t) {
+  document.querySelector(`nav button[data-tab="${t}"]`).click()
+}
+
+async function pollJob() {
+  if (!activeJobId) return
+  let j
+  try {
+    j = (await safeJson(await fetch(API + '/api/mls/jobs/' + activeJobId))).job
+  } catch (e) { return }
+  if (!j) return
+  $('jobConsole').textContent = `# ${j.kind} · ${j.state}${j.code != null ? ' (exit ' + j.code + ')' : ''}\n\n` + j.lines.filter((l) => l !== '').join('\n')
+  $('jobConsole').scrollTop = 999999
+  if (j.state !== 'running') {
+    activeJobId = null
+    clearInterval(jobPollTimer); jobPollTimer = null
+    toast(j.state === 'done' ? '✓ 任务完成' : '✗ 任务失败（看任务输出）', j.state === 'done' ? 3000 : 8000)
+    loadChannels(); loadServices()
+  }
+}
+
+/* prod 动作：stop/restart 必须二次确认 */
+document.querySelectorAll('[data-prod]').forEach((b) => {
+  b.onclick = async () => {
+    const action = b.dataset.prod
+    if (action === 'stop' && !confirm('确认停止 WSL 里的正式端（30001 与 30002 整组）？')) return
+    if (action === 'restart' && !confirm('确认经 start.sh 整组重启正式端 30001+30002（期间短暂不可用，约 10–30 秒）？')) return
+    const d = await postMls('/api/mls/action', { target: 'prod', action })
+    if (d.ok && d.jobId) followJob(d.jobId)
+    else if (d.result) toast(d.result.note || d.result.error || JSON.stringify(d.result))
+    else toast(d.error || '提交失败', 6000)
+  }
+})
+document.querySelectorAll('[data-prodlog]').forEach((b) => {
+  b.onclick = async () => {
+    const target = b.dataset.prodlog
+    const box = $('prodLog')
+    box.style.display = 'block'
+    try {
+      const d = await safeJson(await fetch(API + '/api/mls/logs?target=' + target + '&n=120'))
+      box.textContent = '# ' + (d.path || target) + '\n' + (d.lines || []).filter((l) => l !== '').join('\n')
+      box.scrollTop = 999999
+    } catch (e) { box.textContent = '日志读取失败：' + e.message }
+  }
+})
+
+/* test 通道动作 */
+document.querySelectorAll('[data-test]').forEach((b) => {
+  b.onclick = async () => {
+    const action = b.dataset.test
+    if (action === 'stop' && !confirm('确认停止 test 通道（30000/30003）？')) return
+    const d = await postMls('/api/mls/action', {
+      target: 'test',
+      action,
+      build: $('testBuild').checked,
+      takeover: $('testTakeover').checked,
+    })
+    if (d.ok && d.jobId) followJob(d.jobId)
+    else toast(d.error || '提交失败', 6000)
+  }
+})
+document.querySelectorAll('[data-lanelog]').forEach((b) => {
+  b.onclick = async () => {
+    const target = b.dataset.lanelog
+    const d = await safeJson(await fetch(API + '/api/mls/logs?target=' + target + '&n=120'))
+    if (!d.ok) { toast(d.error || '日志不存在', 5000); return }
+    $('jobConsole').textContent = '# ' + d.path + '\n' + d.lines.filter((l) => l !== '').join('\n')
+    switchTab('channels')
+  }
+})
+
+/* promote */
+$('btnPromoteDry').onclick = async () => {
+  const d = await postMls('/api/mls/promote', { lane: 'test' })
+  if (d.ok && d.jobId) followJob(d.jobId)
+}
+$('btnPromoteGo').onclick = async () => {
+  if (!confirm('真合并 test → master？会重建正式前端产物。')) return
+  if (!confirm('最后确认：合并后将经 WSL start.sh 同时重启正式 30001 与 30002。继续？')) return
+  const d = await postMls('/api/mls/promote', { lane: 'test', execute: true })
+  if (d.ok && d.jobId) followJob(d.jobId)
+}
+$('btnOpenPack').onclick = () => { window.open('http://127.0.0.1:3789', '_blank') }
+
+/* ---------------- Tab 3: contract ---------------- */
+async function loadContract() {
+  const box = $('contractBody')
+  try {
+    const d = await safeJson(await fetch(API + '/api/contract'))
+    if (!d.ok && d.missing) {
+      box.className = 'mut'
+      box.innerHTML = '契约清单尚未生成。<br/>在项目根执行：<br/><code>node scripts/gen-contract-manifest.js</code><br/>（B3 批次落地，输出 docs/contract-manifest.json）'
+      return
+    }
+    if (!d.ok) { box.textContent = d.error || '加载失败'; return }
+    const c = d.contract
+    box.className = ''
+    const counts = c.counts || {}
+    let html = '<div class="stat-row" style="margin-bottom:10px">'
+    html += `<span class="pill">服务端路由 ${counts.routes ?? '?'}</span>`
+    for (const [k, v] of Object.entries(counts.clients || {})) {
+      html += `<span class="pill">${esc(k)} 调用 ${v}</span>`
+    }
+    if (c.generatedAt) html += `<span class="pill">生成于 ${fmtTs(c.generatedAt)}</span>`
+    html += '</div>'
+    const fs2 = c.findings || []
+    if (!fs2.length) {
+      html += '<div class="mut">无 findings —— 客户端调用均有路由且权限匹配。</div>'
+    } else {
+      const order = { high: 0, medium: 1, low: 2 }
+      html += '<div class="findings">' + fs2
+        .slice().sort((a, b) => (order[a.severity] ?? 9) - (order[b.severity] ?? 9))
+        .map((f) => `
+          <div class="finding ${f.severity || 'low'}">
+            <div class="ftop">
+              <span class="sev ${f.severity || 'low'}">${esc(f.severity || 'low')}</span>
+              <b>${esc(f.kind || '')}</b>
+              <span class="mut">${esc(f.client || '')} · ${esc(f.method || '')} ${esc(f.path || '')}</span>
+            </div>
+            <div>${esc(f.detail || '')}</div>
+          </div>`).join('') + '</div>'
+    }
+    box.innerHTML = html
+  } catch (e) {
+    box.className = 'mut'
+    box.textContent = '契约加载失败：' + e.message
+  }
+}
+$('btnContractReload').onclick = loadContract
+
+/* ---------------- global wiring ---------------- */
 $('btnRebuild').onclick = async () => {
   $('btnRebuild').disabled = true
-  toast('⏳ 正在重建：web-pro → 编辑器 → 重启剪辑服务…（约 1 分钟）')
+  toast('⏳ 正在重建：web-pro → 编辑器 → 重启剪辑服务…（约 1 分钟）', 5000)
   try {
     const d = await safeJson(await fetch(API + '/api/rebuild', { method: 'POST' }))
     if (d && d.steps) {
-      const bad = d.steps.filter((s) => !s.ok)
-      if (bad.length) {
-        toast('✗ 重建失败：' + bad[0].label + ' — ' + (bad[0].tail || '').split('\n').pop())
-      } else {
-        toast('✅ 重建完成，已加载最新代码 · 入口 http://127.0.0.1:30002（Ctrl+F5 刷新）')
-      }
+      const bad = d.steps.filter((x) => !x.ok)
+      if (bad.length) toast('✗ 重建失败：' + bad[0].label + ' — ' + (bad[0].tail || '').split('\n').pop(), 9000)
+      else toast('✅ 重建完成，Ctrl+F5 刷新正式页 http://127.0.0.1:30002')
     } else {
-      toast('✗ 重建失败：' + ((d && d.error) || '无响应'))
+      toast('✗ 重建失败：' + ((d && d.error) || '无响应'), 8000)
     }
   } catch (e) {
-    toast('✗ 重建失败：' + e.message)
+    toast('✗ 重建失败：' + e.message, 8000)
   } finally {
     $('btnRebuild').disabled = false
-    load()
+    loadServices()
   }
 }
+$('btnRefresh').onclick = () => { loadServices(); if (activeTab === 'channels') loadChannels() }
 $('btnAll').onclick = async () => {
   const failed = []
-  for (const id of ['ml-server', 'pack-studio', 'web-h5']) {
+  for (const id of ['ml-server', 'pack-studio', 'clip-editor']) {
     try {
-      const port = readPort(id)
       const d = await safeJson(await fetch(API + '/api/action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, action: 'start', port }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action: 'start' }),
       }))
       if (d.result && d.result.ok === false) failed.push(id + ': ' + d.result.error)
+      if (d.result && d.result.jobId) followJob(d.result.jobId)
     } catch (e) {
       failed.push(id + ': ' + e.message)
     }
   }
-  // 以前不管成功失败都只弹一句「正在启动全部…」，某个服务起不来完全看不见
-  if (failed.length) {
-    toast('✗ ' + failed.length + ' 个服务失败 · ' + failed[0])
-    const t = $('toast')
-    clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 9000)
-  } else {
-    toast('全部服务已启动')
-  }
-  setTimeout(load, 1500)
+  if (failed.length) toast('✗ ' + failed.length + ' 个失败 · ' + failed[0], 9000)
+  else toast('启动指令已发送（正式端已在跑会自动跳过）')
+  setTimeout(loadServices, 1500)
 }
 
-load()
-setInterval(load, 5000)
+loadServices()
+statusTimer = setInterval(() => {
+  loadServices()
+  if (activeTab === 'channels') loadChannels()
+}, 5000)
 </script>
 </body>
 </html>

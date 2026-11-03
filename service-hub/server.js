@@ -12,7 +12,11 @@ const { spawn, exec, execFileSync } = require('child_process');
 
 const PORT = Number(process.env.HUB_PORT || 3790);
 const ROOT = path.resolve(__dirname, '..'); // MaterialLibraryServer
-const APP = 'C:\\Users\\lrp\\DevEcoStudioProjects\\AlbumSyncUniAppX';
+
+// 统一控制层（B1）：状态聚合与 WSL 适配，全部为本地库调用，require 无副作用
+const mlsCtl = require(path.join(ROOT, 'scripts', 'mls-ctl'));
+const wslLib = require(path.join(ROOT, 'scripts', 'mls', 'lib', 'wsl'));
+const bcLib = require(path.join(ROOT, 'scripts', 'branch-channel'));
 
 function json(res, code, obj) {
   // SEC-004：不再下发 Access-Control-Allow-Origin:*。总控面板只被同源页面使用，
@@ -48,37 +52,17 @@ function portOpen(port, host = '127.0.0.1', timeout = 800) {
 const SERVICES = [
   {
     id: 'ml-server',
-    name: '素材库服务端',
-    desc: 'MaterialLibrary · 管理台 / App API',
+    name: '素材库服务端 (正式)',
+    desc: 'WSL/smu · start.sh + watchdog 托管 · 与 30002 网关整组启停',
     port: 30001,
     url: 'http://127.0.0.1:30001',
-    kind: 'node',
-    // 2026-10-03：改为「Windows Node 为主」。
-    //
-    // 原来是 wsl 主路径（wsl -d smu ... start.sh start），但 wsl.exe 被 WorkBuddy
-    // 安全策略列入 Program Blacklist（安全中心 → 命令安全 → 程序黑名单），
-    // spawn 直接 EPERM、bat 外跑 exit=1，面板上点启动毫无反应。
-    //
-    // 2026-10-03 用户决定统一在 Windows 上启停，因此把 Windows 路径提为主路径。
-    //
-    // cmd 用 getter 在启动时才求值：better-sqlite3 是原生模块，必须用 ABI 匹配的
-    // node（Node 22=127 / Node 24=137 互不通用），pickNodeFor 会实测哪个能用。
-    // 写死 process.execPath 会因为「面板用哪个 node 启动」而随机失败。
-    // 找不到可用 node 时直接抛错，让面板把原因显示出来，而不是拿 'node' 硬试。
-    get startCmd() {
-      const picked = pickNodeFor(ROOT);
-      if (!picked.exe) {
-        throw new Error(
-          '找不到能加载 better-sqlite3 的 Node（原生模块 ABI 不匹配）。已尝试: ' + picked.reason
-        );
-      }
-      return picked.exe;
-    },
-    startArgs: [path.join(ROOT, 'server.js')],
-    cwd: ROOT,
-    // 没有 watchdog（那是 start.sh 提供的）：崩溃不会自动重启，
-    // 但 Windows 路径不再依赖 wsl.exe，可靠性反而更高。
-    hasWatchdog: false,
+    // 2026-11-03：彻底删除 Windows-node spawn 路径。
+    // 旧实现在 Windows 用独立旧库 ~/.dsh-material-library 再起一个 30001，
+    // 无 watchdog、worker 全开，是危险的「第三数据平面」。
+    // 现在 30001/30002 只能经 WSL start.sh 整组操作（见 /api/mls/action）；
+    // 若 wsl.exe 被安全策略拦截，任务会如实报错并提示改跑「启动素材库.bat」。
+    kind: 'delegate',
+    delegate: 'prod',
   },
   {
     id: 'pack-studio',
@@ -104,26 +88,14 @@ const SERVICES = [
   },
   {
     id: 'web-h5',
-    name: 'Web 端 (桌面工作台 / H5)',
-    desc: 'Material Studio Pro · 桌面素材工作台（端口 30002）',
+    name: 'Web 网关 (正式)',
+    desc: 'WSL/smu watchdog 第二子进程 · web-pro/server.cjs 30002 · 与 30001 整组启停',
     port: 30002,
     url: 'http://127.0.0.1:30002',
-    kind: 'node',
-    portEditable: true,
-    get startCmd() {
-      return process.execPath || 'node';
-    },
-    get startArgs() {
-      return [path.join(ROOT, 'web-pro', 'server.cjs'), String(this.port || 30002)];
-    },
-    cwd: path.join(ROOT, 'web-pro'),
-    fallback: {
-      get cmd() {
-        return process.platform === 'win32' ? 'npm.cmd' : 'npm';
-      },
-      args: ['run', 'dev:h5'],
-      cwd: APP,
-    }
+    // 同样禁止 Windows 侧单拉 30002：会与 WSL 正式网关抢端口、或在 API 缺失时
+    // 造成「网页开着但全是 502」的假存活。
+    kind: 'delegate',
+    delegate: 'prod',
   },
   {
     id: 'clip-editor',
@@ -143,56 +115,9 @@ const SERVICES = [
     },
     cwd: path.join(ROOT, 'editor'),
   },
-  // ── 灰测通道（A/B）：30000 API + 30003 Web ────────────────────────────────
-  // 两者与正式通道（30001/30002）共用同一份源码，但数据目录独立、端口独立。
-  // 日常改动先发布到灰测验证，验证通过后在灰测页面「设置 → 发布到正式版」再更新正式。
-  {
-    id: 'ml-server-gray',
-    name: '灰测服务端 (30000)',
-    desc: '灰度 API · 独立数据目录 ~/.dsh-material-library-gray · 不跑后台 worker',
-    port: 30000,
-    url: 'http://127.0.0.1:30000',
-    kind: 'node',
-    get startCmd() {
-      const exe = findNode22() || pickNodeFor(ROOT).exe;
-      if (!exe) throw new Error('灰测后端需要 Node 22（ABI 127）来加载 Windows 版 better-sqlite3');
-      return exe;
-    },
-    startArgs: [path.join(ROOT, 'server.js')],
-    cwd: ROOT,
-    get env() {
-      const grayData = process.env.ML_GRAY_DATA_DIR || path.join(os.homedir(), '.dsh-material-library-gray');
-      const shim = path.join(ROOT, 'scripts', 'shims', 'better-sqlite3-win.js').replace(/\\/g, '/');
-      return {
-        ML_PORT: String(this.port || 30000),
-        ML_DATA_DIR: grayData,
-        ML_GRAY_DATA_DIR: grayData,
-        APP_CHANNEL: 'gray',
-        ML_WATCH_RESTART: '0',
-        NODE_OPTIONS: `--require "${shim}"`,
-      };
-    },
-  },
-  {
-    id: 'web-h5-gray',
-    name: '灰测 Web 端 (30003)',
-    desc: '灰度前端 · dist-gray 产物 · API 指向灰测 30000',
-    port: 30003,
-    url: 'http://127.0.0.1:30003',
-    kind: 'node',
-    get startCmd() {
-      return process.execPath || 'node';
-    },
-    get startArgs() {
-      return [path.join(ROOT, 'web-pro', 'server.cjs'), String(this.port || 30003)];
-    },
-    cwd: path.join(ROOT, 'web-pro'),
-    env: {
-      APP_CHANNEL: 'gray',
-      WEB_PRO_DIST: 'dist-gray',
-      API_TARGET: 'http://127.0.0.1:30000',
-    },
-  },
+  // 遗留同树 gray 通道（30000/30003）已于 2026-11-03 从面板退役：
+  // 它与 worktree test 通道抢同一组端口且无互斥，是状态误判的最大来源。
+  // test 分支通道的状态/操作见面板「通道与发布」标签（/api/mls/*）。
   {
     id: 'asr-server',
     name: '语音识别 (FunASR)',
@@ -211,6 +136,84 @@ const SERVICES = [
 const children = new Map(); // id -> ChildProcess
 const LOG_DIR = path.join(__dirname, 'logs');
 fs.mkdirSync(LOG_DIR, { recursive: true });
+
+/* ── 长任务运行器：prod 启停 / test 通道构建 / promote 都可能跑几十秒到几分钟，
+   不能阻塞事件循环，统一异步起子进程，前端按 jobId 轮询输出。 ────────────── */
+const jobs = new Map(); // id -> job
+const MLS_CTL = path.join(ROOT, 'scripts', 'mls-ctl.js');
+
+function createJob(kind, cmd, args, opts = {}) {
+  const id = 'j_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  const job = {
+    id,
+    kind,
+    cmd,
+    args,
+    state: 'running',
+    code: null,
+    startedAt: Date.now(),
+    finishedAt: null,
+    lines: [],
+  };
+  jobs.set(id, job);
+  // 仅保留最近 20 个任务
+  for (const k of [...jobs.keys()]) {
+    if (jobs.size <= 20) break;
+    if (k !== id) jobs.delete(k);
+  }
+  let child;
+  try {
+    child = spawn(cmd, args, {
+      cwd: opts.cwd || ROOT,
+      env: { ...process.env, ...(opts.env || {}) },
+      windowsHide: true,
+    });
+  } catch (e) {
+    job.state = 'error';
+    job.code = -1;
+    job.finishedAt = Date.now();
+    job.lines.push('[spawn] ' + e.message);
+    return job;
+  }
+  job.pid = child.pid;
+  const append = (buf) => {
+    const parts = buf.toString().split(/\r?\n/);
+    job.lines.push(...parts);
+    if (job.lines.length > 1500) job.lines.splice(0, job.lines.length - 1500);
+  };
+  child.stdout.on('data', append);
+  child.stderr.on('data', append);
+  child.on('error', (e) => {
+    job.state = 'error';
+    job.code = -1;
+    job.finishedAt = Date.now();
+    job.lines.push('[spawn error] ' + e.message);
+  });
+  child.on('exit', (code) => {
+    job.state = code === 0 ? 'done' : 'error';
+    job.code = code;
+    job.finishedAt = Date.now();
+  });
+  return job;
+}
+
+/** 通道/正式端动作：统一委托给 mls-ctl（prod 内部再走 WSL start.sh） */
+function spawnMlsJob(kind, ctlArgs) {
+  return createJob(kind, process.execPath, [MLS_CTL, ...ctlArgs]);
+}
+
+function jobPublic(job) {
+  return {
+    id: job.id,
+    kind: job.kind,
+    state: job.state,
+    code: job.code,
+    pid: job.pid,
+    startedAt: job.startedAt,
+    finishedAt: job.finishedAt,
+    lines: job.lines,
+  };
+}
 
 /**
  * 找一个能真正加载 better-sqlite3 的 Node 可执行文件。
@@ -252,24 +255,6 @@ function nodeCandidates() {
 }
 
 let _pickCache = null; // { exe, reason } | { exe: null, reason }
-
-/** 灰测后端专用：PE 版 better-sqlite3 是 ABI 127（Node 22），优先找 22.x */
-function findNode22() {
-  const wbBin = path.join(os.homedir(), '.workbuddy', 'binaries', 'node', 'versions');
-  try {
-    for (const v of fs.readdirSync(wbBin)) {
-      if (!/^22\./.test(v)) continue;
-      const p = path.join(wbBin, v, 'node.exe');
-      if (fs.existsSync(p)) return p;
-    }
-  } catch (_) {}
-  try {
-    const sys = 'C:\\Program Files\\nodejs\\node.exe';
-    const major = execFileSync(sys, ['-p', 'process.versions.modules'], { encoding: 'utf8' }).trim();
-    if (major === '127') return sys;
-  } catch (_) {}
-  return '';
-}
 
 function pickNodeFor(root) {
   if (_pickCache) return _pickCache;
@@ -344,6 +329,8 @@ async function snapshot() {
       url: s.url,
       up,
       kind: s.kind,
+      delegated: !!s.delegate,
+      delegate: s.delegate || null,
       portEditable: !!s.portEditable,
       managed: children.has(s.id),
     });
@@ -353,6 +340,9 @@ async function snapshot() {
 
 function startService(svc) {
   if (svc.kind === 'self') return { ok: true, note: '已在运行' };
+  if (svc.kind === 'delegate') {
+    return { ok: false, error: '该服务为委托管理，请走 /api/mls/action（WSL start.sh 整组操作）' };
+  }
   if (children.has(svc.id)) {
     const c = children.get(svc.id);
     if (c.exitCode == null) return { ok: true, note: '已由面板启动' };
@@ -442,7 +432,7 @@ function startService(svc) {
       tick();
     });
 
-  // startCmd 可能是 getter（素材库服务端是），读取本身就可能抛：
+  // startCmd 可能是 getter（pack-studio 是），读取本身就可能抛：
   // getter 内部会调 pickNodeFor，找不到可用 node 时抛错比静默起不来好。
   let cmd;
   let args;
@@ -473,6 +463,10 @@ function startService(svc) {
 
 function stopService(svc) {
   if (svc.kind === 'self') return { ok: false, error: '不能停止自身' };
+  if (svc.kind === 'delegate') {
+    // 绝不能按 Windows 端口杀 WSL 进程（会误杀 wslrelay/整组 watchdog）
+    return { ok: false, error: '该服务为委托管理，请走 /api/mls/action（WSL start.sh 整组操作）' };
+  }
   // 优先杀面板拉起的进程树（最准确：一定是这个面板起的那个进程）
   const c0 = children.get(svc.id);
   if (c0 && c0.exitCode == null) {
@@ -525,6 +519,24 @@ const server = http.createServer(async (req, res) => {
     return res.end();
   }
 
+  // 全请求只读一次 body（2MB 上限），各 POST 端点共用
+  let body = '';
+  if (req.method === 'POST' || req.method === 'PUT') {
+    body = await new Promise((resolve) => {
+      let buf = '';
+      let tooBig = false;
+      req.on('data', (c) => {
+        buf += c;
+        if (buf.length > 2_000_000 && !tooBig) {
+          tooBig = true;
+          req.destroy();
+        }
+      });
+      req.on('end', () => resolve(buf));
+      req.on('error', () => resolve(buf));
+    });
+  }
+
   if (p === '/' || p === '/index.html') {
     const html = fs.readFileSync(path.join(__dirname, 'index.html'));
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -536,11 +548,6 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (p === '/api/action' && req.method === 'POST') {
-    let body = '';
-    await new Promise((r) => {
-      req.on('data', (c) => (body += c));
-      req.on('end', r);
-    });
     let data = {};
     try { data = JSON.parse(body || '{}'); } catch (_) {}
     const svc = SERVICES.find((s) => s.id === data.id);
@@ -552,6 +559,20 @@ const server = http.createServer(async (req, res) => {
         applyPort(svc, data.port);
       }
       let r;
+      if (svc.kind === 'delegate') {
+        // 正式组（30001/30002）：只经 WSL start.sh 整组操作，任务化执行。
+        if (!['start', 'stop', 'restart'].includes(act)) {
+          return json(res, 400, { ok: false, error: '委托服务仅支持 start/stop/restart' });
+        }
+        if (act === 'start' && (await portOpen(30001)) && (await portOpen(30002))) {
+          r = { ok: true, note: '30001/30002 均已在监听，跳过（如需重启请用「重启」）' };
+        } else {
+          const job = spawnMlsJob('prod-' + act, [act, 'prod']);
+          r = { ok: true, jobId: job.id, note: `已提交 WSL 整组${act}任务，执行结果见任务输出` };
+        }
+        const services = await snapshot();
+        return json(res, 200, { ok: true, result: r, services });
+      }
       if (act === 'start') {
         const already = await portOpen(svc.port);
         if (already) r = { ok: true, note: '端口已在监听，跳过重复启动' };
@@ -571,11 +592,6 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (p === '/api/open' && req.method === 'POST') {
-    let body = '';
-    await new Promise((r) => {
-      req.on('data', (c) => (body += c));
-      req.on('end', r);
-    });
     let data = {};
     try { data = JSON.parse(body || '{}'); } catch (_) {}
     const svc = SERVICES.find((s) => s.id === data.id);
@@ -634,6 +650,108 @@ const server = http.createServer(async (req, res) => {
 
     const services = await snapshot();
     return json(res, 200, { ok: steps.every((s) => s.ok), steps, services });
+  }
+
+  // ── B2：「通道与发布」标签页的统一数据源（与 CLI 完全同源）─────────────────
+  if (p === '/api/mls/status' && req.method === 'GET') {
+    try {
+      const status = await mlsCtl.gather();
+      return json(res, 200, { ok: true, status });
+    } catch (e) {
+      return json(res, 500, { ok: false, error: e.message });
+    }
+  }
+
+  // test/gray 通道启停（prod 也允许，但内部由 mls-ctl 走 WSL start.sh）
+  if (p === '/api/mls/action' && req.method === 'POST') {
+    let data = {};
+    try { data = JSON.parse(body || '{}'); } catch (_) {}
+    const target = String(data.target || '');
+    const action = String(data.action || '');
+    if (!['prod', 'test', 'gray'].includes(target)) {
+      return json(res, 400, { ok: false, error: 'target 必须是 prod/test/gray' });
+    }
+    if (!['start', 'stop', 'restart'].includes(action)) {
+      return json(res, 400, { ok: false, error: 'action 必须是 start/stop/restart' });
+    }
+    if (target === 'prod') {
+      // 正式组：已在跑时 start 直接跳过，避免「一键启动」误触发整组重启
+      if (action === 'start' && (await portOpen(30001)) && (await portOpen(30002))) {
+        return json(res, 200, { ok: true, result: { ok: true, note: '30001/30002 均已在监听，跳过' } });
+      }
+    }
+    const args = [action, target];
+    if (data.takeover && action !== 'stop') args.push('--takeover');
+    if (target !== 'prod' && action !== 'stop') {
+      args.push(action === 'start' ? (data.build ? '' : '--no-build') : data.build ? '--build' : '--no-build');
+      if (args[args.length - 1] === '') args.pop();
+    }
+    const job = spawnMlsJob(target + '-' + action, args);
+    return json(res, 200, { ok: true, jobId: job.id, job: jobPublic(job) });
+  }
+
+  // promote：默认只能 dry-run；execute:true 才真合并（前端必须二次确认）
+  if (p === '/api/mls/promote' && req.method === 'POST') {
+    let data = {};
+    try { data = JSON.parse(body || '{}'); } catch (_) {}
+    const lane = String(data.lane || 'test');
+    if (!['test'].includes(lane)) {
+      return json(res, 400, { ok: false, error: '目前只允许 promote test' });
+    }
+    const args = ['promote', lane];
+    if (data.execute === true) args.push('--execute');
+    if (data.force === true) args.push('--force');
+    const job = spawnMlsJob('promote-' + lane, args);
+    return json(res, 200, { ok: true, jobId: job.id, job: jobPublic(job) });
+  }
+
+  if (p.startsWith('/api/mls/jobs') && req.method === 'GET') {
+    const id = p.split('/')[4];
+    if (id) {
+      const job = jobs.get(decodeURIComponent(id));
+      if (!job) return json(res, 404, { ok: false, error: '任务不存在或已过期' });
+      return json(res, 200, { ok: true, job: jobPublic(job) });
+    }
+    return json(res, 200, {
+      ok: true,
+      jobs: [...jobs.values()].sort((a, b) => b.startedAt - a.startedAt).slice(0, 10).map(jobPublic),
+    });
+  }
+
+  // 通道/正式端日志（只读 tail，不动进程）
+  if (p.startsWith('/api/mls/logs') && req.method === 'GET') {
+    const target = url.searchParams.get('target') || '';
+    const n = Math.min(Number(url.searchParams.get('n')) || 200, 1000);
+    if (wslLib.PROD_LOGS[target]) {
+      const r = wslLib.tailProdLog(target, n);
+      if (!r.ok) return json(res, r.unreachable ? 503 : 404, { ok: false, error: r.error });
+      return json(res, 200, { ok: true, path: r.path, lines: r.lines });
+    }
+    const m = /^(test|gray)-(api|web)$/.exec(target);
+    if (m) {
+      const file = path.join(bcLib.LANES[m[1]].dataDir, 'logs', m[2] + '.log');
+      let lines = [];
+      try {
+        lines = fs.readFileSync(file, 'utf8').split(/\r?\n/).slice(-(n + 1));
+      } catch (_) {
+        return json(res, 404, { ok: false, error: '日志不存在：' + file });
+      }
+      return json(res, 200, { ok: true, path: file, lines });
+    }
+    return json(res, 400, { ok: false, error: '未知日志目标：' + target });
+  }
+
+  // ── B3 产物：三端对接契约清单（gen-contract-manifest.js 生成）──────────────
+  if (p === '/api/contract' && req.method === 'GET') {
+    const file = path.join(ROOT, 'docs', 'contract-manifest.json');
+    if (!fs.existsSync(file)) {
+      return json(res, 200, { ok: false, missing: true, error: '契约清单尚未生成（B3）' });
+    }
+    try {
+      return json(res, 200, { ok: true, contract: JSON.parse(fs.readFileSync(file, 'utf8')) });
+    } catch (e) {
+      return json(res, 500, { ok: false, error: '契约清单解析失败：' + e.message });
+    }
   }
 
   json(res, 404, { ok: false, error: 'not found' });
