@@ -368,6 +368,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { getToken } from '../../api';
+import { ensureModelViewer } from '../../utils/model-viewer.js';
 
 const CATEGORIES = [
   { key: 'all', label: '全部单品' },
@@ -748,6 +749,9 @@ function closeEditModal() {
 }
 
 onMounted(() => {
+  // 冷导航修复：3D 单品是素材库里唯一直接用 <model-viewer> 的入口，
+  // 必须在本组件挂载时就确保自定义元素已注册（未注册时标签空白且无 3D）
+  ensureModelViewer();
   loadPresets();
 });
 

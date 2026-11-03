@@ -219,7 +219,8 @@ const edges = computed(() => {
 });
 
 function thumb(node) {
-  return (node && node.imageUrl) || getAssetImageUrl(node && node.fid);
+  // 血缘图节点头像是小尺寸圆形缩略图，用 256px grid 档即可
+  return (node && node.imageUrl) || getAssetImageUrl(node && node.fid, '', 'grid');
 }
 
 function cardKind(node) {

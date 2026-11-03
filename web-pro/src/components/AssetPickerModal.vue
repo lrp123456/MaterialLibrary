@@ -755,7 +755,8 @@ async function loadAssets(targetPage = 1) {
       fid: it.fid,
       mediaToken: it.mediaToken,
       name: it.file_name || it.fileName || it.name || '素材资产',
-      url: getAssetImageUrl(it.fid, it.mediaToken),
+      // 选择器网格缩略图走 256px grid 档；确认选择时原图/衍生图由 versionsOf 另签 URL
+      url: getAssetImageUrl(it.fid, it.mediaToken, (it.kind || it.media_type) === 'video' ? '' : 'grid'),
       category: it.category,
       kind: it.kind || it.media_type || 'image',
       library_shelf: it.library_shelf || 'original',

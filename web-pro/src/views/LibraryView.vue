@@ -1179,17 +1179,15 @@
                 </div>
               </div>
 
-              <!-- 当天素材瀑布流 / 网格 -->
-              <div
-                :class="[
-                  layoutMode === 'masonry'
-                    ? 'columns-2 sm:columns-2 md:columns-3 lg:columns-4 xl:columns-5 2xl:columns-6 gap-4 space-y-4'
-                    : 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4'
-                ]"
+              <!-- 当天素材瀑布流 / 网格（VirtualMasonry 窗口化：仅挂载视口附近卡片，class/内容不变） -->
+              <VirtualMasonry
+                :items="group.items"
+                :mode="layoutMode"
+                :scroll-container="scrollContainerRef"
+                :estimate-height="estimateCardHeight"
               >
+                <template #default="{ item }">
                 <div
-                  v-for="item in group.items"
-                  :key="item.fid"
                   :class="[
                     'group relative bg-studio-900 border rounded-xl overflow-hidden transition-all duration-200 cursor-pointer',
                     layoutMode === 'masonry' ? 'break-inside-avoid' : '',
@@ -1381,7 +1379,8 @@
                     </div>
                   </div>
                 </div>
-              </div>
+                </template>
+              </VirtualMasonry>
             </section>
           </div>
 
@@ -2476,12 +2475,14 @@
     />
 
     <SimilarityWorkbenchModal
+      v-if="similarityWorkbenchOpen"
       ref="workbenchModalRef"
       v-model:visible="similarityWorkbenchOpen"
       @resolved="reloadAssets(true)"
     />
 
     <StyleSchemeStudio
+      v-if="styleStudioOpen"
       :open="styleStudioOpen"
       @close="styleStudioOpen = false"
       @extract="styleStudioOpen = false; catalogIngestOpen = true"
@@ -2489,6 +2490,7 @@
     />
 
     <CatalogIngestPanel
+      v-if="catalogIngestOpen"
       :open="catalogIngestOpen"
       :item-ids="clusterItemIds"
       :initial-asset="catalogIngestAsset"
@@ -2636,15 +2638,17 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick, defineAsyncComponent } from 'vue';
 import StudioIcon from '../components/StudioIcon.vue';
-import BaseLibraryPane from './library/BaseLibraryPane.vue';
-import CatalogIngestPanel from './library/CatalogIngestPanel.vue';
-import StyleSchemeStudio from './library/StyleSchemeStudio.vue';
-import LineageGraph from '../components/LineageGraph.vue';
-import Product3DManager from '../components/library/Product3DManager.vue';
+// 二级面板/弹窗全部按需切块：默认图片素材库首屏不载基础库面板、3D 管理器与各工作台弹窗
+const BaseLibraryPane = defineAsyncComponent(() => import('./library/BaseLibraryPane.vue'));
+const CatalogIngestPanel = defineAsyncComponent(() => import('./library/CatalogIngestPanel.vue'));
+const StyleSchemeStudio = defineAsyncComponent(() => import('./library/StyleSchemeStudio.vue'));
+const LineageGraph = defineAsyncComponent(() => import('../components/LineageGraph.vue'));
+const Product3DManager = defineAsyncComponent(() => import('../components/library/Product3DManager.vue'));
+const SimilarityWorkbenchModal = defineAsyncComponent(() => import('../components/SimilarityWorkbenchModal.vue'));
+import VirtualMasonry from '../components/library/VirtualMasonry.vue';
 import { buildSchemeBrowse } from '../../../src/base-library/scheme-browse.mjs';
-import SimilarityWorkbenchModal from '../components/SimilarityWorkbenchModal.vue';
 import { processClientVocalPreview } from '../utils/audio-preview-webgpu.js';
 import { onAssetChange } from '../service/sse.js';
 import {
@@ -5371,7 +5375,8 @@ function getThumbnailSrc(item) {
     const t = localStorage.getItem('ml_token');
     return t ? `${item.thumbUrl}&token=${encodeURIComponent(t)}` : item.thumbUrl;
   }
-  return getAssetImageUrl(item.fid, item.mediaToken);
+  // 列表卡片只取 256px grid 档；详情/全屏走 getModalMainImageUrl 的默认 preview 档
+  return getAssetImageUrl(item.fid, item.mediaToken, 'grid');
 }
 
 function ratioLabelFromSize(width, height) {
@@ -5386,6 +5391,10 @@ function ratioLabelFromSize(width, height) {
   return `${w}×${h}`;
 }
 
+// 非响应式副本：供 VirtualMasonry 的预估高度函数读取，避免图片量出真实画幅后
+// 触发整个瀑布流重新分桶（卡片跳列）；真实高度偏差由窗口化组件的 RO 测量修正占位
+const measuredAspectRaw = {};
+
 function noteCardAspect(item, event) {
   const el = event?.target;
   const w = el?.naturalWidth || el?.videoWidth || 0;
@@ -5394,6 +5403,35 @@ function noteCardAspect(item, event) {
   const prev = measuredAspect[item.fid];
   if (prev && prev.w === w && prev.h === h) return;
   measuredAspect[item.fid] = { w, h };
+  measuredAspectRaw[item.fid] = { w, h };
+}
+
+/**
+ * VirtualMasonry 卡片总高预估（px）：图像盒高度（aspect-ratio + 最小高）
+ * 与底部元信息区（p-3.5 + 标签行 + 日期行 ≈ 104px，回收站多一行 ≈ +38px）。
+ * 与 getCardAspectStyle 的最小高规则保持一致，保证窗口占位与真实渲染接近。
+ */
+function estimateCardHeight(item, colWidth) {
+  if (!item) return 220;
+  const measured = measuredAspectRaw[item.fid] || null;
+  const w = measured?.w || Number(item.width) || 0;
+  const h = measured?.h || Number(item.height) || 0;
+  let imgH;
+  const isAudio = item.kind === 'audio' || item.media_type === 'music';
+  if (w > 0 && h > 0) {
+    imgH = Math.max(120, (colWidth || 0) * h / w);
+  } else if (isAudio) {
+    imgH = 172;
+  } else {
+    const ori = item.origin_orientation || item.orientation;
+    if (ori === 'portrait' || ori === '9:16') imgH = Math.max(220, (colWidth || 0) * 16 / 9);
+    else if (ori === '3:4') imgH = Math.max(180, (colWidth || 0) * 4 / 3);
+    else if (ori === 'square' || ori === '1:1') imgH = Math.max(160, colWidth || 0);
+    else if (isVideoItem(item)) imgH = 180;
+    else imgH = Math.max(140, (colWidth || 0) * 9 / 16);
+  }
+  const chrome = activeMainTab.value === 'trash' ? 142 : 104;
+  return Math.round(imgH + chrome + 2); // +2 卡片边框
 }
 
 function getCardAspectStyle(item) {

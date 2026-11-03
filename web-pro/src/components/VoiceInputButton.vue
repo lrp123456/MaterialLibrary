@@ -87,6 +87,8 @@ let pendingSamples = [];
 let pendingLen = 0;
 let lastEditable = null;
 let finalResolver = null;
+let statusTimer = null; // 30s ASR 服务状态轮询，卸载时必须清，否则会永久轮询
+let finalTimer = null;  // stop() 后等待服务端 final 的 6s 兜底定时器
 
 const liveText = computed(() => (recording.value ? `${committed.value}${partial.value}` : (finalText.value || committed.value)).trim());
 const placeholder = computed(() => (asrReady.value ? '点右侧麦克风开始说话…' : error.value || '正在检测语音服务…'));
@@ -350,9 +352,13 @@ function stop() {
   if (!socket) return;
   new Promise((resolve) => {
     finalResolver = resolve;
-    setTimeout(() => { if (finalResolver) { finalResolver(committed.value || partial.value); finalResolver = null; } }, 6000);
+    finalTimer = setTimeout(() => {
+      finalTimer = null;
+      if (finalResolver) { finalResolver(committed.value || partial.value); finalResolver = null; }
+    }, 6000);
     try { socket.send(JSON.stringify({ type: 'end' })); } catch (_) { resolve(''); }
   }).then((text) => {
+    if (finalTimer) { clearTimeout(finalTimer); finalTimer = null; }
     try { socket.close(); } catch (_) {}
     ws = null;
     const t = String(text || committed.value || partial.value || '').trim();
@@ -369,10 +375,14 @@ function toggle() {
 onMounted(() => {
   document.addEventListener('focusin', rememberFocus, true);
   refreshStatus();
-  setInterval(refreshStatus, 30000);
+  statusTimer = setInterval(refreshStatus, 30000);
 });
 onBeforeUnmount(() => {
   document.removeEventListener('focusin', rememberFocus, true);
+  if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
+  if (finalTimer) { clearTimeout(finalTimer); finalTimer = null; }
+  // 卸除 resolver：阻止收尾期间迟到的 final 消息在卸载后写回输入框/剪贴板
+  finalResolver = null;
   try { ws && ws.close(); } catch (_) {}
   stopAudio();
 });
