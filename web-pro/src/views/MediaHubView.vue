@@ -46,10 +46,18 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, h, ref, watch } from 'vue';
 import StudioIcon from '../components/StudioIcon.vue';
-import OpenCutView from './studio/OpenCutView.vue';
-import MediaToolsView from './studio/MediaToolsView.vue';
+
+// 两个子工作台独立成块：默认只载多轨剪辑，切到「媒体工具」时才拉取
+// MediaToolsView（含 mediabunny/wgsl/jszip 的动态依赖链）。
+const subLoading = {
+  render() {
+    return h('div', { class: 'flex-1 flex items-center justify-center text-xs text-slate-500 font-mono tracking-widest' }, 'LOADING…');
+  }
+};
+const OpenCutView = defineAsyncComponent({ loader: () => import('./studio/OpenCutView.vue'), loadingComponent: subLoading, delay: 120 });
+const MediaToolsView = defineAsyncComponent({ loader: () => import('./studio/MediaToolsView.vue'), loadingComponent: subLoading, delay: 120 });
 
 const props = defineProps({
   initialSub: { type: String, default: 'opencut' },

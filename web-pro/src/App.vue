@@ -136,15 +136,26 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, onErrorCaptured } from 'vue';
+import { ref, computed, h, onMounted, onUnmounted, onErrorCaptured, defineAsyncComponent } from 'vue';
 import TopNav from './components/TopNav.vue';
 import LoginModal from './components/LoginModal.vue';
-
-import LibraryView from './views/LibraryView.vue';
-import StudioView from './views/StudioView.vue';
-import MediaHubView from './views/MediaHubView.vue';
-import SettingsView from './views/SettingsView.vue';
 import { getCurrentUser, logout, verifySession } from './api.js';
+
+// 路由级（板块级）懒加载：四大视图各自独立 chunk，首屏只载素材库所需代码。
+// 异步块加载失败会被 onErrorCaptured / 全局 error 捕获并引导刷新，见下方崩溃屏障。
+function viewLoading(level) {
+  return {
+    render() {
+      return h('div', {
+        class: 'flex-1 flex items-center justify-center text-xs text-slate-500 font-mono tracking-widest'
+      }, level === 1 ? 'LOADING WORKSPACE…' : 'LOADING…');
+    }
+  };
+}
+const LibraryView = defineAsyncComponent({ loader: () => import('./views/LibraryView.vue'), loadingComponent: viewLoading(1), delay: 120 });
+const StudioView = defineAsyncComponent({ loader: () => import('./views/StudioView.vue'), loadingComponent: viewLoading(1), delay: 120 });
+const MediaHubView = defineAsyncComponent({ loader: () => import('./views/MediaHubView.vue'), loadingComponent: viewLoading(1), delay: 120 });
+const SettingsView = defineAsyncComponent({ loader: () => import('./views/SettingsView.vue'), loadingComponent: viewLoading(1), delay: 120 });
 
 const activeTab = ref('library'); // 默认展示素材库板块 (DAM)
 const libraryLane = ref('image');

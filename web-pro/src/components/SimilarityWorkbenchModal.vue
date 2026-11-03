@@ -251,7 +251,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue';
+import { ref, reactive, computed, onMounted } from 'vue';
 import {
   fetchSimilarityWorkbench,
   resolveSimilarityCluster as apiResolve,
@@ -298,6 +298,11 @@ const clusterTimeSource = '素材时间：上传时取文件修改时间，其�
 
 // 展示顺序在前端兜底：即便后端进程未热更新、忽略 sort 参数，排序也照样生效
 const orderedClusters = computed(() => sortClusters(similarClusters.value, sortBy.value));
+
+// 组件改为按需异步挂载（打开时才创建）：挂载即拉数据，不再依赖父组件 nextTick 拿到 ref
+onMounted(() => {
+  if (props.visible) loadWorkbench();
+});
 
 async function loadWorkbench() {
   loading.value = true;

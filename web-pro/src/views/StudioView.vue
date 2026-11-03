@@ -9,9 +9,20 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue';
-import ChatStudio from './studio/ChatStudio.vue';
+import { defineAsyncComponent, h, ref, watch } from 'vue';
 import { getAssetImageUrl } from '../api';
+
+// ChatStudio 体量大（含 marked/dompurify/StudioEditLayer 等整条创作链），
+// 进 AI 板块时才加载，不拖素材库首屏。
+const ChatStudio = defineAsyncComponent({
+  loader: () => import('./studio/ChatStudio.vue'),
+  loadingComponent: {
+    render() {
+      return h('div', { class: 'flex-1 flex items-center justify-center text-xs text-slate-500 font-mono tracking-widest' }, 'LOADING STUDIO…');
+    }
+  },
+  delay: 120
+});
 
 const props = defineProps({
   initialPayload: { type: Object, default: null }

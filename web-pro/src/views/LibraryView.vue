@@ -2476,12 +2476,14 @@
     />
 
     <SimilarityWorkbenchModal
+      v-if="similarityWorkbenchOpen"
       ref="workbenchModalRef"
       v-model:visible="similarityWorkbenchOpen"
       @resolved="reloadAssets(true)"
     />
 
     <StyleSchemeStudio
+      v-if="styleStudioOpen"
       :open="styleStudioOpen"
       @close="styleStudioOpen = false"
       @extract="styleStudioOpen = false; catalogIngestOpen = true"
@@ -2489,6 +2491,7 @@
     />
 
     <CatalogIngestPanel
+      v-if="catalogIngestOpen"
       :open="catalogIngestOpen"
       :item-ids="clusterItemIds"
       :initial-asset="catalogIngestAsset"
@@ -2636,15 +2639,16 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick, defineAsyncComponent } from 'vue';
 import StudioIcon from '../components/StudioIcon.vue';
-import BaseLibraryPane from './library/BaseLibraryPane.vue';
-import CatalogIngestPanel from './library/CatalogIngestPanel.vue';
-import StyleSchemeStudio from './library/StyleSchemeStudio.vue';
-import LineageGraph from '../components/LineageGraph.vue';
-import Product3DManager from '../components/library/Product3DManager.vue';
+// 二级面板/弹窗全部按需切块：默认图片素材库首屏不载基础库面板、3D 管理器与各工作台弹窗
+const BaseLibraryPane = defineAsyncComponent(() => import('./library/BaseLibraryPane.vue'));
+const CatalogIngestPanel = defineAsyncComponent(() => import('./library/CatalogIngestPanel.vue'));
+const StyleSchemeStudio = defineAsyncComponent(() => import('./library/StyleSchemeStudio.vue'));
+const LineageGraph = defineAsyncComponent(() => import('../components/LineageGraph.vue'));
+const Product3DManager = defineAsyncComponent(() => import('../components/library/Product3DManager.vue'));
+const SimilarityWorkbenchModal = defineAsyncComponent(() => import('../components/SimilarityWorkbenchModal.vue'));
 import { buildSchemeBrowse } from '../../../src/base-library/scheme-browse.mjs';
-import SimilarityWorkbenchModal from '../components/SimilarityWorkbenchModal.vue';
 import { processClientVocalPreview } from '../utils/audio-preview-webgpu.js';
 import { onAssetChange } from '../service/sse.js';
 import {
