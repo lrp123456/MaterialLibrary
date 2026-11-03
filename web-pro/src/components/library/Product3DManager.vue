@@ -91,9 +91,9 @@
               <span class="text-[10px] text-studio-cyan/80 mt-0.5">3D 单品待烘焙</span>
             </div>
 
-            <!-- 朝向徽标 -->
+            <!-- 角标跟封面图的视角走，不跟库里的 facing 数字走 -->
             <div class="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-black/75 backdrop-blur-sm border border-white/10 text-[10px] font-mono text-studio-cyan shadow">
-              标准 {{ item.facing || 45 }}°
+              {{ coverBadge(productCover(item)) }}
             </div>
 
             <!-- 标定朝向快捷浮层 -->
@@ -161,7 +161,7 @@
               </span>
             </div>
             <div class="text-xs text-slate-400 mt-0.5">
-              鼠标左键拖拽旋转 360°，滚轮缩放，下方点击标准视角即可一键对准机位
+              打开时对准卡片上的外部预览。左键旋转，滚轮缩放，下方可改标准视角
             </div>
           </div>
           <button
@@ -178,12 +178,15 @@
           <model-viewer
             ref="modelViewerRef"
             :src="activeModelItem.model_url"
+            :poster="activeCover.url || undefined"
+            :camera-orbit="viewerOrbit"
             camera-controls
             shadow-intensity="1.5"
             environment-image="neutral"
             exposure="1.0"
             class="w-full h-full"
             style="--poster-color: transparent;"
+            @load="onViewerModelLoaded"
           ></model-viewer>
 
           <!-- 烘焙中加载遮罩 -->
@@ -245,6 +248,14 @@
         </div>
 
         <div class="space-y-3 text-xs">
+          <div v-if="editCover.url" class="rounded-xl overflow-hidden border border-studio-800 bg-studio-950">
+            <div class="relative aspect-[4/3] bg-studio-950">
+              <img :src="editCover.url" class="w-full h-full object-contain" :alt="editForm.name" />
+              <div class="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-black/75 border border-white/10 text-[10px] font-mono text-studio-cyan">
+                {{ coverBadge(editCover) }}
+              </div>
+            </div>
+          </div>
           <div>
             <label class="block text-slate-400 mb-1">家具单品名称 *</label>
             <input
@@ -369,6 +380,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { getToken } from '../../api';
 import { ensureModelViewer } from '../../utils/model-viewer.js';
+import { productCover, coverBadge, coverOrbit } from '../../utils/product-cover.js';
 
 const CATEGORIES = [
   { key: 'all', label: '全部单品' },
@@ -396,7 +408,10 @@ const viewerModalOpen = ref(false);
 const activeModelItem = ref(null);
 const modelViewerRef = ref(null);
 const currentViewerAngle = ref('right_45');
+const viewerOrbit = ref('45deg 75deg auto');
 const bakingSnapshot = ref(false);
+const editCover = ref({ url: '', key: 'preview', yaw: null, pitch: 75, label: '封面' });
+const activeCover = computed(() => productCover(activeModelItem.value || {}));
 
 const editModalOpen = ref(false);
 const editForm = ref({
@@ -421,16 +436,8 @@ const uploadSnapshotB64 = ref('');
 const uploadSnapshotCaptured = ref(false);
 const uploadSnapshotsMap = ref({});
 
-// 缩略图回退链解析：right_45 -> front -> front_0 -> 任意首视角 -> preview_url
 function getProductThumbnail(item) {
-  if (item.snapshots && typeof item.snapshots === 'object') {
-    if (item.snapshots.right_45) return item.snapshots.right_45;
-    if (item.snapshots.front) return item.snapshots.front;
-    if (item.snapshots.front_0) return item.snapshots.front_0;
-    const firstVal = Object.values(item.snapshots).find(v => typeof v === 'string' && v.length > 0);
-    if (firstVal) return firstVal;
-  }
-  return item.preview_url || '';
+  return productCover(item).url;
 }
 
 function onImageLoaded(id) {
@@ -482,18 +489,27 @@ async function loadPresets() {
 }
 
 function openViewerModal(item) {
+  const cover = productCover(item);
   activeModelItem.value = item;
+  currentViewerAngle.value = cover.key || 'right_45';
+  viewerOrbit.value = coverOrbit(cover);
   viewerModalOpen.value = true;
-  currentViewerAngle.value = 'right_45';
+}
+
+function onViewerModelLoaded() {
+  const mv = modelViewerRef.value;
+  if (!mv) return;
+  mv.cameraOrbit = viewerOrbit.value;
+  if (typeof mv.jumpCameraToGoal === 'function') mv.jumpCameraToGoal();
 }
 
 function alignViewerAngle(ang) {
   currentViewerAngle.value = ang.key;
+  viewerOrbit.value = `${ang.yaw}deg ${ang.pitch || 75}deg auto`;
   if (!modelViewerRef.value) return;
   const mv = modelViewerRef.value;
-  // 设置相机轨道角度：camera-orbit="theta phi radius"
-  mv.cameraOrbit = `${ang.yaw}deg ${ang.pitch || 75}deg auto`;
-  mv.jumpCameraToGoal();
+  mv.cameraOrbit = viewerOrbit.value;
+  if (typeof mv.jumpCameraToGoal === 'function') mv.jumpCameraToGoal();
 }
 
 async function bakeCurrentViewSnapshot() {
@@ -541,6 +557,7 @@ function openUploadModal() {
   uploadSnapshotCaptured.value = false;
   uploadSnapshotB64.value = '';
   uploadSnapshotsMap.value = {};
+  editCover.value = { url: '', key: 'preview', yaw: null, pitch: 75, label: '封面' };
   editForm.value = {
     id: '',
     name: '',
@@ -562,6 +579,7 @@ function openEditModal(item) {
   uploadSnapshotCaptured.value = false;
   uploadSnapshotB64.value = '';
   uploadSnapshotsMap.value = {};
+  editCover.value = productCover(item);
   editForm.value = {
     id: item.id,
     name: item.name,
@@ -621,18 +639,53 @@ async function waitForStableCapture(mv, { timeoutMs = 4000, minBytes = 8000 } = 
   return mv.toDataURL('image/png');
 }
 
+// model-viewer 默认按设备像素比导出全分辨率 PNG，三张快照叠加 base64 后可达数 MB，
+// 加上 GLB 的 base64 膨胀（~1.33x）很容易顶爆服务端 JSON 上限。
+// 统一降采样到最长边 1024，并优先用支持透明的 WebP，不支持时回退 PNG。
+async function compressSnapshotDataUrl(dataUrl, maxEdge = 1024) {
+  try {
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = dataUrl;
+    await img.decode().catch(() => new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+    }));
+    const w = img.naturalWidth || img.width;
+    const h = img.naturalHeight || img.height;
+    if (!w || !h) return dataUrl;
+    const scale = Math.min(1, maxEdge / Math.max(w, h));
+    const tw = Math.max(1, Math.round(w * scale));
+    const th = Math.max(1, Math.round(h * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = tw;
+    canvas.height = th;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, tw, th);
+    // WebP 在 Chromium 内核支持透明且体积显著小于 PNG
+    let out = null;
+    try { out = canvas.toDataURL('image/webp', 0.85); } catch (_) { out = null; }
+    if (!out || out.length >= dataUrl.length) out = canvas.toDataURL('image/png');
+    return out || dataUrl;
+  } catch (_) {
+    return dataUrl;
+  }
+}
+
 async function onUploadModelLoaded() {
   if (!uploadViewerRef.value) return;
   try {
     const mv = uploadViewerRef.value;
     mv.cameraOrbit = '45deg 75deg auto';
     mv.jumpCameraToGoal();
-    const b64_45 = await waitForStableCapture(mv);
+    const b64_45_raw = await waitForStableCapture(mv);
+    const b64_45 = await compressSnapshotDataUrl(b64_45_raw);
     uploadSnapshotB64.value = b64_45;
 
     mv.cameraOrbit = '0deg 80deg auto';
     mv.jumpCameraToGoal();
-    const b64_front = await waitForStableCapture(mv);
+    const b64_front_raw = await waitForStableCapture(mv);
+    const b64_front = await compressSnapshotDataUrl(b64_front_raw);
 
     uploadSnapshotsMap.value = {
       right_45: b64_45,
@@ -695,16 +748,37 @@ async function submitEditForm() {
       if (uploadSnapshotsMap.value && Object.keys(uploadSnapshotsMap.value).length > 0) {
         payload.snapshots = uploadSnapshotsMap.value;
       }
-      const res = await fetch('/api/products/upload', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${getToken()}`
-        },
-        body: JSON.stringify(payload)
-      });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.error || '上传失败');
+      const payloadJson = JSON.stringify(payload);
+      // base64 经 JSON 转义后体积基本一致，超过服务端 JSON 上限必然被 reset / 413，提前给出可操作提示
+      const MAX_JSON_BYTES = 2 * 1024 * 1024 * 1024 - 64 * 1024;
+      if (payloadJson.length > MAX_JSON_BYTES) {
+        alert(`模型与快照打包后约 ${(payloadJson.length / 1024 / 1024).toFixed(0)}MB，超过服务端上限（2GB）。请精简 GLB（压缩贴图/网格）后重试。`);
+        submitting.value = false;
+        return;
+      }
+      let res;
+      try {
+        res = await fetch('/api/products/upload', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${getToken()}`
+          },
+          body: payloadJson
+        });
+      } catch (netErr) {
+        throw new Error(`网络中断或后端连接被重置（${netErr && netErr.message ? netErr.message : 'ECONNRESET'}）。模型较大时请确认 30001 后端已启动且未在上传中重启，稍后重试。`);
+      }
+      let json = null;
+      try {
+        json = await res.json();
+      } catch (_) {
+        json = null;
+      }
+      if (!res.ok) {
+        throw new Error((json && json.error) || `上传失败（HTTP ${res.status}）`);
+      }
+      if (!json || !json.success) throw new Error((json && json.error) || '上传失败');
     }
     if (tempModelUrl.value) {
       URL.revokeObjectURL(tempModelUrl.value);

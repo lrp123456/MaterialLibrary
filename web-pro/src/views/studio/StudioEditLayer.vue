@@ -936,6 +936,8 @@
                 <model-viewer
                   :ref="el => registerModelViewer(reg.id, el)"
                   :src="reg.guide?.objectUrl || reg.params.glbUrl"
+                  :poster="reg.guide?.objectPreview || undefined"
+                  :camera-orbit="regionCoverOrbit(reg)"
                   alt="3D 家具模型"
                   shadow-intensity="1.2"
                   shadow-softness="0.8"
@@ -1178,8 +1180,24 @@
               <button v-for="cat in objectCatalog" :key="cat.key" type="button" class="px-2 py-1 rounded text-[10px] cursor-pointer" :class="activeGuide.objectCategory === cat.key ? 'bg-amber-500 text-black font-bold' : 'bg-studio-850 text-slate-300'" @click="setObjectCategory(activeRegion, cat.key)">{{ cat.label }}</button>
             </div>
             <div v-if="currentObjects.length === 0" class="text-[11px] text-slate-500">这一类还没有单品。</div>
-            <div v-else class="space-y-1">
-              <button v-for="item in currentObjects" :key="item.url" type="button" class="w-full text-left px-2 py-1.5 rounded-lg border text-[11px] cursor-pointer" :class="activeGuide.objectUrl === item.url ? 'border-amber-400 text-white' : 'border-studio-800 text-slate-300'" @click="setGuideObject(activeRegion, item)">{{ item.name }}</button>
+            <div v-else class="space-y-2">
+              <button
+                v-for="item in currentObjects"
+                :key="item.url"
+                type="button"
+                class="w-full text-left rounded-xl border overflow-hidden cursor-pointer bg-studio-900"
+                :class="activeGuide.objectUrl === item.url ? 'border-amber-400' : 'border-studio-800'"
+                @click="setGuideObject(activeRegion, item)"
+              >
+                <div class="relative aspect-[4/3] bg-studio-950">
+                  <img v-if="item.coverUrl" :src="item.coverUrl" class="w-full h-full object-contain" :alt="item.name" />
+                  <div v-else class="w-full h-full flex items-center justify-center text-[11px] text-slate-500">暂无外部预览</div>
+                  <div v-if="item.coverUrl" class="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-black/75 border border-white/10 text-[10px] font-mono text-studio-cyan">
+                    {{ item.coverYaw == null ? '封面' : `标准 ${item.coverLabel}` }}
+                  </div>
+                </div>
+                <div class="px-2.5 py-2 text-xs font-bold text-slate-100 truncate">{{ item.name }}</div>
+              </button>
             </div>
             <button v-if="activeGuide.suggestion && !suggestionAccepted(activeGuide)" type="button" class="w-full text-left px-2 py-1.5 rounded-lg bg-studio-cyan/10 border border-studio-cyan/40 text-[11px] text-studio-cyan cursor-pointer" @click="acceptSuggestion(activeRegion)">
               建议 {{ activeGuide.suggestion.label }}<span v-if="activeGuide.suggestion.hex"> {{ activeGuide.suggestion.hex }}</span>
@@ -1436,6 +1454,7 @@ import { mapSchemeToRegions } from '../../../../src/base-library/scheme-apply.mj
 import { REGION_COLORS, calculateNormalizedBbox, computeImageEntityBbox, getNearestCanonicalRatio, extractDominantScenePalette } from '../../utils/model-protocol';
 import { buildStructuredPrompt } from '../../utils/prompt-engine';
 import { ensureModelViewer } from '../../utils/model-viewer.js';
+import { productCover, coverOrbit } from '../../utils/product-cover.js';
 import {
   BUILTIN_GUIDE_TEXT,
   GUIDE_TYPE_TO_OP,
@@ -1765,11 +1784,16 @@ async function fetchProductPresets() {
           fixture: { key: 'fixture', label: '洁具', items: [] }
         };
         for (const p of presets) {
+          const cover = productCover(p);
           const item = {
             id: p.id,
             name: p.name,
             url: p.model_url || `/models/${p.model_file || p.id + '.glb'}`,
             preview_url: p.preview_url,
+            coverUrl: cover.url,
+            coverLabel: cover.label,
+            coverYaw: cover.yaw,
+            coverPitch: cover.pitch,
             facing: typeof p.facing === 'number' ? p.facing : 45
           };
           const rawCat = String(p.category || '').toLowerCase();
@@ -1867,8 +1891,17 @@ function setGuideObject(reg, item) {
   const guide = ensureGuide(reg);
   guide.objectName = item.name;
   guide.objectUrl = item.url;
+  guide.objectPreview = item.coverUrl || item.preview_url || '';
+  guide.coverYaw = item.coverYaw ?? null;
+  guide.coverPitch = item.coverPitch ?? 75;
   reg.params.glbUrl = item.url;
   reg.params.modelName = item.name;
+}
+function regionCoverOrbit(reg) {
+  return coverOrbit({
+    yaw: reg?.guide?.coverYaw,
+    pitch: reg?.guide?.coverPitch
+  });
 }
 function setGuideSkin(reg, skin) {
   const guide = ensureGuide(reg);
