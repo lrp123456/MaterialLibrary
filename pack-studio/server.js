@@ -6,6 +6,16 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+
+try {
+  const envFile = path.resolve(__dirname, '..', '.env');
+  if (fs.existsSync(envFile)) {
+    for (const l of fs.readFileSync(envFile, 'utf8').split(/\r?\n/)) {
+      const m = l.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+      if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^['"](.*)['"]$/, '$1');
+    }
+  }
+} catch (_) {}
 const { spawn } = require('child_process');
 const { EventEmitter } = require('events');
 const { freshBuild } = require('./lib/fresh-build');
@@ -14,7 +24,8 @@ const { verifyWgt } = require('./lib/wgt-verify');
 const { pushUpdate } = require('./lib/push-update');
 
 const PORT = Number(process.env.PACK_PORT || 3789);
-const APP = 'C:\\Users\\lrp\\DevEcoStudioProjects\\AlbumSyncUniAppX';
+const DEFAULT_APP = path.resolve(__dirname, '..', 'app-uniapp');
+const APP = process.env.APP_DIR || (fs.existsSync(DEFAULT_APP) ? DEFAULT_APP : 'C:\\Users\\lrp\\DevEcoStudioProjects\\AlbumSyncUniAppX');
 const SCRIPTS = path.join(APP, 'scripts');
 const HBX = 'C:\\Users\\lrp\\Downloads\\HBuilderX\\cli.exe';
 const SCRCPY_DIR = 'C:\\Users\\lrp\\Downloads\\scrcpy-win64-v3.3.4';
@@ -436,9 +447,10 @@ function runWgtPipeline(action, body, opt) {
           file: meta.file,
           note: opt.note,
           channel: opt.channel,
-          server: opt.server,
+          // 目标主机与口令只走环境变量（根 .env 启动时加载），代码不内置默认值。
+          server: (opt.server && opt.server.trim()) || process.env.PACK_SERVER || process.env.PUBLIC_BASE_URL || '',
           user: opt.user,
-          pass: opt.pass,
+          pass: (opt.pass && opt.pass.trim()) || process.env.PACK_PASS || '',
           force: opt.force,
           releaseMode: opt.releaseMode,
           targetDevices: opt.targetDevices,

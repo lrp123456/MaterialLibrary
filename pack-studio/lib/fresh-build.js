@@ -57,13 +57,28 @@ const FINGERPRINT = {
  * 正确产物里也搜不到函数名，用它做校验必然误报。
  * 这里用 CSS 类名、storage key、业务文案等不会被改写的字面量。
  */
-const IDENTITY_MARKERS = [
+const IDENTITY_MARKERS_APP_UNIAPP = [
+  'pages/browse/browse', // 素材库浏览页
+  'pages/home/home',     // 首页
+  'ViewerApi',           // 素材库 API Client
+  'quick-pills',         // 快速分类过滤
+  '素材详情',            // 详情文案
+];
+
+const IDENTITY_MARKERS_ALBUM_SYNC = [
   'home_library_tab',  // 素材库 tab
   'trash-src-bar',     // 回收站来源栏
   'disposeSource',     // 清理来源
   'back-to-top',       // 回顶按钮
   'takeRemovals',      // 删除后即时移除通知
 ];
+
+function getIdentityMarkers(workDir) {
+  if (fs.existsSync(path.join(workDir, 'src', 'pages', 'browse'))) {
+    return IDENTITY_MARKERS_APP_UNIAPP;
+  }
+  return IDENTITY_MARKERS_ALBUM_SYNC;
+}
 
 function rmrf(p) {
   try {
@@ -298,7 +313,8 @@ function verifyArtifact(workDir, startedAt, result) {
   const hasLan = /192\.168\.\d+\.\d+/.test(raw) && !hasPublic;
 
   // 源码↔产物同源
-  const missing = IDENTITY_MARKERS.filter((k) => !raw.includes(k));
+  const markers = getIdentityMarkers(workDir);
+  const missing = markers.filter((k) => !raw.includes(k));
 
   const receipt = {
     builtAt: startedAt.toISOString(),
@@ -312,8 +328,8 @@ function verifyArtifact(workDir, startedAt, result) {
     appServiceSha256: sha256File(svc),
     fingerprint: { hasPublic, hasLan, banned },
     identityMarkers: {
-      total: IDENTITY_MARKERS.length,
-      hit: IDENTITY_MARKERS.length - missing.length,
+      total: markers.length,
+      hit: markers.length - missing.length,
       missing,
     },
     workDirNotes: takeNotes(),
@@ -392,7 +408,10 @@ async function freshBuild(APP, onLog) {
 module.exports = {
   freshBuild,
   WORK_ROOT,
-  IDENTITY_MARKERS,
+  IDENTITY_MARKERS: IDENTITY_MARKERS_APP_UNIAPP,
+  IDENTITY_MARKERS_APP_UNIAPP,
+  IDENTITY_MARKERS_ALBUM_SYNC,
+  getIdentityMarkers,
   APP_SERVICE,
   sha256File,
 };

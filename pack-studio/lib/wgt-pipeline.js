@@ -164,6 +164,8 @@ function syncVersionToApp(APP, alloc) {
         mf.version.name = alloc.versionName;
         mf.version.code = String(alloc.wgtVersion);
       }
+      mf.versionName = alloc.versionName;
+      mf.versionCode = String(alloc.wgtVersion);
       fs.writeFileSync(mfPath, JSON.stringify(mf, null, 2), 'utf8');
     }
   } catch (e) {

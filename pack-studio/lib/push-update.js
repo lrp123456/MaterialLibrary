@@ -152,7 +152,12 @@ function inspectPackage(file) {
  */
 async function pushUpdate(opt) {
   const onLog = opt.onLog || (() => {});
-  const server = String(opt.server || process.env.PACK_SERVER || process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, '');
+  // 推送目标只走显式入参或环境变量（pack-studio 启动时加载根 .env），代码里不落任何默认主机。
+  let server = String(opt.server || '').trim();
+  if (!server) {
+    server = String(process.env.PACK_SERVER || process.env.PUBLIC_BASE_URL || '').trim();
+  }
+  server = server.replace(/\/+$/, '');
   const releaseMode = String(opt.releaseMode || (opt.channel === 'canary' ? 'canary' : 'full')).toLowerCase();
   const channel = String(opt.channel || (releaseMode === 'canary' ? 'canary' : 'internal'));
   const file = opt.file;
@@ -218,7 +223,8 @@ async function pushUpdate(opt) {
   // 3) 登录
   onLog('[3/4] 登录 ' + server + ' ...\n');
   const targetUser = opt.user || process.env.PACK_USER || 'admin';
-  let targetPass = opt.pass || process.env.PACK_PASS || '';
+  // 口令只来自入参或环境变量，绝不硬编码进仓库。
+  let targetPass = String(opt.pass || process.env.PACK_PASS || '').trim();
   const login = await request(server + '/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json; charset=utf-8' },
