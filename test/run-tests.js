@@ -24,6 +24,20 @@ const { spawnSync } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
 
+// 共享 node_modules 的双平台保障（详见 test/lib/native-bindings.js 头注释）：
+//  - Windows node24 无 better-sqlite3 11.10 预编译件，自动改道本机 node22（ABI127）；
+//  - 门禁期间把 better_sqlite3.node 切到当前平台，退出时无条件还原为 linux（prod 静置件）。
+const nativeBindings = require('./lib/native-bindings');
+{
+  const rerouteExe = nativeBindings.rerouteTarget();
+  if (rerouteExe) {
+    console.error(`[run-tests] 当前 Node ${process.version}(ABI${process.versions.modules}) 缺原生预编译件，改道 ${rerouteExe}`);
+    const r = spawnSync(rerouteExe, [__filename, ...process.argv.slice(2)], { stdio: 'inherit' });
+    process.exit(r.status == null ? 1 : r.status);
+  }
+  nativeBindings.ensureForCurrentProcess();
+}
+
 // timeout 单位毫秒；e2e 大类给宽限
 const DEFAULT_MS = 180000;
 const E2E_MS = 420000;
@@ -45,6 +59,7 @@ const MANIFEST = [
   ['unit', 'outpaint-layout.test.js'],
   ['unit', 'part-policy.test.js'],
   ['unit', 'pretint.test.js'],
+  ['unit', 'product-cover.test.js'],
   ['unit', 'qwenimage-local.test.js'],
 
   // ---------- security：鉴权/凭据隔离/对抗输入 ----------

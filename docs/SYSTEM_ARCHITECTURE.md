@@ -134,8 +134,8 @@ node scripts/build-base-library.js
 
 ### 4.4 自动化测试回归
 ```bash
-npm test                 # 显式清单运行器 test/run-tests.js：52 项，离线，约 40s
-npm run test:unit        # 只跑单元（16）
+npm test                 # 显式清单运行器 test/run-tests.js：53 项，离线，约 40s
+npm run test:unit        # 只跑单元（17）
 npm run test:security    # 鉴权/凭据隔离/对抗（4）
 npm run test:integration # 临时库与 127.0.0.1 临时端口集成（29）
 npm run test:e2e         # 真实 HTTP 端到端（3）
