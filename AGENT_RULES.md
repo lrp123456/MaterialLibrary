@@ -9,7 +9,7 @@
 | 节点 / 组件 | 运行环境 | 物理路径 / 端口 | 核心职责 |
 | :--- | :--- | :--- | :--- |
 | **代码仓库 (Git)** | Windows 宿主 | `C:\Users\lrp\DevEcoStudioProjects\MaterialLibraryServer`<br>(WSL 内部对应: `/mnt/c/Users/lrp/DevEcoStudioProjects/MaterialLibraryServer`) | 所有业务源码、前端源码、构建脚本的唯一工作区 |
-| **核心业务后端** | **WSL (Linux)** | **端口：`30001`**<br>主进程文件：`src/server.js` | 核心业务路由、SQLite 连接池、AI 抠图生成、音频 Demucs、Whisper 语音、FFmpeg 剪辑转码等 Linux 原生算力中枢 |
+| **核心业务后端** | **WSL (Linux)** | **端口：`30001`**<br>主进程文件：`server.js`（根目录；src/api.js 是手工路由主体） | 核心业务路由、SQLite 连接池、AI 抠图生成、音频 Demucs、Whisper 语音、FFmpeg 剪辑转码等 Linux 原生算力中枢 |
 | **唯一生产数据库** | **WSL (Linux)** | **`/home/lrp/.dsh-material-library/material.db`**<br>(包含 WAL: `material.db-wal`, `material.db-shm`) | **全系统唯一真实生产数据库**（包含全部资产库、2000+条基础素材、向量特征）。**严禁在 Windows 目录建立孤立库**！ |
 | **桌面工作台网关** | Windows / WSL | **端口：`30002`**<br>主进程文件：`web-pro/server.cjs` | 高性能静态服务器与反向代理网关：托管 `web-pro/dist`，并将所有 `/api/*` 请求代理转发至 WSL 30001 |
 | **浏览器交互端** | Windows 桌面 | `http://localhost:30002/static/preview.html` 或 `http://localhost:30002/` | 用户直面 UI（Vue 3 SPA），包含素材库 (DAM)、空间创作 (Studio)、媒体剪辑 (MediaHub)、系统设置 (Settings) |
@@ -24,7 +24,7 @@ MaterialLibraryServer/
 ├── src/                          # 【30001 核心后端】Node.js 业务服务层
 │   ├── server.js                 # HTTP 服务主入口 (端口 30001)
 │   ├── db.js                     # SQLite 连接管理 (跨平台加载 better_sqlite3.node，配置 busy_timeout)
-│   ├── auth.js                   # 账号鉴权与 Token 管理 (admin: zxlrppp145)
+│   ├── auth.js                   # 账号鉴权与 Token 管理（口令不入仓：见数据目录 bootstrap-credentials.txt 或由管理员重置）
 │   ├── menu-tree.js              # 服务端驱动的分类菜单树与 Studio 参数 Schema
 │   ├── base-library/             # 基础素材核心业务模块
 │   │   ├── items.js              # 基础素材 CRUD、多使用面挂载、光泽/纹理/主色清洗

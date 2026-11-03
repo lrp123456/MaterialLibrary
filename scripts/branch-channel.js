@@ -234,7 +234,7 @@ function ensureWinSqlite() {
   const pkgDir = path.join(ROOT, 'node_modules', 'better-sqlite3-win');
   const bin = path.join(pkgDir, 'build', 'Release', 'better_sqlite3.node');
   if (fs.existsSync(bin)) return true;
-  const backup = path.join(ROOT, '_backup_better_sqlite3_node22abi127_20261003_141806.node');
+  const backup = path.join(ROOT, 'scripts', 'vendor', 'better-sqlite3-node22-abi127.node');
   if (!fs.existsSync(backup)) {
     warn('缺少 Windows 版 better-sqlite3 预编译文件，测试后端无法启动');
     return false;

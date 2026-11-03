@@ -1,0 +1,15 @@
+- insert:
+    - id: dsh-material-library
+      name: dsh-material-library
+      config:
+        quarkCliPath: ''
+        rootFid: '225f01205b7942b1a75bb0c2d7a0565a'
+        systemFid: 'a082098178f74add99cbf6de2c4caa8a'
+        apiToken: ''
+        cacheDir: ''
+        cacheMaxBytes: 5368709120
+        scanIntervalMs: 1800000
+        autoScan: true
+        videoWatermarkQueue: true
+        litellmBaseUrl: 'http://127.0.0.1:4000'
+        litellmModel: 'doubao-seed-2-0-lite-260428'

@@ -98,7 +98,6 @@ scripts/test_*
 query_*
 /test_*
 patch_mls.js
-cordis.patch.yml
 
 # ==========================================
 # Next.js build artifacts (编辑器子应用)
