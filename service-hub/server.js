@@ -662,14 +662,17 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // test/gray 通道启停（prod 也允许，但内部由 mls-ctl 走 WSL start.sh）
+  // test 通道启停（prod 也允许，但内部由 mls-ctl 走 WSL start.sh）；gray 已退役
   if (p === '/api/mls/action' && req.method === 'POST') {
     let data = {};
     try { data = JSON.parse(body || '{}'); } catch (_) {}
     const target = String(data.target || '');
     const action = String(data.action || '');
-    if (!['prod', 'test', 'gray'].includes(target)) {
-      return json(res, 400, { ok: false, error: 'target 必须是 prod/test/gray' });
+    if (target === 'gray') {
+      return json(res, 410, { ok: false, error: '遗留同树 gray 通道已于 2026-11-03 退役，请改用 test worktree 通道' });
+    }
+    if (!['prod', 'test'].includes(target)) {
+      return json(res, 400, { ok: false, error: 'target 必须是 prod/test' });
     }
     if (!['start', 'stop', 'restart'].includes(action)) {
       return json(res, 400, { ok: false, error: 'action 必须是 start/stop/restart' });

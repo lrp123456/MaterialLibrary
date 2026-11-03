@@ -188,97 +188,6 @@
         </div>
       </div>
 
-      <!-- 设置模块 1.5：双通道灰度发布（灰测 30003/30000 → 正式 30002/30001） -->
-      <div class="p-6 rounded-2xl bg-studio-900 border border-studio-700 space-y-4 shadow-sm">
-        <div class="flex items-center justify-between">
-          <h3 class="text-sm font-bold text-white flex items-center gap-2 uppercase tracking-wide font-mono">
-            <StudioIcon name="cloud" :size="16" class="text-emerald-400" />
-            双通道灰度发布（A/B）
-          </h3>
-          <span
-            class="text-xs px-2.5 py-1 rounded-md border font-mono font-bold"
-            :class="gray.channel === 'gray'
-              ? 'text-amber-300 bg-amber-400/10 border-amber-400/40'
-              : 'text-emerald-300 bg-emerald-400/10 border-emerald-400/40'"
-          >{{ gray.channel === 'gray' ? '当前：灰测通道' : '当前：正式通道' }}</span>
-        </div>
-
-        <p class="text-xs text-slate-300 leading-relaxed">
-          灰测通道（API 30000 / Web 30003）与正式通道（API 30001 / Web 30002）共用同一份源码，
-          但端口、数据目录独立。所有改动先在 30003 验证，确认无误后在这里一键重建并发布到正式版：
-          重建 <span class="font-mono">web-pro</span> 产物 → 正式网关加载新前端 → 正式后端自重启加载新代码。
-        </p>
-
-        <div class="grid grid-cols-2 gap-3.5 text-xs font-mono">
-          <div class="p-3 rounded-xl bg-studio-950 border border-studio-700 space-y-1.5">
-            <div class="flex items-center justify-between">
-              <span class="text-amber-300 font-bold">灰测通道</span>
-              <span :class="chUp(gray.channels?.gray) ? 'text-emerald-400' : 'text-rose-400'">
-                {{ chUp(gray.channels?.gray) ? '在线' : '未启动' }}
-              </span>
-            </div>
-            <div class="text-slate-400">API 30000 · Web 30003</div>
-            <div class="text-slate-400">产物：{{ fmtTime(gray.channels?.gray?.dist?.builtAt) }}</div>
-            <div class="text-slate-400 truncate">版本：{{ gray.channels?.gray?.dist?.commit || '未构建' }}</div>
-          </div>
-          <div class="p-3 rounded-xl bg-studio-950 border border-studio-700 space-y-1.5">
-            <div class="flex items-center justify-between">
-              <span class="text-emerald-300 font-bold">正式通道</span>
-              <span :class="chUp(gray.channels?.prod) ? 'text-emerald-400' : 'text-rose-400'">
-                {{ chUp(gray.channels?.prod) ? '在线' : '未启动' }}
-              </span>
-            </div>
-            <div class="text-slate-400">API 30001 · Web 30002</div>
-            <div class="text-slate-400">产物：{{ fmtTime(gray.channels?.prod?.dist?.builtAt) }}</div>
-            <div class="text-slate-400 truncate">版本：{{ gray.channels?.prod?.dist?.commit || '未构建' }}</div>
-          </div>
-        </div>
-
-        <div class="flex items-center justify-between gap-3 flex-wrap">
-          <label class="flex items-center gap-2 text-xs text-slate-300 font-semibold cursor-pointer">
-            <input type="checkbox" v-model="publishBuild" class="accent-emerald-500 w-4 h-4" />
-            发布前重新构建前端产物（改了前端代码必须勾选）
-          </label>
-          <div class="flex items-center gap-2">
-            <button
-              @click="loadGrayStatus"
-              :disabled="grayLoading"
-              class="px-4 py-2 rounded-lg bg-studio-800 hover:bg-studio-750 border border-studio-700 text-white font-bold text-xs disabled:opacity-50"
-            >{{ grayLoading ? '刷新中…' : '刷新状态' }}</button>
-            <button
-              @click="publishProd"
-              :disabled="grayPublishing || gray.channel !== 'gray'"
-              class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs disabled:opacity-50 disabled:cursor-not-allowed"
-            >{{ grayPublishing ? '发布中…' : '发布到正式版' }}</button>
-          </div>
-        </div>
-
-        <div v-if="gray.channel !== 'gray'" class="text-xs text-amber-300 bg-amber-400/10 border border-amber-400/30 rounded-lg p-2.5">
-          发布入口只在灰测页面提供（防止在正式页面误点导致重复重启）。请打开
-          <span class="font-mono font-bold">http://127.0.0.1:30003</span> → 系统设置 → 发布到正式版。
-        </div>
-
-        <!-- 发布进度 -->
-        <div v-if="grayJob && (grayPublishing || grayJob.status !== 'running')" class="p-3 rounded-xl bg-studio-950 border border-studio-700 space-y-1.5">
-          <div class="flex items-center justify-between text-xs">
-            <span class="text-slate-300 font-bold">发布任务</span>
-            <span class="font-mono" :class="grayJob.status === 'failed' ? 'text-rose-400' : grayJob.status === 'done' ? 'text-emerald-400' : 'text-amber-300'">
-              {{ grayJob.status === 'running' ? '进行中' : grayJob.status === 'done' ? '成功' : '失败' }}
-            </span>
-          </div>
-          <div v-for="s in grayJob.steps" :key="s.key" class="text-[11px] leading-relaxed">
-            <span :class="stepIconClass(s.status)" class="font-mono mr-1">{{ stepIcon(s.status) }}</span>
-            <span class="text-slate-200 font-semibold">{{ s.label }}</span>
-            <span v-if="s.detail" class="text-slate-400"> — {{ s.detail }}</span>
-          </div>
-          <div v-if="grayJob.error" class="text-[11px] text-rose-300">失败原因：{{ grayJob.error }}</div>
-        </div>
-        <div v-else-if="gray.lastPublish" class="text-[11px] text-slate-400 font-mono">
-          上次发布：{{ fmtTime(gray.lastPublish.finishedAt) }} ·
-          {{ gray.lastPublish.status === 'done' ? '成功' : '失败' }}
-          {{ gray.lastPublish.error ? '（' + gray.lastPublish.error + '）' : '' }}
-        </div>
-      </div>
 
       <!-- 设置模块 2：灰度发布与应用更新管理 (白名单控制) -->
       <div class="p-6 rounded-2xl bg-studio-900 border border-studio-700 space-y-4 shadow-sm">
@@ -732,95 +641,6 @@ function resetSlotPrefs() {
 const updateState = ref(null);
 const grayscale = computed(() => updateState.value?.grayscale || { active: false, targetDevices: [] });
 
-// ===== 双通道灰度发布（30003/30000 → 30002/30001）=====
-const gray = ref({ channel: '', channels: { gray: {}, prod: {} }, git: {}, lastPublish: null });
-const grayLoading = ref(false);
-const grayPublishing = ref(false);
-const grayJob = ref(null);
-const publishBuild = ref(true);
-let grayPoll = null;
-
-function chUp(ch) {
-  return !!(ch && ch.api && ch.api.up && ch.web && ch.web.up);
-}
-function fmtTime(ts) {
-  if (!ts) return '—';
-  try {
-    return new Date(Number(ts)).toLocaleString('zh-CN', { hour12: false });
-  } catch (_) {
-    return '—';
-  }
-}
-function stepIcon(s) {
-  return s === 'done' ? '✓' : s === 'failed' ? '✗' : s === 'skipped' ? '–' : '…';
-}
-function stepIconClass(s) {
-  return s === 'done' ? 'text-emerald-400' : s === 'failed' ? 'text-rose-400' : s === 'skipped' ? 'text-slate-500' : 'text-amber-300';
-}
-
-async function loadGrayStatus() {
-  if (grayLoading.value) return;
-  grayLoading.value = true;
-  try {
-    const r = await authFetch('/api/gray/status');
-    const j = await r.json();
-    if (r.ok) gray.value = j;
-  } catch (_) {
-    // 灰测通道未启动时静默，页面其它模块照常可用
-  } finally {
-    grayLoading.value = false;
-  }
-}
-
-function pollGrayJob(id) {
-  clearInterval(grayPoll);
-  grayPoll = setInterval(async () => {
-    try {
-      const r = await authFetch(`/api/gray/publish?jobId=${encodeURIComponent(id)}`);
-      const j = await r.json();
-      if (j.job) grayJob.value = j.job;
-      if (!j.job || j.job.status !== 'running') {
-        clearInterval(grayPoll);
-        grayPoll = null;
-        grayPublishing.value = false;
-        loadGrayStatus();
-      }
-    } catch (_) {}
-  }, 1500);
-}
-
-async function publishProd() {
-  if (grayPublishing.value) return;
-  if (gray.channel !== 'gray') {
-    alert('发布入口只在灰测通道（30003）提供');
-    return;
-  }
-  const ok = confirm(
-    '即将把当前工作区代码发布到正式版：\n' +
-      '1) 重新构建 web-pro 产物（可选）\n' +
-      '2) 正式网关 30002 加载新前端并重启\n' +
-      '3) 正式后端 30001 自重启加载新代码\n\n' +
-      '发布期间正式页面会短暂刷新，确定继续？'
-  );
-  if (!ok) return;
-  grayPublishing.value = true;
-  grayJob.value = null;
-  try {
-    const r = await authFetch('/api/gray/publish', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ buildFrontend: publishBuild.value }),
-    });
-    const j = await r.json();
-    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-    grayJob.value = j.job;
-    pollGrayJob(j.job.id);
-  } catch (e) {
-    grayPublishing.value = false;
-    alert('发布失败: ' + e.message);
-  }
-}
-
 const currentUser = computed(() => getCurrentUser() || null);
 const currentUsername = computed(() => currentUser.value?.username || '');
 
@@ -1008,7 +828,7 @@ onMounted(() => {
   loadColorSchemes();
   loadAdminSettings();
   loadNewapiModels();
-  loadGrayStatus();
+
   stopSlotPrefsWatch = onDerivativeSlotPrefsChange((next) => {
     slotPrefs.value = next;
   });
@@ -1016,7 +836,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (stopWatch) stopWatch();
-  if (grayPoll) clearInterval(grayPoll);
+
   if (stopSlotPrefsWatch) stopSlotPrefsWatch();
 });
 </script>

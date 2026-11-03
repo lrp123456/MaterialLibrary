@@ -23,7 +23,7 @@
  * 端口铁律：
  *   prod  master  正式 API 30001 / 正式 Web 30002   （WSL 里跑，本脚本只读状态、不启停）
  *   test  test    测试 API 30000 / 测试 Web 30003   （Windows 里跑，本脚本全权管理）
- *   gray  遗留    旧灰测通道与 test 抢同一组端口，二者互斥，不要同时开
+ *   gray  已退役  同树灰测 2026-11-03 归档 archive/gray-retired-20261103/；定义保留仅为端口互斥识别
  *
  * 数据隔离：每个通道独立 ML_DATA_DIR，绝不共用 material.db（SQLite 多进程写会锁库/写坏）。
  */
@@ -75,8 +75,12 @@ const LANES = {
   },
   gray: {
     key: 'gray',
-    label: '旧灰测',
-    branch: null, // 跟随主工作树当前分支
+    label: '旧灰测（已退役）',
+    branch: null, // 跟随主工作树
+    // 2026-11-03 退役：同树灰测机制（src/gray.js + gray-release.js + dist-gray）
+    // 已归档 archive/gray-retired-20261103/。保留本定义仅为 30000/30003 端口互斥、
+    // 陈旧 PID 识别与 status 可见；任何变更类操作一律拒绝（见 dispatch 退役守卫）。
+    retired: true,
     apiPort: 30000,
     webPort: 30003,
     dataDir: path.join(HOME, '.dsh-material-library-gray'),
@@ -487,7 +491,7 @@ async function start(lane, { skipBuild = false } = {}) {
       ML_PORT: String(lane.apiPort),
       ML_DATA_DIR: lane.dataDir,
       ML_TEST_DATA_DIR: lane.dataDir,
-      // APP_CHANNEL=gray 只借它的两个行为：不消费任务队列、不自动重启。
+      // 借遗留 APP_CHANNEL=gray 标记的两个行为给 test 通道：不消费任务队列、不自动重启。
       APP_CHANNEL: 'gray',
       ML_WATCH_RESTART: '0',
       NODE_OPTIONS,
@@ -836,6 +840,12 @@ if (require.main === module) {
       if (has('--help') || has('-h')) {
         console.log(fs.readFileSync(__filename, 'utf8').split('*/')[0].replace(/^#![^\n]*\n/, ''));
         return;
+      }
+      // 退役守卫：gray 通道只允许只读 status/diff，变更类操作一律拒绝
+      if (resolveLane().retired && /--(start|stop|restart|build|prepare|bootstrap|promote|sync-data)/.test(argv.join(' '))) {
+        fail('遗留同树灰测通道已于 2026-11-03 退役（代码归档 archive/gray-retired-20261103/）。' +
+          '分支验证请用 test worktree 通道：node scripts/branch-channel.js test --start；' +
+          '发布请用：node scripts/mls-ctl.js promote test（dry-run 先看清单）。');
       }
       if (has('--prepare') || has('--bootstrap')) return prepare(resolveLane());
       if (has('--diff')) {

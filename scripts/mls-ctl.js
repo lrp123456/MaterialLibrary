@@ -3,14 +3,14 @@
  * mls-ctl · 素材库三端全局控制脚本（零依赖、跨平台，Windows 上直接跑）
  *
  *   node scripts/mls-ctl.js status [--json]      一屏总览：web 通道 / app 发布 / 正式端 / 周边服务
- *   node scripts/mls-ctl.js start  <target>      target: prod | test | gray
+ *   node scripts/mls-ctl.js start  <target>      target: prod | test（gray 已退役，仅状态可见）
  *   node scripts/mls-ctl.js stop   <target>
- *   node scripts/mls-ctl.js restart <target> [--build]   （test/gray 默认不重新构建）
- *                  [--takeover]                  test/gray 端口互斥时自动停掉对手通道
- *                  [--no-build]                  start test/gray 时跳过构建
+ *   node scripts/mls-ctl.js restart <target> [--build]   （test 默认不重新构建）
+ *                  [--takeover]                  test 通道端口被陈旧 gray 进程占用时自动清理
+ *                  [--no-build]                  start test 时跳过构建
  *   node scripts/mls-ctl.js logs <target> [-n 200] [-f]
  *                  target: prod-server | prod-web | prod-watchdog | prod-prewarm
- *                          test-api | test-web | gray-api | gray-web
+ *                          test-api | test-web（gray-api/gray-web 仅诊断陈旧进程）
  *                          pack | editor | asr
  *   node scripts/mls-ctl.js promote test         默认 dry-run，只预演
  *   node scripts/mls-ctl.js promote test --execute [--force]   真合并 + 重建 + 重启 30001&30002
@@ -91,7 +91,7 @@ async function gather() {
   // 通道级告警
   for (const r of lanes) {
     if (r.legacy && (r.apiUp || r.webUp)) {
-      warnings.push(`遗留 gray 通道正在运行（${r.apiPort}/${r.webPort}），它与 test 互斥，且按计划即将退役`);
+      warnings.push(`遗留 gray 通道正在运行（${r.apiPort}/${r.webPort}），与 test 共用 30000/30003 端口——该遗留通道已退役，请手动结束该进程后改用 test worktree 通道`);
     }
     if (r.key !== 'prod' && r.stale) warnings.push(`${r.label}(${r.key}) 前端产物落后于分支，访问到的是旧构建`);
     if (r.hasUncommitted && r.key !== 'prod') {
@@ -262,7 +262,16 @@ async function cmdLifecycle(action, target) {
     return;
   }
 
-  if (target === 'test' || target === 'gray') {
+  if (target === 'gray') {
+    throw new Error(
+      '遗留同树灰测通道已于 2026-11-03 退役（归档 archive/gray-retired-20261103/）。\n' +
+      '  分支验证 → node scripts/mls-ctl.js start test\n' +
+      '  发布正式 → node scripts/mls-ctl.js promote test --dry-run\n' +
+      '  若 30000/30003 上仍有陈旧 gray 进程：node scripts/branch-channel.js status --json 查 PID 后手动结束'
+    );
+  }
+
+  if (target === 'test') {
     const opts = {
       skipBuild: action === 'start' ? has('--no-build') : !has('--build'),
       takeover: has('--takeover'),
@@ -273,7 +282,7 @@ async function cmdLifecycle(action, target) {
   }
 
   throw new Error(
-    `不支持的启停目标：${target}（本机可管：prod / test / gray；` +
+    `不支持的启停目标：${target}（本机可管：prod / test（gray 已退役）；` +
       `pack/editor/asr 请用 service-hub 面板 http://127.0.0.1:3790/）`
   );
 }

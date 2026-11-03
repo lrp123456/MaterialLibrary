@@ -59,22 +59,25 @@ POST /api/viewer/auth/login <账号>/<口令>
 POST /api/auth/login <账号>/<口令>
 ```
 
-## 双通道灰测（30003 → 30002）
+## 分支通道与发布（test worktree → 正式）
+
+遗留的同树灰测通道（src/gray.js + scripts/gray-release.js + dist-gray）已于
+2026-11-03 退役归档（`archive/gray-retired-20261103/`，留档 7 天）。现行唯一机制是
+**test 分支 git worktree 通道**，由 `scripts/mls-ctl.js` 统一控制：
 
 | 通道 | API | 前端 | 产物 | 数据 |
 | --- | --- | --- | --- | --- |
-| 正式 | 30001 | http://127.0.0.1:30002/ | `web-pro/dist` | WSL `~/.dsh-material-library` |
-| 灰测 | 30000 | http://127.0.0.1:30003/ | `web-pro/dist-gray` | `%USERPROFILE%\.dsh-material-library-gray` |
+| 正式 | 30001（WSL） | http://127.0.0.1:30002/ | `web-pro/dist` | WSL `~/.dsh-material-library` |
+| test | 30000（Windows） | http://127.0.0.1:30003/ | test worktree 的 `web-pro/dist` | `%USERPROFILE%\.dsh-material-library-test` |
 
 ```text
-改代码 → 启动灰测通道.bat（或 node scripts/gray-release.js）
-       → 30003 上验证
-       → 设置 → 双通道灰度发布 → 发布到正式版
+改代码 → npm run ctl -- start test        # 30003 上验证（与 prod 数据隔离）
+       → npm run ctl -- promote test      # 默认 dry-run 预演
+       → npm run ctl -- promote test --execute   # 合并 + 重建 + 同时重启 30001&30002
 ```
 
-首次使用发布功能需要手动「停止素材库.bat → 启动素材库.bat」一次，
-让正式端加载到自重启接口。完整流程、故障排查见
-**`docs/双通道灰度发布与语音输入.md`**。
+完整流程与故障排查见 **`docs/branch-channels.md`**；一屏总览：`npm run status`
+或 service-hub 面板 http://127.0.0.1:3790/（「通道与发布」标签页）。
 
 ## 语音输入（FunASR / SenseVoice）
 

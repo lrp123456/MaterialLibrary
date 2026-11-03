@@ -17,10 +17,10 @@ const { WorkflowInterpreter } = require('./src/interpreter');
 const PORT = process.env.ML_PORT || 30001;
 const dataDir = process.env.ML_DATA_DIR || path.join(os.homedir(), '.dsh-material-library');
 
-// ── 双通道（A/B）──────────────────────────────────────────────────────────────
-// 正式：30001 + 30002（WSL，watchdog 守护）；灰测：30000 + 30003（Windows）。
-// 灰测实例只做「读写 API + 前端联调」，不跑后台 worker：否则同一个正式库快照会被
-// 两个进程重复消费 AI 任务/治理定时器，灰测机器白烧 CPU 还会互相抢写。
+// ── 通道标记（遗留同树灰测通道已于 2026-11-03 退役，见 archive/gray-retired-20261103/）
+// 现行分支验证通道是 worktree test（30000/30003，scripts/branch-channel.js）。
+// test 通道启动时仍借 APP_CHANNEL=gray 这个标记的两个行为：只做「读写 API + 前端联调」、
+// 不跑后台 worker（否则同一个正式库快照会被两个进程重复消费 AI 任务/治理定时器）、不自我重启。
 const APP_CHANNEL = String(process.env.APP_CHANNEL || '').toLowerCase() === 'gray' ? 'gray' : 'prod';
 const IS_GRAY = APP_CHANNEL === 'gray';
 const DISABLE_WORKERS = IS_GRAY || String(process.env.ML_DISABLE_WORKERS || '') === '1';

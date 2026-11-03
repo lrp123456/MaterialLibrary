@@ -24,10 +24,9 @@ worktree 放在项目**同级目录**而不是项目内部，是为了避开 Win
 |---|---|---|---|---|---|---|
 | prod | master | 项目根目录 | 30001 | **30002** | `~/.dsh-material-library`（WSL 内） | WSL `start.sh` / watchdog |
 | test | test | `../MaterialLibraryServer-test` | 30000 | **30003** | `~/.dsh-material-library-test` | `scripts/branch-channel.js` |
-| gray（遗留） | 跟随主工作树 | 项目根目录 | 30000 | 30003 | `~/.dsh-material-library-gray` | `scripts/gray-release.js` |
+| ~~gray（已退役）~~ | — | 代码归档 archive/gray-retired-20261103/ | 30000 | 30003 | `~/.dsh-material-library-gray`（磁盘保留） | 无；LANES.gray 仅留作端口互斥识别 |
 
-**test 与 gray 互斥**：两者抢同一组端口（30000/30003）。现在推荐只用 test 通道，
-`启动灰测通道.bat` 是旧流程，启动前请先 `--stop test`，反之亦然。
+**gray 已退役**：`scripts/branch-channel.js` 与 `mls-ctl` 对 gray 的任何变更类操作一律拒绝；LANES.gray 定义保留仅为在 `status` 中发现占用 30000/30003 的陈旧 gray 进程（查 PID 手动结束即可）。
 
 ## 日常用法
 

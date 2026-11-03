@@ -1662,41 +1662,9 @@ async function handleApi(services, req, res, prefix = '/api') {
     if (handled) return;
   }
 
-  // ===== 双通道灰度发布（/api/gray/*）=====
-  // 状态读取：任何登录用户都能看（灰测页面要展示当前通道）
-  if (pathname === '/gray/status' && req.method === 'GET') {
-    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
-    try {
-      const gray = require('./gray');
-      return sendJson(res, 200, await gray.status());
-    } catch (e) {
-      return sendJson(res, 500, { error: e.message });
-    }
-  }
-  // 发布到正式版：仅管理员，且只能在灰测通道发起（防止在正式页面误点把自己重启两次）
-  if (pathname === '/gray/publish' && req.method === 'POST') {
-    if (!isAdmin) return sendJson(res, 403, { error: '需要管理员权限' });
-    const gray = require('./gray');
-    if (!gray.isGrayChannel()) {
-      return sendJson(res, 400, {
-        error: '请在灰测通道（http://127.0.0.1:30003）发起发布；正式通道不提供自我发布入口',
-        channel: gray.CHANNEL,
-      });
-    }
-    const body = await parseBody(req).catch(() => ({}));
-    const job = gray.publish({
-      buildFrontend: body?.buildFrontend !== false,
-      restartApi: body?.restartApi !== false,
-      restartWeb: body?.restartWeb !== false,
-    });
-    return sendJson(res, 202, { ok: true, job });
-  }
-  if (pathname === '/gray/publish' && req.method === 'GET') {
-    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
-    const gray = require('./gray');
-    const job = gray.getJob(urlObj.searchParams.get('jobId') || '');
-    return sendJson(res, 200, { ok: true, job });
-  }
+  // 遗留同树灰测通道（src/gray.js + scripts/gray-release.js）已于 2026-11-03
+  // 退役并归档至 archive/gray-retired-20261103/；分支验证统一走 worktree test
+  // 通道（scripts/branch-channel.js），发布走 mls-ctl promote。
 
   // ===== 发布用自重启（仅本机 + 内部标记）=====
   // 灰测通道构建完正式产物后调用它，让正式端退出、由 watchdog 拉起新代码。
