@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 全局常量（自鸿蒙 Constants.ets 迁移）
  */
 export const PREF_STORE_NAME = 'album_sync_store'
@@ -28,9 +28,12 @@ export const WINDOW_DAY_OPTIONS = [3, 1, 2, 7, 30, 0]
 
 /** 服务端回退链：本机 → 局域网 → 公网 */
 export const API_PORT = 30001
-export const SERVER_URL_CANDIDATES = [`http://127.0.0.1:${API_PORT}`]
-/** 默认用回退链第一个（本机直连） */
-export const DEFAULT_SERVER_URL = `http://127.0.0.1:${API_PORT}`
+export const SERVER_URL_CANDIDATES = [
+  `http://39.107.120.55:${API_PORT}`,
+  `http://127.0.0.1:${API_PORT}`
+]
+/** 默认用回退链第一个（公网直连） */
+export const DEFAULT_SERVER_URL = `http://39.107.120.55:${API_PORT}`
 /** 已知局域网地址（服务端所在机器的历史 IP） */
 export const KNOWN_LAN_HOSTS = ['192.168.1.59']
 

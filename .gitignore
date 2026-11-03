@@ -49,6 +49,11 @@ web-pro/public/models/
 web-pro/public/sample-video.mp4
 app-uniapp/dist/
 app-uniapp/src_backup/
+# 依赖/插件以软链指向仓外正源 AlbumSyncUniAppX，不入库；version-state 由 pack-studio 流水线生成
+# 注意：这两个当前是指向目录的符号链接，不能用带尾斜杠的模式（尾斜杠不匹配符号链接）
+app-uniapp/node_modules
+app-uniapp/uni_modules
+app-uniapp/src/version-state.json
 pack-studio/zip4j-build/
 pack-studio/_shots/
 pack-studio/*.apk

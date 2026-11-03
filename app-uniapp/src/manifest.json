@@ -2,8 +2,8 @@
   "name": "素材库-turret",
   "appid": "__UNI__F183218",
   "description": "仅上传相册元数据，不上传照片内容",
-  "versionName": "1.0.0",
-  "versionCode": "200",
+  "versionName": "1.0.5",
+  "versionCode": "2050009",
   "transformPx": false,
   "app": {
     "darkmode": false,
