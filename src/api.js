@@ -1480,8 +1480,8 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     ['GET', /^\/assets\/trash$/],
     ['GET', /^\/assets\/trash\/[^\/]+$/],
     ['POST', /^\/assets\/trash\/restore$/],
-    ['POST', /^\/assets\/trash\/purge$/],
-    ['POST', /^\/assets\/trash\/rehome-gate$/],
+    // R6：purge / rehome-gate 处理器要求 admin，viewer 账号命中也只会吃 403；
+    // 管理员经 /api/* 根路径（绕过白名单）访问，故从 viewer 白名单移除（viewer 调则 404）。
     ['POST', /^\/assets\/[^\/]+\/favorite$/],
     ['POST', /^\/assets\/[^\/]+\/library-prep$/],
     ['GET', /^\/assets\/[^\/]+$/],
@@ -1531,6 +1531,8 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     ['GET', /^\/lab\/filter-vocabulary$/],
     ['GET', /^\/lab\/quick-models$/],
     ['GET', /^\/lab\/local-models$/],
+    // R3：本地模型文件下载（viewer 视角端拉取已发布模型，路由仅要求 isViewerOrAdmin）
+    ['GET', /^\/lab\/local-models\/[^\/]+\/download$/],
     ['POST', /^\/lab\/gate-preview$/],
     ['POST', /^\/lab\/stale-tags$/],
     ['POST', /^\/lab\/runs$/],
@@ -1570,19 +1572,10 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     ['GET', /^\/products\/presets$/],
     ['GET', /^\/products\/models\/[^\/]+$/],
     ['GET', /^\/products\/previews\/[^\/]+$/],
-    // SEC-007：治理台读接口对 viewer 保留，写接口（POST/PUT/DELETE/accept/沙盒）
-    // 一律移出白名单，仅管理员经 /api/* 访问。
-    ['GET', /^\/governance\/gen-models$/],
-    ['GET', /^\/governance\/gen-jobs$/],
-    ['GET', /^\/governance\/workflows$/],
-    ['GET', /^\/governance\/prompts$/],
-    ['GET', /^\/governance\/mount-points$/],
-    ['GET', /^\/governance\/mount-points\/[^\/]+\/modules$/],
-    ['GET', /^\/governance\/operators$/],
-    ['GET', /^\/governance\/dict-macros$/],
-    ['GET', /^\/governance\/snippets$/],
+    // R6：治理台 9 个读接口处理器均要求 admin（viewer 命中白名单也只吃 403），
+    // 统一移出 viewer 白名单；管理员经 /api/* 根路径访问。
+    // 唯一例外：prompts/preview-compile 是 viewer 编辑器内显式放行的编译预览（见下方 isGovernanceWrite 豁免）。
     ['POST', /^\/governance\/prompts\/preview-compile$/],
-    ['GET', /^\/runs\/[^\/]+\/unpack$/],
     ['GET', /^\/thumbs\/[^\/]+$/],
     ['HEAD', /^\/thumbs\/[^\/]+$/],
     ['POST', /^\/gen\/preview$/],
@@ -1610,10 +1603,7 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     ['POST', /^\/tools\/extract-frames$/],
     ['POST', /^\/tools\/convert-video$/],
     ['GET', /^\/assets\/similarity-workbench$/],
-    ['POST', /^\/assets\/similarity-workbench\/resolve$/],
-    ['POST', /^\/assets\/similarity-workbench\/clean-exact$/],
-    ['GET', /^\/assets\/similarity-workbench\/ignored$/],
-    ['DELETE', /^\/assets\/similarity-workbench\/ignored$/],
+    // R6：resolve/clean-exact/ignored 读写均为 admin 处理器，viewer 调则 404（根路径不受影响）
     ['GET', /^\/assets\/[^\/]+\/quality$/]
   ];
   if (pathname === '/viewer' || pathname.startsWith('/viewer/')) {
@@ -3050,15 +3040,7 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     }
   }
 
-  // 灰度版本状态获取（正式版 vs 灰度版）
-  if (pathname === '/app/update/state' && req.method === 'GET') {
-    try {
-      const state = appUpdate.getUpdateState(config);
-      return sendJson(res, 200, { success: true, data: state });
-    } catch (e) {
-      return sendJson(res, 500, { error: e.message });
-    }
-  }
+  // R10：/app/update/state 的重复分支已删除（首份完整实现在本文件前部，永不抵达此处）。
 
   // 管理端：一键将当前灰度版本转正为全量正式发布
   if (pathname === '/app/update/promote' && req.method === 'POST') {
@@ -5957,12 +5939,23 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     return sendJson(res, 200, { success: true, data: scanStats });
   }
 
-  // 管理员专用：工作流管理
   // 管理员专用：工作流管理 (支持 default 图片产线与 video 视频空图产线)
-  const mWfGet = pathname.match(/^\/workflows\/([^\/]+)$/);
-  if (mWfGet && req.method === 'GET' && mWfGet[1] !== 'catalog') {
+  // R5：/workflows/default 为精确路由（web 工作流页默认拉它），必须先于正则捕获分支，
+  // default 行缺失时用内置默认图补种；补种仍失败才 404，绝不静默 data:null 让前端空画布。
+  let wfGetId = null;
+  if (req.method === 'GET') {
+    if (pathname === '/workflows/default') {
+      wfGetId = 'default';
+    } else {
+      const mWfGet = pathname.match(/^\/workflows\/([^\/]+)$/);
+      if (mWfGet && mWfGet[1] !== 'catalog' && mWfGet[1] !== 'default') {
+        wfGetId = decodeURIComponent(mWfGet[1]);
+      }
+    }
+  }
+  if (wfGetId) {
     if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
-    const wfId = decodeURIComponent(mWfGet[1]);
+    const wfId = wfGetId;
     let wf = db.prepare('SELECT * FROM workflows WHERE id=?').get(wfId);
     const now = Date.now();
 
@@ -5974,7 +5967,25 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
       wf = db.prepare("SELECT * FROM workflows WHERE id='video'").get();
     }
 
-    if (!wf) return sendJson(res, 200, { success: true, data: null });
+    if (!wf && wfId === 'default') {
+      try {
+        const { DEFAULT_WORKFLOW_GRAPH } = require('../scripts/migrate');
+        db.prepare(`
+          INSERT INTO workflows (id, name, version, is_default, graph_json, created_at, updated_at)
+          VALUES ('default', '默认工作流', 1, 1, ?, ?, ?)
+        `).run(JSON.stringify(DEFAULT_WORKFLOW_GRAPH), now, now);
+        wf = db.prepare("SELECT * FROM workflows WHERE id='default'").get();
+      } catch (seedErr) {
+        console.warn('[workflows] 默认工作流补种失败:', seedErr && seedErr.message);
+      }
+    }
+
+    if (!wf) {
+      if (wfId === 'default') {
+        return sendJson(res, 404, { success: false, error: '默认工作流不存在且补种失败' });
+      }
+      return sendJson(res, 200, { success: true, data: null });
+    }
     let graph = { nodes: [], edges: [] };
     try { graph = JSON.parse(wf.graph_json || '{"nodes":[],"edges":[]}'); } catch {}
 
