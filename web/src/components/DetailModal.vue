@@ -75,12 +75,6 @@
             >
               AI 生成
             </span>
-            <span
-              v-if="showRepBadge"
-              class="absolute bottom-3 left-3 px-2 py-1 rounded-lg bg-black/75 text-white text-[10px] font-semibold tracking-wide border border-white/15"
-            >
-              主图
-            </span>
           </template>
 
           <div v-if="downloadHint" class="absolute top-3 right-3 px-3 py-1.5 rounded-lg bg-surface-low/90 border border-outline-variant text-[11px] text-on-surface">
@@ -91,15 +85,6 @@
           </div>
 
           <div v-if="detail" class="absolute bottom-3 right-3 flex items-center gap-1.5 bg-surface-low/90 backdrop-blur-md p-1.5 rounded-xl border border-outline-variant shadow-lg text-xs">
-            <button
-              v-if="isAdmin && showSetMain"
-              @click="handleSetMain"
-              class="px-2.5 py-1.5 bg-surface-high text-white hover:bg-primary rounded-lg transition text-[11px] font-medium flex items-center gap-1 cursor-pointer"
-              title="把当前这张照片设为重复组代表图"
-            >
-              <span class="material-symbols-outlined text-xs">push_pin</span>
-              <span>设为主图</span>
-            </button>
             <button
               @click="handleDownload(activeDerivative?.id)"
               :disabled="downloading"
@@ -273,47 +258,6 @@
           </button>
         </div>
 
-        <div v-if="detail?.dupMembers?.length > 1" class="space-y-2 pt-2 border-t border-outline-variant">
-          <div class="flex items-center justify-between text-[11px]">
-            <span class="font-medium text-white flex items-center gap-1">
-              <span class="material-symbols-outlined text-xs text-primary">collections</span>
-              <span>同组多视角 / 连拍 ({{ detail.dupMembers.length }})</span>
-            </span>
-            <button
-              v-if="isAdmin"
-              @click="handleUngroup"
-              class="text-[10px] text-error hover:underline"
-            >
-              移出本组
-            </button>
-          </div>
-          <p v-if="detail.matchReason" class="text-[10px] text-on-surface-variant">
-            归组原因：{{ formatReason(detail.matchReason) }}
-          </p>
-          <div class="grid grid-cols-4 gap-1.5">
-            <div
-              v-for="m in detail.dupMembers"
-              :key="m.fid"
-              class="aspect-square rounded-lg bg-surface border overflow-hidden relative"
-              :class="m.fid === detail.asset.fid ? 'border-primary ring-1 ring-primary' : 'border-outline-variant'"
-            >
-              <button type="button" class="w-full h-full" @click="switchFid(m.fid)" :title="m.file_name">
-                <img :src="api.imageUrl(m.fid, m.origin_derivative_id)" class="w-full h-full object-cover" loading="lazy" />
-              </button>
-              <span v-if="m.is_representative" class="absolute top-0.5 left-0.5 bg-primary text-white text-[8px] px-1 rounded pointer-events-none">主</span>
-              <button
-                v-if="isAdmin && !m.is_representative"
-                type="button"
-                @click.stop="setRepresentative(m.fid)"
-                class="absolute bottom-0.5 right-0.5 w-4 h-4 rounded bg-black/75 text-white flex items-center justify-center hover:bg-primary"
-                title="设为主图"
-              >
-                <span class="material-symbols-outlined text-[10px] leading-none">push_pin</span>
-              </button>
-            </div>
-          </div>
-        </div>
-
         <div v-if="detail?.similar?.length" class="space-y-2 pt-2 border-t border-outline-variant">
           <p class="text-[11px] font-medium text-white flex items-center gap-1">
             <span class="material-symbols-outlined text-xs text-primary">auto_awesome</span>
@@ -457,17 +401,6 @@ function selectVersion(tab) {
   else if (tab.missing) showToast(`还没有 ${tab.label} 版本`)
 }
 
-const showSetMain = computed(() => {
-  if (!detail.value?.asset) return false
-  return detail.value.dupMembers?.length > 1 && !detail.value.asset.is_representative
-})
-const showRepBadge = computed(() => {
-  const a = detail.value?.asset
-  if (!a?.is_representative) return false
-  const d = activeDerivative.value
-  return !!(d && d.kind === 'origin')
-})
-
 const isFurniture = computed(() => detail.value?.asset?.category === 'furniture')
 
 const primaryDims = computed(() => {
@@ -602,17 +535,6 @@ function formatOrientation(o) {
   return m[o] || o || '自适应'
 }
 
-function formatReason(reason) {
-  if (!reason) return ''
-  if (reason.startsWith('phash:')) return `感知哈希近重复 (${reason})`
-  if (reason === 'same_space_burst') return '同空间连拍'
-  if (reason === 'video_frames') return '同源视频抽帧'
-  if (reason.startsWith('embed:')) return `同空间语义相近 (${reason})`
-  if (reason.startsWith('variant:')) return `修图变体 (${reason})`
-  if (reason.startsWith('same_space:')) return `同空间变体 (${reason})`
-  return reason
-}
-
 function toggleRatio(r) {
   const i = restageRatios.value.indexOf(r)
   if (i >= 0) {
@@ -656,39 +578,6 @@ async function loadDetail(fid) {
 function switchFid(nextFid) {
   emit('select-asset', nextFid)
   loadDetail(nextFid)
-}
-
-async function setRepresentative(targetFid) {
-  if (!detail.value?.asset?.dup_group_id) return
-  try {
-    await api.setRepresentative(detail.value.asset.dup_group_id, targetFid)
-    await loadDetail(detail.value.asset.fid)
-  } catch (e) {
-    showToast('设置主图失败: ' + e.message)
-  }
-}
-
-async function handleSetMain() {
-  const a = detail.value?.asset
-  if (!a?.dup_group_id) return
-  try {
-    await api.setRepresentative(a.dup_group_id, a.fid)
-    await loadDetail(a.fid)
-  } catch (e) {
-    showToast('设为主图失败: ' + e.message)
-  }
-}
-
-async function handleUngroup() {
-  const a = detail.value?.asset
-  if (!a?.dup_group_id) return
-  if (!confirm('把当前这张移出本组？不会删除文件。')) return
-  try {
-    await api.ungroupAsset(a.dup_group_id, a.fid)
-    await loadDetail(a.fid)
-  } catch (e) {
-    showToast('移出失败: ' + e.message)
-  }
 }
 
 async function handleDownload(derivativeId) {
