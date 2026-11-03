@@ -249,7 +249,9 @@ function isApiPath(p) {
 /**
  * 透明接管全局 fetch：
  *  - 同源 /api、/editor-api 请求自动按当前 base 发往可用服务器；
- *  - 网络错误 / 502 / 503 / 504 视为链路断开，标记当前 base 并按候选链重试（每个 base 一次）。
+ *  - 只读方法（GET/HEAD/OPTIONS）遇到网络错误 / 502 / 503 / 504 视为链路断开，
+ *    标记当前 base 并按候选链重试（每个 base 一次）；POST/PUT/PATCH/DELETE 等
+ *    非幂等方法绝不跨候选重发（防重复提交），网关错误原样返回、网络错误直接抛出。
  *  - 非 API 请求（页面静态资源、外链、跨域）原样透传。
  */
 export function installFetchGuard() {
@@ -304,12 +306,24 @@ export function installFetchGuard() {
     let lastErr = null;
     let lastGatewayResp = null;
 
+    // R7：只有天然安全、只读的方法允许跨候选重发。502/503/504 只代表网关没拿到上游
+    // 响应，不代表上游没处理请求——POST/PUT/PATCH/DELETE 换候选（甚至同候选）重发都有
+    // 重复下单/重复写入风险（候选切换本质也是同一请求的再发送），必须直接失败。
+    const method = String(norm0.init.method || 'GET').toUpperCase();
+    const safeToRetry = method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
+
     for (const base of ordered) {
       const abs = base ? `${base}${path0.startsWith('/') ? '' : '/'}${path0}` : path0;
       try {
         const resp = await doFetch(abs, norm0.init);
         if (resp.status === 502 || resp.status === 503 || resp.status === 504) {
-          // 网关活着但后端链路断：换下一个候选（直连/公网）
+          if (!safeToRetry) {
+            // 非幂等方法：标记当前 base 链路异常供后续请求绕路，但本请求绝不重发，
+            // 直接把网关错误响应交回调用方（由其自身的错误分支处理）
+            if (base === cur) markBaseDown(base);
+            return resp;
+          }
+          // 只读请求：网关活着但后端链路断，换下一个候选（直连/公网）
           lastGatewayResp = resp;
           if (base === cur) markBaseDown(base);
           continue;
@@ -323,7 +337,12 @@ export function installFetchGuard() {
         }
         return resp;
       } catch (networkErr) {
-        // 连接被拒/超时/CORS：换下一个候选
+        if (!safeToRetry) {
+          // 非幂等方法网络失败同样不能换主机重发（对端可能已收到并处理）
+          if (base === cur) markBaseDown(base);
+          throw networkErr;
+        }
+        // 只读请求连接被拒/超时/CORS：换下一个候选
         lastErr = networkErr;
         if (base === cur) markBaseDown(base);
       }
