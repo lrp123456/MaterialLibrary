@@ -94,7 +94,11 @@ function readRequestBuffer(req, limit = MAX_BYTES) {
       if (size > limit) {
         rejected = true;
         const mb = Math.round(limit / (1024 * 1024));
-        reject(new Error(`上传文件体积超过限制 (${mb}MB)`));
+        const err = new Error(`上传文件体积超过限制 (${mb}MB)`);
+        // B6：统一 413 语义，调用方据此返回 Payload Too Large
+        err.statusCode = 413;
+        err.code = 'PAYLOAD_TOO_LARGE';
+        reject(err);
         return;
       }
       chunks.push(c);

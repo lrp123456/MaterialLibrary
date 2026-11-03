@@ -19,6 +19,24 @@ const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif', 
 
 const AUDIO_EXTS = new Set(['.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg', '.wma', '.aiff']);
 
+// B6：单请求上传体积上限（默认 2GB，可用环境变量 ML_MAX_UPLOAD_BYTES 覆盖）
+const DEFAULT_MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
+function resolveMaxUploadBytes() {
+  const v = parseInt(process.env.ML_MAX_UPLOAD_BYTES || '', 10);
+  return Number.isFinite(v) && v > 0 ? v : DEFAULT_MAX_UPLOAD_BYTES;
+}
+const ML_MAX_UPLOAD_BYTES = resolveMaxUploadBytes();
+// 分片上传的单片上限（与历史 readRequestBuffer(64MB) 保持一致）
+const MAX_CHUNK_BYTES = 64 * 1024 * 1024;
+
+function makePayloadTooLarge(limit) {
+  const err = new Error(`上传文件体积超过限制 (${Math.round(limit / (1024 * 1024))}MB)`);
+  err.statusCode = 413;
+  err.code = 'PAYLOAD_TOO_LARGE';
+  err.limit = limit;
+  return err;
+}
+
 function isVideoFile(fileName) {
   const ext = (path.extname(fileName || '') || '').toLowerCase();
   return VIDEO_EXTS.has(ext);
@@ -79,38 +97,281 @@ function extractVideoThumbnail(videoPath, thumbPath) {
 }
 
 /**
- * 流式接收文件并同时计算 SHA-256，写入临时文件
+ * 流式接收文件并同时计算 SHA-256，写入临时文件。
+ * B6：支持 maxBytes 字节计数硬上限（超限即 413 并清理半成品）。
  */
-function streamToTempFile(readableStream, tempPath) {
+function streamToTempFile(readableStream, tempPath, { maxBytes = ML_MAX_UPLOAD_BYTES } = {}) {
   return new Promise((resolve, reject) => {
     fs.mkdirSync(path.dirname(tempPath), { recursive: true });
     const writeStream = fs.createWriteStream(tempPath);
     const hash = crypto.createHash('sha256');
     let totalBytes = 0;
+    let settled = false;
+
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      try { readableStream.destroy(); } catch (_) {}
+      try { writeStream.destroy(); } catch (_) {}
+      try { fs.unlinkSync(tempPath); } catch (_) {}
+      reject(err);
+    };
 
     readableStream.on('data', (chunk) => {
-      hash.update(chunk);
+      if (settled) return;
       totalBytes += chunk.length;
+      if (totalBytes > maxBytes) {
+        return fail(makePayloadTooLarge(maxBytes));
+      }
+      hash.update(chunk);
+      // 背压：磁盘跟不上时暂停读端，drain 后恢复（drain 监听只挂一个，避免监听器堆积）
+      if (!writeStream.write(chunk) && readableStream.pause) {
+        readableStream.pause();
+        if (!writeStream._b6DrainBound) {
+          writeStream._b6DrainBound = true;
+          writeStream.once('drain', () => {
+            writeStream._b6DrainBound = false;
+            if (!settled && readableStream.resume) readableStream.resume();
+          });
+        }
+      }
     });
 
-    readableStream.pipe(writeStream);
-
-    writeStream.on('finish', () => {
-      resolve({
-        sha256: hash.digest('hex'),
-        size: totalBytes
+    readableStream.on('end', () => {
+      if (settled) return;
+      writeStream.end(() => {
+        if (settled) return;
+        settled = true;
+        resolve({ sha256: hash.digest('hex'), size: totalBytes });
       });
     });
 
-    writeStream.on('error', (err) => {
-      try { fs.unlinkSync(tempPath); } catch {}
-      reject(err);
-    });
+    writeStream.on('error', fail);
+    readableStream.on('error', fail);
+  });
+}
 
-    readableStream.on('error', (err) => {
-      try { fs.unlinkSync(tempPath); } catch {}
+const CRLF = Buffer.from('\r\n');
+
+function indexOfBuf(buf, needle, from = 0) {
+  return buf.indexOf(needle, from);
+}
+
+/**
+ * B6：流式 multipart/form-data 解析器（零新依赖）。
+ * 主文件分片（name=file 或第一个带 filename 的 part）直接流式写入 targetFile，
+ * 边写边算 sha256 并做字节计数；thumb 等附带小文件与普通字段在内存中收集。
+ * 彻底消除旧实现 readRequestBuffer(2GB)+Buffer.concat+writeFileSync 的 OOM 路径。
+ *
+ * @returns {Promise<{fields:Object, file:Object|null, extras:Object<string,Buffer>}>}
+ */
+function streamMultipartFile(req, targetFile, boundary, {
+  maxBytes = ML_MAX_UPLOAD_BYTES,
+  extraFileNames = ['thumb'],
+  extraMaxBytes = 16 * 1024 * 1024,
+  fieldsMaxBytes = 1 * 1024 * 1024,
+} = {}) {
+  return new Promise((resolve, reject) => {
+    const delim = Buffer.from('--' + String(boundary).trim());
+    const sep = Buffer.concat([CRLF, delim]);
+    fs.mkdirSync(path.dirname(targetFile), { recursive: true });
+
+    let settled = false;
+    let pending = Buffer.alloc(0);
+    let state = 'delim'; // delim -> headers -> body -> delim ... -> done
+    let partMode = 'ignore'; // 'file' | 'extra' | 'field' | 'ignore'
+    let partName = '';
+    let partChunks = null;
+    let partSize = 0;
+    let fieldsTotal = 0;
+    let ws = null;
+    let hash = null;
+    const result = { fields: {}, file: null, extras: {} };
+
+    const cleanup = () => {
+      try { if (ws) ws.destroy(); } catch (_) {}
+      try { fs.unlinkSync(targetFile); } catch (_) {}
+    };
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      try { req.destroy(); } catch (_) {}
+      cleanup();
       reject(err);
-    });
+    };
+
+    function openPart(headerText) {
+      const nameM = headerText.match(/name="([^"]*)"/i);
+      const fileM = headerText.match(/filename="([^"]*)"/i);
+      partName = nameM ? nameM[1] : '';
+      partChunks = [];
+      partSize = 0;
+      if (fileM) {
+        // 第一个带 filename 的 part 即主文件（与旧 files[0] 兜底语义一致）
+        if (!result.file) {
+          partMode = 'file';
+          ws = fs.createWriteStream(targetFile);
+          ws.on('error', fail);
+          hash = crypto.createHash('sha256');
+        } else if (extraFileNames.includes(partName)) {
+          partMode = 'extra';
+        } else {
+          // 未知文件 part：按额外文件丢弃式收集有内存风险，直接忽略不落地
+          partMode = 'ignore';
+        }
+        result._lastFilename = fileM[1] || '';
+        result._lastPartName = partName;
+      } else {
+        partMode = 'field';
+      }
+    }
+
+    function emitBody(buf) {
+      if (!buf.length || partMode === 'ignore') return;
+      partSize += buf.length;
+      if (partMode === 'file') {
+        if (partSize > maxBytes) return fail(makePayloadTooLarge(maxBytes));
+        hash.update(buf);
+        if (!ws.write(buf) && req.pause) {
+          req.pause();
+          if (!ws._b6DrainBound) {
+            ws._b6DrainBound = true;
+            ws.once('drain', () => {
+              ws._b6DrainBound = false;
+              if (!settled && req.resume) req.resume();
+            });
+          }
+        }
+      } else if (partMode === 'extra') {
+        if (partSize > extraMaxBytes) return fail(makePayloadTooLarge(extraMaxBytes));
+        partChunks.push(buf);
+      } else if (partMode === 'field') {
+        fieldsTotal += buf.length;
+        if (fieldsTotal > fieldsMaxBytes) {
+          const err = new Error('表单字段总体积超限');
+          err.statusCode = 413;
+          err.code = 'PAYLOAD_TOO_LARGE';
+          return fail(err);
+        }
+        partChunks.push(buf);
+      }
+    }
+
+    function closePart() {
+      if (partMode === 'file') {
+        const fileName = result._lastFilename || '';
+        return new Promise((res, rej) => {
+          ws.end(() => {
+            result.file = {
+              name: 'file',
+              filename: fileName,
+              size: partSize,
+              sha256: hash.digest('hex'),
+            };
+            res();
+          });
+          ws.on('error', rej);
+        });
+      }
+      if (partMode === 'extra' && partName) {
+        result.extras[partName] = Buffer.concat(partChunks, partSize);
+      } else if (partMode === 'field' && partName) {
+        result.fields[partName] = Buffer.concat(partChunks, partSize).toString('utf8');
+      }
+      partMode = 'ignore';
+      partChunks = null;
+      return null;
+    }
+
+    async function processBuffer(finalFlush) {
+      let cursor = 0;
+      // eslint-disable-next-line no-constant-condition
+      outer: while (true) {
+        if (state === 'done') break;
+        if (state === 'delim') {
+          const idx = indexOfBuf(pending, delim, cursor);
+          if (idx < 0) {
+            const keep = Math.min(pending.length - cursor, delim.length - 1);
+            pending = pending.slice(pending.length - keep);
+            return;
+          }
+          // 边界恰落在 delim 末尾：还需至少 2 字节判断 '--' 或 CRLF
+          if (pending.length < idx + delim.length + 2) {
+            pending = pending.slice(idx);
+            return;
+          }
+          cursor = idx + delim.length;
+          if (pending[cursor] === 0x2d && pending[cursor + 1] === 0x2d) {
+            state = 'done';
+            break;
+          }
+          if (pending[cursor] === 0x0d && pending[cursor + 1] === 0x0a) cursor += 2;
+          state = 'headers';
+        }
+        if (state === 'headers') {
+          const hend = indexOfBuf(pending, Buffer.from('\r\n\r\n'), cursor);
+          if (hend < 0) {
+            pending = pending.slice(cursor);
+            return;
+          }
+          const headerText = pending.slice(cursor, hend).toString('latin1');
+          cursor = hend + 4;
+          openPart(headerText);
+          state = 'body';
+        }
+        if (state === 'body') {
+          const idx = indexOfBuf(pending, sep, cursor);
+          if (idx < 0) {
+            // 保留 sep.length-1 尾巴，防止分隔符跨 chunk 被切断
+            const keep = sep.length - 1;
+            const end = Math.max(cursor, pending.length - keep);
+          emitBody(pending.slice(cursor, end));
+            if (settled) return;
+            pending = pending.slice(end);
+            return;
+          }
+          emitBody(pending.slice(cursor, idx));
+          if (settled) return;
+          const p = closePart();
+          if (p) await p;
+          if (settled) return;
+          // 仅消费 body 与前导 CRLF，下一轮 delim 状态从 "--boundary" 开始匹配
+          cursor = idx + 2;
+          pending = pending.slice(cursor);
+          cursor = 0;
+          state = 'delim';
+          continue outer;
+        }
+      }
+      // state === 'done'
+      pending = Buffer.alloc(0);
+      if (!finalFlush) return;
+    }
+
+    (async () => {
+      try {
+        for await (const chunk of req) {
+          if (settled) return;
+          pending = pending.length ? Buffer.concat([pending, chunk]) : chunk;
+          await processBuffer(false);
+          if (settled) return;
+        }
+        if (settled) return;
+        await processBuffer(true);
+        if (state !== 'done') {
+          throw new Error('multipart 数据不完整或缺少结束边界');
+        }
+        if (!result.file) {
+          settled = true;
+          cleanup();
+          return reject(new Error('缺少 file 字段'));
+        }
+        settled = true;
+        resolve({ fields: result.fields, file: result.file, extras: result.extras });
+      } catch (err) {
+        fail(err);
+      }
+    })();
   });
 }
 
@@ -560,11 +821,13 @@ async function handleDirectUpload(services, req, {
   let size = 0;
 
   if (ct.includes('multipart/form-data')) {
-    const { parseMultipart, readRequestBuffer } = require('./ingest');
-    // 最大单次 multipart 2048MB (2GB)，支持手机直接直传超大高清视频
-    const buf = await readRequestBuffer(req, 2048 * 1024 * 1024);
-    const { fields, files } = parseMultipart(buf, ct);
-    const file = files.find(f => f.name === 'file') || files[0];
+    // B6：multipart 改为流式解析，文件 part 直接落临时盘（边算 sha256 边做 2GB 字节计数）
+    const bm = ct.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+    if (!bm) throw new Error('缺少 multipart boundary');
+    const parsed = await streamMultipartFile(req, tempFile, (bm[1] || bm[2]).trim(), {
+      maxBytes: ML_MAX_UPLOAD_BYTES,
+    });
+    const { fields, file, extras } = parsed;
     if (!file) throw new Error('缺少 file 字段');
 
     targetFileName = file.filename || fields.filename || targetFileName;
@@ -586,17 +849,15 @@ async function handleDirectUpload(services, req, {
     if (fields.shelf) {
       targetShelf = fields.shelf;
     }
-    fs.writeFileSync(tempFile, file.data);
-    sha256 = crypto.createHash('sha256').update(file.data).digest('hex');
-    size = file.data.length;
+    sha256 = file.sha256;
+    size = file.size;
 
-    const thumbFile = files.find(f => f.name === 'thumb');
-    if (thumbFile) {
-      targetThumbBuffer = thumbFile.data;
+    if (extras.thumb) {
+      targetThumbBuffer = extras.thumb;
     }
   } else {
     // 流式处理 application/octet-stream 或 image/* 或 video/*
-    const streamRes = await streamToTempFile(req, tempFile);
+    const streamRes = await streamToTempFile(req, tempFile, { maxBytes: ML_MAX_UPLOAD_BYTES });
     sha256 = streamRes.sha256;
     size = streamRes.size;
   }
@@ -643,21 +904,17 @@ async function handleChunkUpload(services, req, {
 
   const ct = (req && req.headers && req.headers['content-type']) || '';
   if (ct.includes('multipart/form-data')) {
-    // uni.uploadFile 始终以 multipart 提交分片
-    const { parseMultipart, readRequestBuffer } = require('./ingest');
-    const buf = await readRequestBuffer(req, 64 * 1024 * 1024);
-    const { files } = parseMultipart(buf, ct);
-    const file = files.find(f => f.name === 'file') || files[0];
-    if (!file || !file.data) throw new Error('缺少分片数据');
-    fs.writeFileSync(chunkFile, file.data);
-  } else {
-    await new Promise((resolve, reject) => {
-      const ws = fs.createWriteStream(chunkFile);
-      req.pipe(ws);
-      ws.on('finish', resolve);
-      ws.on('error', reject);
-      req.on('error', reject);
+    // B6：单分片走流式 multipart（单片硬上限 64MB，超限 413），替代整包缓冲+writeFileSync
+    const bm = ct.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+    if (!bm) throw new Error('缺少 multipart boundary');
+    const parsed = await streamMultipartFile(req, chunkFile, (bm[1] || bm[2]).trim(), {
+      maxBytes: MAX_CHUNK_BYTES,
+      extraFileNames: [],
     });
+    if (!parsed.file) throw new Error('缺少分片数据');
+  } else {
+    // raw 分片：流式落盘 + 单片 64MB 字节计数
+    await streamToTempFile(req, chunkFile, { maxBytes: MAX_CHUNK_BYTES });
   }
 
   const parts = fs.readdirSync(chunkDir).filter(f => f.startsWith('part_'));
@@ -693,20 +950,32 @@ async function handleCompleteChunkUpload(services, {
   fs.mkdirSync(tempDir, { recursive: true });
   const mergedPath = path.join(tempDir, `merged_${uploadId}_${Date.now()}`);
 
+  // B6：合并改为分片流式管道，杜绝 readFileSync 全量驻留与写缓冲堆积
   const hash = crypto.createHash('sha256');
   let totalSize = 0;
   const outWs = fs.createWriteStream(mergedPath);
 
-  for (const part of parts) {
-    const partPath = path.join(chunkDir, part);
-    const buf = fs.readFileSync(partPath);
-    hash.update(buf);
-    totalSize += buf.length;
-    outWs.write(buf);
-  }
-
-  await new Promise((resolve) => outWs.end(resolve));
-
+  await new Promise((resolve, reject) => {
+    let aborted = false;
+    const fail = (err) => { if (!aborted) { aborted = true; reject(err); } };
+    outWs.once('error', fail);
+    (async () => {
+      for (const part of parts) {
+        const partPath = path.join(chunkDir, part);
+        totalSize += fs.statSync(partPath).size;
+        await new Promise((res, rej) => {
+          const rs = fs.createReadStream(partPath);
+          rs.on('error', (e) => { fail(e); rej(e); });
+          rs.on('end', res);
+          rs.pipe(hash, { end: false });
+          rs.pipe(outWs, { end: false });
+        });
+        if (aborted) return;
+      }
+      outWs.end(() => !aborted && resolve());
+    })();
+  });
+  await new Promise((resolve) => hash.end(resolve));
   const sha256 = hash.digest('hex');
 
   // 清理临时分片
@@ -746,16 +1015,18 @@ async function handleToolTempUpload(services, req) {
 
   let size = 0;
   if (ct.includes('multipart/form-data')) {
-    const { parseMultipart, readRequestBuffer } = require('./ingest');
-    const buf = await readRequestBuffer(req, 2048 * 1024 * 1024);
-    const { fields, files } = parseMultipart(buf, ct);
-    const file = files.find(f => f.name === 'file') || files[0];
-    if (!file) throw new Error('缺少 file 字段');
-    fs.writeFileSync(tempPath, file.data);
-    size = file.data.length;
-    targetFileName = file.filename || fields.filename || targetFileName;
+    // B6：流式 multipart，2GB 上限边收边计（旧实现整包缓冲 2GB + writeFileSync）
+    const bm = ct.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+    if (!bm) throw new Error('缺少 multipart boundary');
+    const parsed = await streamMultipartFile(req, tempPath, (bm[1] || bm[2]).trim(), {
+      maxBytes: ML_MAX_UPLOAD_BYTES,
+      extraFileNames: [],
+    });
+    if (!parsed.file) throw new Error('缺少 file 字段');
+    size = parsed.file.size;
+    targetFileName = parsed.file.filename || parsed.fields.filename || targetFileName;
   } else {
-    const streamRes = await streamToTempFile(req, tempPath);
+    const streamRes = await streamToTempFile(req, tempPath, { maxBytes: ML_MAX_UPLOAD_BYTES });
     size = streamRes.size;
   }
 
@@ -767,6 +1038,11 @@ async function handleToolTempUpload(services, req) {
 }
 
 module.exports = {
+  ML_MAX_UPLOAD_BYTES,
+  MAX_CHUNK_BYTES,
+  makePayloadTooLarge,
+  streamToTempFile,
+  streamMultipartFile,
   handleToolTempUpload,
   handleDirectUpload,
   handleChunkUpload,
