@@ -32,10 +32,11 @@
     "license": "MIT",
     "scripts": {
         "start": "node server.js",
-        "stop": "bash start.sh stop",
-        "restart": "bash start.sh restart",
-        "status": "bash start.sh status",
-        "logs": "bash start.sh logs",
+        "stop": "node scripts/mls-ctl.js stop prod",
+        "restart": "node scripts/mls-ctl.js restart prod",
+        "status": "node scripts/mls-ctl.js status",
+        "logs": "node scripts/mls-ctl.js logs prod-server",
+        "ctl": "node scripts/mls-ctl.js",
         "test": "node test/suite.js && node test/e2e.js && node test/ai-tasks.test.js && node test/lab.test.js && node test/quick-pipeline.test.js && node test/portrait-music.test.js && node test/admin-model.test.js && node test/creation-templates-since.test.js && node test/crop-selection-interior.test.js && node test/classify-parse.test.js && node test/base-library-compile.test.js && node test/base-library-list.test.js && node test/base-library-flags.test.js && node test/base-library-prefill.test.js && node test/paint-alias.test.js && node test/paint-mirror-upsert.test.js && node test/auto-adaptive-dispatch.test.js && node test/base-items-pinned-use.test.js && node test/scheme-apply.test.mjs && node test/space-filter.test.mjs && node test/scheme-browse.test.mjs && node test/cascade-fallback-store.test.js && node test/classify-part.test.js && node test/e2e-all-suites.test.js && node test/stress-m2-corner-cases.test.js && node test/v4-e2e-verification.test.js"
     }
 }

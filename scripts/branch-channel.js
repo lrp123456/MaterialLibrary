@@ -16,7 +16,9 @@
  *   node scripts/branch-channel.js --restart test   停 + 起（不重新构建）
  *   node scripts/branch-channel.js --sync-data test 从正式库重拉一份数据库快照
  *   node scripts/branch-channel.js --diff test      看 test 相对 master 的差异 + 冲突预演
- *   node scripts/branch-channel.js --promote test   test → master 合并 + 重建正式产物 + 重启正式
+ *   node scripts/branch-channel.js --promote test   test → master 合并 + 重建正式产物 + 经 start.sh 同时重启 30001/30002
+ *
+ * 推荐统一入口：node scripts/mls-ctl.js status|start|stop|restart|logs|promote（零依赖跨平台）
  *
  * 端口铁律：
  *   prod  master  正式 API 30001 / 正式 Web 30002   （WSL 里跑，本脚本只读状态、不启停）
@@ -530,7 +532,8 @@ function stop(lane) {
   if (!stopped) log(`${lane.label} 通道未在运行`);
 }
 
-async function status(asJson = false) {
+/** 纯数据采集：供 mls-ctl / service-hub 以库形式复用，不打印任何内容 */
+async function collectLanes() {
   const rows = [];
   for (const lane of Object.values(LANES)) {
     const wt = laneWorktree(lane);
@@ -541,6 +544,8 @@ async function status(asJson = false) {
     rows.push({
       key: lane.key,
       label: lane.label,
+      legacy: Boolean(lane.legacy),
+      managed: Boolean(lane.managed),
       branch: wt ? wt.branch : lane.branch || '-',
       worktree: lane.worktree,
       worktreeReady: Boolean(wt),
@@ -564,6 +569,11 @@ async function status(asJson = false) {
       hasUncommitted: info ? info.dirty > 0 : false,
     });
   }
+  return rows;
+}
+
+async function status(asJson = false) {
+  const rows = await collectLanes();
 
   if (asJson) {
     console.log(JSON.stringify(rows, null, 2));
@@ -710,7 +720,55 @@ async function promote(lane, { dryRun = false, force = false } = {}) {
   log('重建正式前端产物…');
   await build(target);
 
-  // 正式端自重启：旧代码可能没有这个接口，失败就提示手动重启
+  // 必须同时重启 30001(API) 与 30002(Web 网关)：server.cjs / 前端产物的改动只重启 API 永不生效。
+  const r = await restartProd();
+  if (r.mode === 'wsl') {
+    if (!r.apiOk) warn('正式 API 30001 未在时限内恢复，查 WSL watchdog 日志');
+    if (!r.webOk) warn('正式 Web 网关 30002 未在时限内恢复，查 WSL webpro.log');
+  } else {
+    warn(`无法走 start.sh 整组重启（${r.error}），回退为仅重启 30001；30002 必须另行手动重启`);
+    await legacyRestartApi(target);
+  }
+}
+
+const WSL_DISTRO = process.env.ML_WSL_DISTRO || 'smu';
+
+/**
+ * 整组重启正式端（30001 + 30002）。两者都在 WSL 里由 watchdog 托管，
+ * 唯一正确入口是 start.sh restart；绝不在 Windows 侧 spawn node server.js
+ * ——那会用 Windows 的独立旧库造出「第三数据平面」。
+ */
+async function restartProd() {
+  const wsl = process.env.WSL_EXE || 'wsl.exe';
+  let wslProject = '';
+  try {
+    // wsl.exe 会吞掉 argv 里的反斜杠，先转成正斜杠（wslpath 两种都认）
+    const winRoot = ROOT.replace(/\\/g, '/');
+    wslProject = execFileSync(wsl, ['-d', WSL_DISTRO, 'wslpath', '-a', winRoot], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 20000,
+    }).trim();
+  } catch (e) {
+    return { mode: 'unavailable', error: `wslpath 失败：${e.message}` };
+  }
+  try {
+    log(`通过 WSL/${WSL_DISTRO} start.sh restart 整组重启正式端（30001 + 30002）…`);
+    execFileSync(
+      wsl,
+      ['-d', WSL_DISTRO, '-e', 'bash', '-lc', `bash '${wslProject}/start.sh' restart`],
+      { cwd: ROOT, stdio: 'inherit', timeout: 180000 }
+    );
+  } catch (e) {
+    return { mode: 'failed', error: `start.sh restart 失败：${e.message}` };
+  }
+  const apiOk = await waitPort(LANES.prod.apiPort, 90000);
+  const webOk = await waitPort(LANES.prod.webPort, 90000);
+  return { mode: 'wsl', apiOk, webOk };
+}
+
+/** 旧兜底：只调 API 自重启接口（仅 30001；30002 不更新） */
+async function legacyRestartApi(target) {
   const restartUrl = `http://127.0.0.1:${target.apiPort}/api/system/restart`;
   try {
     const res = await fetch(restartUrl, {
@@ -743,40 +801,71 @@ function resolveLane() {
   return lane;
 }
 
-(async () => {
-  try {
-    if (has('--help') || has('-h')) {
-      console.log(fs.readFileSync(__filename, 'utf8').split('*/')[0].replace(/^#![^\n]*\n/, ''));
-      return;
-    }
-    if (has('--prepare') || has('--bootstrap')) return prepare(resolveLane());
-    if (has('--diff')) {
-      // --diff 后面可以直接跟任意分支名，不限于已登记的通道
-      const which = flagValue('--diff', '') || 'test';
-      return await diff(LANES[which] || which);
-    }
-    if (has('--promote')) return await promote(resolveLane(), { dryRun: has('--dry-run'), force: has('--force') });
-    if (has('--sync-data')) {
-      const lane = resolveLane();
-      prepareData(lane, { sync: true });
-      log('数据快照已更新；重启通道后生效');
-      return;
-    }
+/** 库形式导出：mls-ctl / service-hub 复用，require 时不触发任何 CLI 动作 */
+module.exports = {
+  ROOT,
+  HOME,
+  LANES,
+  WSL_DISTRO,
+  PROD_DATA_UNC,
+  status,
+  collectLanes,
+  start,
+  stop,
+  build,
+  promote,
+  restartProd,
+  prepare,
+  prepareData,
+  diff,
+  waitPort,
+  portOpen,
+  readPid,
+  killPid,
+  buildInfoOf,
+  gitInfo,
+  laneWorktree,
+  laneBranch,
+  occupationHint,
+  ensureDir,
+};
 
-    const lane = resolveLane();
-    if (has('--stop')) return stop(lane);
-    if (has('--build') || has('--build-only')) return await build(lane);
-    if (has('--restart')) {
-      stop(lane);
-      return await start(lane, { skipBuild: has('--no-build') });
+if (require.main === module) {
+  (async () => {
+    try {
+      if (has('--help') || has('-h')) {
+        console.log(fs.readFileSync(__filename, 'utf8').split('*/')[0].replace(/^#![^\n]*\n/, ''));
+        return;
+      }
+      if (has('--prepare') || has('--bootstrap')) return prepare(resolveLane());
+      if (has('--diff')) {
+        // --diff 后面可以直接跟任意分支名，不限于已登记的通道
+        const which = flagValue('--diff', '') || 'test';
+        return await diff(LANES[which] || which);
+      }
+      if (has('--promote')) return await promote(resolveLane(), { dryRun: has('--dry-run'), force: has('--force') });
+      if (has('--sync-data')) {
+        const lane = resolveLane();
+        prepareData(lane, { sync: true });
+        log('数据快照已更新；重启通道后生效');
+        return;
+      }
+
+      const lane = resolveLane();
+      if (has('--stop')) return stop(lane);
+      if (has('--build') || has('--build-only')) return await build(lane);
+      if (has('--restart')) {
+        stop(lane);
+        return await start(lane, { skipBuild: has('--no-build') });
+      }
+      if (has('--start')) {
+        if (lane.managed) prepareData(lane);
+        return await start(lane, { skipBuild: has('--no-build') });
+      }
+      return await status(has('--json'));
+    } catch (e) {
+      warn(`失败：${e.message}`);
+      process.exitCode = 1;
     }
-    if (has('--start')) {
-      if (lane.managed) prepareData(lane);
-      return await start(lane, { skipBuild: has('--no-build') });
-    }
-    return await status(has('--json'));
-  } catch (e) {
-    warn(`失败：${e.message}`);
-    process.exitCode = 1;
-  }
-})();
+  })();
+}
