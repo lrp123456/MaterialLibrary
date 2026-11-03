@@ -88,7 +88,7 @@ function copyRecursive(src, dst) {
 }
 
 /**
- * node_modules 用 junction（目录联接）指回真实位置。
+ * node_modules 优先用软链接/junction 指回真实位置。
  * 目的：隔离目录只有几十 MB，不用复制 400MB 依赖，同时保证插件解析一致。
  */
 function linkNodeModules(APP, workDir) {
@@ -97,11 +97,24 @@ function linkNodeModules(APP, workDir) {
   if (!fs.existsSync(real)) {
     throw new Error('未找到依赖目录: ' + real + '\n请先在项目根目录执行 npm install');
   }
-  try {
-    fs.symlinkSync(real, link, 'junction');
-  } catch (e) {
-    // junction 创建失败（权限/文件系统不支持）→ 退回复制，仍能编译
-    appendNote('junction 创建失败，改为复制 node_modules：' + e.message);
+  // 跨盘或网络映射盘时，junction 会静默创建但后续读取报「reparse point buffer is invalid」
+  // 优先尝试 dir 软链接，其次尝试 junction，且必须通过 readdirSync 可读性校验
+  const linkTypes = process.platform === 'win32' ? ['dir', 'junction'] : ['dir'];
+  let linked = false;
+  for (const type of linkTypes) {
+    try {
+      if (fs.existsSync(link)) fs.rmSync(link, { recursive: true, force: true });
+      fs.symlinkSync(real, link, type);
+      fs.readdirSync(link); // 校验链接目标是否真实可读
+      linked = true;
+      break;
+    } catch (e) {
+      try { fs.rmSync(link, { recursive: true, force: true }); } catch (_) {}
+    }
+  }
+  if (!linked) {
+    // 软链接与 junction 均失败（权限/文件系统不支持）→ 退回复制，仍能编译
+    appendNote('软链接/junction 均不可用，改为复制 node_modules');
     copyRecursive(real, link);
   }
 }
