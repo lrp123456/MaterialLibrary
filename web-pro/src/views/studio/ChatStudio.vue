@@ -1001,7 +1001,7 @@
 
           <!-- 配方句输入区域 (顶部，浅底色，小标签，右侧清空叉，支持@图N胶囊高亮与多行大卡片自由编辑) -->
           <div
-            v-if="recipePrompt || rightDrawerOpen || isRecipeEditing"
+            v-if="recipePrompt || globalRecipePrompt || rightDrawerOpen || isRecipeEditing"
             class="rounded-xl bg-studio-900/95 border border-studio-750 p-2.5 transition-all animate-in fade-in duration-150"
             :class="isRecipeEditing ? 'flex flex-col gap-2 ring-1 ring-studio-accent/40 shadow-lg' : 'flex items-start gap-2'"
           >
@@ -1095,39 +1095,59 @@
                 <StudioIcon name="wand" :size="11" />
                 <span>配方句</span>
               </div>
-              <div
-                v-if="recipePrompt"
-                @click="startRecipeEdit"
-                :class="[
-                  'flex-1 text-xs text-slate-100 font-medium leading-relaxed cursor-text py-0.5 select-text transition-all',
-                  recipeExpanded ? 'max-h-40 overflow-y-auto scrollbar-thin whitespace-pre-wrap' : 'max-h-12 overflow-hidden line-clamp-2 text-ellipsis'
-                ]"
-                :title="recipeExpanded ? '点击编辑配方句' : '点击编辑配方句（或点击右侧展开）'"
-              >
-                <template v-for="(seg, idx) in parseRecipeSegments(displayRecipePrompt)" :key="idx">
-                  <span
-                    v-if="seg.type === 'chip'"
-                    @mouseenter="seg.regionName && highlightRegionFromChip(seg.tuNum - 1, seg.regionName)"
-                    @mouseleave="hoveredRegionKey = null"
-                    class="inline-flex items-center px-1.5 py-0.5 rounded-full bg-studio-cyan/20 text-studio-cyan border border-studio-cyan/40 font-mono font-bold text-[11px] select-none shadow-xs hover:brightness-125 cursor-pointer align-middle mx-0.5 transition-all"
-                  >{{ seg.tag }}</span>
-                  <span v-else class="align-middle">{{ seg.text }}</span>
-                </template>
-                <span
-                  v-if="recipeHasRules"
-                  class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-studio-800/90 text-slate-400 font-mono text-[10px] ml-1.5 select-none border border-studio-700/60 align-middle"
-                  title="已固化包含相机透视、比例锁定与全局禁止清单"
+              <div class="flex-1 min-w-0 space-y-1.5">
+                <!-- 图片局部编辑配方（按图/选区聚合） -->
+                <div
+                  v-if="recipePrompt"
+                  @click="startRecipeEdit"
+                  :class="[
+                    'text-xs text-slate-100 font-medium leading-relaxed cursor-text py-0.5 select-text transition-all',
+                    recipeExpanded ? 'max-h-40 overflow-y-auto scrollbar-thin whitespace-pre-wrap' : 'max-h-12 overflow-hidden line-clamp-2 text-ellipsis'
+                  ]"
+                  :title="recipeExpanded ? '点击编辑配方句' : '点击编辑配方句（或点击右侧展开）'"
                 >
-                  <StudioIcon name="shield" :size="10" class="text-studio-accent" />
-                  <span>包含固化规则</span>
-                </span>
-              </div>
-              <div
-                v-else
-                @click="startRecipeEdit"
-                class="flex-1 text-xs text-slate-400 font-medium italic cursor-pointer py-0.5 select-none"
-              >
-                点击编写或微调空间配方句...
+                  <template v-for="(seg, idx) in parseRecipeSegments(displayRecipePrompt)" :key="idx">
+                    <span
+                      v-if="seg.type === 'chip'"
+                      @mouseenter="seg.regionName && highlightRegionFromChip(seg.tuNum - 1, seg.regionName)"
+                      @mouseleave="hoveredRegionKey = null"
+                      class="inline-flex items-center px-1.5 py-0.5 rounded-full bg-studio-cyan/20 text-studio-cyan border border-studio-cyan/40 font-mono font-bold text-[11px] select-none shadow-xs hover:brightness-125 cursor-pointer align-middle mx-0.5 transition-all"
+                    >{{ seg.tag }}</span>
+                    <span v-else class="align-middle">{{ seg.text }}</span>
+                  </template>
+                  <span
+                    v-if="recipeHasRules"
+                    class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-studio-800/90 text-slate-400 font-mono text-[10px] ml-1.5 select-none border border-studio-700/60 align-middle"
+                    title="已固化包含相机透视、比例锁定与全局禁止清单"
+                  >
+                    <StudioIcon name="shield" :size="10" class="text-studio-accent" />
+                    <span>包含固化规则</span>
+                  </span>
+                </div>
+
+                <!-- 全局操作配方（风格/换空间/超分/去水印）：与图片编辑叠加，不互相替换 -->
+                <div
+                  v-if="displayGlobalRecipePrompt"
+                  :class="[
+                    'rounded-lg border border-amber-500/30 bg-amber-500/10 pl-2 pr-1.5 py-1 text-xs text-amber-100/90 font-medium leading-relaxed',
+                    recipeExpanded ? 'max-h-40 overflow-y-auto scrollbar-thin whitespace-pre-wrap' : 'max-h-12 overflow-hidden'
+                  ]"
+                >
+                  <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold text-[10px] mr-1.5 align-middle select-none">
+                    <StudioIcon name="sliders" :size="10" />
+                    <span>全局编辑</span>
+                  </span>
+                  <span class="whitespace-pre-wrap align-middle">{{ displayGlobalRecipePrompt }}</span>
+                </div>
+
+                <!-- 两者都为空时的占位 -->
+                <div
+                  v-if="!recipePrompt && !displayGlobalRecipePrompt"
+                  @click="startRecipeEdit"
+                  class="text-xs text-slate-400 font-medium italic cursor-pointer py-0.5 select-none"
+                >
+                  点击编写或微调空间配方句...
+                </div>
               </div>
               <div class="flex items-center gap-1 shrink-0 mt-0.5">
                 <button
@@ -1139,7 +1159,15 @@
                   编辑 ✎
                 </button>
                 <button
-                  v-if="recipePrompt && (recipePrompt.length > 60 || recipePrompt.includes('\n'))"
+                  type="button"
+                  @click="rightDrawerOpen = true"
+                  class="px-1.5 py-0.5 rounded text-[10px] font-bold text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 cursor-pointer transition-colors"
+                  title="叠加全局编辑：风格 / 换空间 / 超分 / 去水印"
+                >
+                  全局编辑
+                </button>
+                <button
+                  v-if="recipePrompt || displayGlobalRecipePrompt"
                   type="button"
                   @click.stop="recipeExpanded = !recipeExpanded"
                   class="px-1.5 py-0.5 rounded text-[10px] font-bold text-studio-cyan bg-studio-cyan/15 hover:bg-studio-cyan/25 cursor-pointer transition-colors"
@@ -1148,11 +1176,11 @@
                   {{ recipeExpanded ? '收起 ↑' : '展开 ↓' }}
                 </button>
                 <button
-                  v-if="recipePrompt"
+                  v-if="recipePrompt || displayGlobalRecipePrompt"
                   type="button"
-                  @click="recipePrompt = ''"
+                  @click="clearAllRecipe"
                   class="p-1 text-slate-400 hover:text-rose-400 cursor-pointer transition-colors"
-                  title="清空配方句"
+                  title="清空图片编辑与全局编辑配方"
                 >
                   <StudioIcon name="close" :size="13" />
                 </button>
@@ -1411,7 +1439,7 @@
     <!-- 3. 右侧精准编辑抽屉 (宽 380px，支持风格/超分/去水印，仅修改配方句) -->
     <StudioGlobalDrawer
       v-if="rightDrawerOpen"
-      v-model:recipePrompt="recipePrompt"
+      v-model:recipePrompt="globalRecipePrompt"
       :targetTag="targetRefTag"
       :targetImageThumb="targetRefThumb"
       :targetImageName="targetRefName"
@@ -2671,6 +2699,12 @@ function formatGenTime(t) {
 
 // 阶段 2 状态：配方句、请求审查与抽屉联动
 const recipePrompt = ref('');
+// 全局操作配方（风格/换空间/超分/去水印）：独立于图片局部编辑配方，发送时叠加，不互相替换
+const globalRecipePrompt = ref('');
+// 最终提交/展示用配方 = 图片编辑配方 + 全局操作配方（叠加）
+const combinedRecipePrompt = computed(() =>
+  [recipePrompt.value, globalRecipePrompt.value].map(s => (s || '').trim()).filter(Boolean).join('\n')
+);
 const recipeExpanded = ref(false);
 const hoveredRegionKey = ref(null);
 const DRAFT_STORAGE_KEY = 'ml_studio_persistent_draft_v1';
@@ -2679,11 +2713,12 @@ function saveDraftToStorage() {
   try {
     const data = {
       recipePrompt: recipePrompt.value || '',
+      globalRecipePrompt: globalRecipePrompt.value || '',
       editorHtml: richEditorRef.value ? richEditorRef.value.innerHTML : '',
       referenceTray: JSON.parse(JSON.stringify(referenceTray.value || [])),
       selectedImageIndex: selectedImageIndex.value || 0,
     };
-    if (data.referenceTray.length > 0 || data.recipePrompt || (data.editorHtml && data.editorHtml.trim())) {
+    if (data.referenceTray.length > 0 || data.recipePrompt || data.globalRecipePrompt || (data.editorHtml && data.editorHtml.trim())) {
       localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(data));
     } else {
       localStorage.removeItem(DRAFT_STORAGE_KEY);
@@ -2696,12 +2731,15 @@ function restoreDraftFromStorage() {
     const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
     if (!raw) return false;
     const data = JSON.parse(raw);
-    if (data && (Array.isArray(data.referenceTray) && data.referenceTray.length > 0 || data.recipePrompt || data.editorHtml)) {
+    if (data && (Array.isArray(data.referenceTray) && data.referenceTray.length > 0 || data.recipePrompt || data.globalRecipePrompt || data.editorHtml)) {
       if (Array.isArray(data.referenceTray) && data.referenceTray.length > 0) {
         referenceTray.value = data.referenceTray;
       }
       if (data.recipePrompt) {
         recipePrompt.value = data.recipePrompt;
+      }
+      if (data.globalRecipePrompt) {
+        globalRecipePrompt.value = data.globalRecipePrompt;
       }
       if (data.editorHtml && richEditorRef.value) {
         richEditorRef.value.innerHTML = data.editorHtml;
@@ -2799,7 +2837,7 @@ function onDrawerUnmountMaterialRefs() {
 
 function getFullPromptText() {
   const supplement = getRawEditorText();
-  const recipe = (recipePrompt.value || '').trim();
+  const recipe = (combinedRecipePrompt.value || '').trim();
   return [recipe, supplement].filter(Boolean).join('\n');
 }
 
@@ -3134,6 +3172,9 @@ const displayRecipePrompt = computed(() => {
   return core || recipePrompt.value;
 });
 
+// 全局操作配方（风格/换空间/超分/去水印）展示文本，独立成块与图片编辑叠加
+const displayGlobalRecipePrompt = computed(() => globalRecipePrompt.value || '');
+
 const recipeHasRules = computed(() => {
   if (!recipePrompt.value) return false;
   const { rules } = parseRecipePromptParts(recipePrompt.value);
@@ -3186,6 +3227,12 @@ function saveRecipeEdit() {
 function cancelRecipeEdit() {
   isRecipeEditing.value = false;
   editingRecipeText.value = '';
+}
+
+// 清空图片编辑 + 全局编辑两段配方
+function clearAllRecipe() {
+  recipePrompt.value = '';
+  globalRecipePrompt.value = '';
 }
 
 function handleOrganizeRecipePrompt() {
@@ -3473,7 +3520,9 @@ function syncGenModeWithReferenceTray() {
   }
 
   // 有图状态下：禁止停留在文生图
-  const hasRegions = tray.some(img => Array.isArray(img.regions) && img.regions.length > 0) || Boolean(recipePrompt.value?.trim());
+  const hasRegions = tray.some(img => Array.isArray(img.regions) && img.regions.length > 0)
+    || Boolean(recipePrompt.value?.trim())
+    || Boolean(globalRecipePrompt.value?.trim());
   const hasOutpaint = tray.some(img => img.outpainted);
 
   if (hasOutpaint && modes.some(m => m.id === 'expand_fill')) {
@@ -5028,6 +5077,7 @@ async function consumeIncoming(payload) {
   const hasContent = messages.value.length > 0
     || referenceTray.value.length > 0
     || Boolean(recipePrompt.value && recipePrompt.value.trim())
+    || Boolean(globalRecipePrompt.value && globalRecipePrompt.value.trim())
     || Boolean(editorText);
   if (hasContent) {
     await createNewSession({ forceReset: true });
@@ -5080,7 +5130,7 @@ async function loadStudioCatalog() {
   }
 }
 
-watch([recipePrompt, referenceTray], () => { saveDraftToStorage(); syncGenModeWithReferenceTray(); }, { deep: true });
+watch([recipePrompt, globalRecipePrompt, referenceTray], () => { saveDraftToStorage(); syncGenModeWithReferenceTray(); }, { deep: true });
 
 // 参考托盘变动与选图变动时，自适应智能联动（需在所有依赖状态声明就绪后挂载，避免 TDZ）
 watch(
@@ -5698,10 +5748,12 @@ function onEditorKeyup(e) {
 
 function pushPromptHistory(text, tray, extra = {}) {
   const recipe = extra.recipePrompt ?? (recipePrompt.value || '');
+  const globalRecipe = extra.globalRecipePrompt ?? (globalRecipePrompt.value || '');
   const supplement = extra.supplementText ?? (getRawEditorText() || '');
   const selIdx = extra.selectedImageIndex ?? (selectedImageIndex.value || 0);
   const mode = extra.genMode ?? activeModality.value;
-  const fullText = text || [recipe, supplement].filter(Boolean).join('\n');
+  const fullRecipe = [recipe, globalRecipe].map(s => (s || '').trim()).filter(Boolean).join('\n');
+  const fullText = text || [fullRecipe, supplement].filter(Boolean).join('\n');
   if (!fullText && (!tray || tray.length === 0)) return;
 
   const last = promptHistory.value[promptHistory.value.length - 1];
@@ -5711,6 +5763,7 @@ function pushPromptHistory(text, tray, extra = {}) {
     text: fullText,
     tray: Array.isArray(tray) ? JSON.parse(JSON.stringify(tray)) : [],
     recipePrompt: recipe,
+    globalRecipePrompt: globalRecipe,
     supplementText: supplement,
     selectedImageIndex: selIdx,
     genMode: mode
@@ -5758,6 +5811,7 @@ function restorePromptContent(itemOrText, optionalTray) {
   let targetText = '';
   let targetTray = [];
   let targetRecipe = '';
+  let targetGlobalRecipe = '';
   let targetSupplement = '';
   let targetSelIdx = 0;
 
@@ -5765,6 +5819,7 @@ function restorePromptContent(itemOrText, optionalTray) {
     targetText = itemOrText.text || '';
     targetTray = itemOrText.tray || [];
     targetRecipe = itemOrText.recipePrompt || '';
+    targetGlobalRecipe = itemOrText.globalRecipePrompt || '';
     targetSupplement = itemOrText.supplementText || '';
     targetSelIdx = itemOrText.selectedImageIndex ?? 0;
   } else {
@@ -5799,6 +5854,7 @@ function restorePromptContent(itemOrText, optionalTray) {
   }
 
   recipePrompt.value = targetRecipe;
+  globalRecipePrompt.value = targetGlobalRecipe;
 
   // 3. 清空并恢复富文本编辑器
   if (!richEditorRef.value) return;
@@ -5854,6 +5910,7 @@ function handleEditorArrowKey(direction) {
         text: getFullPromptText(),
         supplementText: getRawEditorText(),
         recipePrompt: recipePrompt.value || '',
+        globalRecipePrompt: globalRecipePrompt.value || '',
         tray: JSON.parse(JSON.stringify(referenceTray.value || [])),
         selectedImageIndex: selectedImageIndex.value || 0
       };
@@ -6607,6 +6664,7 @@ async function selectSession(s) {
   if (currentSessionId.value && currentSessionId.value !== s.id) {
     sessionDrafts.set(currentSessionId.value, {
       recipePrompt: recipePrompt.value || '',
+      globalRecipePrompt: globalRecipePrompt.value || '',
       editorHtml: richEditorRef.value ? richEditorRef.value.innerHTML : '',
       referenceTray: JSON.parse(JSON.stringify(referenceTray.value || [])),
       selectedImageIndex: selectedImageIndex.value || 0,
@@ -6623,6 +6681,7 @@ async function selectSession(s) {
   if (sessionDrafts.has(s.id)) {
     const draft = sessionDrafts.get(s.id);
     recipePrompt.value = draft.recipePrompt || '';
+    globalRecipePrompt.value = draft.globalRecipePrompt || '';
     if (richEditorRef.value) {
       richEditorRef.value.innerHTML = draft.editorHtml || '';
     }
@@ -6630,6 +6689,7 @@ async function selectSession(s) {
     selectedImageIndex.value = draft.selectedImageIndex || 0;
   } else {
     recipePrompt.value = '';
+    globalRecipePrompt.value = '';
     resetComposerState();
     selectedImageIndex.value = 0;
   }
@@ -6707,6 +6767,7 @@ async function selectSession(s) {
               }));
           pushPromptHistory(userPrompt, trayItems, {
             recipePrompt: m.params?.recipePrompt || '',
+            globalRecipePrompt: m.params?.globalRecipePrompt || '',
             supplementText: m.params?.supplementText || '',
             selectedImageIndex: m.params?.selectedImageIndex || 0,
             genMode: m.params?.genMode || m.mode || ''
@@ -6758,6 +6819,7 @@ async function selectSession(s) {
 function resetComposerState() {
   if (richEditorRef.value) richEditorRef.value.innerHTML = '';
   recipePrompt.value = '';
+  globalRecipePrompt.value = '';
   referenceTray.value = [];
   sessionRefPool.value = [];
   activeSkillIds.value = [];
@@ -6768,11 +6830,12 @@ function resetComposerState() {
 async function createNewSession(opts = {}) {
   const currentDraft = {
     recipePrompt: recipePrompt.value || '',
+    globalRecipePrompt: globalRecipePrompt.value || '',
     editorHtml: richEditorRef.value ? richEditorRef.value.innerHTML : '',
     referenceTray: JSON.parse(JSON.stringify(referenceTray.value || [])),
     selectedImageIndex: selectedImageIndex.value || 0,
   };
-  const hasActiveContent = currentDraft.referenceTray.length > 0 || currentDraft.recipePrompt || (currentDraft.editorHtml && currentDraft.editorHtml.trim());
+  const hasActiveContent = currentDraft.referenceTray.length > 0 || currentDraft.recipePrompt || currentDraft.globalRecipePrompt || (currentDraft.editorHtml && currentDraft.editorHtml.trim());
 
   if (currentSessionId.value) {
     sessionDrafts.set(currentSessionId.value, currentDraft);
@@ -7370,6 +7433,7 @@ async function sendMessage() {
   // 记录提示词与附带的参考图历史（支持键盘上下键自动召回）
   pushPromptHistory(rawContent, currentTray, {
     recipePrompt: recipePrompt.value || '',
+    globalRecipePrompt: globalRecipePrompt.value || '',
     supplementText: getRawEditorText() || '',
     selectedImageIndex: selectedImageIndex.value || 0,
     genMode: currentMod
@@ -7467,6 +7531,7 @@ async function sendMessage() {
     richEditorRef.value.innerHTML = '';
   }
   recipePrompt.value = '';
+  globalRecipePrompt.value = '';
   // 规范：发送之后看图区里的图保留，不执行 referenceTray = []
   optimizeUndo.value = null;
   generating.value = true;
@@ -7475,6 +7540,7 @@ async function sendMessage() {
   if (targetSessionId) {
     sessionDrafts.set(targetSessionId, {
       recipePrompt: '',
+      globalRecipePrompt: '',
       editorHtml: '',
       referenceTray: JSON.parse(JSON.stringify(currentTray || [])),
       selectedImageIndex: selectedImageIndex.value || 0,
@@ -7495,6 +7561,7 @@ async function sendMessage() {
         model: retryModel,
         refs: currentTray,
         recipePrompt: recipePrompt.value || '',
+        globalRecipePrompt: globalRecipePrompt.value || '',
         supplementText: getRawEditorText() || '',
         selectedImageIndex: selectedImageIndex.value || 0,
         genMode: currentMod,

@@ -453,7 +453,7 @@
     <div class="p-3 border-t border-studio-800 bg-studio-950/80 flex items-center justify-between text-xs shrink-0">
       <div class="flex items-center gap-1.5 text-[11px] text-emerald-400 font-medium">
         <StudioIcon name="check" :size="13" />
-        <span>已写入配方句，发送前可以改</span>
+        <span>已叠加进配方句（不覆盖图片编辑），发送前可以改</span>
       </div>
       <button
         v-if="recipePrompt"
@@ -461,7 +461,7 @@
         @click="clearRecipe"
         class="text-[11px] text-slate-400 hover:text-rose-400 font-bold underline cursor-pointer transition-colors"
       >
-        清空配方
+        清空全局操作
       </button>
     </div>
   </aside>
@@ -583,6 +583,10 @@ function getLightSentence() {
 function onLightChange() {
   if (currentTab.value === 'style' && activeStyleName.value) {
     writeStyleRecipe(activeStyleName.value, customizedStyleDesc.value);
+  } else if (currentTab.value === 'space' && blocks.space) {
+    // 换空间句是一次确认生成的，仅随光照微调重写其光照尾句
+    blocks.space = replaceLightTail(blocks.space, getLightSentence());
+    syncGlobalRecipe();
   } else if (currentTab.value === 'upscale' && activeUpscale.value) {
     selectUpscale(activeUpscale.value);
   } else if (currentTab.value === 'watermark') {
@@ -590,25 +594,64 @@ function onLightChange() {
   }
 }
 
-// Tab 切换（换空间与风格同级、互斥）
-function selectTab(tab) {
-  currentTab.value = tab;
-  if (tab === 'space') {
-    // 选换空间清掉风格句
+// 全局操作按「操作类型」分块保存：图片局部编辑配方在父组件独立维护，
+// 这里输出的是全局操作配方，两者在发送时叠加，绝不互相替换。
+const blocks = reactive({ style: '', space: '', upscale: '', watermark: '' });
+
+function stripLightTail(sentence) {
+  return String(sentence || '').replace(/\n?(?:保持原图的主光方向和阴影形状。|主光来自[^\n]*色温约\s*\d+K。)\s*$/g, '').trim();
+}
+
+function replaceLightTail(sentence, light) {
+  const core = stripLightTail(sentence);
+  return light ? `${core}\n${light}` : core;
+}
+
+function composeGlobalRecipe() {
+  return ['style', 'space', 'upscale', 'watermark']
+    .map((k) => (blocks[k] || '').trim())
+    .filter(Boolean)
+    .join('\n');
+}
+
+function syncGlobalRecipe() {
+  emit('update:recipePrompt', composeGlobalRecipe());
+}
+
+// 父组件在「清空配方 / 发送后 / 切换会话」时会把 v-model 置空，
+// 此时一并复位抽屉内部各操作块与选中态（但切换 Tab 不清空，保证叠加）。
+watch(() => props.recipePrompt, (val) => {
+  if (!val && (blocks.style || blocks.space || blocks.upscale || blocks.watermark)) {
+    blocks.style = '';
+    blocks.space = '';
+    blocks.upscale = '';
+    blocks.watermark = '';
     activeStyleId.value = '';
     activeStyleName.value = '';
     activeSchemeId.value = '';
-    emit('update:recipePrompt', '');
-  } else if (tab === 'style') {
-    // 选风格清掉换空间句
-    emit('update:recipePrompt', '');
+    activeUpscale.value = '';
+  }
+});
+
+// Tab 切换：风格与换空间语义互斥（替换各自的块），但超分/去水印/图片局部编辑一律保留叠加
+function selectTab(tab) {
+  const prevTab = currentTab.value;
+  currentTab.value = tab;
+  if (tab === 'space' && prevTab !== 'space') {
+    // 进入换空间：移除风格块（互斥），其余操作保留
+    blocks.style = '';
+    activeStyleId.value = '';
+    activeStyleName.value = '';
+    activeSchemeId.value = '';
+    syncGlobalRecipe();
+  } else if (tab === 'style' && prevTab !== 'style') {
+    // 进入风格：移除换空间块（互斥），若之前选过风格则回填
+    blocks.space = '';
     if (activeStyleName.value) {
       writeStyleRecipe(activeStyleName.value, customizedStyleDesc.value);
+    } else {
+      syncGlobalRecipe();
     }
-  } else if (tab === 'upscale' && activeUpscale.value) {
-    selectUpscale(activeUpscale.value);
-  } else if (currentTab.value === 'watermark') {
-    selectWatermark();
   }
 }
 
@@ -686,7 +729,8 @@ async function applyScheme(st, scheme, forceMount = false) {
       if (isMount) {
         // 多图参考模式 (精准质感)
         const sentence = `${data.prompt_multimodal || data.prompt}${light ? `\n${light}` : ''}`;
-        emit('update:recipePrompt', sentence);
+        blocks.style = sentence;
+        syncGlobalRecipe();
         if (Array.isArray(data.refs) && data.refs.length > 0) {
           emit('mount-refs', data.refs.map(r => ({
             name: r.name || `${scheme.name_zh}_材质`,
@@ -696,7 +740,8 @@ async function applyScheme(st, scheme, forceMount = false) {
       } else {
         // 纯文本轻量配方模式 (默认快速)
         const sentence = `${data.prompt_text || data.prompt}${light ? `\n${light}` : ''}`;
-        emit('update:recipePrompt', sentence);
+        blocks.style = sentence;
+        syncGlobalRecipe();
         emit('unmount-material-refs');
       }
     }
@@ -724,7 +769,8 @@ function writeStyleRecipe(styleName, desc) {
   const cleanDesc = (desc || '').trim();
   const light = getLightSentence();
   const sentence = `将${tag}改为${styleName}。${cleanDesc ? `${cleanDesc}。` : ''}保持原有空间结构、构图和主要家具位置。${light ? `\n${light}` : ''}`;
-  emit('update:recipePrompt', sentence);
+  blocks.style = sentence;
+  syncGlobalRecipe();
 }
 
 // 换空间：整图结构化识别与 Lab 色差推荐
@@ -795,7 +841,8 @@ function confirmSpaceTransferRecipe() {
   });
   const light = getLightSentence();
   const sentence = `将${tag}转换为${spaceObj.label}。不要照拷原图的门窗、构图和主要家具位置，在新空间中沿用原图各表面的材质与色彩：${lines.join('；')}。${light ? `\n${light}` : ''}`;
-  emit('update:recipePrompt', sentence);
+  blocks.space = sentence;
+  syncGlobalRecipe();
 
   // 把确认选中的材质图挂进看图区托盘
   const chosenRefs = spaceSurfaces.value
@@ -814,22 +861,28 @@ function selectUpscale(scale) {
   const tag = props.targetTag || '@图1';
   const light = getLightSentence();
   const sentence = `将${tag}的清晰度提升到${scale}。只增强清晰度，不改变构图、物体、材质和颜色。${light ? `\n${light}` : ''}`;
-  emit('update:recipePrompt', sentence);
+  blocks.upscale = sentence;
+  syncGlobalRecipe();
 }
 
 function selectWatermark() {
   const tag = props.targetTag || '@图1';
   const light = getLightSentence();
   const sentence = `去除${tag}中的水印和标识。其余画面保持不变。${light ? `\n${light}` : ''}`;
-  emit('update:recipePrompt', sentence);
+  blocks.watermark = sentence;
+  syncGlobalRecipe();
 }
 
 function clearRecipe() {
-  emit('update:recipePrompt', '');
+  blocks.style = '';
+  blocks.space = '';
+  blocks.upscale = '';
+  blocks.watermark = '';
   activeStyleId.value = '';
   activeStyleName.value = '';
   activeSchemeId.value = '';
   activeUpscale.value = '';
+  syncGlobalRecipe();
 }
 
 onMounted(() => {
