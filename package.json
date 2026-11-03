@@ -39,6 +39,11 @@
         "ctl": "node scripts/mls-ctl.js",
         "contract": "node scripts/gen-contract-manifest.js",
         "contract:check": "node scripts/gen-contract-manifest.js --check",
-        "test": "node test/suite.js && node test/e2e.js && node test/ai-tasks.test.js && node test/lab.test.js && node test/quick-pipeline.test.js && node test/portrait-music.test.js && node test/admin-model.test.js && node test/creation-templates-since.test.js && node test/crop-selection-interior.test.js && node test/classify-parse.test.js && node test/base-library-compile.test.js && node test/base-library-list.test.js && node test/base-library-flags.test.js && node test/base-library-prefill.test.js && node test/paint-alias.test.js && node test/paint-mirror-upsert.test.js && node test/auto-adaptive-dispatch.test.js && node test/base-items-pinned-use.test.js && node test/scheme-apply.test.mjs && node test/space-filter.test.mjs && node test/scheme-browse.test.mjs && node test/cascade-fallback-store.test.js && node test/classify-part.test.js && node test/e2e-all-suites.test.js && node test/stress-m2-corner-cases.test.js && node test/v4-e2e-verification.test.js"
+        "test": "node test/run-tests.js",
+        "test:unit": "node test/run-tests.js unit",
+        "test:security": "node test/run-tests.js security",
+        "test:integration": "node test/run-tests.js integration",
+        "test:e2e": "node test/run-tests.js e2e",
+        "test:list": "node test/run-tests.js --list"
     }
 }

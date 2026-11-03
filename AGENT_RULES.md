@@ -42,7 +42,7 @@ MaterialLibraryServer/
 │       │   ├── LibraryView.vue   # 素材库 (DAM 大资产生态 + 基础素材四板块瀑布流)
 │       │   ├── StudioView.vue    # 空间创作 (对话式生成 + 6大精准模式控制台)
 │       │   ├── MediaHubView.vue  # 媒体多轨剪辑与 FFmpeg 工具箱
-│       │   └── SettingsView.vue  # 系统设置与双通道灰度发布
+│       │   └── SettingsView.vue  # 系统设置（App 包灰度/应用更新管理；遗留 web 灰测面板已退役）
 │       └── components/           # 通用原子 UI 组件
 │
 ├── scripts/                      # 【运维与数据自动化】工具集
@@ -112,3 +112,17 @@ npm --prefix web-pro run build
 wsl -e bash -lc "cd /mnt/c/Users/lrp/DevEcoStudioProjects/MaterialLibraryServer && node scripts/build-base-library.js"
 ```
 脚本会自动以原子事务安全写入 WSL 生产库 `/home/lrp/.dsh-material-library/material.db`（带 15 秒并发防锁重试），并输出各使用面的挂载统计，前台网页立刻即可检索到全量内容。
+
+### 4. 统一控制面（mls-ctl / service-hub）
+- 跨端操作一律走 `scripts/mls-ctl.js`（`npm run ctl -- <命令>`）或 http://127.0.0.1:3790/ 面板；不要自行 spawn Windows-node 占用 30001/30002（那是 WSL 正式端，会制造第三数据平面）。
+- 分支验证只用 **test worktree 通道**（30000/30003，独立数据目录）：`npm run ctl -- start test`；发布 `promote test` 默认 dry-run，`--execute` 才合并并**同时重启 30001 与 30002**。
+- 遗留同树 gray 通道 2026-11-03 已退役（`archive/gray-retired-20261103/`）；`APP_CHANNEL=gray` 字符串仅被 test 通道借用于抑制 worker/自重启，不对应任何 gray 代码。
+
+### 5. 测试门禁（所有提交必过）
+```bash
+npm test            # test/run-tests.js 显式清单：unit/security/integration/e2e，全离线
+npm run contract    # 生成 docs/contract-manifest.json（三端契约，自检基线防扫描器失效）
+```
+- 新测试必须登记进 `test/run-tests.js` 的 MANIFEST：独立子进程可跑、只用临时 `ML_DATA_DIR` 与回环临时端口、禁止外网依赖；`test-tier1~4` 是 e2e-all-suites 子套件，不单独登记。
+- 每批改动的门槛：改动文件 `node --check` + `npm test` 全绿后才可提交。
+

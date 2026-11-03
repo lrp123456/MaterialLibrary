@@ -59,6 +59,14 @@ POST /api/viewer/auth/login <账号>/<口令>
 POST /api/auth/login <账号>/<口令>
 ```
 
+测试与契约：
+
+```text
+npm test             # 显式清单运行器（unit/security/integration/e2e 共 51 项，全离线）
+npm run test:unit    # 分类运行；npm run test:list 查看清单
+npm run contract     # 重新生成 docs/contract-manifest.json（三端路由×消费端契约）
+```
+
 ## 分支通道与发布（test worktree → 正式）
 
 遗留的同树灰测通道（src/gray.js + scripts/gray-release.js + dist-gray）已于

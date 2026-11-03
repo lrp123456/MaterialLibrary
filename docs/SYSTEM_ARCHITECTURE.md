@@ -30,7 +30,7 @@ Material Studio Pro 采用 **Windows 桌面交互宿主 + WSL (Ubuntu) 原生算
 |                               WSL (Ubuntu 22.04 LTS)                              |
 |                                                                                   |
 |  +-----------------------------------------------------------------------------+  |
-|  |                  30001 端口核心后端服务 (src/server.js)                      |  |
+|  |            30001 端口核心后端服务 (根 server.js + src/api.js)                |  |
 |  |  - 业务控制器 (DAM / BaseLibrary / Studio / Clip / Push / Auth)             |  |
 |  |  - AI 生成管线 (EdgeSAM / LiteLLM / Agnes 任务调度)                          |  |
 |  |  - 多媒体流处理 (FFmpeg / Demucs 音频分离 / Whisper 语音识别)                |  |
@@ -53,9 +53,12 @@ Material Studio Pro 采用 **Windows 桌面交互宿主 + WSL (Ubuntu) 原生算
 
 | 端口 | 服务名称 | 进程入口 | 作用与对外协议 |
 | :--- | :--- | :--- | :--- |
-| **`30001`** | **Core API Server** | `src/server.js` | WSL 内部业务中枢，处理所有 REST API、WebSocket（`/api/push`）、语音流（`/api/asr/stream`） |
-| **`30002`** | **Desktop Web Gateway** | `web-pro/server.cjs` | 桌面端统一服务入口。托管 `web-pro/dist` 静态资源，同时透明反向代理 `/api/*` 到 30001 |
+| **`30001`** | **Core API Server（正式）** | 根 `server.js`（路由主体 `src/api.js`） | 仅在 WSL 内由 watchdog 拉起，处理所有 REST API、WebSocket（`/api/push`）、语音流（`/api/asr/stream`） |
+| **`30002`** | **Desktop Web Gateway（正式）** | `web-pro/server.cjs` | 桌面端统一服务入口。托管 `web-pro/dist` 静态资源，同时透明反向代理 `/api/*` 到 30001 |
 | **`3010`**  | **Editor Sub-app** | `editor/apps/web` | Next.js 剪辑子应用（basePath=`/editor`），由 30002 网关统一反向代理提供给主应用嵌入 |
+| `30000` / `30003` | **test worktree 通道** | `../MaterialLibraryServer-test`（git worktree，Windows node） | 分支验证通道，独立数据目录 `~/.dsh-material-library-test`，与正式端端口/数据双隔离；由 `scripts/branch-channel.js` 管理。遗留同树 gray 通道已于 2026-11-03 退役 |
+| `3790` | **Service Hub 控制面板** | `service-hub/server.js` | 仅 127.0.0.1 的治理面板：服务状态、通道与发布、三端契约。变更类 POST 无 CORS + Host 白名单防 DNS rebind |
+| `3789` | **Pack Studio** | `pack-studio/launch.js` | APK/wgt 打包与 App 灰度推送工作台 |
 
 ---
 
@@ -108,6 +111,15 @@ cd /mnt/c/Users/lrp/DevEcoStudioProjects/MaterialLibraryServer
 ./start.sh restart
 ```
 
+跨端统一控制走 `scripts/mls-ctl.js`（Windows / WSL 通用，零依赖）：
+```bash
+npm run status                       # 一屏总览：web 通道 / app 发布 / 各端口探活
+npm run ctl -- start test            # test worktree 通道（30000/30003，数据隔离）
+npm run ctl -- promote test          # 默认 dry-run；--execute 合并并同时重启 30001+30002
+```
+图形化入口：Service Hub 面板 http://127.0.0.1:3790/（「通道与发布」「三端对接契约」标签页）。
+详见 `docs/branch-channels.md`。
+
 ### 4.2 前端构建
 ```powershell
 # 在 Windows 终端执行：
@@ -122,5 +134,12 @@ node scripts/build-base-library.js
 
 ### 4.4 自动化测试回归
 ```bash
-npm test
+npm test                 # 显式清单运行器 test/run-tests.js：51 项，离线，约 40s
+npm run test:unit        # 只跑单元（16）
+npm run test:security    # 鉴权/凭据隔离/对抗（4）
+npm run test:integration # 临时库与 127.0.0.1 临时端口集成（28）
+npm run test:e2e         # 真实 HTTP 端到端（3）
+npm run test:list        # 查看清单
 ```
+新测试必须登记进 `test/run-tests.js` 的 MANIFEST 才进门禁；要求：独立子进程可跑、
+只用临时 `ML_DATA_DIR` 与回环临时端口、不依赖外网。
