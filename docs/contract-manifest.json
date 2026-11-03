@@ -1,0 +1,7181 @@
+{
+  "generatedAt": "2026-11-03T07:23:01.780Z",
+  "generator": "scripts/gen-contract-manifest.js",
+  "counts": {
+    "routes": 374,
+    "routesExact": 242,
+    "routesPrefix": 6,
+    "routesRegex": 126,
+    "adminGuarded": 158,
+    "whitelist": 138,
+    "whitelistDuplicated": 2,
+    "clients": {
+      "web": 129,
+      "web-pro": 102,
+      "app-uniapp": 35,
+      "harmony": 2
+    },
+    "findings": 27,
+    "bySeverity": {
+      "high": 1,
+      "medium": 22,
+      "low": 4
+    }
+  },
+  "routes": [
+    {
+      "file": "src/api.js",
+      "line": 1581,
+      "method": "*",
+      "kind": "exact",
+      "pattern": "/viewer",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1581,
+      "method": "*",
+      "kind": "prefix",
+      "pattern": "/viewer/",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1592,
+      "method": "*",
+      "kind": "prefix",
+      "pattern": "/governance/",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1594,
+      "method": "*",
+      "kind": "exact",
+      "pattern": "/skills/create",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1597,
+      "method": "*",
+      "kind": "prefix",
+      "pattern": "/v1/gen/",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1602,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/health",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1602,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/api/health",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1607,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/events",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1659,
+      "method": "*",
+      "kind": "exact",
+      "pattern": "/asr/status",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1659,
+      "method": "*",
+      "kind": "exact",
+      "pattern": "/asr/transcribe",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1667,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/gray/status",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1677,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/gray/publish",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 1694,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/gray/publish",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1704,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/system/restart",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1733,
+      "method": "*",
+      "kind": "prefix",
+      "pattern": "/portrait-library",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1744,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/frames\\/([^/]+)\\/([^/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1744,
+      "method": "HEAD",
+      "kind": "regex",
+      "pattern": "^\\/frames\\/([^/]+)\\/([^/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1754,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/auth/login",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1770,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/auth/logout",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1777,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/app/update",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1797,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/app/update/state",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1805,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/app\\/update\\/files\\/([^\\/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1840,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/library/catalog",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1849,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/dict/menu-tree",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1858,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/studio/schema",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1870,
+      "method": "*",
+      "kind": "exact",
+      "pattern": "/studio/catalog",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1870,
+      "method": "*",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/items\\/[^\\/]+\\/(preview|scene)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1870,
+      "method": "*",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/materials\\/[^\\/]+\\/preview$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1870,
+      "method": "*",
+      "kind": "regex",
+      "pattern": "^\\/products\\/(previews|models)\\/[^\\/]+$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1873,
+      "method": "*",
+      "kind": "regex",
+      "pattern": "^\\/assets\\/([^\\/]+)\\/(?:image|file)(?:\\/([^\\/]+))?$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1874,
+      "method": "*",
+      "kind": "regex",
+      "pattern": "^\\/ai\\/masks\\/([^\\/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1875,
+      "method": "*",
+      "kind": "regex",
+      "pattern": "^\\/cache\\/temp\\/([^\\/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1888,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/auth/me",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1893,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/studio/presets",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1903,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/studio/presets",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 1914,
+      "method": "DELETE",
+      "kind": "regex",
+      "pattern": "^\\/studio\\/presets\\/([^\\/]+)$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 1940,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/tools/upload",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1951,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/tools/extract-frames",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 1980,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/tools/lip-sync/status",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2005,
+      "method": "GET",
+      "kind": "prefix",
+      "pattern": "/tools/lip-sync/tasks/",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2013,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/tools/lip-sync",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2103,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/tools/convert-video",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2143,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/studio/catalog",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2159,
+      "method": "DELETE",
+      "kind": "regex",
+      "pattern": "^\\/assets\\/([^\\/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2185,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/assets\\/([^\\/]+)\\/delete$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2210,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/assets/batch-delete",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2239,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/assets/blacklist",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 2250,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/assets/trash",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2267,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/assets\\/trash\\/([^/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2280,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/assets\\/([^\\/]+)\\/favorite$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2296,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/assets\\/([^\\/]+)\\/library-prep$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2310,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/assets/trash/rehome-gate",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 2321,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/assets/shelf",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2337,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/assets/classify",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2374,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/assets/retag",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2398,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/assets/from-generation",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2410,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/assets/trash/restore",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2424,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/assets/trash/purge",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 2439,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/assets/similarity-workbench",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2453,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/assets/similarity-workbench/resolve",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 2465,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/assets/similarity-workbench/clean-exact",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 2476,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/assets/similarity-workbench/ignored",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2486,
+      "method": "DELETE",
+      "kind": "exact",
+      "pattern": "/assets/similarity-workbench/ignored",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 2499,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/assets/dedupe-scan",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2636,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/rejected",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2647,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/rejected\\/([^\\/]+)\\/restore$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2665,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/rejected/restore-batch",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2682,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/rejected\\/([^\\/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2695,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/gateway/config",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2706,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/assets/dedupe-library",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2734,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/auth/quark-status",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2738,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/auth/quark-login",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 2745,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/auth/quark-install",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 2763,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/auth/reset",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 2774,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/assets",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2781,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/assets/timeline-days",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2820,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/stats",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2825,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/snapshot",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2841,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/sync/reconcile",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2841,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/sync/reconcile",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2875,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/sync/upload",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2887,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/sync/chunk",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2902,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/sync/complete",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2922,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/presets",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 2927,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/presets",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 2939,
+      "method": "DELETE",
+      "kind": "regex",
+      "pattern": "^\\/presets\\/([^\\/]+)$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 2951,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/app/update",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 2963,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/app/update/quick-push",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 2977,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/app/update/upload",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 3044,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/app/update/state",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 3054,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/app/update/promote",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 3065,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/app/update/revoke-canary",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 3077,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/lab/capabilities",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 3088,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/lab/model-caps",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 3106,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/lab/quick-models",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 3138,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/lab/filter-vocabulary",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 3152,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/lab/gate-preview",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 3172,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/lab/stale-tags",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 3196,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/lab/local-models",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 3207,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/lab\\/local-models\\/([^\\/]+)\\/download$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 3254,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/lab/runs",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 3299,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/lab\\/runs\\/([^\\/]+)\\/([^\\/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 3314,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/process\\/jobs\\/([^\\/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 3337,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/chat/sessions",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 3354,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/chat/sessions",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 3369,
+      "method": "DELETE",
+      "kind": "regex",
+      "pattern": "^\\/chat\\/sessions\\/([^\\/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 3380,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/chat/messages",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 3402,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/chat/messages",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 3487,
+      "method": "DELETE",
+      "kind": "exact",
+      "pattern": "/chat/messages",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 3496,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/chat/optimize-prompt",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 3581,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/creation-templates",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 3803,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/creation-templates",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 3870,
+      "method": "PATCH",
+      "kind": "regex",
+      "pattern": "^\\/creation-templates\\/([^\\/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 3989,
+      "method": "DELETE",
+      "kind": "regex",
+      "pattern": "^\\/creation-templates\\/([^\\/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 4019,
+      "method": "*",
+      "kind": "prefix",
+      "pattern": "/base-library/",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 4032,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/ai/segment",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 4032,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/ai/detect",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 4182,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/products/presets",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 4237,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/(?:viewer\\/)?products\\/previews\\/([^\\/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 4263,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/thumbs\\/([^\\/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 4263,
+      "method": "HEAD",
+      "kind": "regex",
+      "pattern": "^\\/thumbs\\/([^\\/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 4324,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/(?:viewer\\/)?products\\/models\\/([^\\/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 4353,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/products/upload",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 4474,
+      "method": "PUT",
+      "kind": "regex",
+      "pattern": "^\\/products\\/presets\\/([^\\/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 4474,
+      "method": "PATCH",
+      "kind": "regex",
+      "pattern": "^\\/products\\/presets\\/([^\\/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 4474,
+      "method": "DELETE",
+      "kind": "regex",
+      "pattern": "^\\/products\\/presets\\/([^\\/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 4548,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/products\\/presets\\/([^\\/]+)\\/snapshots?$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 4629,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/assets\\/([^\\/]+)\\/process$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 4629,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/assets\\/([^\\/]+)\\/process$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 4652,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/ai\\/masks\\/([^\\/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 4665,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/ai/upload",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 4686,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/ai/capabilities",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 4692,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/exports/register",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 4731,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/edit/run",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 4820,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/custom-styles",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 4829,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/custom-styles",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 4845,
+      "method": "PUT",
+      "kind": "regex",
+      "pattern": "^\\/custom-styles\\/([^/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 4845,
+      "method": "DELETE",
+      "kind": "regex",
+      "pattern": "^\\/custom-styles\\/([^/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 4873,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/ai/style/analyze",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 4902,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/ai/expand-jimeng",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 4980,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/ai/vlm-describe",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 5018,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/ai/walkthrough/infer-topology",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 5037,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/ai/walkthrough/generate-3d",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 5050,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/ai/walkthrough/confirm-topology",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 5072,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/ai/walkthrough/infer-sequence",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 5089,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/ai/walkthrough/confirm-sequence",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 5123,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/ai/tasks",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 5144,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/ai\\/tasks\\/([^\\/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 5154,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/assets\\/([^\\/]+)\\/ai\\/tasks$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 5167,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/assets\\/([^\\/]+)\\/poster$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 5167,
+      "method": "HEAD",
+      "kind": "regex",
+      "pattern": "^\\/assets\\/([^\\/]+)\\/poster$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 5259,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/assets\\/([^\\/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 5276,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/assets\\/([^\\/]+)\\/similar$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 5285,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/assets\\/([^\\/]+)\\/quality$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 5314,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/assets\\/([^\\/]+)\\/tags$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 5323,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/assets\\/([^\\/]+)\\/restage$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 5439,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/assets\\/([^\\/]+)\\/(image|file|video)(?:\\/([^\\/]+))?$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 5439,
+      "method": "HEAD",
+      "kind": "regex",
+      "pattern": "^\\/assets\\/([^\\/]+)\\/(image|file|video)(?:\\/([^\\/]+))?$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 5892,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/cache\\/temp\\/([^/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 5892,
+      "method": "HEAD",
+      "kind": "regex",
+      "pattern": "^\\/cache\\/temp\\/([^/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 5943,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/scan",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 5952,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/workflows\\/([^\\/]+)$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6006,
+      "method": "PUT",
+      "kind": "exact",
+      "pattern": "/workflows/video",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6025,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/workflows/video/start",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6053,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/workflows/video/assets",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6082,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/workflows/catalog",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6088,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/workflows",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6107,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/settings/runtime-config",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6113,
+      "method": "PUT",
+      "kind": "exact",
+      "pattern": "/settings/runtime-config",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6113,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/settings/runtime-config",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6122,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/runs",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6250,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/runs",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6265,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/runs\\/([^\\/]+)\\/graph$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6416,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/runs\\/([^\\/]+)$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6477,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/runs\\/([^\\/]+)\\/unpack$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6546,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/runs\\/([^\\/]+)\\/rerun-gen$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6647,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/runs\\/([^\\/]+)\\/assets\\/([^\\/]+)$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6673,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/exceptions",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6816,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/exceptions\\/(\\d+)\\/retry$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6826,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/adapters",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6868,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/adapters",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6887,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/adapters\\/([^\\/]+)\\/toggle$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6896,
+      "method": "DELETE",
+      "kind": "regex",
+      "pattern": "^\\/adapters\\/([^\\/]+)$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6907,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/adapters/test",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6937,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/providers",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6943,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/providers/newapi/models",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6963,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/providers/env-keys",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6969,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/providers/env-secrets",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6983,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/providers/env-secrets",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 6995,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/providers",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7007,
+      "method": "DELETE",
+      "kind": "regex",
+      "pattern": "^\\/providers\\/([^\\/]+)$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7020,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/providers\\/([^\\/]+)\\/toggle$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7035,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/providers/litellm/toggle-batch",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7044,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/models",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7052,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/models",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7064,
+      "method": "DELETE",
+      "kind": "regex",
+      "pattern": "^\\/models\\/([^\\/]+)$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7073,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/models\\/([^\\/]+)\\/toggle$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7083,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/models\\/([^\\/]+)\\/test$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7097,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/models/sync-litellm",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7111,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/runs/retry-all-failed",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7163,
+      "method": "PUT",
+      "kind": "exact",
+      "pattern": "/gateway/config",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7163,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/gateway/config",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7175,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/gateway/purge",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7187,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/gateway/regurgitate",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7203,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/assets\\/([^\\/]+)\\/main-derivative$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 7221,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/assets/ingest",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7258,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/tag-vocab",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 7271,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/ba-resource/pull",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7287,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/ba-resource/recent",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7300,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/settings/backup",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7305,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/settings/backup",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7313,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/snapshot-status",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7337,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/sync-log",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7350,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/vectors/status",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 7363,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/vectors/recompute",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7425,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/runs/restage-backfill",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7434,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/governance/gen-models",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7443,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/governance/litellm-groups",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7459,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/governance\\/litellm-groups\\/([^/]+)\\/members$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7477,
+      "method": "DELETE",
+      "kind": "regex",
+      "pattern": "^\\/governance\\/litellm-groups\\/([^/]+)\\/members\\/([^/]+)$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7493,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/governance/gen-models/preview-convert",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7530,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/governance/gen-models",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7542,
+      "method": "PUT",
+      "kind": "regex",
+      "pattern": "^\\/governance\\/gen-models\\/([^/]+)\\/schema$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7553,
+      "method": "DELETE",
+      "kind": "regex",
+      "pattern": "^\\/governance\\/gen-models\\/([^/]+)$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7565,
+      "method": "PUT",
+      "kind": "regex",
+      "pattern": "^\\/governance\\/gen-models\\/([^/]+)\\/polish$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7577,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/governance\\/gen-models\\/([^/]+)\\/toggle$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7593,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/governance\\/gen-models\\/([^/]+)\\/polish\\/reset$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7605,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/governance/workflows",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7614,
+      "method": "PUT",
+      "kind": "exact",
+      "pattern": "/governance/workflows",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7614,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/governance/workflows",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7627,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/governance/prompts",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7636,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/governance/prompts",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7647,
+      "method": "DELETE",
+      "kind": "regex",
+      "pattern": "^\\/governance\\/prompts\\/([^/]+)$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7659,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/governance\\/prompts\\/([^/]+)\\/restore$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7673,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/governance/mount-points",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7682,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/governance/mount-points",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7693,
+      "method": "DELETE",
+      "kind": "regex",
+      "pattern": "^\\/governance\\/mount-points\\/([^/]+)$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7705,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/governance\\/mount-points\\/([^/]+)\\/modules$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7705,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/governance\\/mount-points\\/([^/]+)\\/modules$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7728,
+      "method": "DELETE",
+      "kind": "regex",
+      "pattern": "^\\/governance\\/mount-points\\/([^/]+)\\/modules\\/([^/]+)$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7740,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/governance\\/mount-points\\/([^/]+)\\/reorder$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7754,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/governance/operators",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7764,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/governance/dict-macros",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7774,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/governance/snippets",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7783,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/governance/snippets",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7794,
+      "method": "DELETE",
+      "kind": "regex",
+      "pattern": "^\\/governance\\/snippets\\/([^/]+)$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7806,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/governance\\/snippets\\/([^/]+)\\/restore$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7819,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/governance/prompts/preview-compile",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 7850,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/governance/sandbox/run-node",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 8017,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/governance\\/mount-points\\/([^/]+)\\/execute$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 8077,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/governance/gen-jobs",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 8085,
+      "method": "PUT",
+      "kind": "regex",
+      "pattern": "^\\/governance\\/gen-jobs\\/([^/]+)$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 8096,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/governance\\/gen-jobs\\/([^/]+)\\/reset$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 8108,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/governance/manual-defaults",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 8116,
+      "method": "PUT",
+      "kind": "exact",
+      "pattern": "/governance/manual-defaults",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 8128,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/governance/draft-from-doc",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 8145,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/governance/skill-drafts",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 8195,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/governance/skill-drafts",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 8279,
+      "method": "PUT",
+      "kind": "regex",
+      "pattern": "^\\/governance\\/skill-drafts\\/([^/]+)$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 8279,
+      "method": "DELETE",
+      "kind": "regex",
+      "pattern": "^\\/governance\\/skill-drafts\\/([^/]+)$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 8316,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/governance\\/skill-drafts\\/([^/]+)\\/accept$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 8328,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/governance\\/models\\/([^/]+)\\/deprecate-skill$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 8343,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/studio/color-schemes",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 8365,
+      "method": "PUT",
+      "kind": "exact",
+      "pattern": "/studio/color-schemes",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 8408,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/chat/suggest-prompts",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 8473,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/gen/preview",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 8549,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/gen/images",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 8654,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/gen/videos",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 8772,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/gen/audio",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 8829,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/gen/chat",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 8918,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/skills/create",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 8931,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/dict",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 8940,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/dict",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 8950,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/dict/deprecate",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 8960,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/dict/restore",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 8970,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/dict/retag/estimate",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 8981,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/dict/retag",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 9008,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/dict/retag/jobs",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 9012,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/dict/audit",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 9017,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/dict/draft-criteria",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 9022,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/dict\\/audit\\/(\\d+)\\/assets$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 9027,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/assets\\/([^\\/]+)\\/tag-history$",
+      "admin": true
+    },
+    {
+      "file": "src/api.js",
+      "line": 9035,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/users",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 9041,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/users",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 9054,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/users\\/(\\d+)\\/password$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 9054,
+      "method": "PUT",
+      "kind": "regex",
+      "pattern": "^\\/users\\/(\\d+)\\/password$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 9069,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/users/password",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 9069,
+      "method": "PUT",
+      "kind": "exact",
+      "pattern": "/users/password",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 9088,
+      "method": "DELETE",
+      "kind": "regex",
+      "pattern": "^\\/users\\/(\\d+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 9088,
+      "method": "PUT",
+      "kind": "regex",
+      "pattern": "^\\/users\\/(\\d+)$",
+      "admin": false
+    },
+    {
+      "file": "src/api.js",
+      "line": 9118,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/upload",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 57,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/base-library/items",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 89,
+      "method": "PATCH",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/items\\/([^/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 89,
+      "method": "DELETE",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/items\\/([^/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 115,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/base-library/schemes",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 124,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/base-library/styles",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 130,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/base-library/styles",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 141,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/base-library/styles/analyze",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 155,
+      "method": "PATCH",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/styles\\/([^/]+)$",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 155,
+      "method": "DELETE",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/styles\\/([^/]+)$",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 165,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/schemes\\/([^/]+)\\/compile$",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 178,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/base-library/suggest",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 192,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/base-library/space/extract",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 211,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/base-library/space/recommend",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 223,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/base-library/guides",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 228,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/base-library/guides",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 238,
+      "method": "PATCH",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/guides\\/([^/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 238,
+      "method": "DELETE",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/guides\\/([^/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 259,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/base-library/taxonomy",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 265,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/base-library/dictionary",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 273,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/base-library/parts",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 284,
+      "method": "PATCH",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/parts\\/([^\\/]+)$",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 284,
+      "method": "DELETE",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/parts\\/([^\\/]+)$",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 303,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/base-library/categories",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 314,
+      "method": "PATCH",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/categories\\/([^\\/]+)$",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 314,
+      "method": "DELETE",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/categories\\/([^\\/]+)$",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 333,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/base-library/swatches",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 347,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/base-library/swatches",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 358,
+      "method": "PATCH",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/swatches\\/([^\\/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 358,
+      "method": "DELETE",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/swatches\\/([^\\/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 377,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/base-library/swatches/recommend-for-region",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 395,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/base-library/swatches/recognize-vlm",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 413,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/base-library/part-policy",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 428,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/base-library/materials",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 456,
+      "method": "PATCH",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/materials\\/([^/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 477,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/materials\\/([^\\/]+)\\/basecolor$",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 477,
+      "method": "HEAD",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/materials\\/([^\\/]+)\\/basecolor$",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 513,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/items\\/([^/]+)\\/(preview|scene)$",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 513,
+      "method": "HEAD",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/items\\/([^/]+)\\/(preview|scene)$",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 626,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/materials\\/([^\\/]+)\\/preview$",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 626,
+      "method": "HEAD",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/materials\\/([^\\/]+)\\/preview$",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 649,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/base-library/materials/search",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 649,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/base-library/materials/search",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 693,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/base-library/materials/draft",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 768,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/base-library/materials/confirm",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 791,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/base-library/paints",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 825,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/paints\\/([^\\/]+)\\/swatch$",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 825,
+      "method": "HEAD",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/paints\\/([^\\/]+)\\/swatch$",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 851,
+      "method": "PATCH",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/paints\\/([^\\/]+)$",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 910,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/base-library/paints/mirror",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 910,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/base-library/paints/mirror",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 950,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/base-library/lights",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 956,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/base-library/models",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 956,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/base-library/models",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 967,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/base-library/preset-slots",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 973,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/base-library/flags",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 978,
+      "method": "PUT",
+      "kind": "exact",
+      "pattern": "/base-library/flags",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 992,
+      "method": "PUT",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/flags\\/([^\\/]+)$",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 1004,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/base-library/classify-region",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 1145,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/base-library/catalog/sources",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 1151,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/base-library/catalog/pull",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 1202,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/base-library/catalog/extract-preview",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 1223,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/base-library/catalog/extract",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 1272,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/base-library/catalog/distill-preview",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 1295,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/base-library/catalog/distill",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 1350,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/base-library/schemes/draft",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 1358,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/base-library/schemes",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 1370,
+      "method": "PUT",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/schemes\\/([^/]+)\\/slots$",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 1381,
+      "method": "PATCH",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/schemes\\/([^/]+)$",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 1381,
+      "method": "DELETE",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/schemes\\/([^/]+)$",
+      "admin": true
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 1398,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/base-library/bindings",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 1412,
+      "method": "PUT",
+      "kind": "regex",
+      "pattern": "^\\/base-library\\/bindings\\/([^\\/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/base-library/routes.js",
+      "line": 1436,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/base-library/compile",
+      "admin": false
+    },
+    {
+      "file": "src/asr.js",
+      "line": 61,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/asr/status",
+      "admin": false
+    },
+    {
+      "file": "src/asr.js",
+      "line": 74,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/asr/transcribe",
+      "admin": false
+    },
+    {
+      "file": "src/portrait-library.js",
+      "line": 592,
+      "method": "GET",
+      "kind": "regex",
+      "pattern": "^\\/portrait-library\\/fetch\\/([^/]+)$",
+      "admin": false
+    },
+    {
+      "file": "src/portrait-library.js",
+      "line": 605,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/portrait-library/catalog",
+      "admin": false
+    },
+    {
+      "file": "src/portrait-library.js",
+      "line": 610,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/portrait-library",
+      "admin": false
+    },
+    {
+      "file": "src/portrait-library.js",
+      "line": 618,
+      "method": "GET",
+      "kind": "exact",
+      "pattern": "/portrait-library/consent",
+      "admin": false
+    },
+    {
+      "file": "src/portrait-library.js",
+      "line": 622,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/portrait-library/consent",
+      "admin": false
+    },
+    {
+      "file": "src/portrait-library.js",
+      "line": 631,
+      "method": "POST",
+      "kind": "exact",
+      "pattern": "/portrait-library/groups",
+      "admin": false
+    },
+    {
+      "file": "src/portrait-library.js",
+      "line": 641,
+      "method": "POST",
+      "kind": "regex",
+      "pattern": "^\\/portrait-library\\/groups\\/(\\d+)\\/assets$",
+      "admin": false
+    },
+    {
+      "file": "src/portrait-library.js",
+      "line": 676,
+      "method": "DELETE",
+      "kind": "regex",
+      "pattern": "^\\/portrait-library\\/assets\\/(\\d+)$",
+      "admin": false
+    },
+    {
+      "file": "src/portrait-library.js",
+      "line": 682,
+      "method": "DELETE",
+      "kind": "regex",
+      "pattern": "^\\/portrait-library\\/groups\\/(\\d+)$",
+      "admin": false
+    }
+  ],
+  "whitelist": [
+    {
+      "method": "POST",
+      "source": "^\\/auth\\/login$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/auth\\/me$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/auth\\/logout$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/assets$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/assets\\/timeline-days$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/assets\\/trash$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/assets\\/trash\\/[^\\/]+$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/assets\\/trash\\/restore$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/assets\\/trash\\/purge$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/assets\\/trash\\/rehome-gate$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/assets\\/[^\\/]+\\/favorite$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/assets\\/[^\\/]+\\/library-prep$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/assets\\/[^\\/]+$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/assets\\/[^\\/]+\\/similar$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/assets\\/[^\\/]+\\/image$",
+      "duplicated": false
+    },
+    {
+      "method": "HEAD",
+      "source": "^\\/assets\\/[^\\/]+\\/image$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/assets\\/[^\\/]+\\/image\\/[^\\/]+$",
+      "duplicated": false
+    },
+    {
+      "method": "HEAD",
+      "source": "^\\/assets\\/[^\\/]+\\/image\\/[^\\/]+$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/assets\\/[^\\/]+\\/file$",
+      "duplicated": false
+    },
+    {
+      "method": "HEAD",
+      "source": "^\\/assets\\/[^\\/]+\\/file$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/assets\\/[^\\/]+\\/video$",
+      "duplicated": false
+    },
+    {
+      "method": "HEAD",
+      "source": "^\\/assets\\/[^\\/]+\\/video$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/assets\\/[^\\/]+\\/poster$",
+      "duplicated": false
+    },
+    {
+      "method": "HEAD",
+      "source": "^\\/assets\\/[^\\/]+\\/poster$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/assets\\/[^\\/]+\\/process$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/assets\\/[^\\/]+\\/process$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/assets\\/[^\\/]+\\/ai\\/tasks$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/ai\\/tasks$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/ai\\/tasks\\/[^\\/]+$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/ai\\/masks\\/[^\\/]+$",
+      "duplicated": false
+    },
+    {
+      "method": "HEAD",
+      "source": "^\\/ai\\/masks\\/[^\\/]+$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/presets$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/dict$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/dict\\/menu-tree$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/library\\/catalog$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/studio\\/schema$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/studio\\/catalog$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/tools\\/convert-video$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/tools\\/upload$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/tools\\/extract-frames$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/upload$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/tools\\/lip-sync\\/status$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/tools\\/lip-sync$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/tools\\/lip-sync\\/tasks\\/[^\\/]+$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/stats$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/vectors\\/status$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/snapshot$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/sync\\/reconcile$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/sync\\/upload$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/sync\\/chunk$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/sync\\/complete$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/assets\\/[^\\/]+\\/restage$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/assets\\/[^\\/]+\\/main-derivative$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/lab\\/capabilities$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/lab\\/model-caps$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/lab\\/filter-vocabulary$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/lab\\/quick-models$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/lab\\/local-models$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/lab\\/gate-preview$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/lab\\/stale-tags$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/lab\\/runs$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/lab\\/runs\\/[^\\/]+\\/[^\\/]+$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/cache\\/temp\\/[^\\/]+$",
+      "duplicated": false
+    },
+    {
+      "method": "HEAD",
+      "source": "^\\/cache\\/temp\\/[^\\/]+$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/events$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/frames\\/[^/]+\\/[^/]+$",
+      "duplicated": false
+    },
+    {
+      "method": "HEAD",
+      "source": "^\\/frames\\/[^/]+\\/[^/]+$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/app\\/update$",
+      "duplicated": false
+    },
+    {
+      "method": "DELETE",
+      "source": "^\\/assets\\/[^\\/]+$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/assets\\/[^\\/]+\\/delete$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/assets\\/dedupe-library$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/rejected$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/rejected\\/[^\\/]+$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/rejected\\/[^\\/]+\\/restore$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/rejected\\/restore-batch$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/gateway\\/config$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/chat\\/sessions$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/chat\\/sessions$",
+      "duplicated": false
+    },
+    {
+      "method": "DELETE",
+      "source": "^\\/chat\\/sessions\\/[^\\/]+$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/chat\\/messages$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/chat\\/messages$",
+      "duplicated": false
+    },
+    {
+      "method": "DELETE",
+      "source": "^\\/chat\\/messages$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/chat\\/optimize-prompt$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/asr\\/status$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/asr\\/transcribe$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/ai\\/segment$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/ai\\/detect$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/ai\\/capabilities$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/ai\\/expand-jimeng$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/ai\\/vlm-describe$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/edit\\/run$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/exports\\/register$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/ai\\/upload$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/products\\/presets$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/products\\/models\\/[^\\/]+$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/products\\/previews\\/[^\\/]+$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/governance\\/gen-models$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/governance\\/gen-jobs$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/governance\\/workflows$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/governance\\/prompts$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/governance\\/mount-points$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/governance\\/mount-points\\/[^\\/]+\\/modules$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/governance\\/operators$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/governance\\/dict-macros$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/governance\\/snippets$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/governance\\/prompts\\/preview-compile$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/runs\\/[^\\/]+\\/unpack$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/thumbs\\/[^\\/]+$",
+      "duplicated": false
+    },
+    {
+      "method": "HEAD",
+      "source": "^\\/thumbs\\/[^\\/]+$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/gen\\/preview$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/studio\\/color-schemes$",
+      "duplicated": false
+    },
+    {
+      "method": "PUT",
+      "source": "^\\/studio\\/color-schemes$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/chat\\/suggest-prompts$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/gen\\/images$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/gen\\/videos$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/gen\\/chat$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/portrait-library$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/portrait-library\\/catalog$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/portrait-library\\/consent$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/portrait-library\\/consent$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/portrait-library\\/groups$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/portrait-library\\/groups\\/[^\\/]+\\/assets$",
+      "duplicated": false
+    },
+    {
+      "method": "DELETE",
+      "source": "^\\/portrait-library\\/assets\\/[^\\/]+$",
+      "duplicated": false
+    },
+    {
+      "method": "DELETE",
+      "source": "^\\/portrait-library\\/groups\\/[^\\/]+$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/ai\\/walkthrough\\/infer-topology$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/ai\\/walkthrough\\/generate-3d$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/ai\\/walkthrough\\/confirm-topology$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/ai\\/walkthrough\\/infer-sequence$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/ai\\/walkthrough\\/confirm-sequence$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/studio\\/presets$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/tools\\/extract-frames$",
+      "duplicated": true
+    },
+    {
+      "method": "POST",
+      "source": "^\\/tools\\/convert-video$",
+      "duplicated": true
+    },
+    {
+      "method": "GET",
+      "source": "^\\/assets\\/similarity-workbench$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/assets\\/similarity-workbench\\/resolve$",
+      "duplicated": false
+    },
+    {
+      "method": "POST",
+      "source": "^\\/assets\\/similarity-workbench\\/clean-exact$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/assets\\/similarity-workbench\\/ignored$",
+      "duplicated": false
+    },
+    {
+      "method": "DELETE",
+      "source": "^\\/assets\\/similarity-workbench\\/ignored$",
+      "duplicated": false
+    },
+    {
+      "method": "GET",
+      "source": "^\\/assets\\/[^\\/]+\\/quality$",
+      "duplicated": false
+    }
+  ],
+  "clients": {
+    "web": [
+      {
+        "file": "web/src/api.js",
+        "line": 57,
+        "method": "POST",
+        "pattern": "^/auth/login$",
+        "example": "/auth/login",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/auth/login@src/api.js:1754"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 58,
+        "method": "POST",
+        "pattern": "^/auth/logout$",
+        "example": "/auth/logout",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/auth/logout@src/api.js:1770"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 59,
+        "method": "GET",
+        "pattern": "^/auth/me$",
+        "example": "/auth/me",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/auth/me@src/api.js:1888"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 60,
+        "method": "GET",
+        "pattern": "^/auth/quark-status$",
+        "example": "/auth/quark-status",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/auth/quark-status@src/api.js:2734"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 61,
+        "method": "POST",
+        "pattern": "^/auth/quark-login$",
+        "example": "/auth/quark-login",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/auth/quark-login@src/api.js:2738"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 62,
+        "method": "POST",
+        "pattern": "^/auth/quark-install$",
+        "example": "/auth/quark-install",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/auth/quark-install@src/api.js:2745"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 67,
+        "method": "GET",
+        "pattern": "^/assets$",
+        "example": "/assets",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/assets@src/api.js:2774"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 69,
+        "method": "GET",
+        "pattern": "^/assets/[^/]+$",
+        "example": "/assets/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "regex:^\\/assets\\/([^\\/]+)$@src/api.js:5259"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 70,
+        "method": "GET",
+        "pattern": "^/portrait-library/catalog$",
+        "example": "/portrait-library/catalog",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/portrait-library/catalog@src/portrait-library.js:605"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 71,
+        "method": "GET",
+        "pattern": "^/assets/[^/]+/similar\\$",
+        "example": "/assets/example/similar",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "regex:^\\/assets\\/([^\\/]+)\\/similar$@src/api.js:5276"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 72,
+        "method": "POST",
+        "pattern": "^/assets/[^/]+/tags$",
+        "example": "/assets/example/tags",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "regex:^\\/assets\\/([^\\/]+)\\/tags$@src/api.js:5314"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 73,
+        "method": "POST",
+        "pattern": "^/assets/[^/]+/restage$",
+        "example": "/assets/example/restage",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "regex:^\\/assets\\/([^\\/]+)\\/restage$@src/api.js:5323"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 74,
+        "method": "POST",
+        "pattern": "^/assets/[^/]+/main-derivative$",
+        "example": "/assets/example/main-derivative",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "regex:^\\/assets\\/([^\\/]+)\\/main-derivative$@src/api.js:7203"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 75,
+        "method": "POST",
+        "pattern": "^/assets/ingest$",
+        "example": "/assets/ingest",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/assets/ingest@src/api.js:7221"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 76,
+        "method": "POST",
+        "pattern": "^/ba-resource/pull$",
+        "example": "/ba-resource/pull",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/ba-resource/pull@src/api.js:7271"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 77,
+        "method": "GET",
+        "pattern": "^/settings/backup$",
+        "example": "/settings/backup",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/settings/backup@src/api.js:7300"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 78,
+        "method": "POST",
+        "pattern": "^/settings/backup$",
+        "example": "/settings/backup",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/settings/backup@src/api.js:7305"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 80,
+        "method": "GET",
+        "pattern": "^/snapshot-status$",
+        "example": "/snapshot-status",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/snapshot-status@src/api.js:7313"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 81,
+        "method": "POST",
+        "pattern": "^/dup-groups/[^/]+/ungroup$",
+        "example": "/dup-groups/example/ungroup",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": false,
+        "route": null
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 82,
+        "method": "POST",
+        "pattern": "^/dup-groups/recluster$",
+        "example": "/dup-groups/recluster",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": false,
+        "route": null
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 83,
+        "method": "GET",
+        "pattern": "^/runs/[^/]+/assets/[^/]+$",
+        "example": "/runs/example/assets/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "regex:^\\/runs\\/([^\\/]+)\\/assets\\/([^\\/]+)$@src/api.js:6647"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 84,
+        "method": "GET",
+        "pattern": "^/workflows/catalog$",
+        "example": "/workflows/catalog",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/workflows/catalog@src/api.js:6082"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 129,
+        "method": "GET",
+        "pattern": "^/stats$",
+        "example": "/stats",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/stats@src/api.js:2820"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 130,
+        "method": "POST",
+        "pattern": "^/scan$",
+        "example": "/scan",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/scan@src/api.js:5943"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 133,
+        "method": "GET",
+        "pattern": "^/workflows/default$",
+        "example": "/workflows/default",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "regex:^\\/workflows\\/([^\\/]+)$@src/api.js:5952"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 134,
+        "method": "GET",
+        "pattern": "^/workflows/[^/]+$",
+        "example": "/workflows/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "regex:^\\/workflows\\/([^\\/]+)$@src/api.js:5952"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 135,
+        "method": "POST",
+        "pattern": "^/workflows$",
+        "example": "/workflows",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/workflows@src/api.js:6088"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 136,
+        "method": "PUT",
+        "pattern": "^/workflows/video$",
+        "example": "/workflows/video",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/workflows/video@src/api.js:6006"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 137,
+        "method": "POST",
+        "pattern": "^/workflows/video/start$",
+        "example": "/workflows/video/start",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/workflows/video/start@src/api.js:6025"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 138,
+        "method": "GET",
+        "pattern": "^/workflows/video/assets\\$",
+        "example": "/workflows/video/assets",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/workflows/video/assets@src/api.js:6053"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 141,
+        "method": "GET",
+        "pattern": "^/settings/runtime-config$",
+        "example": "/settings/runtime-config",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/settings/runtime-config@src/api.js:6107"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 142,
+        "method": "PUT",
+        "pattern": "^/settings/runtime-config$",
+        "example": "/settings/runtime-config",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/settings/runtime-config@src/api.js:6113"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 145,
+        "method": "GET",
+        "pattern": "^/runs$",
+        "example": "/runs",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/runs@src/api.js:6122"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 146,
+        "method": "GET",
+        "pattern": "^/runs/[^/]+\\$",
+        "example": "/runs/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "regex:^\\/runs\\/([^\\/]+)$@src/api.js:6416"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 147,
+        "method": "POST",
+        "pattern": "^/runs$",
+        "example": "/runs",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/runs@src/api.js:6250"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 148,
+        "method": "GET",
+        "pattern": "^/exceptions$",
+        "example": "/exceptions",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/exceptions@src/api.js:6673"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 154,
+        "method": "GET",
+        "pattern": "^/exceptions\\$",
+        "example": "/exceptions",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/exceptions@src/api.js:6673"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 159,
+        "method": "POST",
+        "pattern": "^/exceptions/[^/]+/retry$",
+        "example": "/exceptions/example/retry",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "regex:^\\/exceptions\\/(\\d+)\\/retry$@src/api.js:6816"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 164,
+        "method": "GET",
+        "pattern": "^/adapters$",
+        "example": "/adapters",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/adapters@src/api.js:6826"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 173,
+        "method": "POST",
+        "pattern": "^/adapters$",
+        "example": "/adapters",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/adapters@src/api.js:6868"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 174,
+        "method": "DELETE",
+        "pattern": "^/adapters/[^/]+$",
+        "example": "/adapters/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "regex:^\\/adapters\\/([^\\/]+)$@src/api.js:6896"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 175,
+        "method": "POST",
+        "pattern": "^/adapters/[^/]+/toggle$",
+        "example": "/adapters/example/toggle",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "regex:^\\/adapters\\/([^\\/]+)\\/toggle$@src/api.js:6887"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 176,
+        "method": "POST",
+        "pattern": "^/adapters/test$",
+        "example": "/adapters/test",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/adapters/test@src/api.js:6907"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 179,
+        "method": "GET",
+        "pattern": "^/providers$",
+        "example": "/providers",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/providers@src/api.js:6937"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 180,
+        "method": "GET",
+        "pattern": "^/providers/env-secrets$",
+        "example": "/providers/env-secrets",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/providers/env-secrets@src/api.js:6969"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 181,
+        "method": "POST",
+        "pattern": "^/providers/env-secrets$",
+        "example": "/providers/env-secrets",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/providers/env-secrets@src/api.js:6983"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 182,
+        "method": "POST",
+        "pattern": "^/providers$",
+        "example": "/providers",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/providers@src/api.js:6995"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 183,
+        "method": "DELETE",
+        "pattern": "^/providers/[^/]+$",
+        "example": "/providers/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "regex:^\\/providers\\/([^\\/]+)$@src/api.js:7007"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 184,
+        "method": "POST",
+        "pattern": "^/providers/[^/]+/toggle$",
+        "example": "/providers/example/toggle",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "regex:^\\/providers\\/([^\\/]+)\\/toggle$@src/api.js:7020"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 188,
+        "method": "GET",
+        "pattern": "^/models$",
+        "example": "/models",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/models@src/api.js:7044"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 190,
+        "method": "POST",
+        "pattern": "^/models$",
+        "example": "/models",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/models@src/api.js:7052"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 191,
+        "method": "DELETE",
+        "pattern": "^/models/[^/]+$",
+        "example": "/models/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "regex:^\\/models\\/([^\\/]+)$@src/api.js:7064"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 192,
+        "method": "POST",
+        "pattern": "^/models/[^/]+/toggle$",
+        "example": "/models/example/toggle",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "regex:^\\/models\\/([^\\/]+)\\/toggle$@src/api.js:7073"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 193,
+        "method": "POST",
+        "pattern": "^/models/[^/]+/test$",
+        "example": "/models/example/test",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "regex:^\\/models\\/([^\\/]+)\\/test$@src/api.js:7083"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 194,
+        "method": "POST",
+        "pattern": "^/models/sync-litellm$",
+        "example": "/models/sync-litellm",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/models/sync-litellm@src/api.js:7097"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 195,
+        "method": "POST",
+        "pattern": "^/providers/litellm/toggle-batch$",
+        "example": "/providers/litellm/toggle-batch",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/providers/litellm/toggle-batch@src/api.js:7035"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 196,
+        "method": "POST",
+        "pattern": "^/runs/retry-all-failed$",
+        "example": "/runs/retry-all-failed",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/runs/retry-all-failed@src/api.js:7111"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 203,
+        "method": "GET",
+        "pattern": "^/runs/[^/]+/graph$",
+        "example": "/runs/example/graph",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "regex:^\\/runs\\/([^\\/]+)\\/graph$@src/api.js:6265"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 205,
+        "method": "POST",
+        "pattern": "^/runs/restage-backfill$",
+        "example": "/runs/restage-backfill",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/runs/restage-backfill@src/api.js:7425"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 206,
+        "method": "GET",
+        "pattern": "^/vectors/status$",
+        "example": "/vectors/status",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/vectors/status@src/api.js:7350"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 207,
+        "method": "POST",
+        "pattern": "^/vectors/recompute$",
+        "example": "/vectors/recompute",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/vectors/recompute@src/api.js:7363"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 210,
+        "method": "POST",
+        "pattern": "^/dup-groups/[^/]+/representative$",
+        "example": "/dup-groups/example/representative",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": false,
+        "route": null
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 213,
+        "method": "GET",
+        "pattern": "^/dict\\$",
+        "example": "/dict",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/dict@src/api.js:8931"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 214,
+        "method": "POST",
+        "pattern": "^/dict$",
+        "example": "/dict",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/dict@src/api.js:8940"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 215,
+        "method": "POST",
+        "pattern": "^/dict/deprecate$",
+        "example": "/dict/deprecate",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/dict/deprecate@src/api.js:8950"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 216,
+        "method": "POST",
+        "pattern": "^/dict/restore$",
+        "example": "/dict/restore",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/dict/restore@src/api.js:8960"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 217,
+        "method": "POST",
+        "pattern": "^/dict/draft-criteria$",
+        "example": "/dict/draft-criteria",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/dict/draft-criteria@src/api.js:9017"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 218,
+        "method": "POST",
+        "pattern": "^/dict/retag/estimate$",
+        "example": "/dict/retag/estimate",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/dict/retag/estimate@src/api.js:8970"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 219,
+        "method": "POST",
+        "pattern": "^/dict/retag$",
+        "example": "/dict/retag",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/dict/retag@src/api.js:8981"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 220,
+        "method": "GET",
+        "pattern": "^/dict/retag/jobs$",
+        "example": "/dict/retag/jobs",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/dict/retag/jobs@src/api.js:9008"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 221,
+        "method": "GET",
+        "pattern": "^/dict/audit$",
+        "example": "/dict/audit",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/dict/audit@src/api.js:9012"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 222,
+        "method": "GET",
+        "pattern": "^/dict/audit/[^/]+/assets$",
+        "example": "/dict/audit/example/assets",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "regex:^\\/dict\\/audit\\/(\\d+)\\/assets$@src/api.js:9022"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 223,
+        "method": "GET",
+        "pattern": "^/assets/[^/]+/tag-history$",
+        "example": "/assets/example/tag-history",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "regex:^\\/assets\\/([^\\/]+)\\/tag-history$@src/api.js:9027"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 224,
+        "method": "GET",
+        "pattern": "^/users$",
+        "example": "/users",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/users@src/api.js:9035"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 225,
+        "method": "POST",
+        "pattern": "^/users$",
+        "example": "/users",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/users@src/api.js:9041"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 226,
+        "method": "POST",
+        "pattern": "^/users/[^/]+/password$",
+        "example": "/users/example/password",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "regex:^\\/users\\/(\\d+)\\/password$@src/api.js:9054"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 227,
+        "method": "DELETE",
+        "pattern": "^/users/[^/]+$",
+        "example": "/users/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "regex:^\\/users\\/(\\d+)$@src/api.js:9088"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 228,
+        "method": "PUT",
+        "pattern": "^/users/[^/]+$",
+        "example": "/users/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "regex:^\\/users\\/(\\d+)$@src/api.js:9088"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 231,
+        "method": "GET",
+        "pattern": "^/lab/capabilities$",
+        "example": "/lab/capabilities",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/lab/capabilities@src/api.js:3077"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 232,
+        "method": "POST",
+        "pattern": "^/lab/runs$",
+        "example": "/lab/runs",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/lab/runs@src/api.js:3254"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 234,
+        "method": "GET",
+        "pattern": "^/lab/runs/[^/]+/[^/]+$",
+        "example": "/lab/runs/example/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "regex:^\\/lab\\/runs\\/([^\\/]+)\\/([^\\/]+)$@src/api.js:3299"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 235,
+        "method": "GET",
+        "pattern": "^/process/jobs/[^/]+$",
+        "example": "/process/jobs/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "regex:^\\/process\\/jobs\\/([^\\/]+)$@src/api.js:3314"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 237,
+        "method": "GET",
+        "pattern": "^/governance/gen-models$",
+        "example": "/governance/gen-models",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/governance/gen-models@src/api.js:7434"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 240,
+        "method": "GET",
+        "pattern": "^/governance/litellm-groups\\$",
+        "example": "/governance/litellm-groups",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/governance/litellm-groups@src/api.js:7443"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 247,
+        "method": "POST",
+        "pattern": "^/governance/litellm-groups/[^/]+/members$",
+        "example": "/governance/litellm-groups/example/members",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "prefix:/governance/@src/api.js:1592"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 254,
+        "method": "DELETE",
+        "pattern": "^/governance/litellm-groups/[^/]+/members/[^/]+$",
+        "example": "/governance/litellm-groups/example/members/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "prefix:/governance/@src/api.js:1592"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 259,
+        "method": "POST",
+        "pattern": "^/governance/gen-models$",
+        "example": "/governance/gen-models",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/governance/gen-models@src/api.js:7530"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 260,
+        "method": "POST",
+        "pattern": "^/governance/gen-models/preview-convert$",
+        "example": "/governance/gen-models/preview-convert",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/governance/gen-models/preview-convert@src/api.js:7493"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 261,
+        "method": "PUT",
+        "pattern": "^/governance/gen-models/[^/]+/schema$",
+        "example": "/governance/gen-models/example/schema",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "prefix:/governance/@src/api.js:1592"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 262,
+        "method": "DELETE",
+        "pattern": "^/governance/gen-models/[^/]+$",
+        "example": "/governance/gen-models/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "prefix:/governance/@src/api.js:1592"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 263,
+        "method": "PUT",
+        "pattern": "^/governance/gen-models/[^/]+/polish$",
+        "example": "/governance/gen-models/example/polish",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "prefix:/governance/@src/api.js:1592"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 264,
+        "method": "GET",
+        "pattern": "^/governance/gen-jobs$",
+        "example": "/governance/gen-jobs",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/governance/gen-jobs@src/api.js:8077"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 265,
+        "method": "PUT",
+        "pattern": "^/governance/gen-jobs/[^/]+$",
+        "example": "/governance/gen-jobs/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "prefix:/governance/@src/api.js:1592"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 266,
+        "method": "POST",
+        "pattern": "^/governance/gen-jobs/[^/]+/reset$",
+        "example": "/governance/gen-jobs/example/reset",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "prefix:/governance/@src/api.js:1592"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 267,
+        "method": "GET",
+        "pattern": "^/governance/manual-defaults$",
+        "example": "/governance/manual-defaults",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/governance/manual-defaults@src/api.js:8108"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 268,
+        "method": "PUT",
+        "pattern": "^/governance/manual-defaults$",
+        "example": "/governance/manual-defaults",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/governance/manual-defaults@src/api.js:8116"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 271,
+        "method": "GET",
+        "pattern": "^/providers/env-keys$",
+        "example": "/providers/env-keys",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/providers/env-keys@src/api.js:6963"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 272,
+        "method": "GET",
+        "pattern": "^/governance/workflows$",
+        "example": "/governance/workflows",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/governance/workflows@src/api.js:7605"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 273,
+        "method": "PUT",
+        "pattern": "^/governance/workflows$",
+        "example": "/governance/workflows",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/governance/workflows@src/api.js:7614"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 274,
+        "method": "GET",
+        "pattern": "^/runs/[^/]+/unpack$",
+        "example": "/runs/example/unpack",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "regex:^\\/runs\\/([^\\/]+)\\/unpack$@src/api.js:6477"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 275,
+        "method": "POST",
+        "pattern": "^/runs/[^/]+/rerun-gen$",
+        "example": "/runs/example/rerun-gen",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "regex:^\\/runs\\/([^\\/]+)\\/rerun-gen$@src/api.js:6546"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 276,
+        "method": "POST",
+        "pattern": "^/governance/draft-from-doc$",
+        "example": "/governance/draft-from-doc",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/governance/draft-from-doc@src/api.js:8128"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 277,
+        "method": "GET",
+        "pattern": "^/governance/skill-drafts$",
+        "example": "/governance/skill-drafts",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/governance/skill-drafts@src/api.js:8145"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 278,
+        "method": "POST",
+        "pattern": "^/governance/skill-drafts$",
+        "example": "/governance/skill-drafts",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/governance/skill-drafts@src/api.js:8195"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 279,
+        "method": "PUT",
+        "pattern": "^/governance/skill-drafts/[^/]+$",
+        "example": "/governance/skill-drafts/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "prefix:/governance/@src/api.js:1592"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 280,
+        "method": "DELETE",
+        "pattern": "^/governance/skill-drafts/[^/]+$",
+        "example": "/governance/skill-drafts/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "prefix:/governance/@src/api.js:1592"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 281,
+        "method": "POST",
+        "pattern": "^/governance/skill-drafts/[^/]+/accept$",
+        "example": "/governance/skill-drafts/example/accept",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "prefix:/governance/@src/api.js:1592"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 282,
+        "method": "POST",
+        "pattern": "^/governance/gen-models/[^/]+/toggle$",
+        "example": "/governance/gen-models/example/toggle",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "prefix:/governance/@src/api.js:1592"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 283,
+        "method": "POST",
+        "pattern": "^/chat/optimize-prompt$",
+        "example": "/chat/optimize-prompt",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/chat/optimize-prompt@src/api.js:3496"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 286,
+        "method": "GET",
+        "pattern": "^/governance/operators$",
+        "example": "/governance/operators",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/governance/operators@src/api.js:7754"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 287,
+        "method": "GET",
+        "pattern": "^/governance/dict-macros$",
+        "example": "/governance/dict-macros",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/governance/dict-macros@src/api.js:7764"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 288,
+        "method": "GET",
+        "pattern": "^/governance/snippets$",
+        "example": "/governance/snippets",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/governance/snippets@src/api.js:7774"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 289,
+        "method": "POST",
+        "pattern": "^/governance/snippets$",
+        "example": "/governance/snippets",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/governance/snippets@src/api.js:7783"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 290,
+        "method": "DELETE",
+        "pattern": "^/governance/snippets/[^/]+$",
+        "example": "/governance/snippets/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "prefix:/governance/@src/api.js:1592"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 291,
+        "method": "POST",
+        "pattern": "^/governance/snippets/[^/]+/restore$",
+        "example": "/governance/snippets/example/restore",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "prefix:/governance/@src/api.js:1592"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 292,
+        "method": "POST",
+        "pattern": "^/governance/prompts/preview-compile$",
+        "example": "/governance/prompts/preview-compile",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/governance/prompts/preview-compile@src/api.js:7819"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 293,
+        "method": "POST",
+        "pattern": "^/governance/sandbox/run-node$",
+        "example": "/governance/sandbox/run-node",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/governance/sandbox/run-node@src/api.js:7850"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 296,
+        "method": "GET",
+        "pattern": "^/governance/prompts$",
+        "example": "/governance/prompts",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/governance/prompts@src/api.js:7627"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 297,
+        "method": "POST",
+        "pattern": "^/governance/prompts$",
+        "example": "/governance/prompts",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/governance/prompts@src/api.js:7636"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 298,
+        "method": "DELETE",
+        "pattern": "^/governance/prompts/[^/]+$",
+        "example": "/governance/prompts/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "prefix:/governance/@src/api.js:1592"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 299,
+        "method": "POST",
+        "pattern": "^/governance/prompts/[^/]+/restore$",
+        "example": "/governance/prompts/example/restore",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "prefix:/governance/@src/api.js:1592"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 302,
+        "method": "GET",
+        "pattern": "^/governance/mount-points$",
+        "example": "/governance/mount-points",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/governance/mount-points@src/api.js:7673"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 303,
+        "method": "POST",
+        "pattern": "^/governance/mount-points$",
+        "example": "/governance/mount-points",
+        "concrete": true,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "exact:/governance/mount-points@src/api.js:7682"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 304,
+        "method": "DELETE",
+        "pattern": "^/governance/mount-points/[^/]+$",
+        "example": "/governance/mount-points/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "prefix:/governance/@src/api.js:1592"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 305,
+        "method": "GET",
+        "pattern": "^/governance/mount-points/[^/]+/modules$",
+        "example": "/governance/mount-points/example/modules",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "prefix:/governance/@src/api.js:1592"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 306,
+        "method": "POST",
+        "pattern": "^/governance/mount-points/[^/]+/modules$",
+        "example": "/governance/mount-points/example/modules",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "prefix:/governance/@src/api.js:1592"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 307,
+        "method": "DELETE",
+        "pattern": "^/governance/mount-points/[^/]+/modules/[^/]+$",
+        "example": "/governance/mount-points/example/modules/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "prefix:/governance/@src/api.js:1592"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 308,
+        "method": "POST",
+        "pattern": "^/governance/mount-points/[^/]+/reorder$",
+        "example": "/governance/mount-points/example/reorder",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "prefix:/governance/@src/api.js:1592"
+      },
+      {
+        "file": "web/src/api.js",
+        "line": 309,
+        "method": "POST",
+        "pattern": "^/governance/mount-points/[^/]+/execute$",
+        "example": "/governance/mount-points/example/execute",
+        "concrete": false,
+        "viewer": false,
+        "via": "web",
+        "matched": true,
+        "route": "prefix:/governance/@src/api.js:1592"
+      }
+    ],
+    "web-pro": [
+      {
+        "file": "web-pro/src/api.js",
+        "line": 68,
+        "method": "POST",
+        "pattern": "^/api/auth/login$",
+        "example": "/auth/login",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/auth/login@src/api.js:1754"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 85,
+        "method": "POST",
+        "pattern": "^/api/auth/logout$",
+        "example": "/auth/logout",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/auth/logout@src/api.js:1770"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 106,
+        "method": "GET",
+        "pattern": "^/api/auth/me$",
+        "example": "/auth/me",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/auth/me@src/api.js:1888"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 266,
+        "method": "GET",
+        "pattern": "^/api/viewer/assets\\$",
+        "example": "/assets",
+        "concrete": false,
+        "viewer": true,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/assets@src/api.js:2774"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 284,
+        "method": "GET",
+        "pattern": "^/api/viewer/assets/trash\\$",
+        "example": "/assets/trash",
+        "concrete": false,
+        "viewer": true,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/assets/trash@src/api.js:2250"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 297,
+        "method": "POST",
+        "pattern": "^/api/assets/trash/restore$",
+        "example": "/assets/trash/restore",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/assets/trash/restore@src/api.js:2410"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 310,
+        "method": "POST",
+        "pattern": "^/api/assets/trash/purge$",
+        "example": "/assets/trash/purge",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/assets/trash/purge@src/api.js:2424"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 322,
+        "method": "POST",
+        "pattern": "^/api/assets/[^/]+/delete$",
+        "example": "/assets/example/delete",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "regex:^\\/assets\\/([^\\/]+)\\/delete$@src/api.js:2185"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 341,
+        "method": "POST",
+        "pattern": "^/api/assets/batch-delete$",
+        "example": "/assets/batch-delete",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/assets/batch-delete@src/api.js:2210"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 394,
+        "method": "POST",
+        "pattern": "^/api/viewer/assets/[^/]+/favorite$",
+        "example": "/assets/example/favorite",
+        "concrete": false,
+        "viewer": true,
+        "via": "web-pro",
+        "matched": true,
+        "route": "regex:^\\/assets\\/([^\\/]+)\\/favorite$@src/api.js:2280"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 406,
+        "method": "GET",
+        "pattern": "^/api/viewer/dict/menu-tree$",
+        "example": "/dict/menu-tree",
+        "concrete": true,
+        "viewer": true,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/dict/menu-tree@src/api.js:1849"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 417,
+        "method": "GET",
+        "pattern": "^/api/viewer/assets/[^/]+$",
+        "example": "/assets/example",
+        "concrete": false,
+        "viewer": true,
+        "via": "web-pro",
+        "matched": true,
+        "route": "regex:^\\/assets\\/([^\\/]+)$@src/api.js:5259"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 514,
+        "method": "GET",
+        "pattern": "^/api/viewer/assets/timeline-days\\$",
+        "example": "/assets/timeline-days",
+        "concrete": false,
+        "viewer": true,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/assets/timeline-days@src/api.js:2781"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 524,
+        "method": "POST",
+        "pattern": "^/api/ai/expand-jimeng$",
+        "example": "/ai/expand-jimeng",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/ai/expand-jimeng@src/api.js:4902"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 541,
+        "method": "POST",
+        "pattern": "^/api/edit/run$",
+        "example": "/edit/run",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/edit/run@src/api.js:4731"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 557,
+        "method": "GET",
+        "pattern": "^/api/custom-styles$",
+        "example": "/custom-styles",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/custom-styles@src/api.js:4820"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 564,
+        "method": "POST",
+        "pattern": "^/api/custom-styles$",
+        "example": "/custom-styles",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/custom-styles@src/api.js:4829"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 575,
+        "method": "PUT",
+        "pattern": "^/api/custom-styles/[^/]+$",
+        "example": "/custom-styles/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "regex:^\\/custom-styles\\/([^/]+)$@src/api.js:4845"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 586,
+        "method": "DELETE",
+        "pattern": "^/api/custom-styles/[^/]+$",
+        "example": "/custom-styles/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "regex:^\\/custom-styles\\/([^/]+)$@src/api.js:4845"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 596,
+        "method": "POST",
+        "pattern": "^/api/ai/style/analyze$",
+        "example": "/ai/style/analyze",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/ai/style/analyze@src/api.js:4873"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 611,
+        "method": "POST",
+        "pattern": "^/api/ai/detect$",
+        "example": "/ai/detect",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/ai/detect@src/api.js:4032"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 625,
+        "method": "GET",
+        "pattern": "^/api/library/catalog$",
+        "example": "/library/catalog",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/library/catalog@src/api.js:1840"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 632,
+        "method": "GET",
+        "pattern": "^/api/studio/catalog$",
+        "example": "/studio/catalog",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/studio/catalog@src/api.js:1870"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 639,
+        "method": "POST",
+        "pattern": "^/api/gen/preview$",
+        "example": "/gen/preview",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/gen/preview@src/api.js:8473"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 652,
+        "method": "POST",
+        "pattern": "^/api/gen/images$",
+        "example": "/gen/images",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/gen/images@src/api.js:8549"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 668,
+        "method": "POST",
+        "pattern": "^/api/gen/audio$",
+        "example": "/gen/audio",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/gen/audio@src/api.js:8772"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 681,
+        "method": "POST",
+        "pattern": "^/api/gen/videos$",
+        "example": "/gen/videos",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/gen/videos@src/api.js:8654"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 697,
+        "method": "POST",
+        "pattern": "^/api/gen/chat$",
+        "example": "/gen/chat",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/gen/chat@src/api.js:8829"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 713,
+        "method": "GET",
+        "pattern": "^/api/chat/sessions$",
+        "example": "/chat/sessions",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/chat/sessions@src/api.js:3337"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 724,
+        "method": "GET",
+        "pattern": "^/api/chat/messages\\$",
+        "example": "/chat/messages",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/chat/messages@src/api.js:3380"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 734,
+        "method": "POST",
+        "pattern": "^/api/chat/messages$",
+        "example": "/chat/messages",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/chat/messages@src/api.js:3402"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 746,
+        "method": "DELETE",
+        "pattern": "^/api/chat/sessions/[^/]+$",
+        "example": "/chat/sessions/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "regex:^\\/chat\\/sessions\\/([^\\/]+)$@src/api.js:3369"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 758,
+        "method": "GET",
+        "pattern": "^/api/assets/similarity-workbench\\$",
+        "example": "/assets/similarity-workbench",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/assets/similarity-workbench@src/api.js:2439"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 763,
+        "method": "POST",
+        "pattern": "^/api/assets/similarity-workbench/resolve$",
+        "example": "/assets/similarity-workbench/resolve",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/assets/similarity-workbench/resolve@src/api.js:2453"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 772,
+        "method": "POST",
+        "pattern": "^/api/assets/similarity-workbench/clean-exact$",
+        "example": "/assets/similarity-workbench/clean-exact",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/assets/similarity-workbench/clean-exact@src/api.js:2465"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 780,
+        "method": "GET",
+        "pattern": "^/api/assets/similarity-workbench/ignored$",
+        "example": "/assets/similarity-workbench/ignored",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/assets/similarity-workbench/ignored@src/api.js:2476"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 785,
+        "method": "DELETE",
+        "pattern": "^/api/assets/similarity-workbench/ignored$",
+        "example": "/assets/similarity-workbench/ignored",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/assets/similarity-workbench/ignored@src/api.js:2486"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 799,
+        "method": "GET",
+        "pattern": "^/api/settings/runtime-config$",
+        "example": "/settings/runtime-config",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/settings/runtime-config@src/api.js:6107"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 812,
+        "method": "PUT",
+        "pattern": "^/api/settings/runtime-config$",
+        "example": "/settings/runtime-config",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/settings/runtime-config@src/api.js:6113"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 828,
+        "method": "POST",
+        "pattern": "^/api/users/password$",
+        "example": "/users/password",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/users/password@src/api.js:9069"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 845,
+        "method": "GET",
+        "pattern": "^/api/app/update/state$",
+        "example": "/app/update/state",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/app/update/state@src/api.js:1797"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 858,
+        "method": "GET",
+        "pattern": "^/api/providers/env-secrets$",
+        "example": "/providers/env-secrets",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/providers/env-secrets@src/api.js:6969"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 871,
+        "method": "POST",
+        "pattern": "^/api/providers/env-secrets$",
+        "example": "/providers/env-secrets",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/providers/env-secrets@src/api.js:6983"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 887,
+        "method": "GET",
+        "pattern": "^/api/viewer/studio/color-schemes$",
+        "example": "/studio/color-schemes",
+        "concrete": true,
+        "viewer": true,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/studio/color-schemes@src/api.js:8343"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 899,
+        "method": "PUT",
+        "pattern": "^/api/viewer/studio/color-schemes$",
+        "example": "/studio/color-schemes",
+        "concrete": true,
+        "viewer": true,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/studio/color-schemes@src/api.js:8365"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 916,
+        "method": "POST",
+        "pattern": "^/api/viewer/chat/suggest-prompts$",
+        "example": "/chat/suggest-prompts",
+        "concrete": true,
+        "viewer": true,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/chat/suggest-prompts@src/api.js:8408"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 932,
+        "method": "POST",
+        "pattern": "^/api/viewer/gen/preview$",
+        "example": "/gen/preview",
+        "concrete": true,
+        "viewer": true,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/gen/preview@src/api.js:8473"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 978,
+        "method": "PATCH",
+        "pattern": "^/api/base-library/items/[^/]+$",
+        "example": "/base-library/items/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "prefix:/base-library/@src/api.js:4019"
+      },
+      {
+        "file": "web-pro/src/api.js",
+        "line": 987,
+        "method": "PATCH",
+        "pattern": "^/api/base-library/materials/[^/]+$",
+        "example": "/base-library/materials/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "prefix:/base-library/@src/api.js:4019"
+      },
+      {
+        "file": "web-pro/src/components/library/Product3DManager.vue",
+        "line": 469,
+        "method": "GET",
+        "pattern": "^/api/products/presets$",
+        "example": "/products/presets",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/products/presets@src/api.js:4182"
+      },
+      {
+        "file": "web-pro/src/components/library/Product3DManager.vue",
+        "line": 506,
+        "method": "POST",
+        "pattern": "^/api/products/presets/[^/]+/snapshots$",
+        "example": "/products/presets/example/snapshots",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "regex:^\\/products\\/presets\\/([^\\/]+)\\/snapshots?$@src/api.js:4548"
+      },
+      {
+        "file": "web-pro/src/components/library/Product3DManager.vue",
+        "line": 656,
+        "method": "PUT",
+        "pattern": "^/api/products/presets/[^/]+$",
+        "example": "/products/presets/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "regex:^\\/products\\/presets\\/([^\\/]+)$@src/api.js:4474"
+      },
+      {
+        "file": "web-pro/src/components/library/Product3DManager.vue",
+        "line": 697,
+        "method": "POST",
+        "pattern": "^/api/products/upload$",
+        "example": "/products/upload",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/products/upload@src/api.js:4353"
+      },
+      {
+        "file": "web-pro/src/components/library/Product3DManager.vue",
+        "line": 724,
+        "method": "DELETE",
+        "pattern": "^/api/products/presets/[^/]+$",
+        "example": "/products/presets/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "regex:^\\/products\\/presets\\/([^\\/]+)$@src/api.js:4474"
+      },
+      {
+        "file": "web-pro/src/components/studio/ResurfaceDrawer.vue",
+        "line": 574,
+        "method": "GET",
+        "pattern": "^/api/base-library/dictionary$",
+        "example": "/base-library/dictionary",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/base-library/dictionary@src/base-library/routes.js:265"
+      },
+      {
+        "file": "web-pro/src/components/studio/ResurfaceDrawer.vue",
+        "line": 616,
+        "method": "POST",
+        "pattern": "^/api/base-library/swatches/recommend-for-region$",
+        "example": "/base-library/swatches/recommend-for-region",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/base-library/swatches/recommend-for-region@src/base-library/routes.js:377"
+      },
+      {
+        "file": "web-pro/src/components/studio/ResurfaceDrawer.vue",
+        "line": 779,
+        "method": "POST",
+        "pattern": "^/api/base-library/swatches/recognize-vlm$",
+        "example": "/base-library/swatches/recognize-vlm",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/base-library/swatches/recognize-vlm@src/base-library/routes.js:395"
+      },
+      {
+        "file": "web-pro/src/components/studio/ResurfaceDrawer.vue",
+        "line": 805,
+        "method": "DELETE",
+        "pattern": "^/api/base-library/items/[^/]+$",
+        "example": "/base-library/items/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "prefix:/base-library/@src/api.js:4019"
+      },
+      {
+        "file": "web-pro/src/components/studio/ResurfaceDrawer.vue",
+        "line": 847,
+        "method": "POST",
+        "pattern": "^/api/base-library/swatches$",
+        "example": "/base-library/swatches",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/base-library/swatches@src/base-library/routes.js:347"
+      },
+      {
+        "file": "web-pro/src/components/VoiceInputButton.vue",
+        "line": 180,
+        "method": "GET",
+        "pattern": "^/api/asr/status$",
+        "example": "/asr/status",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/asr/status@src/api.js:1659"
+      },
+      {
+        "file": "web-pro/src/views/library/BaseLibraryPane.vue",
+        "line": 901,
+        "method": "GET",
+        "pattern": "^/api/base-library/taxonomy$",
+        "example": "/base-library/taxonomy",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/base-library/taxonomy@src/base-library/routes.js:259"
+      },
+      {
+        "file": "web-pro/src/views/library/BaseLibraryPane.vue",
+        "line": 923,
+        "method": "GET",
+        "pattern": "^/api/base-library/materials\\$",
+        "example": "/base-library/materials",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/base-library/materials@src/base-library/routes.js:428"
+      },
+      {
+        "file": "web-pro/src/views/library/BaseLibraryPane.vue",
+        "line": 936,
+        "method": "GET",
+        "pattern": "^/api/base-library/paints\\$",
+        "example": "/base-library/paints",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/base-library/paints@src/base-library/routes.js:791"
+      },
+      {
+        "file": "web-pro/src/views/library/BaseLibraryPane.vue",
+        "line": 942,
+        "method": "GET",
+        "pattern": "^/api/base-library/lights$",
+        "example": "/base-library/lights",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/base-library/lights@src/base-library/routes.js:950"
+      },
+      {
+        "file": "web-pro/src/views/library/BaseLibraryPane.vue",
+        "line": 1013,
+        "method": "PATCH",
+        "pattern": "^/api/base-library/paints/[^/]+$",
+        "example": "/base-library/paints/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "prefix:/base-library/@src/api.js:4019"
+      },
+      {
+        "file": "web-pro/src/views/library/BaseLibrarySearch.vue",
+        "line": 121,
+        "method": "GET",
+        "pattern": "^/api/base-library/materials/search\\$",
+        "example": "/base-library/materials/search",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/base-library/materials/search@src/base-library/routes.js:649"
+      },
+      {
+        "file": "web-pro/src/views/library/BaseLibrarySearch.vue",
+        "line": 160,
+        "method": "POST",
+        "pattern": "^/api/base-library/materials/draft$",
+        "example": "/base-library/materials/draft",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/base-library/materials/draft@src/base-library/routes.js:693"
+      },
+      {
+        "file": "web-pro/src/views/library/BaseLibrarySearch.vue",
+        "line": 177,
+        "method": "POST",
+        "pattern": "^/api/base-library/materials/confirm$",
+        "example": "/base-library/materials/confirm",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/base-library/materials/confirm@src/base-library/routes.js:768"
+      },
+      {
+        "file": "web-pro/src/views/library/BaseLibrarySearch.vue",
+        "line": 205,
+        "method": "POST",
+        "pattern": "^/api/base-library/paints/mirror$",
+        "example": "/base-library/paints/mirror",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/base-library/paints/mirror@src/base-library/routes.js:910"
+      },
+      {
+        "file": "web-pro/src/views/library/CatalogIngestPanel.vue",
+        "line": 501,
+        "method": "GET",
+        "pattern": "^/api/base-library/catalog/sources$",
+        "example": "/base-library/catalog/sources",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/base-library/catalog/sources@src/base-library/routes.js:1145"
+      },
+      {
+        "file": "web-pro/src/views/library/CatalogIngestPanel.vue",
+        "line": 513,
+        "method": "POST",
+        "pattern": "^/api/base-library/catalog/pull$",
+        "example": "/base-library/catalog/pull",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/base-library/catalog/pull@src/base-library/routes.js:1151"
+      },
+      {
+        "file": "web-pro/src/views/library/CatalogIngestPanel.vue",
+        "line": 581,
+        "method": "POST",
+        "pattern": "^/api/base-library/catalog/distill-preview$",
+        "example": "/base-library/catalog/distill-preview",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/base-library/catalog/distill-preview@src/base-library/routes.js:1272"
+      },
+      {
+        "file": "web-pro/src/views/library/CatalogIngestPanel.vue",
+        "line": 601,
+        "method": "POST",
+        "pattern": "^/api/base-library/catalog/distill$",
+        "example": "/base-library/catalog/distill",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/base-library/catalog/distill@src/base-library/routes.js:1295"
+      },
+      {
+        "file": "web-pro/src/views/library/CatalogIngestPanel.vue",
+        "line": 626,
+        "method": "POST",
+        "pattern": "^/api/base-library/schemes/draft$",
+        "example": "/base-library/schemes/draft",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/base-library/schemes/draft@src/base-library/routes.js:1350"
+      },
+      {
+        "file": "web-pro/src/views/library/CatalogIngestPanel.vue",
+        "line": 645,
+        "method": "POST",
+        "pattern": "^/api/base-library/schemes$",
+        "example": "/base-library/schemes",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/base-library/schemes@src/base-library/routes.js:1358"
+      },
+      {
+        "file": "web-pro/src/views/LibraryView.vue",
+        "line": 3186,
+        "method": "POST",
+        "pattern": "^/api/tools/upload$",
+        "example": "/tools/upload",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/tools/upload@src/api.js:1940"
+      },
+      {
+        "file": "web-pro/src/views/LibraryView.vue",
+        "line": 3195,
+        "method": "POST",
+        "pattern": "^/api/tools/convert-video$",
+        "example": "/tools/convert-video",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/tools/convert-video@src/api.js:2103"
+      },
+      {
+        "file": "web-pro/src/views/LibraryView.vue",
+        "line": 3302,
+        "method": "POST",
+        "pattern": "^/api/upload$",
+        "example": "/upload",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/upload@src/api.js:9118"
+      },
+      {
+        "file": "web-pro/src/views/LibraryView.vue",
+        "line": 3384,
+        "method": "GET",
+        "pattern": "^/api/base-library/schemes/[^/]+/compile$",
+        "example": "/base-library/schemes/example/compile",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "prefix:/base-library/@src/api.js:4019"
+      },
+      {
+        "file": "web-pro/src/views/SettingsView.vue",
+        "line": 765,
+        "method": "GET",
+        "pattern": "^/api/gray/status$",
+        "example": "/gray/status",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/gray/status@src/api.js:1667"
+      },
+      {
+        "file": "web-pro/src/views/SettingsView.vue",
+        "line": 779,
+        "method": "GET",
+        "pattern": "^/api/gray/publish\\$",
+        "example": "/gray/publish",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/gray/publish@src/api.js:1694"
+      },
+      {
+        "file": "web-pro/src/views/SettingsView.vue",
+        "line": 809,
+        "method": "POST",
+        "pattern": "^/api/gray/publish$",
+        "example": "/gray/publish",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/gray/publish@src/api.js:1677"
+      },
+      {
+        "file": "web-pro/src/views/SettingsView.vue",
+        "line": 942,
+        "method": "GET",
+        "pattern": "^/api/providers/newapi/models$",
+        "example": "/providers/newapi/models",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/providers/newapi/models@src/api.js:6943"
+      },
+      {
+        "file": "web-pro/src/views/studio/ChatStudio.vue",
+        "line": 3829,
+        "method": "POST",
+        "pattern": "^/api/asr/transcribe\\$",
+        "example": "/asr/transcribe",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/asr/transcribe@src/api.js:1659"
+      },
+      {
+        "file": "web-pro/src/views/studio/ChatStudio.vue",
+        "line": 4735,
+        "method": "PATCH",
+        "pattern": "^/api/creation-templates/[^/]+$",
+        "example": "/creation-templates/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "regex:^\\/creation-templates\\/([^\\/]+)$@src/api.js:3870"
+      },
+      {
+        "file": "web-pro/src/views/studio/ChatStudio.vue",
+        "line": 6367,
+        "method": "GET",
+        "pattern": "^/api/tag-vocab$",
+        "example": "/tag-vocab",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/tag-vocab@src/api.js:7258"
+      },
+      {
+        "file": "web-pro/src/views/studio/ChatStudio.vue",
+        "line": 6586,
+        "method": "POST",
+        "pattern": "^/api/chat/sessions$",
+        "example": "/chat/sessions",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/chat/sessions@src/api.js:3354"
+      },
+      {
+        "file": "web-pro/src/views/studio/ChatStudio.vue",
+        "line": 7246,
+        "method": "POST",
+        "pattern": "^/api/chat/optimize-prompt$",
+        "example": "/chat/optimize-prompt",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/chat/optimize-prompt@src/api.js:3496"
+      },
+      {
+        "file": "web-pro/src/views/studio/ChatStudio.vue",
+        "line": 8112,
+        "method": "GET",
+        "pattern": "^/api/assets/[^/]+$",
+        "example": "/assets/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "regex:^\\/assets\\/([^\\/]+)$@src/api.js:5259"
+      },
+      {
+        "file": "web-pro/src/views/studio/ChatStudio.vue",
+        "line": 8151,
+        "method": "POST",
+        "pattern": "^/api/creation-templates$",
+        "example": "/creation-templates",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/creation-templates@src/api.js:3803"
+      },
+      {
+        "file": "web-pro/src/views/studio/ChatStudio.vue",
+        "line": 8205,
+        "method": "DELETE",
+        "pattern": "^/api/creation-templates/[^/]+$",
+        "example": "/creation-templates/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "regex:^\\/creation-templates\\/([^\\/]+)$@src/api.js:3989"
+      },
+      {
+        "file": "web-pro/src/views/studio/QuickStudio.vue",
+        "line": 1768,
+        "method": "POST",
+        "pattern": "^/api/base-library/classify-region$",
+        "example": "/base-library/classify-region",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/base-library/classify-region@src/base-library/routes.js:1004"
+      },
+      {
+        "file": "web-pro/src/views/studio/StudioEditLayer.vue",
+        "line": 1959,
+        "method": "GET",
+        "pattern": "^/api/base-library/guides$",
+        "example": "/base-library/guides",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/base-library/guides@src/base-library/routes.js:223"
+      },
+      {
+        "file": "web-pro/src/views/studio/StudioEditLayer.vue",
+        "line": 1974,
+        "method": "POST",
+        "pattern": "^/api/base-library/guides$",
+        "example": "/base-library/guides",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/base-library/guides@src/base-library/routes.js:228"
+      },
+      {
+        "file": "web-pro/src/views/studio/StudioEditLayer.vue",
+        "line": 2018,
+        "method": "DELETE",
+        "pattern": "^/api/base-library/guides/[^/]+$",
+        "example": "/base-library/guides/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "prefix:/base-library/@src/api.js:4019"
+      },
+      {
+        "file": "web-pro/src/views/studio/StudioEditLayer.vue",
+        "line": 2028,
+        "method": "GET",
+        "pattern": "^/api/base-library/styles$",
+        "example": "/base-library/styles",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/base-library/styles@src/base-library/routes.js:124"
+      },
+      {
+        "file": "web-pro/src/views/studio/StudioEditLayer.vue",
+        "line": 2052,
+        "method": "GET",
+        "pattern": "^/api/base-library/schemes\\$",
+        "example": "/base-library/schemes",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/base-library/schemes@src/base-library/routes.js:115"
+      },
+      {
+        "file": "web-pro/src/views/studio/StudioEditLayer.vue",
+        "line": 4081,
+        "method": "POST",
+        "pattern": "^/api/base-library/compile$",
+        "example": "/base-library/compile",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/base-library/compile@src/base-library/routes.js:1436"
+      },
+      {
+        "file": "web-pro/src/views/studio/StudioEditLayer.vue",
+        "line": 4122,
+        "method": "PUT",
+        "pattern": "^/api/base-library/bindings/[^/]+$",
+        "example": "/base-library/bindings/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "prefix:/base-library/@src/api.js:4019"
+      },
+      {
+        "file": "web-pro/src/views/studio/StudioGlobalDrawer.vue",
+        "line": 671,
+        "method": "GET",
+        "pattern": "^/api/base-library/schemes/[^/]+/compile\\$",
+        "example": "/base-library/schemes/example/compile",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "prefix:/base-library/@src/api.js:4019"
+      },
+      {
+        "file": "web-pro/src/views/studio/StudioGlobalDrawer.vue",
+        "line": 735,
+        "method": "POST",
+        "pattern": "^/api/base-library/space/extract$",
+        "example": "/base-library/space/extract",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/base-library/space/extract@src/base-library/routes.js:192"
+      },
+      {
+        "file": "web-pro/src/views/studio/StudioGlobalDrawer.vue",
+        "line": 777,
+        "method": "GET",
+        "pattern": "^/api/base-library/space/recommend\\$",
+        "example": "/base-library/space/recommend",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/base-library/space/recommend@src/base-library/routes.js:211"
+      }
+    ],
+    "app-uniapp": [
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 74,
+        "method": "POST",
+        "pattern": "^/auth/login$",
+        "example": "/auth/login",
+        "concrete": true,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "exact:/auth/login@src/api.js:1754"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 87,
+        "method": "GET",
+        "pattern": "^/auth/me$",
+        "example": "/auth/me",
+        "concrete": true,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "exact:/auth/me@src/api.js:1888"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 92,
+        "method": "POST",
+        "pattern": "^/auth/logout$",
+        "example": "/auth/logout",
+        "concrete": true,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "exact:/auth/logout@src/api.js:1770"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 150,
+        "method": "GET",
+        "pattern": "^/assets$",
+        "example": "/assets",
+        "concrete": true,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "exact:/assets@src/api.js:2774"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 285,
+        "method": "GET",
+        "pattern": "^/assets/[^/]+$",
+        "example": "/assets/example",
+        "concrete": false,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "regex:^\\/assets\\/([^\\/]+)$@src/api.js:5259"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 297,
+        "method": "GET",
+        "pattern": "^/assets/[^/]+/quality$",
+        "example": "/assets/example/quality",
+        "concrete": false,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "regex:^\\/assets\\/([^\\/]+)\\/quality$@src/api.js:5285"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 352,
+        "method": "POST",
+        "pattern": "^/ai/tasks$",
+        "example": "/ai/tasks",
+        "concrete": true,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "exact:/ai/tasks@src/api.js:5123"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 389,
+        "method": "GET",
+        "pattern": "^/assets/[^/]+/ai/tasks$",
+        "example": "/assets/example/ai/tasks",
+        "concrete": false,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "regex:^\\/assets\\/([^\\/]+)\\/ai\\/tasks$@src/api.js:5154"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 396,
+        "method": "GET",
+        "pattern": "^/ai/tasks/[^/]+$",
+        "example": "/ai/tasks/example",
+        "concrete": false,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "regex:^\\/ai\\/tasks\\/([^\\/]+)$@src/api.js:5144"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 402,
+        "method": "POST",
+        "pattern": "^/assets/[^/]+/restage$",
+        "example": "/assets/example/restage",
+        "concrete": false,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "regex:^\\/assets\\/([^\\/]+)\\/restage$@src/api.js:5323"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 417,
+        "method": "GET",
+        "pattern": "^/ai/capabilities$",
+        "example": "/ai/capabilities",
+        "concrete": true,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "exact:/ai/capabilities@src/api.js:4686"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 421,
+        "method": "GET",
+        "pattern": "^/lab/capabilities$",
+        "example": "/lab/capabilities",
+        "concrete": true,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "exact:/lab/capabilities@src/api.js:3077"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 425,
+        "method": "GET",
+        "pattern": "^/portrait-library$",
+        "example": "/portrait-library",
+        "concrete": true,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "exact:/portrait-library@src/portrait-library.js:610"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 429,
+        "method": "POST",
+        "pattern": "^/portrait-library/consent$",
+        "example": "/portrait-library/consent",
+        "concrete": true,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "exact:/portrait-library/consent@src/portrait-library.js:622"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 436,
+        "method": "POST",
+        "pattern": "^/portrait-library/groups$",
+        "example": "/portrait-library/groups",
+        "concrete": true,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "exact:/portrait-library/groups@src/portrait-library.js:631"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 443,
+        "method": "DELETE",
+        "pattern": "^/portrait-library/assets/[^/]+$",
+        "example": "/portrait-library/assets/example",
+        "concrete": false,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "prefix:/portrait-library@src/api.js:1733"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 447,
+        "method": "DELETE",
+        "pattern": "^/portrait-library/groups/[^/]+$",
+        "example": "/portrait-library/groups/example",
+        "concrete": false,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "prefix:/portrait-library@src/api.js:1733"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 480,
+        "method": "POST",
+        "pattern": "^/lab/runs$",
+        "example": "/lab/runs",
+        "concrete": true,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "exact:/lab/runs@src/api.js:3254"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 489,
+        "method": "GET",
+        "pattern": "^/lab/runs/[^/]+/[^/]+$",
+        "example": "/lab/runs/example/example",
+        "concrete": false,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "regex:^\\/lab\\/runs\\/([^\\/]+)\\/([^\\/]+)$@src/api.js:3299"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 497,
+        "method": "GET",
+        "pattern": "^/chat/sessions$",
+        "example": "/chat/sessions",
+        "concrete": true,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "exact:/chat/sessions@src/api.js:3337"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 502,
+        "method": "POST",
+        "pattern": "^/chat/sessions$",
+        "example": "/chat/sessions",
+        "concrete": true,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "exact:/chat/sessions@src/api.js:3354"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 510,
+        "method": "DELETE",
+        "pattern": "^/chat/sessions/[^/]+$",
+        "example": "/chat/sessions/example",
+        "concrete": false,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "regex:^\\/chat\\/sessions\\/([^\\/]+)$@src/api.js:3369"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 517,
+        "method": "GET",
+        "pattern": "^/chat/messages$",
+        "example": "/chat/messages",
+        "concrete": true,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "exact:/chat/messages@src/api.js:3380"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 525,
+        "method": "POST",
+        "pattern": "^/chat/messages$",
+        "example": "/chat/messages",
+        "concrete": true,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "exact:/chat/messages@src/api.js:3402"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 533,
+        "method": "POST",
+        "pattern": "^/gen/chat$",
+        "example": "/gen/chat",
+        "concrete": true,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "exact:/gen/chat@src/api.js:8829"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 545,
+        "method": "POST",
+        "pattern": "^/edit/run$",
+        "example": "/edit/run",
+        "concrete": true,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "exact:/edit/run@src/api.js:4731"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 554,
+        "method": "POST",
+        "pattern": "^/ai/segment$",
+        "example": "/ai/segment",
+        "concrete": true,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "exact:/ai/segment@src/api.js:4032"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 564,
+        "method": "POST",
+        "pattern": "^/chat/optimize-prompt$",
+        "example": "/chat/optimize-prompt",
+        "concrete": true,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "exact:/chat/optimize-prompt@src/api.js:3496"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 584,
+        "method": "DELETE",
+        "pattern": "^/chat/messages$",
+        "example": "/chat/messages",
+        "concrete": true,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "exact:/chat/messages@src/api.js:3487"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 676,
+        "method": "GET",
+        "pattern": "^/lab/local-models$",
+        "example": "/lab/local-models",
+        "concrete": true,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "exact:/lab/local-models@src/api.js:3196"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 699,
+        "method": "GET",
+        "pattern": "^/products/presets$",
+        "example": "/products/presets",
+        "concrete": true,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "exact:/products/presets@src/api.js:4182"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 707,
+        "method": "DELETE",
+        "pattern": "^/assets/[^/]+$",
+        "example": "/assets/example",
+        "concrete": false,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "regex:^\\/assets\\/([^\\/]+)$@src/api.js:2159"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 717,
+        "method": "POST",
+        "pattern": "^/assets/[^/]+/main-derivative$",
+        "example": "/assets/example/main-derivative",
+        "concrete": false,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "regex:^\\/assets\\/([^\\/]+)\\/main-derivative$@src/api.js:7203"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 731,
+        "method": "GET",
+        "pattern": "^/dict/menu-tree$",
+        "example": "/dict/menu-tree",
+        "concrete": true,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "exact:/dict/menu-tree@src/api.js:1849"
+      },
+      {
+        "file": "app-uniapp/src/service/ViewerApi.js",
+        "line": 736,
+        "method": "GET",
+        "pattern": "^/studio/schema$",
+        "example": "/studio/schema",
+        "concrete": true,
+        "viewer": true,
+        "via": "app-uniapp",
+        "matched": true,
+        "route": "exact:/studio/schema@src/api.js:1858"
+      }
+    ],
+    "harmony": [
+      {
+        "file": "harmony/material_sync/entry/src/main/ets/services/Api.ets",
+        "line": 21,
+        "method": "POST",
+        "pattern": "^/api/auth/login$",
+        "example": "/auth/login",
+        "concrete": true,
+        "viewer": false,
+        "via": "harmony",
+        "matched": true,
+        "route": "exact:/auth/login@src/api.js:1754"
+      },
+      {
+        "file": "harmony/material_sync/entry/src/main/ets/services/Api.ets",
+        "line": 55,
+        "method": "POST",
+        "pattern": "^/api/assets/ingest$",
+        "example": "/assets/ingest",
+        "concrete": true,
+        "viewer": false,
+        "via": "harmony",
+        "matched": true,
+        "route": "exact:/assets/ingest@src/api.js:7221"
+      }
+    ]
+  },
+  "otherEndpoints": [
+    {
+      "kind": "ws",
+      "method": "WS",
+      "path": "/api/push",
+      "source": "src/ws-server.js",
+      "note": "WebSocket 推送，query token 鉴权"
+    },
+    {
+      "kind": "proxy",
+      "method": "*",
+      "path": "/editor-api/* 与 /editor/*",
+      "source": "web-pro/server.cjs",
+      "note": "剪辑器反代与静态托管，非 src/api.js 路由"
+    },
+    {
+      "kind": "plugin",
+      "method": "*",
+      "path": "/plugins/material/api/*",
+      "source": "index.js",
+      "note": "DSH 插件形态挂载，同一张路由表（旧管理台双前缀）"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "high",
+      "kind": "wrong-base-url",
+      "client": "harmony",
+      "path": "http://127.0.0.1:8787",
+      "detail": "默认 BASE_URL=http://127.0.0.1:8787 端口错误，素材库正式端口为 30001；出厂配置不可用",
+      "ref": "R1"
+    },
+    {
+      "severity": "medium",
+      "kind": "dead-alias",
+      "client": "app-uniapp",
+      "path": "ViewerApi.js:580",
+      "detail": "export const aiEditVerify = verifyPasteback，但 verifyPasteback 全文件未定义也未导入；模块加载即 ReferenceError（白屏风险），且全仓无人使用",
+      "ref": "R2"
+    },
+    {
+      "severity": "medium",
+      "kind": "dynamic-capture",
+      "client": "web",
+      "method": "GET",
+      "path": "/workflows/default",
+      "detail": "GET /workflows/default 无精确分支，被 /^\\/workflows\\/([^/]+)$/ 捕获（src/api.js:5952），default 行缺失时静默兜底返空",
+      "ref": "R5"
+    },
+    {
+      "severity": "medium",
+      "kind": "missing-route",
+      "client": "web",
+      "method": "POST",
+      "path": "/dup-groups/example/representative",
+      "detail": "重复组概念已退役（src/api.js:7158 注释），旧管理台仍在调用：旧管理台调用在服务端无对应路由（web/src/api.js:210），运行时 404",
+      "ref": "R4"
+    },
+    {
+      "severity": "medium",
+      "kind": "missing-route",
+      "client": "web",
+      "method": "POST",
+      "path": "/dup-groups/example/ungroup",
+      "detail": "重复组概念已退役（src/api.js:7158 注释），旧管理台仍在调用：旧管理台调用在服务端无对应路由（web/src/api.js:81），运行时 404",
+      "ref": "R4"
+    },
+    {
+      "severity": "medium",
+      "kind": "missing-route",
+      "client": "web",
+      "method": "POST",
+      "path": "/dup-groups/recluster",
+      "detail": "重复组概念已退役（src/api.js:7158 注释），旧管理台仍在调用：旧管理台调用在服务端无对应路由（web/src/api.js:82），运行时 404",
+      "ref": "R4"
+    },
+    {
+      "severity": "medium",
+      "kind": "viewer-admin",
+      "client": "(白名单审计)",
+      "method": "POST",
+      "path": "/assets/similarity-workbench/clean-exact",
+      "detail": "白名单条目放行，但 src/api.js:2465 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web-pro/src/api.js:772 直接调用"
+    },
+    {
+      "severity": "medium",
+      "kind": "viewer-admin",
+      "client": "(白名单审计)",
+      "method": "DELETE",
+      "path": "/assets/similarity-workbench/ignored",
+      "detail": "白名单条目放行，但 src/api.js:2486 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web-pro/src/api.js:785 直接调用"
+    },
+    {
+      "severity": "medium",
+      "kind": "viewer-admin",
+      "client": "(白名单审计)",
+      "method": "POST",
+      "path": "/assets/similarity-workbench/resolve",
+      "detail": "白名单条目放行，但 src/api.js:2453 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web-pro/src/api.js:763 直接调用"
+    },
+    {
+      "severity": "medium",
+      "kind": "viewer-admin",
+      "client": "(白名单审计)",
+      "method": "POST",
+      "path": "/assets/trash/purge",
+      "detail": "白名单条目放行，但 src/api.js:2424 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web-pro/src/api.js:310 直接调用",
+      "ref": "R6"
+    },
+    {
+      "severity": "medium",
+      "kind": "viewer-admin",
+      "client": "(白名单审计)",
+      "method": "POST",
+      "path": "/assets/trash/rehome-gate",
+      "detail": "白名单条目放行，但 src/api.js:2310 处理器要求 admin，viewer 账号 403"
+    },
+    {
+      "severity": "medium",
+      "kind": "viewer-admin",
+      "client": "(白名单审计)",
+      "method": "GET",
+      "path": "/governance/dict-macros",
+      "detail": "白名单条目放行，但 src/api.js:7764 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web/src/api.js:287 直接调用"
+    },
+    {
+      "severity": "medium",
+      "kind": "viewer-admin",
+      "client": "(白名单审计)",
+      "method": "GET",
+      "path": "/governance/gen-jobs",
+      "detail": "白名单条目放行，但 src/api.js:8077 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web/src/api.js:264 直接调用"
+    },
+    {
+      "severity": "medium",
+      "kind": "viewer-admin",
+      "client": "(白名单审计)",
+      "method": "GET",
+      "path": "/governance/gen-models",
+      "detail": "白名单条目放行，但 src/api.js:7434 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web/src/api.js:237 直接调用"
+    },
+    {
+      "severity": "medium",
+      "kind": "viewer-admin",
+      "client": "(白名单审计)",
+      "method": "GET",
+      "path": "/governance/mount-points",
+      "detail": "白名单条目放行，但 src/api.js:7673 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web/src/api.js:302 直接调用"
+    },
+    {
+      "severity": "medium",
+      "kind": "viewer-admin",
+      "client": "(白名单审计)",
+      "method": "GET",
+      "path": "/governance/mount-points/example/modules",
+      "detail": "白名单条目放行，但 src/api.js:7705 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web/src/api.js:305 直接调用"
+    },
+    {
+      "severity": "medium",
+      "kind": "viewer-admin",
+      "client": "(白名单审计)",
+      "method": "GET",
+      "path": "/governance/operators",
+      "detail": "白名单条目放行，但 src/api.js:7754 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web/src/api.js:286 直接调用"
+    },
+    {
+      "severity": "medium",
+      "kind": "viewer-admin",
+      "client": "(白名单审计)",
+      "method": "GET",
+      "path": "/governance/prompts",
+      "detail": "白名单条目放行，但 src/api.js:7627 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web/src/api.js:296 直接调用"
+    },
+    {
+      "severity": "medium",
+      "kind": "viewer-admin",
+      "client": "(白名单审计)",
+      "method": "POST",
+      "path": "/governance/prompts/preview-compile",
+      "detail": "白名单条目放行，但 src/api.js:7819 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web/src/api.js:292 直接调用"
+    },
+    {
+      "severity": "medium",
+      "kind": "viewer-admin",
+      "client": "(白名单审计)",
+      "method": "GET",
+      "path": "/governance/snippets",
+      "detail": "白名单条目放行，但 src/api.js:7774 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web/src/api.js:288 直接调用"
+    },
+    {
+      "severity": "medium",
+      "kind": "viewer-admin",
+      "client": "(白名单审计)",
+      "method": "GET",
+      "path": "/governance/workflows",
+      "detail": "白名单条目放行，但 src/api.js:7605 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web/src/api.js:272 直接调用"
+    },
+    {
+      "severity": "medium",
+      "kind": "viewer-admin",
+      "client": "(白名单审计)",
+      "method": "GET",
+      "path": "/runs/example/unpack",
+      "detail": "白名单条目放行，但 src/api.js:6477 处理器要求 admin，viewer 账号 403；web/web-pro 亦在 web/src/api.js:274 直接调用"
+    },
+    {
+      "severity": "medium",
+      "kind": "whitelist-gap",
+      "client": "(潜在)app-uniapp",
+      "method": "GET",
+      "path": "/lab/local-models/example/download",
+      "detail": "路由存在（src/api.js:3207）但不在 viewer 白名单；移动端将来直连必 404（当前走原生桥）",
+      "ref": "R3"
+    },
+    {
+      "severity": "low",
+      "kind": "duplicate-route",
+      "method": "GET",
+      "path": "/app/update/state",
+      "detail": "在 src/api.js:1797 与 src/api.js:3044 重复注册，后者永远不可达",
+      "ref": "R10"
+    },
+    {
+      "severity": "low",
+      "kind": "duplicate-whitelist",
+      "method": "POST",
+      "path": "/tools/convert-video",
+      "detail": "VIEWER_WHITELIST 重复条目 POST ^\\/tools\\/convert-video$"
+    },
+    {
+      "severity": "low",
+      "kind": "duplicate-whitelist",
+      "method": "POST",
+      "path": "/tools/extract-frames",
+      "detail": "VIEWER_WHITELIST 重复条目 POST ^\\/tools\\/extract-frames$"
+    },
+    {
+      "severity": "low",
+      "kind": "unguarded-json-parse",
+      "client": "harmony",
+      "path": "Api.ets login()/ingestFile()",
+      "detail": "2 处 JSON.parse 无 try/catch，错误页 HTML / 代理 502 会直接抛异常（B8 修）"
+    }
+  ]
+}
