@@ -11,12 +11,108 @@ const {
   extractDominantHexFromBuffer,
   generateAestheticColorName
 } = require('./color-engine');
+const { ensureBaseLibrarySchema } = require('./schema');
+const { seedMasterDictionary } = require('./master-dictionary-seed');
+const { expandPartForMatch } = require('./part-policy');
+
+// millwork<->cabinet_door 的双轨归一统一由 part-policy.expandPartForMatch 处理，
+// 这里只保留历史遗留的旧名兼容
+const PART_ALIAS_MAP = {
+  furniture: 'upholstery',
+  soft: 'upholstery',
+  lighting: 'hard_furniture',
+  fixture: 'hard_furniture'
+};
+
+const SWATCH_KIND_MAP = {
+  mat_cat_latex: { kind: '乳胶漆', kind_key: 'latex' },
+  mat_cat_art_plaster: { kind: '艺术漆/微水泥', kind_key: 'microcement' },
+  mat_cat_leather: { kind: '头层真皮', kind_key: 'leather' },
+  mat_cat_fabric_upholstery: { kind: '沙发软包布艺', kind_key: 'fabric' },
+  mat_cat_wood_panel: { kind: '实木护墙板与木皮', kind_key: 'wood' },
+  mat_cat_wood_floor: { kind: '实木木地板', kind_key: 'wood_flooring' },
+  mat_cat_stone: { kind: '大理石与洞石岩板', kind_key: 'stone' },
+  mat_cat_cabinet_lacquer: { kind: '定制柜门烤漆/PET', kind_key: 'cabinet_lacquer' },
+  mat_cat_metal: { kind: '金属五金', kind_key: 'metal' },
+  mat_cat_glass: { kind: '玻璃镜面', kind_key: 'glass' },
+  mat_cat_textile_drapery: { kind: '窗帘床品', kind_key: 'drapery' },
+  mat_cat_carpet: { kind: '地毯织物', kind_key: 'carpet' },
+  mat_cat_tile: { kind: '瓷砖花砖', kind_key: 'tile' }
+};
+
+/**
+ * 强幂等 Master 字典自愈保障：若表不存在或条目数不足则自动播种
+ */
+function ensureMasterDictionaryReady(db) {
+  try {
+    ensureBaseLibrarySchema(db);
+    const partCount = db.prepare('SELECT COUNT(*) AS c FROM ba_parts WHERE enabled = 1').get()?.c || 0;
+    const swatchCount = db.prepare('SELECT COUNT(*) AS c FROM ba_material_swatches WHERE enabled = 1').get()?.c || 0;
+    if (partCount < 8 || swatchCount < 30) {
+      seedMasterDictionary(db);
+    }
+  } catch (err) {
+    console.warn('[dictionary] ensureMasterDictionaryReady warning:', err.message);
+  }
+}
+
+function syncSwatchToBaItems(db, sw) {
+  try {
+    const kInfo = SWATCH_KIND_MAP[sw.category_id] || { kind: '基础基材', kind_key: 'base' };
+    const now = Date.now();
+    db.prepare(`
+      INSERT OR REPLACE INTO ba_items (
+        id, kind, kind_key, name_zh, prompt_name, hex, family, lightness,
+        role_hint, zone, preview_rel, external_sku, created_at, updated_at
+      ) VALUES (
+        :id, :kind, :kind_key, :name_zh, :prompt_name, :hex, :family, :lightness,
+        :role_hint, 'any', :preview_rel, :external_sku, :now, :now
+      )
+    `).run({
+      id: sw.id,
+      kind: kInfo.kind,
+      kind_key: kInfo.kind_key,
+      name_zh: sw.name_zh,
+      prompt_name: sw.name_zh,
+      hex: sw.hex,
+      family: sw.color_family,
+      lightness: sw.lrv,
+      role_hint: sw.brand ? `${sw.brand} ${sw.code || ''}`.trim() : '',
+      preview_rel: sw.preview_path || '',
+      external_sku: sw.code || '',
+      now
+    });
+
+    const cat = db.prepare('SELECT allowed_parts FROM ba_material_categories WHERE id=?').get(sw.category_id);
+    if (cat && cat.allowed_parts) {
+      let allowedParts = [];
+      try { allowedParts = JSON.parse(cat.allowed_parts); } catch (_) {}
+      const insMount = db.prepare('INSERT OR IGNORE INTO ba_item_mounts (item_id, mount) VALUES (?, ?)');
+      for (const pt of allowedParts) {
+        insMount.run(sw.id, pt);
+      }
+    }
+  } catch (err) {
+    // 忽略未建表或并发异常
+  }
+}
+
+function deleteSwatchFromBaItems(db, id) {
+  try {
+    db.prepare('DELETE FROM ba_items WHERE id=?').run(id);
+    db.prepare('DELETE FROM ba_item_mounts WHERE item_id=?').run(id);
+  } catch (err) {}
+}
 
 /**
  * 获取完整层级联动字典树 (空间部位 ↔ 基材品类 ↔ 专属色卡/纹理与工艺)
  */
 function getDictionary(db, { part = '' } = {}) {
-  // 1. 部位列表
+  ensureMasterDictionaryReady(db);
+
+  const normPart = (part && PART_ALIAS_MAP[part]) ? PART_ALIAS_MAP[part] : (part || '');
+
+  // 1. 部位列表 (永远返回全部 8 个部位)
   const partsRows = db.prepare('SELECT * FROM ba_parts WHERE enabled=1 ORDER BY sort_order ASC').all();
   const parts = partsRows.map(p => {
     let aliases = [];
@@ -34,9 +130,9 @@ function getDictionary(db, { part = '' } = {}) {
     };
   });
 
-  // 2. 基材品类列表
+  // 2. 基材品类列表 (全部 12 个品类)
   const catRows = db.prepare('SELECT * FROM ba_material_categories WHERE enabled=1 ORDER BY sort_order ASC').all();
-  const categories = catRows.map(c => {
+  const all_categories = catRows.map(c => {
     let allowedParts = [];
     let finishes = [];
     try { allowedParts = JSON.parse(c.allowed_parts || '[]'); } catch (_) {}
@@ -54,22 +150,8 @@ function getDictionary(db, { part = '' } = {}) {
     };
   });
 
-  // 3. 专属色卡与花色资产列表
-  let swatchSql = 'SELECT * FROM ba_material_swatches WHERE enabled=1';
-  const swatchParams = [];
-  if (part) {
-    const matchedCats = categories.filter(c => c.allowed_parts.includes(part)).map(c => c.id);
-    if (matchedCats.length > 0) {
-      const placeholders = matchedCats.map(() => '?').join(',');
-      swatchSql += ` AND category_id IN (${placeholders})`;
-      swatchParams.push(...matchedCats);
-    } else {
-      swatchSql += ' AND 1=0';
-    }
-  }
-  swatchSql += ' ORDER BY pinned DESC, sort_order ASC, lrv DESC';
-  const swatchRows = db.prepare(swatchSql).all(...swatchParams);
-
+  // 3. 专属色卡 (永远查询全量 12 品类色卡，绝不因传了 part 就 AND 1=0 或过滤分类！)
+  const swatchRows = db.prepare('SELECT * FROM ba_material_swatches WHERE enabled=1 ORDER BY pinned DESC, sort_order ASC, lrv DESC').all();
   const swatchesByCategory = {};
   for (const s of swatchRows) {
     let styleTags = [];
@@ -93,7 +175,8 @@ function getDictionary(db, { part = '' } = {}) {
       tintable: Boolean(s.tintable),
       source_type: s.source_type || 'curated',
       pinned: Boolean(s.pinned),
-      sort_order: s.sort_order || 0
+      sort_order: s.sort_order || 0,
+      is_system: Boolean(s.is_system)
     };
     if (!swatchesByCategory[s.category_id]) {
       swatchesByCategory[s.category_id] = [];
@@ -101,16 +184,22 @@ function getDictionary(db, { part = '' } = {}) {
     swatchesByCategory[s.category_id].push(item);
   }
 
-  // 4. 计算当前选定部位的可用品类
-  const filteredCategories = part
-    ? categories.filter(c => c.allowed_parts.includes(part))
-    : categories;
+  // 4. 当前选定部位的可用品类：如果匹配到了合法品类则返回，否则返回全部，绝不返回空数组 []
+  let filteredCategories = all_categories;
+  if (normPart) {
+    // millwork 与 cabinet_door 视为同一部位，任一 id 命中 allowed_parts 即匹配
+    const matchKeys = expandPartForMatch(normPart);
+    const matched = all_categories.filter(c => matchKeys.some(k => (c.allowed_parts || []).includes(k)));
+    if (matched.length > 0) {
+      filteredCategories = matched;
+    }
+  }
 
   return {
     parts,
     categories: filteredCategories,
     swatches: swatchesByCategory,
-    all_categories: categories
+    all_categories
   };
 }
 
@@ -320,7 +409,9 @@ function createSwatch(db, b) {
     now, now
   );
 
-  return db.prepare('SELECT * FROM ba_material_swatches WHERE id=?').get(id);
+  const created = db.prepare('SELECT * FROM ba_material_swatches WHERE id=?').get(id);
+  if (created) syncSwatchToBaItems(db, created);
+  return created;
 }
 
 function updateSwatch(db, id, b) {
@@ -347,12 +438,23 @@ function updateSwatch(db, id, b) {
     WHERE id=?
   `).run(name_zh, brand, code, hex, lrv, color_family, style_tags, finish_override, prompt_hint_zh, pinned, sort_order, enabled, now, id);
 
-  return db.prepare('SELECT * FROM ba_material_swatches WHERE id=?').get(id);
+  const updated = db.prepare('SELECT * FROM ba_material_swatches WHERE id=?').get(id);
+  if (updated) syncSwatchToBaItems(db, updated);
+  return updated;
 }
 
 function deleteSwatch(db, id) {
-  const res = db.prepare('DELETE FROM ba_material_swatches WHERE id=?').run(id);
-  return res.changes > 0;
+  const existing = db.prepare('SELECT is_system FROM ba_material_swatches WHERE id=?').get(id);
+  if (!existing) return false;
+  if (existing.is_system) {
+    // 系统策展色卡只软禁用（种子 INSERT OR IGNORE 不会把它重新启用），
+    // 防止 viewer 级会话物理删除共享 Master 字典
+    db.prepare('UPDATE ba_material_swatches SET enabled=0, updated_at=? WHERE id=?').run(Date.now(), id);
+  } else {
+    db.prepare('DELETE FROM ba_material_swatches WHERE id=?').run(id);
+  }
+  deleteSwatchFromBaItems(db, id);
+  return true;
 }
 
 /**
@@ -505,6 +607,8 @@ function getRecommendedSwatchesForRegion(db, { part = '', category_id = '', domi
       category_id: targetCatId,
       category_name: catName,
       swatches: [],
+      default_swatch: null,
+      dominant_name_zh: dominant_hex ? ((generateAestheticColorName(dominant_hex, part) || {}).name || '') : '',
       advice_zh: `当前基材【${catName}】暂无专属色卡`
     };
   }
@@ -517,7 +621,7 @@ function getRecommendedSwatchesForRegion(db, { part = '', category_id = '', domi
   const recommended = [];
   const usedIds = new Set();
 
-  // (1) 原色同频推荐 (若提供选区原色)
+  // (1) 原色同频 (若提供选区原色，从全部色卡中匹配最同频的一款)
   let originMatch = null;
   if (dominant_hex) {
     const matches = matchClosestSwatches(dominant_hex, swatchesWithLab, 1);
@@ -527,15 +631,29 @@ function getRecommendedSwatchesForRegion(db, { part = '', category_id = '', domi
         badge: '原色同频',
         recommend_reason: `与框选区域原色 (${dominant_hex}) 色差极小 (ΔE=${matches[0].delta_e.toFixed(1)})`
       };
-      recommended.push(originMatch);
       usedIds.add(originMatch.id);
     }
   }
 
-  // (2) 空间百搭基底色 (中高明度经典常用色，优先 pinned)
+  // (2) 推荐首选 (高频置顶主推色)；唯一色卡已被「原色同频」占用时不重复推同一款
+  const topCandidate = swatchesWithLab.find(s => !usedIds.has(s.id));
+  if (topCandidate) {
+    recommended.push({
+      ...topCandidate,
+      badge: '推荐首选',
+      recommend_reason: `【${catName}】最经典高频主推色，百搭质感优选`
+    });
+    usedIds.add(topCandidate.id);
+  }
+
+  if (originMatch) {
+    recommended.push(originMatch);
+  }
+
+  // (3) 空间百搭基底色 (中高明度经典常用色，优先 pinned)
   const baseCandidates = swatchesWithLab.filter(s => !usedIds.has(s.id) && s.pinned === 1);
   for (const s of baseCandidates) {
-    if (recommended.length >= (originMatch ? 3 : 2)) break;
+    if (recommended.length >= 3) break;
     recommended.push({
       ...s,
       badge: '空间百搭',
@@ -544,7 +662,7 @@ function getRecommendedSwatchesForRegion(db, { part = '', category_id = '', domi
     usedIds.add(s.id);
   }
 
-  // (3) 质感跳色/沉稳压阵色 (深色或特色色调)
+  // (4) 质感跳色/沉稳压阵色 (深色或特色色调)
   const accentCandidates = swatchesWithLab.filter(s => !usedIds.has(s.id));
   for (const s of accentCandidates) {
     if (recommended.length >= 5) break;
@@ -560,14 +678,20 @@ function getRecommendedSwatchesForRegion(db, { part = '', category_id = '', domi
     ? `已根据框选原色 (${dominant_hex}) 与【${catName}】材质特征，为您推荐 ${recommended.length} 款和谐配色方案`
     : `为您精选 ${recommended.length} 款【${catName}】高频经典与点睛配色建议`;
 
+  const dominant_name_zh = dominant_hex ? ((generateAestheticColorName(dominant_hex, part) || {}).name || '') : '';
+
+  const cleanSwatches = recommended.map(r => {
+    const copy = { ...r };
+    delete copy._lab;
+    return copy;
+  });
+
   return {
     category_id: targetCatId,
     category_name: catName,
-    swatches: recommended.map(r => {
-      const copy = { ...r };
-      delete copy._lab;
-      return copy;
-    }),
+    swatches: cleanSwatches,
+    default_swatch: cleanSwatches[0] || null,
+    dominant_name_zh,
     advice_zh
   };
 }

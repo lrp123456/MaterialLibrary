@@ -4,6 +4,7 @@
  */
 
 const { normalizeWoodFields } = require('./wood-taxonomy');
+const { expandPartForMatch } = require('./part-policy');
 
 const SURFACES = ['ceiling', 'wall', 'floor', 'millwork', 'counter', 'furniture', 'soft', 'metal'];
 const SURFACE_LABELS = {
@@ -515,8 +516,11 @@ function listItems(db, {
   }
   let join = '';
   if (mount) {
-    join = 'JOIN ba_item_mounts m ON m.item_id = i.id AND m.mount = ?';
-    args.unshift(mount);
+    // millwork 与 cabinet_door 双 id 等价：任一挂载命中即返回（DISTINCT 防双挂载重复行）
+    const mountKeys = expandPartForMatch(String(mount).trim());
+    const placeholders = mountKeys.map(() => '?').join(',');
+    join = `JOIN (SELECT DISTINCT item_id FROM ba_item_mounts WHERE mount IN (${placeholders})) m ON m.item_id = i.id`;
+    args.unshift(...mountKeys);
   }
 
   let orderSql = `

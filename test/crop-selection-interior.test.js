@@ -5,7 +5,12 @@
 
 const assert = require('assert');
 const sharp = require('sharp');
-const { cropSelectionInterior } = require('../src/handlers/image-ops');
+const {
+  cropSelectionInterior,
+  normalizeQuadOrRect,
+  selectionBounds,
+  parseBboxString,
+} = require('../src/handlers/image-ops');
 
 async function runTests() {
   console.log('=== 1. 测试矩形选区内部裁切 ===');
@@ -78,7 +83,74 @@ async function runTests() {
   assert.strictEqual(m5.height, 280, '短边必须延展补齐到 280');
   assert.ok(m5.width * m5.height <= 2458624, '总像素不得超过上限');
   assert.ok(m5.width * m5.height >= 78400, '总像素不得低于下限');
-  console.log('✅ 高长宽比边缘像素延展正常');
+  console.log('=== 6. 回归测试：1152x2048 竖屏原图下 <bbox>122 633 699 953</bbox> 沙发选区像素换算与切片 ===');
+  const sofaImgW = 1152;
+  const sofaImgH = 2048;
+  const sofaBaseImg = await sharp({
+    create: {
+      width: sofaImgW,
+      height: sofaImgH,
+      channels: 3,
+      background: { r: 240, g: 235, b: 230 }
+    }
+  }).jpeg().toBuffer();
+
+  const sofaBboxStr = '<bbox>122 633 699 953</bbox>';
+  const parsed = parseBboxString(sofaBboxStr);
+  assert.deepStrictEqual(parsed, [122, 633, 699, 953]);
+
+  // 验证像素换算精准落在 140.5~805.2px 与 1296.4~1951.7px 范围内
+  const sofaBounds = selectionBounds(sofaBboxStr, sofaImgW, sofaImgH);
+  assert.strictEqual(sofaBounds.minX, 141, 'minX (122/1000 * 1152 = 140.544) 必须为 141px');
+  assert.strictEqual(sofaBounds.maxX, 805, 'maxX (699/1000 * 1152 = 805.248) 必须为 805px');
+  assert.strictEqual(sofaBounds.minY, 1296, 'minY (633/1000 * 2048 = 1296.384) 必须为 1296px');
+  assert.strictEqual(sofaBounds.maxY, 1952, 'maxY (953/1000 * 2048 = 1951.744) 必须为 1952px');
+
+  // 验证 cropSelectionInterior 基于 <bbox> 选区直接裁切
+  const sofaCropFromTag = await cropSelectionInterior(sofaBaseImg, sofaBboxStr);
+  const mSofaTag = await sharp(sofaCropFromTag).metadata();
+  assert.strictEqual(mSofaTag.format, 'jpeg');
+  assert.strictEqual(mSofaTag.width, 665, '沙发裁切宽为 665px (805.2 - 140.5)');
+  assert.strictEqual(mSofaTag.height, 655, '沙发裁切高为 655px (1951.7 - 1296.4)');
+
+  // 验证对象入参 { bbox: [122, 633, 699, 953] } 未带 unit 时同样智能识别 0~1000 并裁切相同尺寸
+  const sofaCropFromObj = await cropSelectionInterior(sofaBaseImg, { bbox: [122, 633, 699, 953] });
+  const mSofaObj = await sharp(sofaCropFromObj).metadata();
+  assert.strictEqual(mSofaObj.width, 665);
+  assert.strictEqual(mSofaObj.height, 655);
+
+  const origAspectRatio = (699 - 122) / (953 - 633); // 577 / 320 = 1.803125 (归一化长宽)
+  const actualRatio = (665 / 1152) / (655 / 2048);
+  assert.ok(Math.abs(actualRatio - origAspectRatio) < 0.01, '选区长宽比在物理像素上无漂移或扭曲');
+  console.log('✅ 1152x2048 下 <bbox>122 633 699 953</bbox> 沙发切片及坐标换算测试全部通过');
+
+  console.log('=== 7. 前端等比缩放至 [280, 512] 算法纯函数验证 (零形变、零黑边) ===');
+  function simulateFrontendScale(w, h) {
+    let targetW = w;
+    let targetH = h;
+    if (Math.max(w, h) > 512) {
+      const s = 512 / Math.max(w, h);
+      targetW = Math.max(1, Math.round(w * s));
+      targetH = Math.max(1, Math.round(h * s));
+    } else if (Math.min(w, h) < 280) {
+      const s = Math.min(280 / Math.max(1, Math.min(w, h)), 512 / Math.max(1, Math.max(w, h)));
+      targetW = Math.max(1, Math.round(w * s));
+      targetH = Math.max(1, Math.round(h * s));
+    }
+    return { targetW, targetH };
+  }
+
+  const scaledSofa = simulateFrontendScale(665, 655);
+  assert.strictEqual(scaledSofa.targetW, 512, '长边限制至 512');
+  assert.strictEqual(scaledSofa.targetH, 504, '短边等比缩放至 504 (655 * 512 / 665)');
+  assert.ok(Math.abs(scaledSofa.targetW / scaledSofa.targetH - 665 / 655) < 0.005, '缩放后比例精确一致');
+
+  const scaledSmall = simulateFrontendScale(100, 80);
+  assert.strictEqual(scaledSmall.targetH, 280, '短边拉伸至 280');
+  assert.strictEqual(scaledSmall.targetW, 350, '长边按比例放大至 350');
+  assert.strictEqual(scaledSmall.targetW / scaledSmall.targetH, 100 / 80);
+
+  console.log('✅ [280, 512] 保持原始比例等比缩放验证通过');
 
   console.log('\n🎉 cropSelectionInterior 单元测试全部通过！');
 }

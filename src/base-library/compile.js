@@ -198,7 +198,12 @@ function compileBaseAttributes(db, payload = {}) {
     let masterSwatch = null;
     const swatchLookupId = reg.swatch_id || reg.asset_id;
     if (db && swatchLookupId) {
-      try { masterSwatch = db.prepare('SELECT * FROM ba_material_swatches WHERE id = ? AND enabled = 1').get(swatchLookupId); } catch (_) {}
+      try {
+        masterSwatch = db.prepare('SELECT * FROM ba_material_swatches WHERE (id = ? OR code = ?) AND enabled = 1').get(swatchLookupId, swatchLookupId);
+        if (!masterSwatch) {
+          masterSwatch = db.prepare('SELECT * FROM ba_material_swatches WHERE id = ? OR code = ?').get(swatchLookupId, swatchLookupId);
+        }
+      } catch (_) {}
     }
 
     if (masterSwatch) {
@@ -218,7 +223,10 @@ function compileBaseAttributes(db, payload = {}) {
         } catch (_) {}
       }
 
-      const preserveClause = (partRow && partRow.preserve_clause_zh) || '保持原有结构体积与光影';
+      const defaultPreserve = '保持原有结构体积与光影';
+      const preserveClause = (partRow && partRow.preserve_clause_zh)
+        ? `${partRow.preserve_clause_zh}，${defaultPreserve}`
+        : defaultPreserve;
       const categoryName = (catRow && catRow.name_zh) || '';
       const colorBrandCode = [masterSwatch.brand, masterSwatch.code].filter(Boolean).join(' ');
       const colorDetail = [masterSwatch.name_zh, colorBrandCode, masterSwatch.hex].filter(Boolean).join('，');

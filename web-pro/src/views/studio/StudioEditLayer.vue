@@ -445,7 +445,7 @@
               v-if="isOutpainting"
               class="absolute inset-0 bg-black/80 z-50 flex flex-col items-center justify-center gap-4 backdrop-blur-md animate-in fade-in"
             >
-              <div class="w-12 h-12 border-3 border-emerald-400 border-t-transparent rounded-full animate-spin"></div>
+              <div class="w-12 h-12 border-4 border-emerald-400 border-t-transparent rounded-full animate-spin"></div>
               <div class="text-sm font-bold text-white tracking-wide">
                 正在调用专业扩图模型自然延伸空间纹理，请稍候...
               </div>
@@ -1217,7 +1217,10 @@
               :surface="activeGuide.part || activeGuide.surface"
               :subclass="activeGuide.subclass"
               :inferred-prob="activeRegion.inferredProb || 0"
+              :recommended-category-id="activeGuide.recommended_category_id || activeGuide.recommendedCategoryId || ''"
+              :default-swatch="activeGuide.default_swatch || activeGuide.defaultSwatch || null"
               @update:guide="Object.assign(activeGuide, $event)"
+              @change="Object.assign(activeGuide, $event)"
             />
           </div>
 
@@ -1724,7 +1727,7 @@ const SKIN_COLOR_PRESETS = {
     { label: '电镀银', hex: '#D8DCDF' }
   ]
 };
-const objectCatalog = [
+const objectCatalog = ref([
   { key: 'sofa', label: '沙发', items: [
     { name: '单人电动科技沙发', url: '/models/sofa_electric_single.glb' },
     { name: '意式极简双人沙发', url: '/models/sofa_model.glb' },
@@ -1736,12 +1739,59 @@ const objectCatalog = [
   ] },
   { key: 'light', label: '灯', items: [] },
   { key: 'fixture', label: '洁具', items: [] }
-];
+]);
 const savedGuides = ref([]);
 const guideNotice = ref('');
 const pendingGuideApply = ref(null);
 const activeGuide = computed(() => activeRegion.value?.guide || emptyGuide());
-const currentObjects = computed(() => objectCatalog.find((item) => item.key === activeGuide.value.objectCategory)?.items || []);
+const currentObjects = computed(() => objectCatalog.value.find((item) => item.key === activeGuide.value.objectCategory)?.items || []);
+
+async function fetchProductPresets() {
+  try {
+    const token = getToken();
+    const res = await fetch('/api/products/presets', {
+      headers: { Authorization: token ? `Bearer ${token}` : '' }
+    });
+    if (res.ok) {
+      const json = await res.json();
+      const presets = json.data || json;
+      if (Array.isArray(presets) && presets.length > 0) {
+        const catMap = {
+          sofa: { key: 'sofa', label: '沙发', items: [] },
+          chair: { key: 'chair', label: '椅', items: [] },
+          table: { key: 'table', label: '桌', items: [] },
+          light: { key: 'light', label: '灯', items: [] },
+          fixture: { key: 'fixture', label: '洁具', items: [] }
+        };
+        for (const p of presets) {
+          const item = {
+            id: p.id,
+            name: p.name,
+            url: p.model_url || `/models/${p.model_file || p.id + '.glb'}`,
+            preview_url: p.preview_url,
+            facing: typeof p.facing === 'number' ? p.facing : 45
+          };
+          const rawCat = String(p.category || '').toLowerCase();
+          const pName = String(p.name || '').toLowerCase();
+          if (rawCat === 'chair' || pName.includes('椅')) {
+            catMap.chair.items.push(item);
+          } else if (rawCat === 'table' || pName.includes('桌') || pName.includes('柜')) {
+            catMap.table.items.push(item);
+          } else if (rawCat === 'light' || pName.includes('灯')) {
+            catMap.light.items.push(item);
+          } else if (rawCat === 'fixture' || pName.includes('洁具') || pName.includes('卫浴')) {
+            catMap.fixture.items.push(item);
+          } else {
+            catMap.sofa.items.push(item);
+          }
+        }
+        objectCatalog.value = Object.values(catMap);
+      }
+    }
+  } catch (err) {
+    console.warn('[StudioEditLayer] fetchProductPresets error:', err.message);
+  }
+}
 
 function surfaceLabel(key) {
   const labels = { ceiling: '天花', wall: '墙面', floor: '地面', millwork: '全屋定制', furniture: '活动家具', soft: '软装', lighting: '灯具', fixture: '卫浴五金' };
@@ -1791,9 +1841,17 @@ function setGuideType(reg, type) {
   const guide = ensureGuide(reg);
   guide.type = type;
   reg.op = GUIDE_TYPE_TO_OP[type] || '';
-  if ((type === 'add' || type === 'replace') && !guide.suggestion) {
-    if (!guide.objectCategory) guide.objectCategory = 'sofa';
-    guide.suggestion = suggestionFor(guide.objectCategory);
+  if (type === 'resurface') {
+    if (!guide.part && !guide.surface && !reg.inferredSurface) {
+      triggerRegionClassification(reg);
+    }
+  }
+  if (type === 'add' || type === 'replace') {
+    fetchProductPresets();
+    if (!guide.suggestion) {
+      if (!guide.objectCategory) guide.objectCategory = 'sofa';
+      guide.suggestion = suggestionFor(guide.objectCategory);
+    }
   }
 }
 function setGuideText(reg, value) {
@@ -2295,24 +2353,50 @@ async function triggerRegionClassification(reg) {
     }
   }
 
-  // 尝试前端提取切片纯净 JPEG Base64 (极速直传后端，消除跨域与大图开销)
+  // 尝试前端提取切片纯净 JPEG Base64 (基于 reg.norm 原图直切，消除 Letterbox 屏幕视口漂移)
   try {
     const img = baseImageRef.value;
-    if (img && img.naturalWidth) {
-      const dw = canvasDisplaySize.w || img.clientWidth || img.naturalWidth;
-      const dh = canvasDisplaySize.h || img.clientHeight || img.naturalHeight;
-      const scaleX = img.naturalWidth / dw;
-      const scaleY = img.naturalHeight / dh;
-      const minX = Math.max(0, Math.round(reg.x * scaleX));
-      const minY = Math.max(0, Math.round(reg.y * scaleY));
-      const w = Math.max(1, Math.min(img.naturalWidth - minX, Math.round(reg.w * scaleX)));
-      const h = Math.max(1, Math.min(img.naturalHeight - minY, Math.round(reg.h * scaleY)));
+    const norm = reg.norm || (reg.normW && reg.normH ? { x: reg.normX, y: reg.normY, w: reg.normW, h: reg.normH } : null) || (
+      reg.normPoints && reg.normPoints.length >= 3 ? {
+        x: Math.min(...reg.normPoints.map((p) => p.x)),
+        y: Math.min(...reg.normPoints.map((p) => p.y)),
+        w: Math.max(...reg.normPoints.map((p) => p.x)) - Math.min(...reg.normPoints.map((p) => p.x)),
+        h: Math.max(...reg.normPoints.map((p) => p.y)) - Math.min(...reg.normPoints.map((p) => p.y)),
+      } : null
+    );
+    if (img && img.naturalWidth && norm) {
+      const normX = Math.max(0, Math.min(1, Number(norm.x) || 0));
+      const normY = Math.max(0, Math.min(1, Number(norm.y) || 0));
+      const normW = Math.max(0.001, Math.min(1 - normX, Number(norm.w) || 0.1));
+      const normH = Math.max(0.001, Math.min(1 - normY, Number(norm.h) || 0.1));
+
+      let minX = Math.round(normX * img.naturalWidth);
+      let minY = Math.round(normY * img.naturalHeight);
+      let w = Math.round(normW * img.naturalWidth);
+      let h = Math.round(normH * img.naturalHeight);
+
+      minX = Math.max(0, Math.min(img.naturalWidth - 1, minX));
+      minY = Math.max(0, Math.min(img.naturalHeight - 1, minY));
+      w = Math.max(1, Math.min(img.naturalWidth - minX, w));
+      h = Math.max(1, Math.min(img.naturalHeight - minY, h));
+
+      let targetW = w;
+      let targetH = h;
+      if (Math.max(w, h) > 512) {
+        const s = 512 / Math.max(w, h);
+        targetW = Math.max(1, Math.round(w * s));
+        targetH = Math.max(1, Math.round(h * s));
+      } else if (Math.min(w, h) < 280) {
+        const s = Math.min(280 / Math.max(1, Math.min(w, h)), 512 / Math.max(1, Math.max(w, h)));
+        targetW = Math.max(1, Math.round(w * s));
+        targetH = Math.max(1, Math.round(h * s));
+      }
 
       const c = document.createElement('canvas');
-      c.width = Math.min(512, Math.max(280, w));
-      c.height = Math.min(512, Math.max(280, h));
+      c.width = targetW;
+      c.height = targetH;
       const ctx = c.getContext('2d');
-      ctx.drawImage(img, minX, minY, w, h, 0, 0, c.width, c.height);
+      ctx.drawImage(img, minX, minY, w, h, 0, 0, targetW, targetH);
       payload.crop_base64 = c.toDataURL('image/jpeg', 0.88);
       if (!reg.guide) reg.guide = emptyGuide();
       reg.guide.crop_base64 = payload.crop_base64;
@@ -2339,11 +2423,19 @@ async function triggerRegionClassification(reg) {
     if (json.data.part || json.data.surface) {
       const part = json.data.part || json.data.surface;
       reg.inferredSurface = json.data.surface || part;
-      reg.inferredProb = json.data.probability || 0.85;
+      reg.inferredProb = (json.data.probability != null ? json.data.probability : (json.data.confidence != null ? json.data.confidence : 0));
       reg.guide.part = part;
       reg.guide.surface = part;
       reg.guide.materialFamily = json.data.material_family || '';
       reg.guide.surfaceSource = 'auto';
+      if (json.data.recommended_category_id) {
+        reg.guide.recommended_category_id = json.data.recommended_category_id;
+        reg.guide.recommendedCategoryId = json.data.recommended_category_id;
+      }
+      if (json.data.default_swatch) {
+        reg.guide.default_swatch = json.data.default_swatch;
+        reg.guide.defaultSwatch = json.data.default_swatch;
+      }
       if (json.data.alternatives) reg.guide.alternatives = json.data.alternatives;
       if (json.data.dominant_hex) reg.guide.dominant_hex = json.data.dominant_hex;
       if (json.data.recommended_swatches) reg.guide.recommended_swatches = json.data.recommended_swatches;
@@ -4122,6 +4214,7 @@ function syncDisplaySize() {
 
 onMounted(async () => {
   loadSavedGuides();
+  fetchProductPresets();
   window.addEventListener('resize', () => {
     syncDisplaySize();
     const dw = canvasDisplaySize.w;

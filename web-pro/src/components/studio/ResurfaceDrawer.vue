@@ -6,8 +6,11 @@
         <div class="flex items-center gap-2">
           <span class="w-2.5 h-2.5 rounded-full" :class="uncertain ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'"></span>
           <span class="font-bold text-slate-200 text-xs">{{ headerTitle }}</span>
-          <span v-if="!uncertain && confidencePercent" class="text-[10px] font-mono text-studio-cyan bg-studio-cyan/10 px-1.5 py-0.2 rounded border border-studio-cyan/20">
+          <span v-if="confidencePercent > 0" class="text-[10px] font-mono text-studio-cyan bg-studio-cyan/10 px-1.5 py-0.2 rounded border border-studio-cyan/20">
             {{ confidencePercent }}% 置信度
+          </span>
+          <span v-else-if="isManualSelected || props.guide?.surfaceSource === 'manual'" class="text-[10px] font-mono text-amber-300 bg-amber-400/10 px-1.5 py-0.2 rounded border border-amber-400/20">
+            手动指定
           </span>
         </div>
         <button
@@ -278,6 +281,15 @@
             <!-- 色块预览 -->
             <div class="w-full aspect-[4/3] rounded border border-black/20 flex items-center justify-center relative overflow-hidden" :style="{ backgroundColor: swatch.hex }">
               <span v-if="swatch.pinned" class="absolute top-0.5 right-0.5 text-[8px] bg-black/60 text-amber-300 px-1 rounded">常用</span>
+              <button
+                v-if="!swatch.is_system"
+                type="button"
+                @click.stop="handleDeleteSwatch(swatch)"
+                class="absolute top-0.5 left-0.5 w-4 h-4 rounded bg-red-600/80 hover:bg-red-600 text-white text-[9px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition"
+                title="删除此色卡"
+              >
+                ✕
+              </button>
             </div>
             <!-- 信息 -->
             <div class="min-w-0">
@@ -325,14 +337,23 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { getToken } from '../../api';
+import {
+  FALLBACK_DICTIONARY,
+  FALLBACK_PARTS,
+  FALLBACK_CATEGORIES,
+  FALLBACK_SWATCHES,
+  generateLocalAestheticName
+} from '../../utils/master-dictionary-fallback';
 
 const props = defineProps({
   guide: { type: Object, default: () => ({}) },
   surface: { type: String, default: '' },
   subclass: { type: String, default: '' },
-  inferredProb: { type: Number, default: 0 }
+  inferredProb: { type: Number, default: 0 },
+  recommendedCategoryId: { type: String, default: '' },
+  defaultSwatch: { type: Object, default: null }
 });
 
 const emit = defineEmits([
@@ -355,23 +376,36 @@ const COLOR_FAMILIES = [
   { key: 'yellow_gold', label: '黄铜金属' }
 ];
 
-// 核心字典数据
+// 核心字典数据 (使用离线兜底字典赋初值，绝不呈现空白态)
 const loadingDictionary = ref(false);
 const showPartSelector = ref(false);
+const isManualSelected = ref(false);
 
-const allParts = ref([]);
-const allCategories = ref([]);
-const swatchesMap = ref({});
+const allParts = ref(FALLBACK_PARTS);
+const allCategories = ref(FALLBACK_CATEGORIES);
+const swatchesMap = ref(FALLBACK_SWATCHES);
 
 // 选定状态
-const activePart = ref('wall');
+const initialPart = props.surface || props.guide?.part || 'wall';
+const activePart = ref(initialPart);
 const alternativePart = ref('');
-const selectedCategoryId = ref('');
-const activeSwatchId = ref('');
-const activeHex = ref('#8B4A2B');
-const activeDisplayName = ref('意式马鞍棕');
+const initialPartObj = FALLBACK_PARTS.find(p => p.id === initialPart);
+const initialAvailable = FALLBACK_CATEGORIES.filter(c => (c.allowed_parts || []).includes(initialPart));
+
+const initialRecCat = props.recommendedCategoryId || props.guide?.recommended_category_id || props.guide?.recommendedCategoryId;
+const initialCatId = (initialRecCat && initialAvailable.some(c => c.id === initialRecCat))
+  ? initialRecCat
+  : ((initialPartObj && initialPartObj.default_category_id && initialAvailable.some(c => c.id === initialPartObj.default_category_id))
+    ? initialPartObj.default_category_id
+    : (initialAvailable[0]?.id || 'mat_cat_latex'));
+const selectedCategoryId = ref(initialCatId);
+
+const initialDefaultSwatch = props.defaultSwatch || props.guide?.default_swatch || props.guide?.defaultSwatch;
+const activeSwatchId = ref(initialDefaultSwatch?.id || 'sw_latex_nippon_nn0107_4');
+const activeHex = ref(initialDefaultSwatch?.hex ? initialDefaultSwatch.hex.toUpperCase() : '#E6DAC6');
+const activeDisplayName = ref(initialDefaultSwatch?.name_zh || '可可蛋奶');
 const selectedFamilyKey = ref('');
-const selectedFinishId = ref('');
+const selectedFinishId = ref('roller_matte');
 const selectedGloss = ref('matte');
 
 // 纹理模式
@@ -381,9 +415,9 @@ const activeTextureSwatch = ref(null);
 const applyTintToTexture = ref(true);
 
 // 调色盘滑条状态 (HSL)
-const currentHue = ref(20);
-const currentLightness = ref(36);
-const currentLrv = ref(14);
+const currentHue = ref(38);
+const currentLightness = ref(84);
+const currentLrv = ref(72);
 
 // 选区智能推荐与原色
 const sampledDominantHex = ref('');
@@ -395,7 +429,9 @@ const uncertain = computed(() => {
 });
 
 const confidencePercent = computed(() => {
-  return Math.round((props.inferredProb || 0.85) * 100);
+  if (isManualSelected.value || props.guide?.surfaceSource === 'manual') return 0;
+  if (!props.inferredProb || props.inferredProb <= 0) return 0;
+  return Math.round(props.inferredProb * 100);
 });
 
 const headerTitle = computed(() => {
@@ -411,7 +447,8 @@ const availableCategories = computed(() => {
 });
 
 const currentCategory = computed(() => {
-  return allCategories.value.find(c => c.id === selectedCategoryId.value) || availableCategories.value[0] || null;
+  const match = availableCategories.value.find(c => c.id === selectedCategoryId.value);
+  return match || availableCategories.value[0] || null;
 });
 
 const currentFinishName = computed(() => {
@@ -529,26 +566,39 @@ function approxLrv(hex) {
   return Math.round(Y * 100);
 }
 
-// 统一字典拉取
+// 统一字典拉取 (拉取全量 8 大部位、12 大基材、全部色卡，不带 ?part= 过滤)
 async function fetchMasterDictionary() {
   loadingDictionary.value = true;
   try {
     const token = getToken();
-    const res = await fetch(`/api/base-library/dictionary?part=${encodeURIComponent(activePart.value || '')}`, {
+    const res = await fetch('/api/base-library/dictionary', {
       headers: { Authorization: token ? `Bearer ${token}` : '' }
     });
     if (res.ok) {
       const json = await res.json();
       if (json && json.data) {
-        allParts.value = json.data.parts || [];
-        allCategories.value = json.data.categories || [];
-        swatchesMap.value = json.data.swatches || {};
+        if (json.data.parts && json.data.parts.length) {
+          allParts.value = json.data.parts;
+        }
+        allCategories.value = (json.data.all_categories && json.data.all_categories.length ? json.data.all_categories : json.data.categories) || FALLBACK_DICTIONARY.categories;
+        // 空对象 {} 表示后端暂无色卡，绝不能据此清掉离线兜底色板
+        const sw = json.data.swatches;
+        if (sw && typeof sw === 'object' && Object.keys(sw).length > 0) {
+          swatchesMap.value = sw;
+        }
 
         // 智能初始化当前品类
         const available = availableCategories.value;
-        if (available.length > 0 && (!selectedCategoryId.value || !available.some(c => c.id === selectedCategoryId.value))) {
+        const recCat = props.recommendedCategoryId || props.guide?.recommended_category_id || props.guide?.recommendedCategoryId;
+        if (recCat && available.some(c => c.id === recCat)) {
+          selectedCategoryId.value = recCat;
+        } else if (available.length > 0 && (!selectedCategoryId.value || !available.some(c => c.id === selectedCategoryId.value))) {
           selectedCategoryId.value = available[0].id;
           selectedFinishId.value = available[0].default_finish_id || (available[0].finishes && available[0].finishes[0]?.id) || '';
+        }
+        const defSw = props.defaultSwatch || props.guide?.default_swatch || props.guide?.defaultSwatch;
+        if (defSw && defSw.hex && (!defSw.category_id || defSw.category_id === selectedCategoryId.value)) {
+          pickSwatch(defSw);
         }
       }
     }
@@ -585,20 +635,36 @@ async function fetchRegionRecommendations() {
   } catch (_) {}
 }
 
-function selectPart(partKey) {
+function selectPart(partKey, { isManual = true } = {}) {
   activePart.value = partKey;
   alternativePart.value = '';
   showPartSelector.value = false;
+  isManualSelected.value = !!isManual;
 
+  const partObj = allParts.value.find(p => p.id === partKey);
   const available = allCategories.value.filter(c => (c.allowed_parts || []).includes(partKey));
   if (available.length > 0) {
-    selectedCategoryId.value = available[0].id;
-    selectedFinishId.value = available[0].default_finish_id || (available[0].finishes && available[0].finishes[0]?.id) || '';
-    const swatches = (swatchesMap.value[selectedCategoryId.value] || []).filter(s => s.item_type !== 'texture_map');
-    if (swatches.length > 0) {
-      pickSwatch(swatches[0]);
+    const recCat = props.recommendedCategoryId || props.guide?.recommended_category_id || props.guide?.recommendedCategoryId;
+    const preferredCatId = (recCat && available.some(c => c.id === recCat))
+      ? recCat
+      : ((partObj && partObj.default_category_id && available.some(c => c.id === partObj.default_category_id))
+        ? partObj.default_category_id
+        : available[0].id);
+
+    selectedCategoryId.value = preferredCatId;
+    const cat = allCategories.value.find(c => c.id === preferredCatId);
+    selectedFinishId.value = cat?.default_finish_id || (cat?.finishes && cat.finishes[0]?.id) || '';
+
+    const defSw = props.defaultSwatch || props.guide?.default_swatch || props.guide?.defaultSwatch;
+    if (defSw && defSw.hex && (!defSw.category_id || defSw.category_id === preferredCatId)) {
+      pickSwatch(defSw);
     } else {
-      emitChange();
+      const swatches = (swatchesMap.value[preferredCatId] || []).filter(s => s.item_type !== 'texture_map');
+      if (swatches.length > 0) {
+        pickSwatch(swatches[0]);
+      } else {
+        emitChange();
+      }
     }
   } else {
     emitChange();
@@ -683,6 +749,8 @@ function onLightnessSliderInput(l) {
   applyNewHex(hex, false);
 }
 
+let vlmRecognizeTimer = null;
+
 function applyNewHex(hex, syncHsl = true) {
   hex = hex.toUpperCase();
   activeHex.value = hex;
@@ -694,18 +762,62 @@ function applyNewHex(hex, syncHsl = true) {
     currentLightness.value = hsl.l;
   }
 
-  // 尝试在当前分类中寻找匹配的最相近色名
-  const swatches = activeCategorySwatches.value;
-  const exact = swatches.find(s => s.hex.toUpperCase() === hex);
-  if (exact) {
-    activeDisplayName.value = exact.name_zh;
-    activeSwatchId.value = exact.id;
-  } else {
-    activeDisplayName.value = `自定义色 (${hex})`;
-    activeSwatchId.value = '';
-  }
+  // 本地实时美学色彩赋名，彻底消灭「自定义色 (#...)」
+  const aestheticName = generateLocalAestheticName(hex, selectedCategoryId.value, activeCategorySwatches.value);
+  activeDisplayName.value = aestheticName;
+
+  // 检查是否命中已知色卡
+  const exact = activeCategorySwatches.value.find(s => s.hex.toUpperCase() === hex);
+  activeSwatchId.value = exact ? exact.id : '';
 
   emitChange();
+
+  // 300ms 防抖请求 VLM 视觉模型赋名调优（若后端返回更诗意命名则平滑更新）
+  if (vlmRecognizeTimer) clearTimeout(vlmRecognizeTimer);
+  vlmRecognizeTimer = setTimeout(() => {
+    const token = getToken();
+    fetch('/api/base-library/swatches/recognize-vlm', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: token ? `Bearer ${token}` : ''
+      },
+      body: JSON.stringify({
+        hex,
+        partHint: activePart.value
+      })
+    })
+      .then(r => r.json())
+      .then(j => {
+        if (j && j.data && j.data.name_zh && activeHex.value === hex) {
+          activeDisplayName.value = j.data.name_zh;
+          emitChange();
+        }
+      })
+      .catch(() => {});
+  }, 300);
+}
+
+async function handleDeleteSwatch(swatch) {
+  if (!confirm(`确定要删除色卡【${swatch.name_zh}】吗？`)) return;
+  try {
+    const token = getToken();
+    const res = await fetch(`/api/base-library/items/${encodeURIComponent(swatch.id)}`, {
+      method: 'DELETE',
+      headers: { Authorization: token ? `Bearer ${token}` : '' }
+    });
+    if (res.ok) {
+      if (swatchesMap.value[selectedCategoryId.value]) {
+        swatchesMap.value[selectedCategoryId.value] = swatchesMap.value[selectedCategoryId.value].filter(s => s.id !== swatch.id);
+      }
+      if (activeSwatchId.value === swatch.id) {
+        const next = activeCategorySwatches.value[0];
+        if (next) pickSwatch(next);
+      }
+    }
+  } catch (err) {
+    console.warn('删除色卡失败:', err);
+  }
 }
 
 function applySampledHex() {
@@ -720,23 +832,6 @@ async function triggerEyeDropper() {
       const result = await eyeDropper.open();
       if (result && result.sRGBHex) {
         applyNewHex(result.sRGBHex);
-        // 调用 VLM 识别赋名
-        fetch('/api/base-library/swatches/recognize-vlm', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: getToken() ? `Bearer ${getToken()}` : ''
-          },
-          body: JSON.stringify({
-            hex: result.sRGBHex,
-            partHint: activePart.value
-          })
-        }).then(r => r.json()).then(j => {
-          if (j && j.data && j.data.name_zh) {
-            activeDisplayName.value = j.data.name_zh;
-            emitChange();
-          }
-        }).catch(() => {});
       }
     } catch (_) {}
   } else {
@@ -813,10 +908,55 @@ function emitChange() {
 }
 
 // 监听 props.guide，处理异步识别回填
+watch(availableCategories, (cats) => {
+  if (cats.length > 0 && !cats.some(c => c.id === selectedCategoryId.value)) {
+    selectedCategoryId.value = cats[0].id;
+    const cat = cats[0];
+    selectedFinishId.value = cat.default_finish_id || (cat.finishes && cat.finishes[0]?.id) || '';
+    const swatches = (swatchesMap.value[cat.id] || []).filter(s => s.item_type !== 'texture_map');
+    if (swatches.length > 0) {
+      pickSwatch(swatches[0]);
+    }
+  }
+}, { immediate: true });
+
+watch(() => props.surface, (s) => {
+  if (s && s !== activePart.value) {
+    selectPart(s, { isManual: props.guide?.surfaceSource === 'manual' });
+  }
+});
+
+watch(() => props.recommendedCategoryId, (catId) => {
+  if (catId && catId !== selectedCategoryId.value) {
+    selectCategory(catId);
+  }
+});
+
+watch(() => props.defaultSwatch, (sw) => {
+  if (sw && sw.hex) {
+    if (sw.category_id && sw.category_id !== selectedCategoryId.value) {
+      selectCategory(sw.category_id);
+    }
+    pickSwatch(sw);
+  }
+});
+
 watch(() => props.guide, (g) => {
   if (g) {
-    if (g.part && g.part !== activePart.value) {
-      selectPart(g.part);
+    const nextPart = g.part || g.surface || props.surface;
+    if (nextPart && nextPart !== activePart.value) {
+      selectPart(nextPart, { isManual: g.surfaceSource === 'manual' });
+    }
+    const recCat = props.recommendedCategoryId || g.recommended_category_id || g.recommendedCategoryId;
+    if (recCat && recCat !== selectedCategoryId.value) {
+      selectCategory(recCat);
+    }
+    const defSw = props.defaultSwatch || g.default_swatch || g.defaultSwatch;
+    if (defSw && defSw.hex) {
+      if (defSw.category_id && defSw.category_id !== selectedCategoryId.value) {
+        selectCategory(defSw.category_id);
+      }
+      pickSwatch(defSw);
     }
     if (g.alternatives && g.alternatives.length) {
       alternativePart.value = g.alternatives[0];
@@ -847,6 +987,14 @@ onMounted(async () => {
   await fetchMasterDictionary();
   emitChange();
   fetchRegionRecommendations();
+});
+
+// 组件卸载后不允许残留的 VLM 防抖回调改写状态
+onUnmounted(() => {
+  if (vlmRecognizeTimer) {
+    clearTimeout(vlmRecognizeTimer);
+    vlmRecognizeTimer = null;
+  }
 });
 </script>
 

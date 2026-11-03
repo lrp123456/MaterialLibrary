@@ -139,6 +139,24 @@ const PART_POLICIES = {
   }
 };
 
+/**
+ * 部位 id 双轨归一：识别链（VALID_PARTS/VLM/JEV/part-policy）使用 `millwork`，
+ * Master 字典 ba_parts 与品类 allowed_parts/挂载历史使用 `cabinet_door`。
+ * 任何按部位匹配字典品类或素材挂载的地方，都必须用 expandPartForMatch 展开，
+ * 不得再各自维护本地别名表。
+ */
+const PART_DICTIONARY_ALIAS = { millwork: 'cabinet_door', cabinet_door: 'millwork' };
+
+function toDictionaryPart(part) {
+  return PART_DICTIONARY_ALIAS[part] || part || '';
+}
+
+function expandPartForMatch(part) {
+  if (!part) return [];
+  const alias = PART_DICTIONARY_ALIAS[part];
+  return alias ? [part, alias] : [part];
+}
+
 const PART_TO_SURFACE = {
   ceiling: 'ceiling',
   wall: 'wall',
@@ -225,6 +243,9 @@ module.exports = {
   PART_TO_SURFACE,
   SURFACE_TO_PART,
   SUBCLASS_COMPAT_MAP,
+  PART_DICTIONARY_ALIAS,
+  toDictionaryPart,
+  expandPartForMatch,
   isSubclassAllowed,
   isAssetAllowedForPart,
   resolvePartFromSurface,

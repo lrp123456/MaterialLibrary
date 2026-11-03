@@ -97,6 +97,21 @@ async function handleBaseLibraryRoutes(services, req, res, pathname, urlObj, { s
     return sendJson(res, 200, { success: true, data: updated });
   }
 
+  if (mItemPatch && req.method === 'DELETE') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const itemId = decodeURIComponent(mItemPatch[1]);
+    try {
+      db.prepare('DELETE FROM ba_items WHERE id = ?').run(itemId);
+      db.prepare('DELETE FROM ba_item_mounts WHERE item_id = ?').run(itemId);
+      // 系统色卡只软禁用（物理删除会被种子以 enabled=1 补回，等于撤销管理端删除）
+      db.prepare('UPDATE ba_material_swatches SET enabled=0, updated_at=? WHERE id=? AND is_system=1').run(Date.now(), itemId);
+      db.prepare('DELETE FROM ba_material_swatches WHERE id=? AND COALESCE(is_system,0)=0').run(itemId);
+      return sendJson(res, 200, { success: true, deleted: itemId });
+    } catch (err) {
+      return sendJson(res, 500, { success: false, error: 'delete_failed' });
+    }
+  }
+
   if (pathname === '/base-library/schemes' && req.method === 'GET') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
     const { listSchemes } = require('./items');
@@ -1018,12 +1033,14 @@ async function handleBaseLibraryRoutes(services, req, res, pathname, urlObj, { s
         });
         const { extractDominantHexFromBuffer } = require('./color-engine');
         const { getRecommendedSwatchesForRegion } = require('./dictionary-routes');
-        let dominantHex = null;
+        let dominantHex = b.client_sampled_hex || null;
         try {
-          dominantHex = await extractDominantHexFromBuffer(cropJpeg);
+          const extracted = await extractDominantHexFromBuffer(cropJpeg);
+          if (extracted) dominantHex = extracted;
         } catch (_) {}
         const recResult = getRecommendedSwatchesForRegion(db, {
           part: result.part,
+          category_id: result.recommended_category_id,
           dominant_hex: dominantHex
         });
         return sendJson(res, 200, {
@@ -1031,7 +1048,9 @@ async function handleBaseLibraryRoutes(services, req, res, pathname, urlObj, { s
           data: {
             ...result,
             dominant_hex: dominantHex,
+            dominant_name_zh: recResult.dominant_name_zh || '',
             recommended_swatches: recResult.swatches || [],
+            default_swatch: recResult.default_swatch || (recResult.swatches && recResult.swatches[0]) || null,
             advice_zh: recResult.advice_zh || ''
           }
         });
@@ -1049,11 +1068,38 @@ async function handleBaseLibraryRoutes(services, req, res, pathname, urlObj, { s
       const comma = raw.indexOf(',');
       if (comma >= 0) raw = raw.slice(comma + 1);
       imgBuffer = Buffer.from(raw, 'base64');
-    } else {
-      return sendJson(res, 400, { success: false, error: 'image_required' });
     }
 
-    if (!b.selection) {
+    // 若无图像输入但提供了选区，走空间几何与启发式分类
+    if (!imgBuffer) {
+      if (b.selection || b.norm) {
+        const result = await classifyRegionPart(db, null, {
+          config: services && services.config,
+          selection: b.selection || b.norm
+        });
+        const { getRecommendedSwatchesForRegion } = require('./dictionary-routes');
+        const dominantHex = b.client_sampled_hex || null;
+        const recResult = getRecommendedSwatchesForRegion(db, {
+          part: result.part,
+          category_id: result.recommended_category_id,
+          dominant_hex: dominantHex
+        });
+        return sendJson(res, 200, {
+          success: true,
+          data: {
+            ...result,
+            dominant_hex: dominantHex,
+            dominant_name_zh: recResult.dominant_name_zh || '',
+            recommended_swatches: recResult.swatches || [],
+            default_swatch: recResult.default_swatch || (recResult.swatches && recResult.swatches[0]) || null,
+            advice_zh: recResult.advice_zh || ''
+          }
+        });
+      }
+      return sendJson(res, 400, { success: false, error: 'image_or_selection_required' });
+    }
+
+    if (!b.selection && !b.norm) {
       return sendJson(res, 400, { success: false, error: 'selection_required' });
     }
 
@@ -1062,19 +1108,21 @@ async function handleBaseLibraryRoutes(services, req, res, pathname, urlObj, { s
       if ((meta.width && meta.width > 8192) || (meta.height && meta.height > 8192)) {
         return sendJson(res, 400, { success: false, error: 'image_dimension_too_large' });
       }
-      const cropJpeg = await cropSelectionInterior(imgBuffer, b.selection);
+      const cropJpeg = await cropSelectionInterior(imgBuffer, b.selection || b.norm);
       const result = await classifyRegionPart(db, cropJpeg, {
         config: services && services.config,
-        selection: b.selection
+        selection: b.selection || b.norm
       });
       const { extractDominantHexFromBuffer } = require('./color-engine');
       const { getRecommendedSwatchesForRegion } = require('./dictionary-routes');
-      let dominantHex = null;
+      let dominantHex = b.client_sampled_hex || null;
       try {
-        dominantHex = await extractDominantHexFromBuffer(cropJpeg);
+        const extracted = await extractDominantHexFromBuffer(cropJpeg);
+        if (extracted) dominantHex = extracted;
       } catch (_) {}
       const recResult = getRecommendedSwatchesForRegion(db, {
         part: result.part,
+        category_id: result.recommended_category_id,
         dominant_hex: dominantHex
       });
       return sendJson(res, 200, {
@@ -1082,7 +1130,9 @@ async function handleBaseLibraryRoutes(services, req, res, pathname, urlObj, { s
         data: {
           ...result,
           dominant_hex: dominantHex,
+          dominant_name_zh: recResult.dominant_name_zh || '',
           recommended_swatches: recResult.swatches || [],
+          default_swatch: recResult.default_swatch || (recResult.swatches && recResult.swatches[0]) || null,
           advice_zh: recResult.advice_zh || ''
         }
       });

@@ -177,7 +177,7 @@ const MASTER_CATEGORIES = [
     name_zh: '实木护墙板 / 木饰面 / 木皮',
     name_en: 'wood veneer paneling',
     track_mode: 'hybrid',
-    allowed_parts: JSON.stringify(['wall', 'cabinet_door', 'hard_furniture']),
+    allowed_parts: JSON.stringify(['wall', 'cabinet_door', 'millwork', 'hard_furniture']),
     default_finish_id: 'wood_grain_straight',
     finishes_json: JSON.stringify([
       { id: 'wood_grain_straight', name_zh: '直纹平铺木饰面', prompt_zh: '天然原木直纹木饰面，木纹清爽利落，开放漆微孔触感', prompt_en: 'straight grain natural wood veneer, open-pore matte wood texture' },
@@ -207,7 +207,7 @@ const MASTER_CATEGORIES = [
     name_zh: '大理石 / 洞石 / 岩板 / 水磨石',
     name_en: 'natural marble, travertine and sintered stone',
     track_mode: 'track_b',
-    allowed_parts: JSON.stringify(['wall', 'floor', 'cabinet_door', 'hard_furniture']),
+    allowed_parts: JSON.stringify(['wall', 'floor', 'cabinet_door', 'millwork', 'hard_furniture']),
     default_finish_id: 'stone_honed_matte',
     finishes_json: JSON.stringify([
       { id: 'stone_honed_matte', name_zh: '哑光亚光面 (Honed)', prompt_zh: '亚光哑光打磨石材表面，触感温润不反强光，保留原石质感', prompt_en: 'honed matte stone finish, smooth tactile surface without glaring glare' },
@@ -222,7 +222,7 @@ const MASTER_CATEGORIES = [
     name_zh: '定制柜门烤漆 / PET / 肤感膜',
     name_en: 'lacquer, PET and skin-feel cabinet finish',
     track_mode: 'track_a',
-    allowed_parts: JSON.stringify(['cabinet_door']),
+    allowed_parts: JSON.stringify(['cabinet_door', 'millwork']),
     default_finish_id: 'skin_feel_pet',
     finishes_json: JSON.stringify([
       { id: 'skin_feel_pet', name_zh: '极致肤感微晶板 (Skin-Feel)', prompt_zh: '抗指纹超哑肤感膜，婴儿肌肤般温润触感，全消光无反光', prompt_en: 'anti-fingerprint ultra-matte skin-feel PET finish, zero-specular touch' },
@@ -237,7 +237,7 @@ const MASTER_CATEGORIES = [
     name_zh: '金属五金 / 拉丝黄铜 / 黑钛',
     name_en: 'architectural metal and hardware',
     track_mode: 'track_a',
-    allowed_parts: JSON.stringify(['hard_furniture', 'cabinet_door']),
+    allowed_parts: JSON.stringify(['hard_furniture', 'cabinet_door', 'millwork']),
     default_finish_id: 'brushed_metal',
     finishes_json: JSON.stringify([
       { id: 'brushed_metal', name_zh: '精细拉丝纹理 (Brushed)', prompt_zh: '细腻平行金属拉丝纹理，各向异性柔和金属高光', prompt_en: 'anisotropic brushed metal finish, subtle linear hairline grain' },
@@ -252,7 +252,7 @@ const MASTER_CATEGORIES = [
     name_zh: '玻璃镜面 / 长虹 / 灰茶玻',
     name_en: 'architectural glass and mirror',
     track_mode: 'track_a',
-    allowed_parts: JSON.stringify(['cabinet_door', 'hard_furniture']),
+    allowed_parts: JSON.stringify(['cabinet_door', 'millwork', 'hard_furniture']),
     default_finish_id: 'fluted_reeded_glass',
     finishes_json: JSON.stringify([
       { id: 'fluted_reeded_glass', name_zh: '超白长虹竖条纹玻璃', prompt_zh: '超白长虹玻璃立挺竖纹折射，透光不透人的朦胧光影', prompt_en: 'fluted reeded ribbed glass, ultra-clear prismatic light refraction' },
@@ -325,8 +325,8 @@ const TOP_20_CURATED_PAINTS = [
 // 3. 各基材专属精选常用色卡与真实 1K 材质贴图资产规范
 const MASTER_SWATCHES_SPEC = [
   // ── A. 头层真皮 (mat_cat_leather) ──
-  { id: 'sw_lth_obsidian', category_id: 'mat_cat_leather', item_type: 'solid_color', name_zh: '曜石黑真皮', brand: '经典包豪斯色卡', code: 'LTH-Obsidian', hex: '#232325', color_family: 'cool_gray', style_tags: ['包豪斯', '意式极简'], pinned: 1, sort_order: 1 },
-  { id: 'sw_lth_saddle_brown', category_id: 'mat_cat_leather', item_type: 'solid_color', name_zh: '意式马鞍棕', brand: '意式纳帕皮色卡', code: 'LTH-SaddleBrown', hex: '#8B4A2B', color_family: 'beige_brown', style_tags: ['意式轻奢', '中古风'], pinned: 1, sort_order: 2 },
+  { id: 'sw_lth_saddle_brown', category_id: 'mat_cat_leather', item_type: 'solid_color', name_zh: '意式马鞍棕', brand: '意式纳帕皮色卡', code: 'LTH-SaddleBrown', hex: '#8B4A2B', color_family: 'beige_brown', style_tags: ['意式轻奢', '中古风'], pinned: 1, sort_order: 1 },
+  { id: 'sw_lth_obsidian', category_id: 'mat_cat_leather', item_type: 'solid_color', name_zh: '曜石黑真皮', brand: '经典包豪斯色卡', code: 'LTH-Obsidian', hex: '#232325', color_family: 'cool_gray', style_tags: ['包豪斯', '意式极简'], pinned: 1, sort_order: 2 },
   { id: 'sw_lth_caramel', category_id: 'mat_cat_leather', item_type: 'solid_color', name_zh: '复古焦糖棕', brand: '意式纳帕皮色卡', code: 'LTH-Caramel', hex: '#A65E36', color_family: 'beige_brown', style_tags: ['复古法式', '温馨中古'], pinned: 1, sort_order: 3 },
   { id: 'sw_lth_cognac', category_id: 'mat_cat_leather', item_type: 'solid_color', name_zh: '干邑暖棕', brand: '复古油蜡皮色卡', code: 'LTH-Cognac', hex: '#945232', color_family: 'beige_brown', style_tags: ['美式复古', '意式奢华'], pinned: 1, sort_order: 4 },
   { id: 'sw_lth_mocha', category_id: 'mat_cat_leather', item_type: 'solid_color', name_zh: '摩卡深咖', brand: '奢品皮料色卡', code: 'LTH-Mocha', hex: '#4A352A', color_family: 'beige_brown', style_tags: ['沉稳大宅', '现代黑金'], pinned: 1, sort_order: 5 },
@@ -356,6 +356,8 @@ const MASTER_SWATCHES_SPEC = [
   { id: 'sw_mc_warm_stone', category_id: 'mat_cat_art_plaster', item_type: 'solid_color', name_zh: '岩石暖灰微水泥', brand: '磐多魔/西卡参考', code: 'MC-03 Warm Stone', hex: '#C2B9AE', color_family: 'warm_gray', style_tags: ['侘寂灰泥', '现代素雅'], pinned: 1, sort_order: 3 },
   { id: 'sw_mc_basalt', category_id: 'mat_cat_art_plaster', item_type: 'solid_color', name_zh: '火山深灰微水泥', brand: '磐多魔/西卡参考', code: 'MC-04 Basalt', hex: '#7E7A75', color_family: 'cool_gray', style_tags: ['暗调极简', '侘寂'], pinned: 1, sort_order: 4 },
   { id: 'sw_ap_pearl', category_id: 'mat_cat_art_plaster', item_type: 'solid_color', name_zh: '小羊皮柔光珍珠白', brand: '卡百利/瓦科参考', code: 'AP-01 Pearl', hex: '#F1ECE3', color_family: 'off_white', style_tags: ['法式奶油', '蛋壳柔光'], pinned: 1, sort_order: 5 },
+  { id: 'sw_mc_pandomo_sand', category_id: 'mat_cat_art_plaster', item_type: 'solid_color', name_zh: '磐多魔暖沙灰', brand: '磐多魔/西卡参考', code: 'MC-05 Sand', hex: '#D3C9BC', color_family: 'warm_gray', style_tags: ['侘寂风', '无缝素雅'], pinned: 1, sort_order: 6 },
+  { id: 'sw_mc_lime_rammed', category_id: 'mat_cat_art_plaster', item_type: 'solid_color', name_zh: '石灰夯土暖褐', brand: '天然石灰夯土', code: 'MC-06 Rammed', hex: '#9E7D63', color_family: 'beige_brown', style_tags: ['质朴夯土', '侘寂'], pinned: 1, sort_order: 7 },
   { id: 'sw_mc_texture_map', category_id: 'mat_cat_art_plaster', item_type: 'texture_map', name_zh: '微水泥手批纹（支持任意换色）', brand: '内置1K贴图', code: 'mat_micro_cement', hex: '#C8C2B9', color_family: 'warm_gray', texture_1k_path: 'cache/base-library/materials/mat_micro_cement/basecolor.jpg', preview_path: '/api/base-library/materials/mat_micro_cement/basecolor', tintable: 1, pinned: 1, sort_order: 20 },
 
   // ── D. 实木护墙板与木地板 (mat_cat_wood_panel & mat_cat_wood_floor) ──
@@ -368,10 +370,13 @@ const MASTER_SWATCHES_SPEC = [
   { id: 'sw_wd_oak_map', category_id: 'mat_cat_wood_panel', item_type: 'texture_map', name_zh: '天然白橡木直纹（1K贴图）', brand: '内置1K贴图', code: 'mat_white_oak', hex: '#C8A97E', color_family: 'beige_brown', texture_1k_path: 'cache/base-library/materials/mat_white_oak/basecolor.jpg', preview_path: '/api/base-library/materials/mat_white_oak/basecolor', tintable: 1, pinned: 1, sort_order: 20 },
   { id: 'sw_wd_walnut_map', category_id: 'mat_cat_wood_panel', item_type: 'texture_map', name_zh: '北美黑胡桃木纹（1K贴图）', brand: '内置1K贴图', code: 'mat_black_walnut', hex: '#5C4030', color_family: 'beige_brown', texture_1k_path: 'cache/base-library/materials/mat_black_walnut/basecolor.jpg', preview_path: '/api/base-library/materials/mat_black_walnut/basecolor', tintable: 1, pinned: 1, sort_order: 21 },
 
-  // 地板同款同步
+  // 地板同款同步 (6款常用木色 + 1K 贴图)
   { id: 'sw_flr_white_oak', category_id: 'mat_cat_wood_floor', item_type: 'solid_color', name_zh: '北欧漂白橡木地板', brand: '天然原木色卡', code: 'FLR-WhiteOak-01', hex: '#DFCBB2', color_family: 'beige_brown', style_tags: ['北欧风', '奶油原木'], pinned: 1, sort_order: 1 },
   { id: 'sw_flr_natural_oak', category_id: 'mat_cat_wood_floor', item_type: 'solid_color', name_zh: '日式原木暖橡地板', brand: '天然原木色卡', code: 'FLR-NaturalOak-02', hex: '#C8A97E', color_family: 'beige_brown', style_tags: ['日式原木', '无印风'], pinned: 1, sort_order: 2 },
-  { id: 'sw_flr_walnut', category_id: 'mat_cat_wood_floor', item_type: 'solid_color', name_zh: '北美黑胡桃地板', brand: '天然原木色卡', code: 'FLR-Walnut-05', hex: '#5C4030', color_family: 'beige_brown', style_tags: ['意式极简', '大宅豪宅'], pinned: 1, sort_order: 3 },
+  { id: 'sw_flr_cherry', category_id: 'mat_cat_wood_floor', item_type: 'solid_color', name_zh: '蜂蜜暖调樱桃木地板', brand: '天然原木色卡', code: 'FLR-Cherry-03', hex: '#B37A4C', color_family: 'beige_brown', style_tags: ['温馨美式', '复古原木'], pinned: 1, sort_order: 3 },
+  { id: 'sw_flr_teak', category_id: 'mat_cat_wood_floor', item_type: 'solid_color', name_zh: '中古缅甸柚木地板', brand: '天然原木色卡', code: 'FLR-Teak-04', hex: '#965D34', color_family: 'beige_brown', style_tags: ['中古风', '南洋复古'], pinned: 1, sort_order: 4 },
+  { id: 'sw_flr_walnut', category_id: 'mat_cat_wood_floor', item_type: 'solid_color', name_zh: '北美黑胡桃地板', brand: '天然原木色卡', code: 'FLR-Walnut-05', hex: '#5C4030', color_family: 'beige_brown', style_tags: ['意式极简', '大宅豪宅'], pinned: 1, sort_order: 5 },
+  { id: 'sw_flr_smoked_oak', category_id: 'mat_cat_wood_floor', item_type: 'solid_color', name_zh: '烟熏炭化乌木地板', brand: '天然原木色卡', code: 'FLR-SmokedOak-06', hex: '#362D28', color_family: 'cool_gray', style_tags: ['暗调极简', '侘寂奢宅'], pinned: 1, sort_order: 6 },
   { id: 'sw_flr_oak_map', category_id: 'mat_cat_wood_floor', item_type: 'texture_map', name_zh: '白橡木地板纹理（1K贴图）', brand: '内置1K贴图', code: 'mat_white_oak', hex: '#C8A97E', color_family: 'beige_brown', texture_1k_path: 'cache/base-library/materials/mat_white_oak/basecolor.jpg', preview_path: '/api/base-library/materials/mat_white_oak/basecolor', tintable: 1, pinned: 1, sort_order: 20 },
 
   // ── E. 天然大理石 / 洞石 / 岩板 / 水磨石 (mat_cat_stone) ──
@@ -389,6 +394,8 @@ const MASTER_SWATCHES_SPEC = [
   { id: 'sw_cab_rock_gray', category_id: 'mat_cat_cabinet_lacquer', item_type: 'solid_color', name_zh: '岩石暖灰（U702平替）', brand: '爱格U702平替', code: 'CAB-03', hex: '#B8B0A6', color_family: 'warm_gray', style_tags: ['现代极简'], pinned: 1, sort_order: 3 },
   { id: 'sw_cab_graphite', category_id: 'mat_cat_cabinet_lacquer', item_type: 'solid_color', name_zh: '石墨深灰（U961平替）', brand: '爱格U961平替', code: 'CAB-04', hex: '#3D3C3A', color_family: 'cool_gray', style_tags: ['意式暗调', '现代极简'], pinned: 1, sort_order: 4 },
   { id: 'sw_cab_sage_green', category_id: 'mat_cat_cabinet_lacquer', item_type: 'solid_color', name_zh: '鼠尾草灰绿柜门', brand: '法式复古色卡', code: 'CAB-05', hex: '#9AA696', color_family: 'green_blue', style_tags: ['法式复古', '森系清新'], pinned: 1, sort_order: 5 },
+  { id: 'sw_cab_walnut_skin', category_id: 'mat_cat_cabinet_lacquer', item_type: 'solid_color', name_zh: '胡桃木纹肤感', brand: '定制柜门色卡', code: 'CAB-06', hex: '#553F33', color_family: 'beige_brown', style_tags: ['意式轻奢', '现代暗调'], pinned: 1, sort_order: 6 },
+  { id: 'sw_cab_champagne_metal', category_id: 'mat_cat_cabinet_lacquer', item_type: 'solid_color', name_zh: '香槟金金属漆', brand: '定制柜门色卡', code: 'CAB-07', hex: '#A89882', color_family: 'yellow_gold', style_tags: ['现代极简', '意式轻奢'], pinned: 1, sort_order: 7 },
 
   // ── G. 金属五金 (mat_cat_metal) ──
   { id: 'sw_mtl_brushed_brass', category_id: 'mat_cat_metal', item_type: 'solid_color', name_zh: '拉丝黄铜 / 复古金色', brand: '意式五金', code: 'MTL-01', hex: '#C59B5F', color_family: 'yellow_gold', style_tags: ['轻奢风', '中古风'], pinned: 1, sort_order: 1 },
@@ -404,12 +411,18 @@ const MASTER_SWATCHES_SPEC = [
   // ── I. 窗帘床品 (mat_cat_textile_drapery) ──
   { id: 'sw_drp_sheer_white', category_id: 'mat_cat_textile_drapery', item_type: 'solid_color', name_zh: '极简幻影透光白纱', brand: '高定纱帘', code: 'DRP-01', hex: '#FAF8F5', color_family: 'off_white', style_tags: ['奶油风', '法式简约'], pinned: 1, sort_order: 1 },
   { id: 'sw_drp_linen_oat', category_id: 'mat_cat_textile_drapery', item_type: 'solid_color', name_zh: '燕麦色原麻窗帘', brand: '天然棉麻', code: 'DRP-02', hex: '#D7CABE', color_family: 'beige_brown', style_tags: ['原木风', '侘寂'], pinned: 1, sort_order: 2 },
-  { id: 'sw_drp_taupe_drape', category_id: 'mat_cat_textile_drapery', item_type: 'solid_color', name_zh: '灰咖色垂感绒布', brand: '高密遮光布', code: 'DRP-03', hex: '#877B73', color_family: 'warm_gray', style_tags: ['意式极简'], pinned: 1, sort_order: 3 },
+  { id: 'sw_drp_cashmere_cream', category_id: 'mat_cat_textile_drapery', item_type: 'solid_color', name_zh: '奶油羊绒窗帘', brand: '高密遮光布', code: 'DRP-03', hex: '#E8DFD3', color_family: 'off_white', style_tags: ['法式奶油', '现代简约'], pinned: 1, sort_order: 3 },
+  { id: 'sw_drp_taupe_drape', category_id: 'mat_cat_textile_drapery', item_type: 'solid_color', name_zh: '灰咖色垂感绒布', brand: '高密遮光布', code: 'DRP-04', hex: '#877B73', color_family: 'warm_gray', style_tags: ['意式极简'], pinned: 1, sort_order: 4 },
+  { id: 'sw_drp_mist_blue', category_id: 'mat_cat_textile_drapery', item_type: 'solid_color', name_zh: '雾霾蓝遮光布', brand: '高密遮光布', code: 'DRP-05', hex: '#7A8D9B', color_family: 'green_blue', style_tags: ['现代极简', '卧室静谧'], pinned: 1, sort_order: 5 },
+  { id: 'sw_drp_matcha_green', category_id: 'mat_cat_textile_drapery', item_type: 'solid_color', name_zh: '抹茶绿棉麻', brand: '天然棉麻', code: 'DRP-06', hex: '#6E7A68', color_family: 'green_blue', style_tags: ['自然清新', '中古复古'], pinned: 1, sort_order: 6 },
 
   // ── J. 地毯织物 (mat_cat_carpet) ──
   { id: 'sw_cpt_cream_wool', category_id: 'mat_cat_carpet', item_type: 'solid_color', name_zh: '奶油白密割绒羊毛毯', brand: '新西兰羊毛', code: 'CPT-01', hex: '#F0ECE1', color_family: 'off_white', style_tags: ['奶油风', '极简'], pinned: 1, sort_order: 1 },
   { id: 'sw_cpt_sand_sisal', category_id: 'mat_cat_carpet', item_type: 'solid_color', name_zh: '暖沙色剑麻平织地毯', brand: '天然剑麻', code: 'CPT-02', hex: '#CFBEA7', color_family: 'beige_brown', style_tags: ['侘寂风', '原木风'], pinned: 1, sort_order: 2 },
-  { id: 'sw_cpt_morandi_gray', category_id: 'mat_cat_carpet', item_type: 'solid_color', name_zh: '莫兰迪冷灰短绒毯', brand: '高密短绒', code: 'CPT-03', hex: '#9E9E9C', color_family: 'cool_gray', style_tags: ['现代简约'], pinned: 1, sort_order: 3 }
+  { id: 'sw_cpt_morandi_gray', category_id: 'mat_cat_carpet', item_type: 'solid_color', name_zh: '莫兰迪冷灰短绒毯', brand: '高密短绒', code: 'CPT-03', hex: '#9E9E9C', color_family: 'cool_gray', style_tags: ['现代简约'], pinned: 1, sort_order: 3 },
+  { id: 'sw_cpt_caramel_geo', category_id: 'mat_cat_carpet', item_type: 'solid_color', name_zh: '焦糖几何簇绒毯', brand: '现代设计毯', code: 'CPT-04', hex: '#A26543', color_family: 'terracotta_red', style_tags: ['现代设计', '复古中古'], pinned: 1, sort_order: 4 },
+  { id: 'sw_cpt_oat_loop', category_id: 'mat_cat_carpet', item_type: 'solid_color', name_zh: '燕麦圈绒毯', brand: '高密圈绒', code: 'CPT-05', hex: '#C8BEAF', color_family: 'beige_brown', style_tags: ['原木风', '侘寂素雅'], pinned: 1, sort_order: 5 },
+  { id: 'sw_cpt_dark_charcoal', category_id: 'mat_cat_carpet', item_type: 'solid_color', name_zh: '深炭灰短绒毯', brand: '高密短绒', code: 'CPT-06', hex: '#3A3A3B', color_family: 'cool_gray', style_tags: ['意式极简', '现代大宅'], pinned: 1, sort_order: 6 }
 ];
 
 /**
@@ -419,8 +432,9 @@ function seedMasterDictionary(db) {
   const now = Date.now();
 
   // 1. 部位表 ba_parts
+  // 只补缺行，永不覆盖既有行（含 enabled/改名/别名等用户编辑）；种子内容升级走显式版本迁移。
   const insPart = db.prepare(`
-    INSERT OR REPLACE INTO ba_parts (
+    INSERT OR IGNORE INTO ba_parts (
       id, name_zh, name_en, jev_aliases, preserve_clause_zh, preserve_clause_en,
       default_category_id, sort_order, is_system, enabled, created_at, updated_at
     ) VALUES (
@@ -432,9 +446,9 @@ function seedMasterDictionary(db) {
     insPart.run({ ...p, now });
   }
 
-  // 2. 基材品类表 ba_material_categories
+  // 2. 基材品类表 ba_material_categories（同上：INSERT OR IGNORE，只补缺）
   const insCat = db.prepare(`
-    INSERT OR REPLACE INTO ba_material_categories (
+    INSERT OR IGNORE INTO ba_material_categories (
       id, name_zh, name_en, track_mode, allowed_parts, default_finish_id,
       finishes_json, sort_order, is_system, enabled, created_at, updated_at
     ) VALUES (
@@ -446,18 +460,18 @@ function seedMasterDictionary(db) {
     insCat.run({ ...c, now });
   }
 
-  // 3. 专属色卡/纹理花色表 ba_material_swatches
+  // 3. 专属色卡/纹理花色表 ba_material_swatches（同上：INSERT OR IGNORE，只补缺）
   const insSwatch = db.prepare(`
-    INSERT OR REPLACE INTO ba_material_swatches (
+    INSERT OR IGNORE INTO ba_material_swatches (
       id, category_id, item_type, name_zh, brand, code, hex, lrv,
       color_family, style_tags, finish_override, prompt_hint_zh, prompt_hint_en,
       texture_1k_path, preview_path, tintable, source_type, pinned, sort_order,
-      enabled, created_at, updated_at
+      enabled, is_system, created_at, updated_at
     ) VALUES (
       :id, :category_id, :item_type, :name_zh, :brand, :code, :hex, :lrv,
       :color_family, :style_tags, :finish_override, :prompt_hint_zh, :prompt_hint_en,
       :texture_1k_path, :preview_path, :tintable, :source_type, :pinned, :sort_order,
-      1, :now, :now
+      1, 1, :now, :now
     )
   `);
 
@@ -575,8 +589,10 @@ function seedMasterDictionary(db) {
     };
 
     const allSwatches = db.prepare('SELECT * FROM ba_material_swatches WHERE enabled=1').all();
+    // 镜像到 ba_items 同样只补缺：管理员对素材条目的改名/挂载不会被种子撤销；
+    // 被软删后重新启用的系统色卡因 ba_items 行缺失，会在这里自动补回。
     const insItem = db.prepare(`
-      INSERT OR REPLACE INTO ba_items (
+      INSERT OR IGNORE INTO ba_items (
         id, kind, kind_key, name_zh, prompt_name, hex, family, lightness,
         role_hint, zone, preview_rel, external_sku, created_at, updated_at
       ) VALUES (

@@ -734,6 +734,8 @@ function migrate(dataDir, { doBackup = true } = {}) {
     try {
       const { ensureBaseLibrarySchema } = require('../src/base-library/schema');
       ensureBaseLibrarySchema(db);
+      const { seedMasterDictionary } = require('../src/base-library/master-dictionary-seed');
+      seedMasterDictionary(db);
     } catch (e) {
       console.warn('[migrate] base-library schema skip:', e.message);
     }
@@ -793,6 +795,7 @@ function migrate(dataDir, { doBackup = true } = {}) {
           model_file TEXT,
           tags_json TEXT,
           dimensions_json TEXT,
+          snapshots_json TEXT,
           sort INTEGER DEFAULT 0,
           enabled INTEGER DEFAULT 1,
           created_at INTEGER,
@@ -802,16 +805,27 @@ function migrate(dataDir, { doBackup = true } = {}) {
         CREATE INDEX IF NOT EXISTS idx_product_presets_sort ON product_presets(sort);
       `);
 
+      try {
+        db.exec('ALTER TABLE product_presets ADD COLUMN snapshots_json TEXT;');
+      } catch (_) {}
+
       // 软装模型预设：只保留真实存在的 1 款 3D 单品 (sofa_default.glb)，清理历史模拟占位
       try {
         db.prepare("DELETE FROM product_presets WHERE id IN ('chair_nordic_lounge', 'table_stone_coffee', 'chair_lecorbusier', 'table_minimalist')").run();
       } catch (_) {}
 
+      const defaultSnapshots = JSON.stringify({
+        right_45: '/api/viewer/products/previews/sofa_electric_single_right_45.png',
+        front: '/api/viewer/products/previews/sofa_electric_single_front.png',
+        front_0: '/api/viewer/products/previews/sofa_electric_single_front_0.png',
+        right_90: '/api/viewer/products/previews/sofa_electric_single_right_90.png'
+      });
+
       const count = db.prepare('SELECT COUNT(*) as c FROM product_presets').get().c;
       if (count === 0) {
         const insPreset = db.prepare(`
-          INSERT INTO product_presets (id, name, category, facing, preview_file, model_file, tags_json, dimensions_json, sort, enabled, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO product_presets (id, name, category, facing, preview_file, model_file, tags_json, dimensions_json, snapshots_json, sort, enabled, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
         const now = Date.now();
         insPreset.run(
@@ -823,12 +837,22 @@ function migrate(dataDir, { doBackup = true } = {}) {
           'sofa_default.glb',
           JSON.stringify(['单人位', '电动展开', '意大利头层牛皮', '极简奶油风']),
           JSON.stringify({ width: 950, depth: 1050, height: 920 }),
+          defaultSnapshots,
           10,
           1,
           now,
           now
         );
-        console.log('[migrate] product_presets 软装模型已种子化 (真实单品: 极简单人电动真皮沙发)');
+        console.log('[migrate] product_presets 软装模型已种子化 (真实单品: 极简单人电动真皮沙发，含多视角快照)');
+      } else {
+        // 同步已有预设单品缺失的快照映射
+        try {
+          db.prepare(`
+            UPDATE product_presets
+            SET snapshots_json = ?
+            WHERE id = 'sofa_electric_single' AND (snapshots_json IS NULL OR snapshots_json = '' OR snapshots_json = '{}')
+          `).run(defaultSnapshots);
+        } catch (_) {}
       }
     } catch (e) {
       console.warn('[migrate] product_presets 表迁移警告:', e.message);

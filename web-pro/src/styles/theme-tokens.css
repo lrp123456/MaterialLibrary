@@ -375,34 +375,20 @@ input::placeholder, textarea::placeholder {
 }
 
 /* ==============================================================================
-   亮色与护眼模式下，消除一切残留暗色 (bg-black, bg-slate-900, etc.)
+   亮色与护眼模式下，消除界面普通容器暗色残留 (实心普通容器转为主题底色，绝不误伤浮层与遮罩)
    ============================================================================== */
-html.light .bg-black,
-html.light .bg-black\/20,
-html.light .bg-black\/25,
-html.light .bg-black\/40,
-html.light .bg-black\/60,
-html.light .bg-black\/70,
-html.light .bg-black\/80,
-html.light .bg-black\/90,
-html.light .bg-slate-900,
-html.light .bg-slate-950,
-html.light .bg-slate-850,
-html.light .bg-slate-800,
-html.light .bg-slate-700,
-html.eye-care .bg-black,
-html.eye-care .bg-black\/20,
-html.eye-care .bg-black\/25,
-html.eye-care .bg-black\/40,
-html.eye-care .bg-black\/60,
-html.eye-care .bg-black\/70,
-html.eye-care .bg-black\/80,
-html.eye-care .bg-black\/90,
-html.eye-care .bg-slate-900,
-html.eye-care .bg-slate-950,
-html.eye-care .bg-slate-850,
-html.eye-care .bg-slate-800,
-html.eye-care .bg-slate-700 {
+html.light .bg-black:not(.on-media):not(.media-badge):not([class*="media-"]):not(canvas):not(video),
+html.light .bg-slate-900:not(.on-media):not(.media-badge):not([class*="media-"]),
+html.light .bg-slate-950:not(.on-media):not(.media-badge):not([class*="media-"]),
+html.light .bg-slate-850:not(.on-media):not(.media-badge):not([class*="media-"]),
+html.light .bg-slate-800:not(.on-media):not(.media-badge):not([class*="media-"]),
+html.light .bg-slate-700:not(.on-media):not(.media-badge):not([class*="media-"]),
+html.eye-care .bg-black:not(.on-media):not(.media-badge):not([class*="media-"]):not(canvas):not(video),
+html.eye-care .bg-slate-900:not(.on-media):not(.media-badge):not([class*="media-"]),
+html.eye-care .bg-slate-950:not(.on-media):not(.media-badge):not([class*="media-"]),
+html.eye-care .bg-slate-850:not(.on-media):not(.media-badge):not([class*="media-"]),
+html.eye-care .bg-slate-800:not(.on-media):not(.media-badge):not([class*="media-"]),
+html.eye-care .bg-slate-700:not(.on-media):not(.media-badge):not([class*="media-"]) {
   background-color: var(--theme-bg-subtle) !important;
 }
 
@@ -664,4 +650,111 @@ html.eye-care [class*="from-black"] .text-white,
 html.light .on-media .text-white,
 html.eye-care .on-media .text-white {
   color: var(--theme-media-text) !important;
+}
+
+/* ==============================================================================
+   全局深色浮层与媒体叠层防反色白字保护（彻底消灭黑底黑字）
+   ============================================================================== */
+html.light [class*="bg-black"] .text-white,
+html.eye-care [class*="bg-black"] .text-white,
+html.light [class*="bg-black/"] .text-white,
+html.eye-care [class*="bg-black/"] .text-white,
+html.light [class*="bg-emerald-950"] .text-emerald-300,
+html.eye-care [class*="bg-emerald-950"] .text-emerald-300,
+html.light [class*="bg-purple-900"] .text-purple-300,
+html.eye-care [class*="bg-purple-900"] .text-purple-300,
+html.light .on-media,
+html.light .on-media .text-white,
+html.light .on-media [class*="text-slate-"],
+html.eye-care .on-media,
+html.eye-care .on-media .text-white,
+html.eye-care .on-media [class*="text-slate-"] {
+  color: var(--theme-media-text) !important;
+}
+
+/* ==============================================================================
+   核心修复：.on-media 媒体浮层永远保持半透明暗色遮罩与纯白字（绝不转变成大白块）
+   ============================================================================== */
+html.light .on-media,
+html.light .on-media.bg-black,
+html.light .on-media[class*="bg-black"],
+html.light .on-media [class*="bg-black"],
+html.eye-care .on-media,
+html.eye-care .on-media.bg-black,
+html.eye-care .on-media[class*="bg-black"],
+html.eye-care .on-media [class*="bg-black"] {
+  background-color: var(--theme-media-scrim) !important;
+  color: var(--theme-media-text) !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+html.light .on-media *,
+html.eye-care .on-media * {
+  color: var(--theme-media-text) !important;
+}
+
+
+/* ==============================================================================
+   三大主题终极媒体保护：胶片微缩条、静帧池角标、时间码、浮层工具条
+   在暗黑 / 明朗 / 护眼三大主题下均永久锁定为半透明深色微磨砂胶囊 + 发光高对比白字，杜绝任何反色死白遮挡！
+   ============================================================================== */
+.media-badge,
+.on-media,
+[data-scrim],
+.filmstrip-badge,
+.media-scrim-pill {
+  background-color: rgba(15, 23, 42, 0.85) !important;
+  color: #FFFFFF !important;
+  border-color: rgba(255, 255, 255, 0.22) !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45) !important;
+}
+
+html.light .media-badge,
+html.light .on-media,
+html.light [data-scrim],
+html.light .filmstrip-badge,
+html.light .media-scrim-pill,
+html.eye-care .media-badge,
+html.eye-care .on-media,
+html.eye-care [data-scrim],
+html.eye-care .filmstrip-badge,
+html.eye-care .media-scrim-pill,
+html.dark .media-badge,
+html.dark .on-media,
+html.dark [data-scrim],
+html.dark .filmstrip-badge,
+html.dark .media-scrim-pill {
+  background-color: rgba(15, 23, 42, 0.85) !important;
+  color: #FFFFFF !important;
+  border-color: rgba(255, 255, 255, 0.22) !important;
+}
+
+.media-badge *,
+.on-media *,
+[data-scrim] *,
+.filmstrip-badge *,
+.media-scrim-pill *,
+html.light .media-badge *,
+html.light .on-media *,
+html.light [data-scrim] *,
+html.light .filmstrip-badge *,
+html.light .media-scrim-pill *,
+html.eye-care .media-badge *,
+html.eye-care .on-media *,
+html.eye-care [data-scrim] *,
+html.eye-care .filmstrip-badge *,
+html.eye-care .media-scrim-pill * {
+  color: #FFFFFF !important;
+}
+
+/* 模态弹窗在明朗和护眼下的背景蒙版（保持深色半透明聚焦，绝不变成实心大白幕） */
+html.light .modal-backdrop,
+html.light .bg-black\/75,
+html.light .bg-black\/80,
+html.light .bg-black\/90,
+html.eye-care .modal-backdrop,
+html.eye-care .bg-black\/75,
+html.eye-care .bg-black\/80,
+html.eye-care .bg-black\/90 {
+  background-color: rgba(15, 23, 42, 0.75) !important;
 }

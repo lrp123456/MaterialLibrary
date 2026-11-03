@@ -88,7 +88,7 @@
       </div>
 
       <!-- 左右对比浮层标签 -->
-      <div class="absolute bottom-5 left-5 z-20 px-3 py-1 rounded-lg bg-black/80 backdrop-blur-md text-[11px] text-slate-200 font-mono font-bold border border-white/20 pointer-events-none shadow-lg">
+      <div class="on-media absolute bottom-5 left-5 z-20 px-3 py-1 rounded-lg bg-black/80 backdrop-blur-md text-[11px] text-white font-mono font-bold border border-white/20 pointer-events-none shadow-lg">
         左侧：原始图 (Before)
       </div>
       <div class="absolute bottom-5 right-5 z-20 px-3 py-1 rounded-lg bg-studio-accent/90 backdrop-blur-md text-[11px] text-white font-mono font-bold border border-white/30 pointer-events-none shadow-lg">
@@ -103,7 +103,7 @@
     >
       <!-- 左图：原图 (Before) -->
       <div class="flex-1 h-full flex flex-col bg-studio-900/60 rounded-xl border border-studio-800 overflow-hidden relative shadow-inner">
-        <div class="absolute top-3 left-3 z-10 px-3 py-1 rounded-lg bg-black/80 backdrop-blur-md text-xs text-white font-mono font-bold border border-white/20 shadow">
+        <div class="on-media absolute top-3 left-3 z-10 px-3 py-1 rounded-lg bg-black/80 backdrop-blur-md text-xs text-white font-mono font-bold border border-white/20 shadow">
           原始图 (Before)
         </div>
         <div class="w-full h-full flex items-center justify-center p-2">

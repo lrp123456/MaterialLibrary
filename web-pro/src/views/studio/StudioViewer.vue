@@ -215,7 +215,7 @@
                     class="w-full h-full object-cover mix-blend-multiply opacity-80"
                     alt="材质贴图"
                   />
-                  <div class="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/65 backdrop-blur text-[8px] text-white font-mono flex items-center gap-1 shadow">
+                  <div class="on-media absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/75 backdrop-blur text-[8px] text-white font-mono flex items-center gap-1 shadow">
                     <span class="w-1.5 h-1.5 rounded-full border border-white/30" :style="{ backgroundColor: reg.params.colorHex || '#CBD5E1' }"></span>
                     <span class="truncate max-w-[80px]">{{ reg.params.materialName || reg.params.colorName || '基础属性' }}</span>
                   </div>
@@ -442,7 +442,7 @@
                     class="w-full h-full object-cover mix-blend-multiply opacity-80"
                     alt="材质贴图"
                   />
-                  <div class="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/65 backdrop-blur text-[8px] text-white font-mono flex items-center gap-1 shadow">
+                  <div class="on-media absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/75 backdrop-blur text-[8px] text-white font-mono flex items-center gap-1 shadow">
                     <span class="w-1.5 h-1.5 rounded-full border border-white/30" :style="{ backgroundColor: reg.params.colorHex || '#CBD5E1' }"></span>
                     <span class="truncate max-w-[80px]">{{ reg.params.materialName || reg.params.colorName || '基础属性' }}</span>
                   </div>
@@ -645,7 +645,7 @@
                     class="w-full h-full object-cover mix-blend-multiply opacity-80"
                     alt="材质贴图"
                   />
-                  <div class="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/65 backdrop-blur text-[8px] text-white font-mono flex items-center gap-1 shadow">
+                  <div class="on-media absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/75 backdrop-blur text-[8px] text-white font-mono flex items-center gap-1 shadow">
                     <span class="w-1.5 h-1.5 rounded-full border border-white/30" :style="{ backgroundColor: reg.params.colorHex || '#CBD5E1' }"></span>
                     <span class="truncate max-w-[80px]">{{ reg.params.materialName || reg.params.colorName || '基础属性' }}</span>
                   </div>
@@ -834,7 +834,7 @@
                     class="w-full h-full object-cover mix-blend-multiply opacity-80"
                     alt="材质贴图"
                   />
-                  <div class="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/65 backdrop-blur text-[8px] text-white font-mono flex items-center gap-1 shadow">
+                  <div class="on-media absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/75 backdrop-blur text-[8px] text-white font-mono flex items-center gap-1 shadow">
                     <span class="w-1.5 h-1.5 rounded-full border border-white/30" :style="{ backgroundColor: reg.params.colorHex || '#CBD5E1' }"></span>
                     <span class="truncate max-w-[80px]">{{ reg.params.materialName || reg.params.colorName || '基础属性' }}</span>
                   </div>

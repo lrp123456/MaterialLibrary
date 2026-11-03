@@ -7,6 +7,11 @@ const TOMBSTONE_RETENTION_DAYS = 90;
 const TOMBSTONE_RETENTION_MS = TOMBSTONE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 const DRAFT_RETENTION_MS = 24 * 60 * 60 * 1000;
 
+// 每个 db 连接只初始化一次：getDictionary 是热路径，绝不能每次读请求都重跑 DDL/种子
+// （否则数百行同步写事务阻塞事件循环，且种子会撤销管理端 CRUD）。按连接维度记录，
+// 测试使用独立 tmp 库连接时仍会正常初始化。
+const initializedDbs = new WeakSet();
+
 /**
  * 清理超过 90 天的旧墓碑
  */
@@ -50,6 +55,7 @@ function cleanupExpiredDrafts(db, now = Date.now(), fsModule = null, dataDir = n
  * 幂等初始化创作库与基础属性库 Schema
  */
 function ensureBaseLibrarySchema(db) {
+  if (initializedDbs.has(db)) return;
   // 1. creation_templates 列扩展与索引
   try { db.exec('ALTER TABLE creation_templates ADD COLUMN poster_w INTEGER;'); } catch (e) {}
   try { db.exec('ALTER TABLE creation_templates ADD COLUMN poster_h INTEGER;'); } catch (e) {}
@@ -124,8 +130,6 @@ function ensureBaseLibrarySchema(db) {
     );
     CREATE INDEX IF NOT EXISTS idx_ba_paints_pinned_brand
       ON ba_paints(pinned DESC, brand, updated_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_ba_paints_curated
-      ON ba_paints(curated DESC, family_key, lrv DESC);
 
     -- 空间装修面 / 部位字典表 (支持全量 CRUD)
     CREATE TABLE IF NOT EXISTS ba_parts (
@@ -181,11 +185,21 @@ function ensureBaseLibrarySchema(db) {
       pinned INTEGER NOT NULL DEFAULT 1,
       sort_order INTEGER NOT NULL DEFAULT 0,
       enabled INTEGER NOT NULL DEFAULT 1,
+      is_system INTEGER NOT NULL DEFAULT 0,       -- 1=系统策展种子，只允许软禁用，不允许物理删除
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_ba_swatches_cat_fam ON ba_material_swatches(category_id, color_family, lrv DESC);
   `);
+
+  // 老库补 is_system 列，并把种子策展色卡（source_type='curated'）标记为系统行
+  try {
+    const swatchCols = db.pragma('table_info(ba_material_swatches)').map(c => c.name);
+    if (!swatchCols.includes('is_system')) {
+      db.prepare('ALTER TABLE ba_material_swatches ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0').run();
+      db.prepare("UPDATE ba_material_swatches SET is_system=1 WHERE source_type='curated'").run();
+    }
+  } catch (e) {}
 
   // 补齐列 preview_rel, is_pinned, use_count, track, tone, layout (幂等升级)
   try {
@@ -227,6 +241,10 @@ function ensureBaseLibrarySchema(db) {
     if (!paintCols.includes('role_hint')) {
       db.prepare('ALTER TABLE ba_paints ADD COLUMN role_hint TEXT').run();
     }
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_ba_paints_curated
+        ON ba_paints(curated DESC, family_key, lrv DESC);
+    `);
   } catch (e) {}
 
   db.exec(`
@@ -414,6 +432,8 @@ function ensureBaseLibrarySchema(db) {
   } catch (e) {
     console.warn('[base-library] seedMasterDictionary error:', e.message);
   }
+
+  initializedDbs.add(db);
 }
 
 module.exports = {

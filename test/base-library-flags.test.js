@@ -132,8 +132,11 @@ async function runTests() {
 
     const pListOpen = await request('GET', '/api/base-library/paints', null, viewerToken);
     assert.strictEqual(pListOpen.status, 200);
-    assert.strictEqual(pListOpen.body.data.length, 1);
-    assert.strictEqual(pListOpen.body.data[0].code, 'NN999');
+    // 全新库 schema 第 8 步会幂等同步 CURATED_PAINTS 款策展色卡（curated=1），
+    // 因此重新开启后列表应为「策展种子 + 本用例插入的 NN999」，而非只有 1 行
+    const { CURATED_PAINTS } = require('../src/base-library/curated-paints');
+    assert.strictEqual(pListOpen.body.data.length, CURATED_PAINTS.length + 1);
+    assert.ok(pListOpen.body.data.some(p => p.code === 'NN999'), 'NN999 应在重新开启后的列表中');
 
     const swatchOpen = await request('GET', '/api/base-library/paints/paint_test_flag/swatch', null, viewerToken);
     assert.strictEqual(swatchOpen.status, 200);

@@ -131,9 +131,24 @@ async function floodFillCutout(imageBuffer, tolerance = 36) {
 }
 
 /**
+ * 解析 <bbox>x1 y1 x2 y2</bbox> 或 [x1, y1, x2, y2] 或空格分隔字符串
+ */
+function parseBboxString(str) {
+  if (typeof str !== 'string') return null;
+  const cleaned = str.trim();
+  const m = cleaned.match(/<bbox>\s*([+-]?\d+(?:\.\d+)?)\s+([+-]?\d+(?:\.\d+)?)\s+([+-]?\d+(?:\.\d+)?)\s+([+-]?\d+(?:\.\d+)?)\s*<\/bbox>/i)
+    || cleaned.match(/\[?\s*([+-]?\d+(?:\.\d+)?)[,\s]+([+-]?\d+(?:\.\d+)?)[,\s]+([+-]?\d+(?:\.\d+)?)[,\s]+([+-]?\d+(?:\.\d+)?)\s*\]?/);
+  if (m) {
+    return [parseFloat(m[1]), parseFloat(m[2]), parseFloat(m[3]), parseFloat(m[4])];
+  }
+  return null;
+}
+
+/**
  * 把一个轴上的数换成像素。
  * unit=px 一律按像素，即使数值 ≤100。
  * unit=percent 按 0–100。
+ * unit=norm1000 / 0-1000 / seedream 按 0–1000 归一化。
  * 未标注时：0–1 视为相对边长的比例，其余视为像素。
  */
 function axisToPx(raw, size, unit) {
@@ -141,6 +156,7 @@ function axisToPx(raw, size, unit) {
   if (!Number.isFinite(n)) return 0;
   if (unit === 'percent') return (n / 100) * size;
   if (unit === 'fraction') return n * size;
+  if (unit === 'norm1000' || unit === '0-1000' || unit === 'seedream') return (n / 1000) * size;
   if (unit === 'px') return n;
   if (n >= 0 && n <= 1) return n * size;
   return n;
@@ -151,6 +167,12 @@ function axisToPx(raw, size, unit) {
  */
 function normalizeQuadOrRect(input, sw, sh, unitHint) {
   const unit = unitHint || (input && typeof input === 'object' && !Array.isArray(input) ? (input.unit || null) : null);
+  if (typeof input === 'string') {
+    const parsed = parseBboxString(input);
+    if (parsed) {
+      return normalizeQuadOrRect({ bbox: parsed }, sw, sh, unit);
+    }
+  }
   if (Array.isArray(input)) {
     return input.map(p => {
       const rx = Array.isArray(p) ? p[0] : (typeof p === 'object' && p !== null ? p.x : p);
@@ -169,8 +191,8 @@ function normalizeQuadOrRect(input, sw, sh, unitHint) {
       const [rx, ry, rw, rh] = input.rect;
       const x = axisToPx(rx, sw, unit);
       const y = axisToPx(ry, sh, unit);
-      const w = axisToPx(rw, sw, unit === 'percent' || unit === 'fraction' ? unit : 'px');
-      const h = axisToPx(rh, sh, unit === 'percent' || unit === 'fraction' ? unit : 'px');
+      const w = axisToPx(rw, sw, unit === 'percent' || unit === 'fraction' || unit === 'norm1000' || unit === '0-1000' ? unit : 'px');
+      const h = axisToPx(rh, sh, unit === 'percent' || unit === 'fraction' || unit === 'norm1000' || unit === '0-1000' ? unit : 'px');
       return [
         { x: Math.round(x), y: Math.round(y) },
         { x: Math.round(x + w), y: Math.round(y) },
@@ -178,21 +200,39 @@ function normalizeQuadOrRect(input, sw, sh, unitHint) {
         { x: Math.round(x), y: Math.round(y + h) },
       ];
     }
-    if (Array.isArray(input.bbox)) {
-      const [minX, minY, maxX, maxY] = input.bbox;
+    let rawBbox = input.bbox;
+    if (typeof rawBbox === 'string') {
+      rawBbox = parseBboxString(rawBbox);
+    }
+    if (Array.isArray(rawBbox) && rawBbox.length === 4) {
+      const [b1, b2, b3, b4] = rawBbox.map(Number);
+      const minX = Math.min(b1, b3);
+      const maxX = Math.max(b1, b3);
+      const minY = Math.min(b2, b4);
+      const maxY = Math.max(b2, b4);
+      let effectiveUnit = unit;
+      if (!effectiveUnit) {
+        // 智能识别 0~1000 归一化输入（如 Seedream <bbox>122 633 699 953</bbox>）
+        const allInThousand = [minX, minY, maxX, maxY].every((v) => Number.isFinite(v) && v >= 0 && v <= 1000);
+        if (allInThousand) {
+          effectiveUnit = [minX, minY, maxX, maxY].some((v) => v > 1) ? 'norm1000' : 'fraction';
+        } else {
+          effectiveUnit = 'px';
+        }
+      }
       return normalizeQuadOrRect([
         [minX, minY], [maxX, minY], [maxX, maxY], [minX, maxY],
-      ], sw, sh, unit || 'px');
+      ], sw, sh, effectiveUnit);
     }
     if (Number.isFinite(Number(input.left)) && Number.isFinite(Number(input.top))) {
       const left = axisToPx(input.left, sw, unit);
       const top = axisToPx(input.top, sh, unit);
       const right = Number.isFinite(Number(input.right))
         ? axisToPx(input.right, sw, unit)
-        : left + axisToPx(input.width || 0, sw, unit === 'percent' || unit === 'fraction' ? unit : 'px');
+        : left + axisToPx(input.width || 0, sw, unit === 'percent' || unit === 'fraction' || unit === 'norm1000' || unit === '0-1000' ? unit : 'px');
       const bottom = Number.isFinite(Number(input.bottom))
         ? axisToPx(input.bottom, sh, unit)
-        : top + axisToPx(input.height || 0, sh, unit === 'percent' || unit === 'fraction' ? unit : 'px');
+        : top + axisToPx(input.height || 0, sh, unit === 'percent' || unit === 'fraction' || unit === 'norm1000' || unit === '0-1000' ? unit : 'px');
       return [
         { x: Math.round(left), y: Math.round(top) },
         { x: Math.round(right), y: Math.round(top) },
@@ -611,7 +651,46 @@ async function pastebackToTarget(sceneBuffer, generatedBuffer, { selection = nul
  */
 async function cropSelectionInterior(imageBuffer, selection, { minShort = 280, maxLong = 1568, quality = 85 } = {}) {
   let norm = null;
-  if (!selection) {
+  let rawBbox = null;
+  if (typeof selection === 'string') {
+    rawBbox = parseBboxString(selection);
+  } else if (Array.isArray(selection) && selection.length === 4 && typeof selection[0] === 'number') {
+    rawBbox = selection;
+  } else if (selection && typeof selection === 'object') {
+    if (typeof selection.bbox === 'string') {
+      rawBbox = parseBboxString(selection.bbox);
+    } else if (Array.isArray(selection.bbox)) {
+      rawBbox = selection.bbox;
+    } else if (Array.isArray(selection.norm) && selection.norm.length === 4) {
+      rawBbox = selection.norm;
+    }
+  }
+
+  const meta = await sharp(imageBuffer).metadata();
+  const imgW = meta.width;
+  const imgH = meta.height;
+
+  if (rawBbox && rawBbox.length === 4) {
+    const [b1, b2, b3, b4] = rawBbox.map(Number);
+    const bMinX = Math.min(b1, b3);
+    const bMaxX = Math.max(b1, b3);
+    const bMinY = Math.min(b2, b4);
+    const bMaxY = Math.max(b2, b4);
+    let scaleX = 1;
+    let scaleY = 1;
+    if (bMaxX > 1000 || bMaxY > 1000) {
+      scaleX = imgW || 1;
+      scaleY = imgH || 1;
+    } else if (bMinX > 1 || bMinY > 1 || bMaxX > 1 || bMaxY > 1) {
+      scaleX = 1000;
+      scaleY = 1000;
+    }
+    const nx = bMinX / scaleX;
+    const ny = bMinY / scaleY;
+    const nw = Math.max(0.001, (bMaxX - bMinX) / scaleX);
+    const nh = Math.max(0.001, (bMaxY - bMinY) / scaleY);
+    norm = { x: nx, y: ny, w: nw, h: nh };
+  } else if (!selection) {
     norm = { x: 0, y: 0, w: 1, h: 1 };
   } else if (selection.norm_points && Array.isArray(selection.norm_points) && selection.norm_points.length > 0) {
     const pts = selection.norm_points;
@@ -635,21 +714,48 @@ async function cropSelectionInterior(imageBuffer, selection, { minShort = 280, m
     norm = { x: 0, y: 0, w: 1, h: 1 };
   }
 
-  const meta = await sharp(imageBuffer).metadata();
-  const imgW = meta.width;
-  const imgH = meta.height;
+  let left = 0;
+  let top = 0;
+  let width = imgW;
+  let height = imgH;
 
-  let left = Math.max(0, Math.floor((norm.x || 0) * imgW));
-  let top = Math.max(0, Math.floor((norm.y || 0) * imgH));
-  let width = Math.round((norm.w || 1) * imgW);
-  let height = Math.round((norm.h || 1) * imgH);
+  const maxNormX = Math.max(norm.x || 0, (norm.x || 0) + (norm.w || 0));
+  const maxNormY = Math.max(norm.y || 0, (norm.y || 0) + (norm.h || 0));
 
-  if (left + width > imgW) width = imgW - left;
-  if (top + height > imgH) height = imgH - top;
-  left = Math.max(0, Math.min(left, imgW - 1));
-  top = Math.max(0, Math.min(top, imgH - 1));
-  width = Math.max(1, Math.min(width, imgW - left));
-  height = Math.max(1, Math.min(height, imgH - top));
+  if (maxNormX > 1000 || maxNormY > 1000) {
+    // 已经为绝对物理像素坐标，直接钳制取整，杜绝浮点往返截断误差
+    left = Math.max(0, Math.min(imgW - 1, Math.round(norm.x || 0)));
+    top = Math.max(0, Math.min(imgH - 1, Math.round(norm.y || 0)));
+    width = Math.max(1, Math.min(imgW - left, Math.round(norm.w || (imgW - left))));
+    height = Math.max(1, Math.min(imgH - top, Math.round(norm.h || (imgH - top))));
+  } else {
+    let scaleX = 1;
+    let scaleY = 1;
+    // norm 对象契约是 0~1 归一化分量；选区允许越界（x+w 可 >1，下面统一钳制），
+    // 所以绝不能用 x+w 越界判断千分比——否则右下溢出选区会被整体缩小 1000 倍成 1px 方块。
+    // 仅当某个分量本身明显超出比例域（>1.5，典型为 Seedream 0~1000 整数坐标误走 norm 通道）才按千分比解析。
+    const normCompMax = Math.max(norm.x || 0, norm.y || 0, norm.w || 0, norm.h || 0);
+    if (normCompMax > 1.5) {
+      scaleX = 1000;
+      scaleY = 1000;
+    }
+    const normX = (norm.x || 0) / scaleX;
+    const normY = (norm.y || 0) / scaleY;
+    const normW = (norm.w || 1) / scaleX;
+    const normH = (norm.h || 1) / scaleY;
+
+    left = Math.max(0, Math.floor(normX * imgW));
+    top = Math.max(0, Math.floor(normY * imgH));
+    width = Math.round(normW * imgW);
+    height = Math.round(normH * imgH);
+
+    if (left + width > imgW) width = imgW - left;
+    if (top + height > imgH) height = imgH - top;
+    left = Math.max(0, Math.min(left, imgW - 1));
+    top = Math.max(0, Math.min(top, imgH - 1));
+    width = Math.max(1, Math.min(width, imgW - left));
+    height = Math.max(1, Math.min(height, imgH - top));
+  }
 
   let pipeline = sharp(imageBuffer).extract({ left, top, width, height });
 
@@ -701,6 +807,7 @@ async function cropSelectionInterior(imageBuffer, selection, { minShort = 280, m
 
 module.exports = {
   axisToPx,
+  parseBboxString,
   normalizeQuadOrRect,
   selectionBounds,
   floodFillCutout,

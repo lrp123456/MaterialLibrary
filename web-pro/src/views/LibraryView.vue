@@ -2014,7 +2014,7 @@
             </button>
 
             <div v-if="isDetailLoading" class="absolute inset-0 flex items-center justify-center bg-studio-950/50 backdrop-blur-sm z-10">
-              <div class="w-8 h-8 rounded-full border-3 border-studio-accent border-t-transparent animate-spin"></div>
+              <div class="w-8 h-8 rounded-full border-4 border-studio-accent border-t-transparent animate-spin"></div>
             </div>
 
             <!-- 视频播放器 -->
