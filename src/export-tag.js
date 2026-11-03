@@ -108,16 +108,37 @@ function isExportedByTag(buf, extra = {}) {
 
 /**
  * 为任意前端可见图片文件计算 sha256/md5 并登记到 export_registry
+ *
+ * B6 性能：缩略图等热路径每次响应都会调用本函数，原先每请求一次全量哈希 + 同步 upsert 写。
+ * 这里按 (sourceFid, variant) 做进程内短路：文件大小 + 首尾 128 字节签名一致即视为
+ * 同一张已登记图片，直接复用缓存的 sha/md5，跳过哈希与写库（best-effort 查重层）。
  */
+const visibleHashCache = new WeakMap(); // db -> Map(cacheKey -> { size, sig, sha256, md5 })
+function bufferEdgeSignature(buf) {
+  const n = Math.min(128, buf.length);
+  return crypto.createHash('md5').update(buf.slice(0, n)).update(buf.slice(buf.length - n)).digest('hex');
+}
+
 function registerVisibleImageHashes(db, { filePath, buffer, sourceFid, variant = 'origin', exportedBy = 'system' } = {}) {
   if (!db || !sourceFid) return null;
   try {
     const buf = buffer || (filePath && fs.existsSync(filePath) ? fs.readFileSync(filePath) : null);
     if (!buf || !buf.length) return null;
+    const variantVal = String(variant || 'origin');
+    const cacheKey = `${String(sourceFid)}|${variantVal}`;
+    let cache = visibleHashCache.get(db);
+    if (!cache) {
+      cache = new Map();
+      visibleHashCache.set(db, cache);
+    }
+    const sig = bufferEdgeSignature(buf);
+    const cached = cache.get(cacheKey);
+    if (cached && cached.size === buf.length && cached.sig === sig) {
+      return { sha256: cached.sha256, md5: cached.md5, size: buf.length, cached: true };
+    }
     const sha256 = crypto.createHash('sha256').update(buf).digest('hex');
     const md5 = crypto.createHash('md5').update(buf).digest('hex');
     const now = Date.now();
-    const variantVal = String(variant || 'origin');
     const byVal = String(exportedBy || 'system');
     db.prepare(`
       INSERT INTO export_registry (sha256, md5, source_fid, kind, marker, created_at, variant, file_size, exported_by, exported_at)
@@ -133,6 +154,7 @@ function registerVisibleImageHashes(db, { filePath, buffer, sourceFid, variant =
         exported_by = COALESCE(export_registry.exported_by, excluded.exported_by),
         exported_at = COALESCE(export_registry.exported_at, excluded.exported_at)
     `).run(sha256, md5, String(sourceFid), variantVal, byVal, now, variantVal, buf.length, byVal, now);
+    cache.set(cacheKey, { size: buf.length, sig, sha256, md5 });
     return { sha256, md5, size: buf.length };
   } catch (_) {
     return null;

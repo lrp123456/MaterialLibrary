@@ -393,25 +393,36 @@ async function attachLocalVideoPoster(services, resultImages) {
 }
 
 function parseBody(req, limit = 2 * 1024 * 1024) {
-  return new Promise(resolve => {
+  return new Promise((resolve, reject) => {
     let b = '';
     let overflow = false;
+    let settled = false;
     req.on('data', c => {
-      if (overflow) return;
+      if (overflow || settled) return;
       b += c;
       if (b.length > limit) {
         overflow = true;
         b = '';
+        settled = true;
         try { req.destroy(); } catch (_) {}
+        // 保持历史哨兵约定：调用方按 __bodyTooLarge 显式回 413
         resolve({ __bodyTooLarge: true });
       }
     });
     req.on('end', () => {
-      if (overflow) return;
-      try { resolve(b ? JSON.parse(b) : {}); }
-      catch { resolve({}); }
+      if (overflow || settled) return;
+      if (!b) return resolve({});
+      try {
+        resolve(JSON.parse(b));
+      } catch {
+        // B6：坏 JSON 不再静默成 {}，显式 400（由 handleApi 兜底或各 handler catch 透传）
+        const err = new Error('请求体不是合法的 JSON');
+        err.statusCode = 400;
+        err.code = 'BAD_JSON';
+        reject(err);
+      }
     });
-    req.on('error', () => { if (!overflow) resolve({}); });
+    req.on('error', () => { if (!overflow && !settled) resolve({}); });
   });
 }
 
@@ -1409,7 +1420,22 @@ function requireAdmin(res, sessionUser) {
 }
 
 // 核心 HTTP 请求路由调度
+// B6：入口兜底 —— 未被各路由局部 try/catch 接住的 4xx 语义错误（如 parseBody 坏 JSON 的
+// statusCode=400）按其状态码返回；其余异常继续上抛由服务端 500 处理，避免坏请求体被静默当 {}。
 async function handleApi(services, req, res, prefix = '/api') {
+  try {
+    return await handleApiImpl(services, req, res, prefix);
+  } catch (e) {
+    if (res.headersSent) throw e;
+    const code = Number(e && e.statusCode);
+    if (code >= 400 && code < 500) {
+      return sendJson(res, code, { success: false, error: e.message });
+    }
+    throw e;
+  }
+}
+
+async function handleApiImpl(services, req, res, prefix = '/api') {
   const { db, config, interpreter } = services;
   const urlObj = new URL(req.url, 'http://127.0.0.1');
   let pathname = urlObj.pathname;
@@ -9129,8 +9155,10 @@ function register(services) {
     // 转换为原生 req/res 兼容对象
     await new Promise(resolve => {
       handleApi(services, c.req, c.res, P).then(resolve).catch(err => {
-        c.status = 500;
-        c.body = { error: err.message };
+        const code = Number(err && err.statusCode);
+        c.status = (code >= 400 && code < 500) ? code : 500;
+        // B6：4xx 可回显业务消息；500 不泄漏内部细节
+        c.body = (code >= 400 && code < 500) ? { error: err.message } : { error: '服务器内部错误' };
         resolve();
       });
     });
