@@ -4255,8 +4255,21 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
       if (fs.existsSync(cp)) { found = cp; break; }
     }
     if (!found) return sendJson(res, 404, { error: '预览图未找到' });
+    // 快照上传后统一存为 .png 文件名，但内容可能是 WebP（前端压缩降采样），
+    // 按魔数嗅探真实类型，避免固定 image/png 与实际字节不符。
+    let previewType = 'image/png';
+    try {
+      const fd = fs.openSync(found, 'r');
+      const head = Buffer.alloc(12);
+      fs.readSync(fd, head, 0, 12, 0);
+      fs.closeSync(fd);
+      if (head.subarray(0, 4).toString('hex') === '89504e47') previewType = 'image/png';
+      else if (head.subarray(0, 4).toString('ascii') === 'RIFF' && head.subarray(8, 12).toString('ascii') === 'WEBP') previewType = 'image/webp';
+      else if (head.subarray(0, 3).toString('hex') === 'ffd8ff') previewType = 'image/jpeg';
+    } catch (_) {}
     res.writeHead(200, {
-      'Content-Type': 'image/png',
+      'Content-Type': previewType,
+      'X-Content-Type-Options': 'nosniff',
       'Access-Control-Allow-Origin': '*',
       'Cache-Control': 'public, max-age=86400'
     });
@@ -4356,7 +4369,12 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
   // POST /products/upload  { name, model_b64, preview_b64?, snapshots?, tags?, dimensions? }
   if (pathname === '/products/upload' && req.method === 'POST') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
-    const b = await parseBody(req, 64 * 1024 * 1024);
+    // GLB base64 会膨胀 ~33%，叠加多张高分辨率快照后 64MB 很容易爆，超限旧逻辑直接
+    // destroy socket，30002 代理侧表现为 ECONNRESET。这里对齐全局上传上限并优雅回 413。
+    const b = await parseBody(req, ML_MAX_UPLOAD_BYTES);
+    if (b && b.__bodyTooLarge) {
+      return sendJson(res, 413, { success: false, error: `模型包过大（超过 ${Math.round(ML_MAX_UPLOAD_BYTES / 1024 / 1024)}MB JSON 上限），请精简 GLB 或减少快照后重试` });
+    }
     try {
       const name = String(b.name || '自定义单品').slice(0, 80);
       const id = 'custom_' + Date.now().toString(36);
