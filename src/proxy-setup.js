@@ -85,10 +85,25 @@ function applyDispatcher(proxyUrl) {
   const np = process.env.NO_PROXY || process.env.no_proxy || '127.0.0.1,localhost,::1';
   process.env.NO_PROXY = np;
   process.env.no_proxy = np;
-  const { setGlobalDispatcher, EnvHttpProxyAgent } = require('undici');
+
+  // undici 缺失绝不允许拖垮启动：跨平台共用一棵 node_modules 时它已被误删过两次
+  // （watchdog 每 3 秒拉起、每启必崩 = 循环重启事故）。缺件时降级为「无代理直连」，
+  // 本机/局域网端点照常服务，海外 AI 端点失败，ensureProxy() 后续装回依赖即可恢复。
+  let undici = null;
+  try {
+    undici = require('undici');
+  } catch (e) {
+    console.warn('[proxy] undici 未安装：全局 fetch 代理本次不生效（服务继续运行）。请在 WSL 内 npm install 后重启恢复海外端点代理。');
+    try {
+      const https = require('https');
+      const { HttpsProxyAgent } = require('https-proxy-agent');
+      https.globalAgent = new HttpsProxyAgent(proxyUrl);
+    } catch {}
+    return false;
+  }
   // ProxyAgent 不看 NO_PROXY，会把 127.0.0.1:4000 也送进 Clash，对话只得到 fetch failed。
   // EnvHttpProxyAgent 对 NO_PROXY 里的本机地址直连，其余仍走代理。
-  setGlobalDispatcher(new EnvHttpProxyAgent({
+  undici.setGlobalDispatcher(new undici.EnvHttpProxyAgent({
     httpProxy: proxyUrl,
     httpsProxy: proxyUrl,
     noProxy: np
@@ -98,6 +113,7 @@ function applyDispatcher(proxyUrl) {
     const { HttpsProxyAgent } = require('https-proxy-agent');
     https.globalAgent = new HttpsProxyAgent(proxyUrl);
   } catch {}
+  return true;
 }
 
 function rewriteHost(proxyUrl, host) {
@@ -159,7 +175,8 @@ function resolveAndApplyProxy({ quiet = false } = {}) {
   for (const c of expanded) {
     if (!c.parsed) continue;
     if (tcpProbeSync(c.parsed.host, c.parsed.port)) {
-      applyDispatcher(c.url);
+      const ok = applyDispatcher(c.url);
+      if (!ok) break; // undici 缺件是全局问题，换候选无意义
       if (!quiet) {
         console.log(`[proxy] 已启用全局 HTTP 代理: ${c.url} (${c.why}) (NO_PROXY: ${process.env.NO_PROXY})`);
       }
