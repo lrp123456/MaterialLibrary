@@ -23,7 +23,8 @@ function loadMediabunny() {
 
 const LRU_MAX_FRAMES = 24;                 // 预览尺寸位图上限（1080p 下约 24×8MB 内）
 const BATCH_INTERVAL_MAX = 240;            // 定时间隔抽帧硬上限，防止 0.5s×10min 产出上千张全尺寸 PNG
-const SEEK_WATCHDOG_MS = 350;
+const SEEK_VERIFY_MS = 350;        // 等待新帧真正上屏（rVFC）的窗口
+const SEEK_HARD_TIMEOUT_MS = 8000; // 弱网大视频 seeked 硬超时；超时后监听仍保留，迟到帧可补画
 
 class LRUFrameCache {
   constructor(maxSize = LRU_MAX_FRAMES) {
@@ -612,8 +613,93 @@ export class MediaFrameExtractor {
   }
 
   /**
+   * 等待 video 在 targetTime 的帧真正上屏。
+   * 必须在改 currentTime 之前注册 requestVideoFrameCallback：seeked 只代表
+   * currentTime 已变，新帧可能尚未合成，此时 drawImage 会抓到旧帧
+   * （「切帧后画面偶发不变」的根因，且旧帧一旦入缓存会稳定复现）。
+   * rVFC 不可用时用两级 rAF + 时间核对兜底。
+   */
+  _waitPresentedFrame(v, targetTime, tolerance, timeoutMs, { strict = true } = {}) {
+    return new Promise((resolve) => {
+      const start = Date.now();
+      const beforeTime = v.currentTime;
+      let done = false;
+      let rvfcId = 0;
+      let rafId = 0;
+      let fallbackArmed = false;
+      let timer = 0;
+
+      const matched = () => {
+        if (Math.abs(v.currentTime - targetTime) <= tolerance) return true;
+        // 非精确寻帧（fastSeek 会吸附关键帧）：seek 已静止且落点确实变了即可
+        if (!strict && !v.seeking && v.currentTime !== beforeTime) return true;
+        return false;
+      };
+
+      const finish = (ok) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        cancelAnimationFrame(rafId);
+        if (rvfcId && typeof v.cancelVideoFrameCallback === 'function') {
+          try { v.cancelVideoFrameCallback(rvfcId); } catch (_) {}
+        }
+        resolve(ok);
+      };
+
+      // 1. 主通道：rVFC 回调带 mediaTime，报告的是「真正已呈现」的帧
+      if (typeof v.requestVideoFrameCallback === 'function') {
+        const onRvfc = (_now, meta) => {
+          if (done) return;
+          const presentedTime = (meta && typeof meta.mediaTime === 'number' && isFinite(meta.mediaTime) && meta.mediaTime > 0)
+            ? meta.mediaTime
+            : v.currentTime;
+          // 非精确寻帧：注册在改 currentTime 之前，首个上屏帧必是 seek 后的新画面
+          const frameOk = strict
+            ? Math.abs(presentedTime - targetTime) <= tolerance
+            : presentedTime !== beforeTime;
+          if (frameOk) {
+            finish(true);
+            return;
+          }
+          // 呈现帧滞后一拍（Chrome 偶发先回旧帧）：继续等下一帧
+          if (Date.now() - start > timeoutMs) {
+            finish(false);
+            return;
+          }
+          try { rvfcId = v.requestVideoFrameCallback(onRvfc); } catch (_) { armRafFallback(); }
+        };
+        try { rvfcId = v.requestVideoFrameCallback(onRvfc); } catch (_) { armRafFallback(); }
+      } else {
+        armRafFallback();
+      }
+
+      // 2. 兜底：currentTime 到位后再等两个 rAF（给合成器上屏时间）才认账
+      function armRafFallback() {
+        if (fallbackArmed) return;
+        fallbackArmed = true;
+        const tick = (graceLeft) => {
+          if (done) return;
+          if (matched()) {
+            if (graceLeft <= 0) { finish(true); return; }
+            rafId = requestAnimationFrame(() => tick(graceLeft - 1));
+            return;
+          }
+          if (Date.now() - start > timeoutMs) { finish(false); return; }
+          rafId = requestAnimationFrame(() => tick(graceLeft));
+        };
+        rafId = requestAnimationFrame(() => tick(2));
+      }
+
+      timer = setTimeout(() => finish(false), timeoutMs + 200);
+    });
+  }
+
+  /**
    * 丢弃过时请求的调度寻帧。
-   * 看门狗超时且画面未到位时：不上画、不入缓存，绝不把旧帧冒充新帧。
+   * 关键时序：先注册「帧已呈现」等待，再改 currentTime；只有核对过呈现时间的帧
+   * 才上画、入缓存。网络视频 seek 可能数秒，硬超时后不再移除监听——迟到的
+   * seeked 若仍是用户所求帧，后台补画；已被更新请求取代则静默丢弃。
    */
   _seekHTML5VideoScheduled(targetTime, frameNumber, isPrecise) {
     this._latestSeekTarget = { targetTime, frameNumber, isPrecise };
@@ -630,53 +716,16 @@ export class MediaFrameExtractor {
         return resolve();
       }
 
-      let settled = false;
       const tolerance = Math.max(0.05, 1.5 / this.fps);
+      // 同步段内没有 await，这里的判断对下面的赋值同样有效
+      const alreadyThere = !v.seeking && Math.abs(v.currentTime - targetTime) <= tolerance;
+      let settled = false;       // 本次调度是否已收口（含超时放弃）
+      let chained = false;
 
-      const finishSeek = (timedOut = false) => {
-        if (settled) return;
-        const closeEnough = Math.abs(v.currentTime - targetTime) <= tolerance;
-
-        if (timedOut && !closeEnough) {
-          // 解码器未到位：保留旧画面，等待下一次寻帧/真正的 seeked 事件
-          settled = true;
-          clearTimeout(this._seekWatchdog);
-          this._seekWatchdog = null;
-          v.removeEventListener('seeked', onSeeked);
-          this.isSeeking = false;
-          if (this._latestSeekTarget && this._latestSeekTarget.frameNumber !== frameNumber) {
-            const next = this._latestSeekTarget;
-            this.seekToFrame(next.frameNumber, next.isPrecise).then(resolve);
-          } else {
-            resolve();
-          }
-          return;
-        }
-
-        settled = true;
-        clearTimeout(this._seekWatchdog);
-        this._seekWatchdog = null;
-        v.removeEventListener('seeked', onSeeked);
+      const chainOrResolve = () => {
         this.isSeeking = false;
-
-        if (v.videoWidth > 0) {
-          this._paintToCanvas(v);
-
-          // 仅真实 seeked（非超时兜底）缓存「预览尺寸」位图，绝不缓存全分辨率帧
-          if (!timedOut && isPrecise && typeof createImageBitmap === 'function') {
-            const [tw, th] = this._computeTargetPreviewSize();
-            const previewC = document.createElement('canvas');
-            previewC.width = tw;
-            previewC.height = th;
-            previewC.getContext('2d').drawImage(v, 0, 0, tw, th);
-            createImageBitmap(previewC).then((bmp) => {
-              this.cache.set(frameNumber, bmp);
-            }).catch(() => {});
-          }
-        }
-
-        // 检查中途是否有更新的寻帧请求
-        if (this._latestSeekTarget && this._latestSeekTarget.frameNumber !== frameNumber) {
+        if (!chained && this._latestSeekTarget && this._latestSeekTarget.frameNumber !== frameNumber) {
+          chained = true;
           const next = this._latestSeekTarget;
           this.seekToFrame(next.frameNumber, next.isPrecise).then(resolve);
         } else {
@@ -684,10 +733,91 @@ export class MediaFrameExtractor {
         }
       };
 
-      const onSeeked = () => finishSeek(false);
+      const paintVerifiedFrame = () => {
+        if (v.videoWidth <= 0) return;
+        this._paintToCanvas(v);
+        if (isPrecise && typeof createImageBitmap === 'function') {
+          const [tw, th] = this._computeTargetPreviewSize();
+          const previewC = document.createElement('canvas');
+          previewC.width = tw;
+          previewC.height = th;
+          previewC.getContext('2d').drawImage(v, 0, 0, tw, th);
+          createImageBitmap(previewC).then((bmp) => {
+            // 入缓存前再次核对：用户可能已经跳到别的帧，缓存键必须对得上画面
+            if (this._latestSeekTarget && this._latestSeekTarget.frameNumber === frameNumber) {
+              this.cache.set(frameNumber, bmp);
+            } else {
+              try { bmp.close(); } catch (_) {}
+            }
+          }).catch(() => {});
+        }
+      };
+
+      // seeked 后等真正上屏并核对 mediaTime；失败就继续等，硬超时兜底
+      const onSeeked = async () => {
+        const ok = await this._waitPresentedFrame(v, targetTime, tolerance, SEEK_VERIFY_MS, { strict: isPrecise });
+        if (settled) {
+          // 硬超时已收口：迟到帧只有在「仍是最新所求、且没有新寻帧在途」时补画
+          if (ok &&
+              !this.isSeeking &&
+              this._latestSeekTarget &&
+              this._latestSeekTarget.frameNumber === frameNumber) {
+            paintVerifiedFrame();
+          }
+          v.removeEventListener('seeked', onSeeked);
+          return;
+        }
+        if (!ok) return; // 呈现帧未核对上：保留监听等下一次 seeked/超时
+        settled = true;
+        clearTimeout(this._seekWatchdog);
+        this._seekWatchdog = null;
+        v.removeEventListener('seeked', onSeeked);
+        paintVerifiedFrame();
+        chainOrResolve();
+      };
+
+      if (alreadyThere) {
+        // 同点寻帧（如单帧步进落在 1.5 帧容差内）：暂停视频不会再有新帧上屏，
+        // rVFC 永不触发，绝不能等呈现帧回调（否则要拖到硬超时才收口）。
+        // 双 rAF 后直接认账当前画面，也不再赋 currentTime。
+        let rafB = 0;
+        const settleSamePoint = () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(this._seekWatchdog);
+          this._seekWatchdog = null;
+          v.removeEventListener('seeked', onSeeked);
+          paintVerifiedFrame();
+          chainOrResolve();
+        };
+        rafB = requestAnimationFrame(() => { rafB = requestAnimationFrame(settleSamePoint); });
+        return;
+      }
+
       v.addEventListener('seeked', onSeeked);
 
-      this._seekWatchdog = setTimeout(() => finishSeek(true), SEEK_WATCHDOG_MS);
+      // 硬超时：seeked 迟迟不到（弱网/大视频）。绝不移除 onSeeked——
+      // 迟到 seeked 仍可后台补画；也绝不把旧帧画上去冒充新帧。
+      this._seekWatchdog = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        this._seekWatchdog = null;
+        chainOrResolve();
+      }, SEEK_HARD_TIMEOUT_MS);
+
+      // 注册呈现帧等待（必须在改 currentTime 之前），覆盖「seek 完成但
+      // seeked 缺失/提前」以及 rVFC 报告滞后帧的情况
+      this._waitPresentedFrame(v, targetTime, tolerance, SEEK_VERIFY_MS, { strict: isPrecise }).then((ok) => {
+        if (settled || !ok) return;
+        if (Math.abs(v.currentTime - targetTime) <= tolerance && !v.seeking) {
+          settled = true;
+          clearTimeout(this._seekWatchdog);
+          this._seekWatchdog = null;
+          v.removeEventListener('seeked', onSeeked);
+          paintVerifiedFrame();
+          chainOrResolve();
+        }
+      });
 
       // 如果不是必须单帧逐像素精确且支持 fastSeek，走更轻快的 fastSeek
       if (!isPrecise && typeof v.fastSeek === 'function') {
