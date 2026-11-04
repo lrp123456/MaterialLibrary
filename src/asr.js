@@ -50,11 +50,11 @@ function probeOne(base, pathname, label) {
           } catch (_) {}
           resolve({ ready, label });
         });
+        res.on('error', () => resolve({ ready: false, label }));
       }
     );
     req.on('timeout', () => { req.destroy(); resolve({ ready: false, label }); });
     req.on('error', () => resolve({ ready: false, label }));
-    res.on('error', () => resolve({ ready: false, label }));
   });
 }
 
