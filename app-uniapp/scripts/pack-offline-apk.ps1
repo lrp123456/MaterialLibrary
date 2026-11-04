@@ -15,6 +15,21 @@ param(
   [string]$ConfigPath = ""
 )
 $ErrorActionPreference = "Stop"
+
+# 兼容从 PowerShell 7 环境（如 service-hub 经 pwsh 启动、MSIX 安装器把 PS7 模块目录
+# 写入 PSModulePath 最前）拉起本脚本的情况：WPS 5.1 会优先发现并加载 7.0.0.0 的
+# Microsoft.PowerShell.Utility（.NET Core 编译，cmdlet 在 5.1 里不导出），表现为
+# Get-FileHash 等命令"无法识别"。此处把模块路径规范回 5.1 规范路径，后续自动模块
+# 发现及本脚本派生的所有嵌套 powershell 子进程均使用干净环境。
+if ($PSVersionTable.PSVersion.Major -lt 6) {
+  $cleanModulePath = @(
+    (Join-Path $HOME "Documents\WindowsPowerShell\Modules"),
+    "C:\Program Files\WindowsPowerShell\Modules",
+    (Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\Modules")
+  ) | Where-Object { Test-Path $_ } | Select-Object -Unique
+  $env:PSModulePath = [string]::Join(";", $cleanModulePath)
+}
+
 $scripts = $PSScriptRoot
 $root = Split-Path -Parent $scripts
 if (-not $ConfigPath) { $ConfigPath = Join-Path $scripts "offline-config.json" }
@@ -39,6 +54,16 @@ $code = "$Model".Trim().ToLowerInvariant()
 function Copy-Tree([string]$from, [string]$to) {
   New-Item -ItemType Directory -Force -Path $to | Out-Null
   Copy-Item (Join-Path $from "*") $to -Recurse -Force
+}
+
+function Get-Md5Hex([string]$path) {
+  # 不依赖 Get-FileHash：被 PS7 模块劫持时该 cmdlet 可能缺失，.NET MD5 始终可用
+  $hasher = [System.Security.Cryptography.MD5]::Create()
+  try {
+    $fs = [System.IO.File]::OpenRead($path)
+    try { return ([BitConverter]::ToString($hasher.ComputeHash($fs))).Replace("-", "") }
+    finally { $fs.Dispose() }
+  } finally { $hasher.Dispose() }
 }
 
 function Set-FileLocked([string]$path, [string]$value, [switch]$NoNewline) {
@@ -249,7 +274,7 @@ function Build-Www {
   }
   if (Test-Path $wwwDst) { Remove-Item $wwwDst -Recurse -Force }
   Copy-Tree $wwwOut $wwwDst
-  $md5 = (Get-FileHash $svc -Algorithm MD5).Hash
+  $md5 = Get-Md5Hex $svc
   Write-Host "  www synced, app-service.js md5=$md5"
 }
 
