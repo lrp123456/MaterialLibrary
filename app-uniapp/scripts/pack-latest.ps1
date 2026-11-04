@@ -1,4 +1,4 @@
-﻿# pack-latest.ps1 - rebuild latest src and pack offline APK (source-safe)
+# pack-latest.ps1 - rebuild latest src and pack offline APK (source-safe)
 param(
   [switch]$Install,
   [string]$Serial = '',
@@ -26,7 +26,7 @@ if ($SkipImport) { $packArgs += '-SkipImport' }
 if ($BumpVersion) { $packArgs += '-BumpVersion' }
 if ($NoPrompt) { $packArgs += '-NoPrompt' }
 
-& powershell -ExecutionPolicy Bypass -File (Join-Path $scripts 'pack-offline-apk.ps1') @packArgs
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $scripts 'pack-offline-apk.ps1') @packArgs
 if ($LASTEXITCODE -ne 0) { throw "pack-offline-apk failed exit=$LASTEXITCODE" }
 
 Write-Host ''

@@ -1,7 +1,7 @@
 # 一键：打包 WGT 并推送到更新通道
 # 用法:
-#   powershell -ExecutionPolicy Bypass -File scripts\pack-and-push.ps1 -Note 热更新WGT -Channel internal -Force
-#   powershell -ExecutionPolicy Bypass -File scripts\pack-and-push.ps1 -SkipBuild -Note 仅用现有www
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\pack-and-push.ps1 -Note 热更新WGT -Channel internal -Force
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\pack-and-push.ps1 -SkipBuild -Note 仅用现有www
 param(
   [string]$Note = "热更新",
   [string]$Channel = "internal",
@@ -29,7 +29,7 @@ if ($Status -or $Revoke -or $Promote) {
   if ($Status) { $fwdArgs += "-Status" }
   if ($Revoke) { $fwdArgs += "-Revoke" }
   if ($Promote) { $fwdArgs += "-Promote" }
-  powershell -ExecutionPolicy Bypass -File $pushScript @fwdArgs
+  powershell -NoProfile -ExecutionPolicy Bypass -File $pushScript @fwdArgs
   exit $LASTEXITCODE
 }
 
@@ -39,7 +39,7 @@ if ($SkipBuild) { $packArgs += "-SkipBuild" }
 if ($BumpVersion) { $packArgs += "-BumpVersion" }
 if ($NoPrompt) { $packArgs += "-NoPrompt" }
 $packScript = Join-Path $scripts "pack-wgt.ps1"
-powershell -ExecutionPolicy Bypass -File $packScript @packArgs
+powershell -NoProfile -ExecutionPolicy Bypass -File $packScript @packArgs
 if ($LASTEXITCODE -ne 0) { throw "pack-wgt 失败 exit=$LASTEXITCODE" }
 
 $outDir = Join-Path $root "dist\release\wgt"
@@ -63,7 +63,7 @@ $pushArgs = @(
 if ($Force) { $pushArgs += "-Force" }
 if ($Canary) { $pushArgs += "-Canary" }
 $pushScript = Join-Path $scripts "push-update.ps1"
-powershell -ExecutionPolicy Bypass -File $pushScript @pushArgs
+powershell -NoProfile -ExecutionPolicy Bypass -File $pushScript @pushArgs
 if ($LASTEXITCODE -ne 0) { throw "push wgt 失败" }
 
 Write-Host ""

@@ -1,4 +1,4 @@
-﻿# quick-repack-install.ps1 - legacy name, forwards to pack-latest.ps1
+# quick-repack-install.ps1 - legacy name, forwards to pack-latest.ps1
 param(
   [switch]$Install,
   [string]$Serial = '',
@@ -17,5 +17,5 @@ if ($BumpVersion) { $forward += '-BumpVersion' }
 if ($NoPrompt) { $forward += '-NoPrompt' }
 if ($ConfigPath) { $forward += @('-ConfigPath', $ConfigPath) }
 
-& powershell -ExecutionPolicy Bypass -File (Join-Path $scripts 'pack-latest.ps1') @forward
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $scripts 'pack-latest.ps1') @forward
 exit $LASTEXITCODE

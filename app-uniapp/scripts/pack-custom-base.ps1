@@ -1,4 +1,4 @@
-﻿# 自定义调试基座（含 uni-local-infer so + JNI jar）
+# 自定义调试基座（含 uni-local-infer so + JNI jar）
 param(
   [string]$PackageName = "lrp.aibum",
   [string]$CertType = "3",
@@ -21,7 +21,7 @@ $verScript = Join-Path $root "scripts\version-bump.ps1"
 $verArgs = @()
 if ($BumpVersion) { $verArgs += "-BumpVersion" }
 if ($NoPrompt) { $verArgs += "-NoPrompt" }
-$verOut = & powershell -ExecutionPolicy Bypass -File $verScript @verArgs
+$verOut = & powershell -NoProfile -ExecutionPolicy Bypass -File $verScript @verArgs
 if ($LASTEXITCODE -ne 0) { throw "version-bump failed exit=$LASTEXITCODE" }
 $verLine = ($verOut | Where-Object { "$_" -like '@VER@*' } | Select-Object -Last 1)
 if (-not $verLine) { throw "version-bump no output" }

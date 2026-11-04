@@ -26,7 +26,7 @@ if ($SkipImport) { $packArgs += "-SkipImport" }
 if ($BumpVersion) { $packArgs += "-BumpVersion" }
 if ($NoPrompt) { $packArgs += "-NoPrompt" }
 if ($ConfigPath) { $packArgs += @("-ConfigPath", $ConfigPath) }
-powershell -ExecutionPolicy Bypass -File (Join-Path $scripts "pack-offline-apk.ps1") @packArgs
+powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $scripts "pack-offline-apk.ps1") @packArgs
 if ($LASTEXITCODE -ne 0) { throw "pack-offline-apk 失败 exit=$LASTEXITCODE" }
 
 $outDir = $cfg.outputDir
@@ -40,7 +40,7 @@ Write-Host "产物 $($apk.FullName)  $([math]::Round($apk.Length/1MB,2)) MB"
 
 Write-Host ""
 Write-Host "======== 2/2 推送到更新通道 ========"
-powershell -ExecutionPolicy Bypass -File (Join-Path $scripts "push-update.ps1") `
+powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $scripts "push-update.ps1") `
   -File $apk.FullName -Note $Note -Channel $Channel -Server $Server -User $User -Pass $Pass -Force
 if ($LASTEXITCODE -ne 0) { throw "push apk 失败" }
 

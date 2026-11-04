@@ -1,4 +1,4 @@
-﻿# Offline APK pack (DCloud Offline SDK + Gradle), per-model source switching.
+# Offline APK pack (DCloud Offline SDK + Gradle), per-model source switching.
 # Usage:
 #   pack-offline-apk.ps1 -Model o            # pack with Oxbow client source
 #   pack-offline-apk.ps1 -Model base         # pack with src_backup baseline
@@ -58,7 +58,7 @@ function Set-FileLocked([string]$path, [string]$value, [switch]$NoNewline) {
 
 function Restore-SdkAssets {
   Write-Host "==== re-import offline SDK / native plugin (repair zeroed files) ====" -ForegroundColor Cyan
-  powershell -ExecutionPolicy Bypass -File (Join-Path $scripts "import-offline-sdk.ps1") -ConfigPath $ConfigPath
+  powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $scripts "import-offline-sdk.ps1") -ConfigPath $ConfigPath
   if ($LASTEXITCODE -ne 0) { throw "import-offline-sdk failed" }
   $plug = $cfg.nativePlugin
   $jni = Join-Path $offlineApp "src\main\jniLibs"
@@ -389,7 +389,7 @@ $verScript = Join-Path $scripts "version-bump.ps1"
 $verArgs = @()
 if ($BumpVersion) { $verArgs += "-BumpVersion" }
 if ($NoPrompt) { $verArgs += "-NoPrompt" }
-$verOut = & powershell -ExecutionPolicy Bypass -File $verScript @verArgs
+$verOut = & powershell -NoProfile -ExecutionPolicy Bypass -File $verScript @verArgs
 if ($LASTEXITCODE -ne 0) { throw "version-bump failed exit=$LASTEXITCODE" }
 $verLine = ($verOut | Where-Object { "$_" -like '@VER@*' } | Select-Object -Last 1)
 if (-not $verLine) { throw "version-bump no output" }

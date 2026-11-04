@@ -1,4 +1,4 @@
-﻿# Cloud pack APK then ADB install (not push)
+# Cloud pack APK then ADB install (not push)
 param(
   [string]$Serial = "",
   [string]$PackageName = "lrp.aibum",
@@ -18,7 +18,7 @@ Write-Host "======== [1/2] 云打包自定义基座 APK ========"
 $packArgs = @("-PackageName", $PackageName, "-CertType", $CertType)
 if ($BumpVersion) { $packArgs += "-BumpVersion" }
 if ($NoPrompt) { $packArgs += "-NoPrompt" }
-powershell -ExecutionPolicy Bypass -File (Join-Path $scripts "pack-custom-base.ps1") @packArgs
+powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $scripts "pack-custom-base.ps1") @packArgs
 if ($LASTEXITCODE -ne 0) { throw "pack-custom-base 失败 exit=$LASTEXITCODE" }
 
 $apk = Get-ChildItem (Join-Path $root "dist\release\apk") -Filter "*.apk" -ErrorAction SilentlyContinue |
@@ -33,7 +33,7 @@ Write-Host "======== [2/2] ADB 安装到设备 ========"
 $adbArgs = @{ Apk = $apk.FullName; PackageName = $PackageName }
 if ($Serial) { $adbArgs["Serial"] = $Serial }
 if ($PushModels) { $adbArgs["PushModels"] = $true }
-powershell -ExecutionPolicy Bypass -File (Join-Path $scripts "adb-install.ps1") @adbArgs
+powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $scripts "adb-install.ps1") @adbArgs
 if ($LASTEXITCODE -ne 0) { throw "ADB 安装失败 exit=$LASTEXITCODE" }
 
 Write-Host ""

@@ -3,9 +3,9 @@
 # 版本策略见 scripts\version-bump.ps1：是否抬版本交互询问，机器号每次出包 +1
 #
 # 用法:
-#   powershell -ExecutionPolicy Bypass -File scripts\pack-wgt.ps1
-#   powershell -ExecutionPolicy Bypass -File scripts\pack-wgt.ps1 -Note "修复编辑器点选" -BumpVersion
-#   powershell -ExecutionPolicy Bypass -File scripts\pack-wgt.ps1 -SkipBuild -NoPrompt
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\pack-wgt.ps1
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\pack-wgt.ps1 -Note "修复编辑器点选" -BumpVersion
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\pack-wgt.ps1 -SkipBuild -NoPrompt
 param(
   [string]$VersionName = "",
   [string]$Note = "热更新",
@@ -28,7 +28,7 @@ $verScript = Join-Path $root "scripts\version-bump.ps1"
 $verArgs = @()
 if ($BumpVersion) { $verArgs += "-BumpVersion" }
 if ($NoPrompt) { $verArgs += "-NoPrompt" }
-$verOut = & powershell -ExecutionPolicy Bypass -File $verScript @verArgs
+$verOut = & powershell -NoProfile -ExecutionPolicy Bypass -File $verScript @verArgs
 if ($LASTEXITCODE -ne 0) { throw "version-bump 失败 exit=$LASTEXITCODE" }
 $verLine = ($verOut | Where-Object { "$_" -like '@VER@*' } | Select-Object -Last 1)
 if (-not $verLine) { throw "version-bump 无有效输出" }
