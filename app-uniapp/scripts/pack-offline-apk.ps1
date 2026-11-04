@@ -81,10 +81,43 @@ function Set-FileLocked([string]$path, [string]$value, [switch]$NoNewline) {
   if (-not $ok) { throw "cannot write (locked): $path" }
 }
 
+function Test-SdkExtractPresent {
+  # 仓外 DCloud 离线 SDK 解压目录是机器级工具位置（非项目代码）。
+  # 自包含要求：该目录被删除时，只要仓内已入库的 SDK 副本锚点齐全，构建照常进行。
+  foreach ($c in @($cfg.offlineSdkExtractDir)) {
+    if (-not $c) { continue }
+    if (Test-Path (Join-Path $c "SDK")) { return $true }
+    if (Test-Path (Join-Path $c "libs")) { return $true }
+  }
+  return $false
+}
+
+function Test-CommittedSdkAnchors {
+  $anchors = @(
+    (Join-Path $offlineApp "libs\uniapp-v8-release.aar"),
+    (Join-Path $offlineApp "libs\lib.5plus.base-release.aar"),
+    (Join-Path $offlineApp "libs\uni-local-infer.jar"),
+    (Join-Path $offlineApp "src\main\assets\data\dcloud_control.xml"),
+    (Join-Path $offlineApp "src\main\jniLibs\arm64-v8a\liblocalinfer.so"),
+    (Join-Path $offlineApp "src\main\jniLibs\armeabi-v7a\liblocalinfer.so")
+  )
+  foreach ($a in $anchors) { if (-not (Test-Path $a)) { Write-Host "  [anchor miss] $a" -ForegroundColor Yellow; return $false } }
+  return $true
+}
+
 function Restore-SdkAssets {
   Write-Host "==== re-import offline SDK / native plugin (repair zeroed files) ====" -ForegroundColor Cyan
-  powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $scripts "import-offline-sdk.ps1") -ConfigPath $ConfigPath
-  if ($LASTEXITCODE -ne 0) { throw "import-offline-sdk failed" }
+  if (Test-SdkExtractPresent) {
+    powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $scripts "import-offline-sdk.ps1") -ConfigPath $ConfigPath
+    if ($LASTEXITCODE -ne 0) { throw "import-offline-sdk failed" }
+  } else {
+    Write-Host "[warn] 仓外离线 SDK 解压目录不存在（$($cfg.offlineSdkExtractDir)）" -ForegroundColor Yellow
+    Write-Host "       跳过 SDK re-import，改用仓内 android-offline 已入库副本。" -ForegroundColor Yellow
+    if (-not (Test-CommittedSdkAnchors)) {
+      throw "仓内 SDK 副本锚点不完整，且仓外离线 SDK 缺失。请恢复解压目录后重跑 import-offline-sdk.ps1。"
+    }
+    Write-Host "  [ok] committed SDK anchors verified (AAR / data / 双 ABI .so)" -ForegroundColor Green
+  }
   $plug = $cfg.nativePlugin
   $jni = Join-Path $offlineApp "src\main\jniLibs"
   $libsDir = Join-Path $offlineApp "libs"
