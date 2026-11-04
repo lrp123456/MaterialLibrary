@@ -13,7 +13,8 @@
 - `nativeplugins/uni-local-infer/` 与 `uni_modules/uni-local-infer/`：端侧推理原生插件（实体文件，非 junction）
 - `node_modules/`：不入库，`npm ci` 可复现（约 740 包）
 
-**仓库外（机器级工具，非项目代码，换机时装一遍即可）：**
+**仓库外（机器级工具，非项目代码）：** JDK / Android SDK / Gradle / HBuilderX 为出包必需；
+DCloud 离线 SDK 解压目录仅在需要刷新/修复仓内 SDK 副本时才需要（见下）。
 
 | 工具 | 配置项（`offline-config.json`） |
 |------|------|
@@ -21,10 +22,12 @@
 | Android SDK | `androidSdkRoot` |
 | Gradle 8.9 | `gradleBin` |
 | HBuilderX CLI | `hbx` |
-| DCloud Android 离线 SDK 解压目录 | `offlineSdkExtractDir` |
+| DCloud Android 离线 SDK 解压目录（**可选**，仅刷新/修复仓内副本时需要） | `offlineSdkExtractDir` |
 
 `import-offline-sdk.ps1` 每次打包前从离线 SDK 目录把 AAR / jar / .so / assets 同步进
-`android-offline/`（入库副本即来自该同步，目录在不在都不影响已入库工程，只影响"修复性重导"）。
+`android-offline/`（入库副本即来自该同步）。**该目录被删除也不影响打包**：脚本探测缺失后
+校验仓内锚点（核心 AAR、dcloud_control.xml、双 ABI .so）齐全即告警跳过 re-import，
+已实测完整构建成功；仅当仓内副本也不完整时才报错要求恢复 SDK 目录。
 
 **运行数据（不入库，打包时按配置拷入）：** 端侧模型取自服务仓 `data/local-models`。
 
