@@ -97,6 +97,7 @@ const MANIFEST = [
   ['integration', 'clip-api.test.js'],
   ['integration', 'mlsclip.test.js'],
   ['integration', 'app-update-canary.test.js'],
+  ['integration', 'pack-push-canary.test.js'],
   ['integration', 'asr-health-probe.test.js'],
   ['integration', 'suite.js'],
 

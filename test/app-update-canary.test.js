@@ -93,6 +93,22 @@ publishUpdate(config, {
 st = getUpdateState(config);
 assert.strictEqual(st.grayscale.rolloutPct, 100, 'pct 夹取到 100');
 
+// ---------- 5b. preserveGrayscale：回滚式重指不清空白名单 ----------
+publishUpdate(config, {
+  releaseMode: 'canary', versionCode: 2040030, wgtVersion: '2040030',
+  type: 'wgt', url: '/files/wl.wgt', targetDevices: ['dev-a', 'dev-b'],
+});
+st = getUpdateState(config);
+assert.deepStrictEqual(st.grayscale.targetDevices, ['dev-a', 'dev-b']);
+publishUpdate(config, {
+  channel: 'canary', versionCode: 2040009, wgtVersion: '2040009',
+  type: 'wgt', url: '/files/old.wgt', preserveGrayscale: true,
+});
+st = getUpdateState(config);
+assert.deepStrictEqual(st.grayscale.targetDevices, ['dev-a', 'dev-b'], 'preserveGrayscale 保留白名单');
+assert.strictEqual(st.canary.url, '/files/old.wgt', '指针仍被改回旧包');
+assert.strictEqual(st.grayscale.active, true, 'active 状态保留');
+
 (async () => {
   // ---------- 6. checkUpdate 端到端 + 设备名册 ----------
   publishUpdate(config, {

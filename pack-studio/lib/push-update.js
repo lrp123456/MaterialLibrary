@@ -303,27 +303,27 @@ async function pushUpdate(opt) {
   }
   onLog('      ' + jdump(up.json) + '\n');
 
-  // 5) 回读校验：确认服务端真的把指针指向这个新文件
-  // 参数必须是 versionCode=0/wgtVersion=0，理由同 snapshotPointer 的注释。
-  const probe = await request(
-    server + '/api/app/update?platform=android&versionCode=0&wgtVersion=0&channel=' + encodeURIComponent(channel),
-    { method: 'GET', headers: {}, timeout: 30000 }
-  );
-  if (probe.status !== 200) {
-    throw new Error('回读服务端清单失败 HTTP ' + probe.status + '（上传可能未落库）');
-  }
-  const remote = probe.json || {};
-  const d = remote.data || remote;
-  onLog('\n[回读] 服务端当前指针:\n');
+  // 5) 回读校验：以「管理端完整状态」为准。
+  // 关键：灰度白名单模式下，客户端接口 /api/app/update 对「不在白名单的请求」
+  // 一律回落稳定版（无 deviceId 的探针必然不命中），拿它回读 canary 会把
+  // 一次成功的灰度发布误判为失败，还会触发自动回滚、顺手清空白名单
+  // （2026-11-04 2050010 真实事故）。/state 返回完整 channels/grayscale，
+  // 是管理端核对指针的唯一可靠真值。
+  const state = await readAdminState({ server, token });
+  const canaryLike = channel === 'canary' || channel === 'beta' || channel === 'gray';
+  const gotEntry = pickStateEntry(state, channel);
+  const remoteName = gotEntry ? String(gotEntry.url || '').split('/').pop() : '';
+
+  onLog('\n[回读] 服务端当前指针（管理端状态）:\n');
   onLog('      ' + jdump({
-    wgtVersion: d.wgtVersion,
-    versionName: d.versionName,
-    hasUpdate: d.hasUpdate,
-    fileName: d.fileName || (d.url || '').split('/').pop(),
-    url: d.url,
+    channel,
+    wgtVersion: gotEntry && gotEntry.wgtVersion,
+    versionName: gotEntry && gotEntry.versionName,
+    fileName: remoteName || '(空)',
+    grayscaleActive: !!(state.grayscale && state.grayscale.active),
+    targetDevices: (state.grayscale && state.grayscale.targetDevices) || [],
   }) + '\n');
 
-  const remoteName = d.fileName || String(d.url || '').split('/').pop();
   if (remoteName !== fileName) {
     // 指针没切过去 = 用户还在线上包上，但服务端可能已经写进了坏包文件。
     // 立刻回滚指针，别让「上传成功但指针错乱」这种中间态留在生产上。
@@ -332,10 +332,44 @@ async function pushUpdate(opt) {
       '上传返回成功，但服务端指针不是本次的新包！\n' +
       '  期望: ' + fileName + '\n' +
       '  实际: ' + (remoteName || '(空)') + '\n' +
-      '  已尝试回滚到 ' + (snapshot ? snapshot.fileName : '(无快照)') +
+      '  已尝试回滚到 ' + (snapshot && !snapshot.empty ? snapshot.fileName : '(撤回灰度)') +
       '：' + (rb.ok ? '成功，线上仍是你原来的包' : '失败！' + rb.error) +
       '\n  这说明服务器没有真正切换版本，已按失败处理。'
     );
+  }
+
+  // 白名单完整性：本次带了目标设备，服务端灰度白名单必须原样收下
+  const expectTargets = Array.isArray(opt.targetDevices)
+    ? opt.targetDevices.map((s) => String(s).trim()).filter(Boolean)
+    : [];
+  const serverTargets = canaryLike
+    ? ((state.grayscale && state.grayscale.targetDevices) || []).map((s) => String(s).trim().toLowerCase())
+    : [];
+  const missingTargets = expectTargets
+    .map((s) => s.trim())
+    .filter((t) => !serverTargets.includes(t.toLowerCase()));
+  if (canaryLike && expectTargets.length && missingTargets.length) {
+    const rb = await rollbackPointer({ server, token, channel, snapshot, onLog });
+    throw new Error(
+      '灰度白名单未落库完整！缺失设备: ' + missingTargets.join(', ') + '\n' +
+      '  已尝试回滚：' + (rb.ok ? '成功' : '失败！' + rb.error)
+    );
+  }
+
+  // 端到端旁证：用首个白名单设备的身份模拟客户端检查，应拿到本次新包。
+  // 仅旁证不阻断（管理端状态才是真值），失败只告警。
+  if (canaryLike && expectTargets.length) {
+    const probeDev = encodeURIComponent(expectTargets[0]);
+    const probe = await request(
+      server + '/api/app/update?platform=android&versionCode=0&wgtVersion=0&channel=canary&deviceId=' + probeDev,
+      { method: 'GET', headers: {}, timeout: 30000 }
+    ).catch(() => null);
+    const pd = probe && probe.json && (probe.json.data || probe.json);
+    const probeName = pd ? String(pd.url || '').split('/').pop() : '';
+    if (probeName !== fileName) {
+      onLog('      [告警] 白名单设备端到端探测拿到的不是新包（' + (probeName || '空') +
+            '），管理端指针正确；请用真机确认。\n');
+    }
   }
 
   return {
@@ -350,11 +384,46 @@ async function pushUpdate(opt) {
     force: !!opt.force,
     server,
     local: info,
-    remote,
+    remote: gotEntry,
     uploaded: up.json.data,
     // 留一份推送前快照，便于事后手动回滚（界面上也有回滚按钮）
     snapshot,
   };
+}
+
+/**
+ * 读取管理端完整状态（含 channels/grayscale/canary）。需要登录会话。
+ * 客户端检查接口在灰度白名单模式下会对未命中设备回落稳定版，
+ * 不能用来快照/回读灰度指针——那是 2026-11-04 误判事故的根源。
+ */
+async function readAdminState({ server, token }) {
+  const r = await request(server + '/api/app/update/state', {
+    method: 'GET',
+    headers: { Authorization: 'Bearer ' + token },
+    timeout: 30000,
+  });
+  if (r.status !== 200 || !r.json || r.json.success !== true) {
+    throw new Error(
+      '读取管理端状态 /api/app/update/state 失败 HTTP ' + r.status +
+      '（旧版服务器？灰度推送需要该接口做真值核对）'
+    );
+  }
+  return r.json.data || {};
+}
+
+/** 从管理端状态里取指定渠道当前指向的条目 */
+function pickStateEntry(state, channel) {
+  const canaryLike = channel === 'canary' || channel === 'beta' || channel === 'gray';
+  if (canaryLike) {
+    return (state.channels && state.channels.canary && state.channels.canary.latest)
+      || (state.grayscale && state.grayscale.latest)
+      || state.canary
+      || null;
+  }
+  if (channel && state.channels && state.channels[channel] && state.channels[channel].latest) {
+    return state.channels[channel].latest;
+  }
+  return state.latest || null;
 }
 
 /**
@@ -365,39 +434,41 @@ async function pushUpdate(opt) {
  *   所以推送失败时只要把指针改回去，线上用户就继续用旧包，完全不受影响。
  *   没有快照就无法回滚 —— 只能靠人肉去服务器改 manifest.json。
  *
- * ⚠️ 探测参数必须用 versionCode=0 / wgtVersion=0（见 app-update.js:97 checkUpdate）：
- *   传 100 之类的「较大值」会命中 `local_up_to_date` 分支，
- *   那条分支**不返回 url**（只返回 hasUpdate/latestVersionName/latestVersionCode），
- *   拿到的快照没有 url 就没法回滚 —— 恰好在最需要保护的时候保护失效。
- *   传 0 则 clientMax=0，永远小于 serverMax，走到底返回完整指针含 url。
+ * 真值来源是管理端 /api/app/update/state：它给出 channels.canary 与 grayscale
+ * （白名单/百分比），客户端检查接口在白名单模式下永远不给未命中设备看灰度包。
  */
 async function snapshotPointer({ server, token, channel, onLog }) {
-  const probe = await request(
-    server + '/api/app/update?platform=android&versionCode=0&wgtVersion=0&channel=' + encodeURIComponent(channel),
-    { method: 'GET', headers: {}, timeout: 30000 }
-  );
-  if (probe.status !== 200) {
-    throw new Error('读取推送前指针失败 HTTP ' + probe.status + '，为安全起见中止推送');
-  }
-  const remote = probe.json || {};
-  const d = remote.data || remote;
+  const canaryLike = channel === 'canary' || channel === 'beta' || channel === 'gray';
+  const state = await readAdminState({ server, token });
+  const d = pickStateEntry(state, channel);
   const snap = {
     at: new Date().toISOString(),
     server,
     channel,
-    fileName: d.fileName || String(d.url || '').split('/').pop() || '',
-    url: String(d.url || ''),
-    versionName: String(d.versionName || ''),
-    versionCode: Number(d.versionCode || 0),
-    wgtVersion: String(d.wgtVersion == null ? '' : d.wgtVersion),
-    type: String(d.type || (isApkName(d.fileName) ? 'apk' : 'wgt')),
-    force: Boolean(d.force),
-    note: String(d.note || ''),
+    fileName: d ? String(d.url || '').split('/').pop() || '' : '',
+    url: d ? String(d.url || '') : '',
+    versionName: String((d && d.versionName) || ''),
+    versionCode: Number((d && d.versionCode) || 0),
+    wgtVersion: String(d && d.wgtVersion != null ? d.wgtVersion : ''),
+    type: String((d && d.type) || 'wgt'),
+    force: Boolean(d && d.force),
+    note: String((d && d.note) || ''),
+    md5: String((d && d.md5) || ''),
+    size: Number((d && d.size) || 0),
   };
+  if (canaryLike) {
+    // 连同灰度配置一起快照，回滚才能还原白名单，而不是把它清空
+    const g = state.grayscale || {};
+    snap.gray = {
+      active: !!g.active,
+      targetDevices: Array.isArray(g.targetDevices) ? g.targetDevices.slice() : [],
+      rolloutPct: g.rolloutPct,
+    };
+  }
   if (!snap.url) {
     snap.empty = true;
     if (onLog) {
-      onLog('[推送前快照] 线上当前未发布任何更新包（初始空状态），若推送中断无需回滚历史包\n');
+      onLog('[推送前快照] 该渠道线上当前无指针（若推送中断将走撤回而非回滚）\n');
     }
     return snap;
   }
@@ -415,6 +486,7 @@ async function snapshotPointer({ server, token, channel, onLog }) {
     onLog('[推送前快照] ' + jdump({
       fileName: snap.fileName, versionName: snap.versionName,
       wgtVersion: snap.wgtVersion, type: snap.type,
+      ...(canaryLike ? { grayscaleActive: snap.gray.active, targetDevices: snap.gray.targetDevices } : {}),
     }) + '\n');
     onLog('             已备份到 ' + snap.file + '\n');
   }
@@ -426,16 +498,35 @@ function isApkName(n) {
 }
 
 /**
- * 把指针改回快照。调用 publishUpdate（type='none' + 旧 url）实现。
+ * 把指针改回快照。
+ *  - canary 且推送前无指针：调 revoke-canary 撤回（而不是把稳定版塞进 canary，
+ *    那会清空白名单、污染灰度配置）；
+ *  - canary 有旧指针：连 md5/size/白名单/百分比一起还原；
+ *  - 其它渠道：POST /api/app/update 普通发布。
  * 失败不抛 —— 由调用方决定怎么报告，绝不让回滚异常掩盖原始错误。
  */
 async function rollbackPointer({ server, token, channel, snapshot, onLog }) {
-  if (!snapshot || !snapshot.url || snapshot.empty) {
+  const canaryLike = channel === 'canary' || channel === 'beta' || channel === 'gray';
+  if (!snapshot || snapshot.empty || !snapshot.url) {
+    if (canaryLike) {
+      try {
+        const r = await request(server + '/api/app/update/revoke-canary', {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + token },
+          timeout: 30000,
+        });
+        if (r.status !== 200) return { ok: false, error: 'revoke-canary HTTP ' + r.status };
+        if (onLog) onLog('[回滚] 推送前灰度不存在，已撤回本次灰度\n');
+        return { ok: true, restored: '(灰度已撤回)' };
+      } catch (e) {
+        return { ok: false, error: 'revoke-canary: ' + e.message };
+      }
+    }
     if (onLog) onLog('[回滚] 线上原本为空，无需回滚历史包\n');
     return { ok: true, restored: '(线上原本为空)' };
   }
   try {
-    // 服务端路由是 POST /app/update，参数走 **body**（api.js:1748 parseBody），
+    // 服务端路由是 POST /app/update，参数走 **body**（api.js parseBody），
     // 不是 query —— 之前误写成 /app/update/publish?xxx 会被 404。
     const body = {
       channel,
@@ -444,9 +535,20 @@ async function rollbackPointer({ server, token, channel, snapshot, onLog }) {
       versionName: snapshot.versionName || '',
       wgtVersion: snapshot.wgtVersion || '',
       url: snapshot.url,
+      md5: snapshot.md5 || '',
+      size: snapshot.size || 0,
       note: '[回滚] ' + (snapshot.note || ''),
       force: !!snapshot.force,
     };
+    // 还原灰度白名单/百分比：旧回滚漏发 targetDevices，服务端按「无白名单灰度」
+    // 落盘，白名单被清空（2026-11-04 事故）。
+    if (canaryLike && snapshot.gray) {
+      const targets = Array.isArray(snapshot.gray.targetDevices) ? snapshot.gray.targetDevices : [];
+      body.targetDevices = targets;
+      if (targets.length === 0 && snapshot.gray.rolloutPct != null) {
+        body.rolloutPct = snapshot.gray.rolloutPct;
+      }
+    }
     const r = await request(server + '/api/app/update', {
       method: 'POST',
       headers: {
@@ -472,6 +574,8 @@ module.exports = {
   readZipEntries,
   readZipFile,
   request,
+  readAdminState,
+  pickStateEntry,
   // 导出给界面做「手动回滚」按钮：读最近一次推送前快照并还原线上指针
   snapshotPointer,
   rollbackPointer,

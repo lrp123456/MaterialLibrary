@@ -349,23 +349,36 @@ function publishUpdate(config, body = {}) {
   if (isCanary) {
     if (!manifest.channels) manifest.channels = {};
     manifest.channels.canary = { latest };
-    let targets = [];
-    if (Array.isArray(body.targetDevices)) {
-      targets = body.targetDevices.map((s) => String(s || '').trim()).filter(Boolean);
-    } else if (typeof body.targetDevices === 'string' && body.targetDevices.trim()) {
-      targets = body.targetDevices.split(/[,，\s]+/).map((s) => s.trim()).filter(Boolean);
-    }
-    manifest.grayscale = {
-      active: true,
-      targetDevices: targets,
-      latest,
-      publishedAt: Date.now(),
-    };
-    if (body.rolloutPct != null) {
-      const pct = Math.floor(Number(body.rolloutPct));
-      // 白名单模式下百分比无意义（白名单优先），仅无白名单时落盘
-      if (Number.isFinite(pct) && targets.length === 0) {
-        manifest.grayscale.rolloutPct = Math.max(0, Math.min(100, pct));
+
+    // preserveGrayscale：只重指 canary 指针（典型场景=推送器回滚），
+    // 保留既有灰度白名单/百分比与 active 状态。
+    // 2026-11-04 事故：旧推送器回滚走普通 canary 发布且不带 targetDevices，
+    // 结果灰度白名单被清空、灰度指向了稳定版，目标设备再也收不到灰度包。
+    if (body.preserveGrayscale && manifest.grayscale && manifest.grayscale.latest) {
+      manifest.grayscale = {
+        ...manifest.grayscale,
+        latest,
+        repointedAt: Date.now(),
+      };
+    } else {
+      let targets = [];
+      if (Array.isArray(body.targetDevices)) {
+        targets = body.targetDevices.map((s) => String(s || '').trim()).filter(Boolean);
+      } else if (typeof body.targetDevices === 'string' && body.targetDevices.trim()) {
+        targets = body.targetDevices.split(/[,，\s]+/).map((s) => s.trim()).filter(Boolean);
+      }
+      manifest.grayscale = {
+        active: true,
+        targetDevices: targets,
+        latest,
+        publishedAt: Date.now(),
+      };
+      if (body.rolloutPct != null) {
+        const pct = Math.floor(Number(body.rolloutPct));
+        // 白名单模式下百分比无意义（白名单优先），仅无白名单时落盘
+        if (Number.isFinite(pct) && targets.length === 0) {
+          manifest.grayscale.rolloutPct = Math.max(0, Math.min(100, pct));
+        }
       }
     }
   } else {
