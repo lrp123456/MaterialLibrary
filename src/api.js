@@ -4600,12 +4600,20 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
       let currentMap = {};
       try { currentMap = JSON.parse(existing.snapshots_json || '{}'); } catch (_) {}
 
+      // \u65f6\u95f4\u6233\u65b0\u6587\u4ef6\u540d\u4f1a\u8ba9\u88ab\u9876\u66ff\u7684\u65e7 PNG \u6b8b\u7559\u5728\u76d8\u4e0a\uff0c\u8bb0\u5f55\u540e\u7edf\u4e00\u6e05\u7406
+      const replacedFiles = [];
       let mainPreviewCandidate = null;
       for (const [angleKey, b64Data] of Object.entries(incomingSnapshots)) {
         if (!b64Data) continue;
+        const prevUrl = currentMap[angleKey];
+        if (typeof prevUrl === 'string') {
+          const prevName = path.basename(prevUrl);
+          if (prevName) replacedFiles.push(prevName);
+        }
         const safeAngle = String(angleKey).replace(/[^a-zA-Z0-9_\-\u4e00-\u9fa5]/g, '_') || 'default';
         const raw = String(b64Data).replace(/^data:[^,]+,/, '');
-        const snapFileName = `${id}_${safeAngle}.png`;
+        // 文件名带时间戳，避免浏览器把上一张棚拍图按旧地址缓存下来。
+        const snapFileName = `${id}_${safeAngle}_${Date.now().toString(36)}.png`;
         const snapBuf = Buffer.from(raw, 'base64');
         fs.writeFileSync(path.join(previewsDir, snapFileName), snapBuf);
         if (fs.existsSync(localPreviewsDir)) {
@@ -4614,6 +4622,22 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
         currentMap[angleKey] = `/api/viewer/products/previews/${snapFileName}`;
         if (angleKey === 'right_45' || !mainPreviewCandidate) {
           mainPreviewCandidate = snapFileName;
+        }
+      }
+
+      // 仅清理已不在任何角度映射中、且不是当前主预览的旧文件
+      if (replacedFiles.length) {
+        const stillReferenced = new Set([
+          ...Object.values(currentMap)
+            .map((u) => (typeof u === 'string' ? path.basename(u) : ''))
+            .filter(Boolean),
+          existing.preview_file,
+        ]);
+        for (const oldName of replacedFiles) {
+          if (stillReferenced.has(oldName)) continue;
+          for (const dir of [previewsDir, localPreviewsDir]) {
+            try { fs.unlinkSync(path.join(dir, oldName)); } catch (_) {}
+          }
         }
       }
 
