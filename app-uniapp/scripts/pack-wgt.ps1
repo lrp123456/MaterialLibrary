@@ -1,4 +1,4 @@
-# AlbumSync 手动打包 · WGT 热更新包
+﻿# AlbumSync 手动打包 · WGT 热更新包
 # 产物: dist/release/wgt/album-sync-<buildCode>.wgt
 # 版本策略见 scripts\version-bump.ps1：是否抬版本交互询问，机器号每次出包 +1
 #

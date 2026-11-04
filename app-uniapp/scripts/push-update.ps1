@@ -1,4 +1,4 @@
-# 推送 wgt/apk 到 MaterialLibraryServer 私有更新通道
+﻿# 推送 wgt/apk 到 MaterialLibraryServer 私有更新通道
 # 手机端 AppUpdater 启动/回前台 GET /api/app/update → 弹窗安装
 #
 # 用法:

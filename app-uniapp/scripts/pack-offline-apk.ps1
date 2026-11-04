@@ -1,4 +1,4 @@
-# Offline APK pack (DCloud Offline SDK + Gradle), per-model source switching.
+﻿# Offline APK pack (DCloud Offline SDK + Gradle), per-model source switching.
 # Usage:
 #   pack-offline-apk.ps1 -Model o            # pack with Oxbow client source
 #   pack-offline-apk.ps1 -Model base         # pack with src_backup baseline

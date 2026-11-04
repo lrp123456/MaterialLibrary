@@ -1,4 +1,4 @@
-# Cloud pack APK then ADB install (not push)
+﻿# Cloud pack APK then ADB install (not push)
 param(
   [string]$Serial = "",
   [string]$PackageName = "lrp.aibum",

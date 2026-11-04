@@ -1,4 +1,4 @@
-# 一键：打包 WGT 并推送到更新通道
+﻿# 一键：打包 WGT 并推送到更新通道
 # 用法:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\pack-and-push.ps1 -Note 热更新WGT -Channel internal -Force
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\pack-and-push.ps1 -SkipBuild -Note 仅用现有www

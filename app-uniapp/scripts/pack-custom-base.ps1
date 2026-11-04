@@ -1,4 +1,4 @@
-# 自定义调试基座（含 uni-local-infer so + JNI jar）
+﻿# 自定义调试基座（含 uni-local-infer so + JNI jar）
 param(
   [string]$PackageName = "lrp.aibum",
   [string]$CertType = "3",

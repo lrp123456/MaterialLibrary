@@ -1,4 +1,4 @@
-# Offline APK pack + push to update channel
+﻿# Offline APK pack + push to update channel
 param(
   [string]$Note = "离线整包",
   [string]$Channel = "internal",
