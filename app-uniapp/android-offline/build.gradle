@@ -1,0 +1,4 @@
+// Root build file — match DCloud offline SDK 5.26 sample (AGP 8.7 / compileSdk 35)
+plugins {
+    id 'com.android.application' version '8.7.3' apply false
+}

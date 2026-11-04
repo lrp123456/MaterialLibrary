@@ -1,0 +1,6 @@
+/**
+ * 多端统一入口。各端在 utssdk/app-*/index 实现同名导出。
+ * Android: NCNN JNI；HarmonyOS: MindSpore Lite/HiAI 占位；iOS: CoreML 占位。
+ */
+// @ts-ignore
+export * from './app-android/index.uts'

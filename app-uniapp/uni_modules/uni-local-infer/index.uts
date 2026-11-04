@@ -1,0 +1,82 @@
+/**
+ * uni-local-infer 公共 API（逻辑层，多端一致）
+ * 与 src/service/LocalModelRuntime.js 对接：
+ *   import { createLocalInfer } from '@/uni_modules/uni-local-infer'
+ *   setNativeInfer(createLocalInfer())
+ */
+import {
+  isLoaded,
+  loadModel,
+  unloadModel,
+  segmentPoint,
+  segmentBox,
+  upscaleImage,
+  downloadModelFile,
+} from './utssdk/app-android/index.uts'
+
+export type LocalInferPoint = {
+  x: number
+  y: number
+  label?: number
+}
+
+export type LocalInferBox = {
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+}
+
+export type LocalInferModel = {
+  id: string
+  version?: string
+  fileName?: string
+  inputSize?: number
+  maxSide?: number
+  tile?: number
+  scale?: number
+  downloadUrl?: string
+}
+
+export type SegmentResult = {
+  maskPath: string
+  polygon: any[]
+  width: number
+  height: number
+}
+
+export type UpscaleResult = {
+  outputPath: string
+  scale: number
+}
+
+/**
+ * 返回可注入 LocalModelRuntime 的实现
+ */
+export function createLocalInfer(): any {
+  return {
+    isLoaded(modelId: string): boolean {
+      return isLoaded(modelId)
+    },
+    async load(model: LocalInferModel): Promise<void> {
+      await loadModel(model)
+    },
+    async unload(modelId: string): Promise<void> {
+      await unloadModel(modelId)
+    },
+    async segment(opts: any): Promise<SegmentResult> {
+      if (opts && opts.box != null) {
+        return segmentBox(opts)
+      }
+      return segmentPoint(opts)
+    },
+    async upscale(opts: any): Promise<UpscaleResult> {
+      return upscaleImage(opts)
+    },
+    async downloadModel(model: LocalInferModel): Promise<void> {
+      await downloadModelFile(model)
+    },
+  }
+}
+
+export default createLocalInfer
