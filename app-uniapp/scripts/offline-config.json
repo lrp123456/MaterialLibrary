@@ -1,0 +1,25 @@
+{
+  "_comment": "离线 APK 工具链配置（仓内自包含）。工程/插件/产物均在仓内；JDK/Android SDK/Gradle/HBuilderX/DCloud 离线 SDK 为本机预装依赖。",
+  "androidSdkRoot": "C:\\Android\\Sdk",
+  "javaHome": "C:\\Users\\lrp\\Downloads\\HBuilderX\\plugins\\amazon-corretto",
+  "hbx": "C:\\Users\\lrp\\Downloads\\HBuilderX\\cli.exe",
+  "uniProject": "C:\\Users\\lrp\\DevEcoStudioProjects\\MaterialLibraryServer\\app-uniapp",
+  "offlineProject": "C:\\Users\\lrp\\DevEcoStudioProjects\\MaterialLibraryServer\\app-uniapp\\android-offline",
+  "offlineSdkExtractDir": "C:\\Users\\lrp\\Downloads\\DCloud-Android-Offline-SDK\\Android-SDK@5.26.82680_20260914",
+  "packageName": "lrp.aibum",
+  "appId": "__UNI__F183218",
+  "appKey": "5caa3303184881d7e0e03282f9922357",
+  "keystoreSha1": "97:C8:41:01:B9:14:1C:13:0D:D7:5D:74:28:A2:92:25:18:C3:6D:CD",
+  "keystore": {
+    "_comment": "DCloud HBuilderX 自带公开 Test.keystore（默认口令 123456），随 IDE 分发；正式发版前应替换",
+    "file": "C:\\Users\\lrp\\Downloads\\HBuilderX\\plugins\\app-safe-pack\\Test.keystore",
+    "alias": "android",
+    "storepass": "123456",
+    "keypass": "123456"
+  },
+  "nativePlugin": "C:\\Users\\lrp\\DevEcoStudioProjects\\MaterialLibraryServer\\app-uniapp\\nativeplugins\\uni-local-infer",
+  "modelsRoot": "Y:\\home\\lrp\\my_folder\\smu\\g8doubao_test",
+  "outputDir": "C:\\Users\\lrp\\DevEcoStudioProjects\\MaterialLibraryServer\\app-uniapp\\dist\\release\\apk",
+  "gradleBin": "C:\\Android\\gradle-8.9\\bin\\gradle.bat",
+  "localModelsGoodDir": "C:\\Users\\lrp\\DevEcoStudioProjects\\MaterialLibraryServer\\data\\local-models"
+}
