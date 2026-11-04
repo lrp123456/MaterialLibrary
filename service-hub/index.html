@@ -373,7 +373,7 @@ async function loadChannels() {
   // 正式端
   const p = s.prod
   if (!p.reachable) {
-    $('prodBody').innerHTML = '<div class="warn-line">WSL/smu 未运行。点「启动（整组）」会尝试经 start.sh 拉起；若 wsl.exe 被安全策略拦截，请改跑桌面「启动素材库.bat」。</div>'
+    $('prodBody').innerHTML = '<div class="warn-line">WSL/smu 未运行。点「启动（整组）」会尝试经 start.sh 拉起；若 wsl.exe 被安全策略拦截，请在 WSL(smu) 终端执行 bash start.sh start。</div>'
   } else {
     $('prodBody').innerHTML = `<dl class="kv">
       <dt>watchdog</dt><dd>${p.pids.watchdog || '—'}</dd>

@@ -1714,7 +1714,7 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     } catch (_) {}
     if (!watchdogAlive) {
       return sendJson(res, 409, {
-        error: '没有检测到 watchdog 进程，重启后无法自动拉起。请手动执行「停止素材库.bat → 启动素材库.bat」',
+        error: '没有检测到 watchdog 进程，重启后无法自动拉起。请在素材库控制台（3790）「通道与发布」整组重启，或 WSL 内执行 bash start.sh restart',
         channel: config.channel || 'prod',
       });
     }

@@ -60,7 +60,7 @@ const SERVICES = [
     // 旧实现在 Windows 用独立旧库 ~/.dsh-material-library 再起一个 30001，
     // 无 watchdog、worker 全开，是危险的「第三数据平面」。
     // 现在 30001/30002 只能经 WSL start.sh 整组操作（见 /api/mls/action）；
-    // 若 wsl.exe 被安全策略拦截，任务会如实报错并提示改跑「启动素材库.bat」。
+    // 若 wsl.exe 被安全策略拦截，任务会如实报错并提示在 WSL(smu) 终端执行 bash start.sh。
     kind: 'delegate',
     delegate: 'prod',
   },

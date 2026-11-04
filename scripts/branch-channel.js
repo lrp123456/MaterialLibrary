@@ -521,7 +521,7 @@ async function start(lane, { skipBuild = false } = {}) {
 }
 
 function stop(lane) {
-  if (!lane.managed) fail(`${lane.label} 通道由 WSL 的 start.sh 管理，请用「停止素材库.bat」`);
+  if (!lane.managed) fail(`${lane.label} 通道由 WSL 的 start.sh 管理，请在素材库控制台（3790）整组停止，或执行 npm run ctl -- stop prod`);
   let stopped = 0;
   for (const name of ['web', 'api']) {
     const file = path.join(lane.dataDir, `${name}.pid`);
@@ -785,8 +785,8 @@ async function legacyRestartApi(target) {
     if (await waitPort(target.apiPort, 60000)) log('正式后端已恢复');
   } catch (e) {
     warn(
-      `正式后端自重启失败（${e.message}）。请手动执行「停止素材库.bat → 启动素材库.bat」` +
-        `，否则 30001 仍在跑旧代码`
+      `正式后端自重启失败（${e.message}）。请在素材库控制台（3790）整组重启正式端，` +
+        `或 WSL 内执行 bash start.sh restart，否则 30001 仍在跑旧代码`
     );
   }
 }

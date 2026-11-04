@@ -30,11 +30,11 @@ worktree 放在项目**同级目录**而不是项目内部，是为了避开 Win
 
 ## 日常用法
 
-```bat
-启动test通道.bat          :: 构建 test 前端 + 拉起 30000/30003
-停止test通道.bat          :: 停掉 30000/30003
-分支通道状态.bat          :: 看两个通道的分支、commit、产物是否过期、进程状态
-```
+日常操作统一走两个入口，根目录不再有散落的 .bat：
+
+- **素材库控制台**（双击根目录 `素材库控制台.bat` → http://127.0.0.1:3790/ ，
+  「通道与发布」标签页）：启动/停止 test、查看两通道状态、合并发布。
+- 命令行 `npm run ctl`（即 `scripts/mls-ctl.js`），等价子命令见下。
 
 等价命令行：
 
@@ -63,7 +63,7 @@ node scripts/branch-channel.js --diff fix/audit-20261020   # 支持任意分支�
 ## 与正式端的关系
 
 - `30002`（master）由 WSL 里的 `start.sh` + watchdog 管理，本脚本**只读状态、不启停**。
-  停止/启动请继续用 `停止素材库.bat` / `启动素材库.bat`。
+  停止/启动请在素材库控制台（3790）操作「正式端（整组）」，或 `npm run ctl -- restart prod`。
 - `30003`（test）是 Windows 侧独立进程，`APP_CHANNEL=gray` 只借用它的两个行为：
   **不消费任务队列**（避免和正式抢 AI 任务）、**不自动重启**。所以页面上仍显示"灰测通道"徽标，
   这是刻意的——提醒你这页不是正式环境。
@@ -82,8 +82,10 @@ node scripts/branch-channel.js --diff fix/audit-20261020   # 支持任意分支�
 
 ## 合并回 master
 
-```bat
-合并test到master.bat
+在素材库控制台「通道与发布」里点「test → 正式 合并发布」，或：
+
+```bash
+npm run ctl -- promote test            # 等价于旧的合并test到master.bat
 ```
 
 它会先跑 `--promote test --dry-run`（只预演，列出提交、文件改动、冲突清单），
@@ -95,8 +97,8 @@ node scripts/branch-channel.js --diff fix/audit-20261020   # 支持任意分支�
   `git stash` / `git commit` 两种处理方式。
 - **test 工作树必须干净**（否则等于把半成品合进正式），确要强推加 `--force`。
 - 合并冲突时脚本会停在冲突状态，解决后 `git add` + `git commit`，或 `git merge --abort` 放弃。
-- 正式端自重启接口 `POST /api/system/restart` 在旧代码里可能不存在，失败时脚本会提示手动执行
-  `停止素材库.bat → 启动素材库.bat`。
+- 正式端自重启接口 `POST /api/system/restart` 在旧代码里可能不存在，失败时请在素材库控制台
+  （3790）手动整组重启，或 WSL 内执行 `bash start.sh restart`。
 
 ## 加一个新通道（例如 fix 分支）
 

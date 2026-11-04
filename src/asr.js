@@ -187,7 +187,7 @@ function attachAsrWebSocket(httpServer, services) {
 
     const failTimer = setTimeout(() => {
       if (!upstreamOpen) {
-        sendLocal({ type: 'error', message: '语音服务连接超时，请确认「启动语音识别.bat」已运行' });
+        sendLocal({ type: 'error', message: '语音服务连接超时，请确认素材库控制台中的「语音识别 (FunASR)」已启动' });
         try { conn.close(1011, 'timeout'); } catch (_) {}
         try { upstream.close(); } catch (_) {}
       }
