@@ -1,5 +1,9 @@
 # App 灰度能力——仓外工程改动单（AlbumSyncUniAppX）
 
+> **2026-11-04 状态更新：** App 工程与打包工具链已全部迁回本仓 `app-uniapp/`（自包含，见
+> `app-uniapp/scripts/PACKAGING.md`）。本单中的客户端建议如继续实施，应落到仓内工程，
+> 路径 `C:\...\AlbumSyncUniAppX` 不再是正源。以下内容按 2026-11-03 当时状况留档。
+
 > 日期：2026-11-03
 > 适用工程：`C:\Users\lrp\DevEcoStudioProjects\AlbumSyncUniAppX`（appid `__UNI__F183218`，App 正源）
 > 本仓（MaterialLibraryServer）**不代为修改**该工程；本单只描述服务端已交付的能力与建议的客户端改动。
