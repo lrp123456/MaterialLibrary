@@ -152,13 +152,15 @@ export async function authFetch(url, options = {}) {
  *              相比默认 1280px preview 档单图省约 30 倍流量；
  *  - 'preview' 1280px 预览档（默认，详情/全屏/聊天引用使用）。
  */
-export function getAssetImageUrl(fid, mediaToken = '', tier = '') {
+export function getAssetImageUrl(fid, mediaToken = '', tier = '', cacheBust = '') {
   if (!fid) return '';
   const token = getToken();
   const q = new URLSearchParams();
   if (token) q.set('token', token);
   if (mediaToken) q.set('media_token', mediaToken);
   if (tier === 'grid' || tier === 'preview') q.set('tier', tier);
+  // 替换原图后 fid 不变、URL 不变，浏览器会一直显示缓存旧图；用版本号强制换 URL。
+  if (cacheBust) q.set('v', String(cacheBust));
   const qs = q.toString();
   return resolveApiUrl(`/api/viewer/assets/${encodeURIComponent(fid)}/image${qs ? `?${qs}` : ''}`);
 }

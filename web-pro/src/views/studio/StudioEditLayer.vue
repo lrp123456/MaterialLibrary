@@ -4223,6 +4223,16 @@ function exportComposedImage() {
 function handleReplaceOriginal() {
   const result = exportComposedImage();
   if (!result.dataUrl) return;
+  // 明确告诉用户这次会输出多大——否则"替换完看起来没变"时无法区分是缓存还是没裁到
+  const sizeText = result.width && result.height
+    ? `${result.width} × ${result.height}`
+    : '当前画面尺寸';
+  const hasEdit = Boolean(getEffectiveCropBox())
+    || mosaicAnnotations.value.length > 0
+    || arrowAnnotations.value.length > 0
+    || (regions.value || []).some((r) => r && r.type === 'brush');
+  const head = hasEdit ? '确认用当前编辑结果替换原图？' : '没有检测到裁剪或标注修改，仍要替换原图吗？';
+  if (!window.confirm(`${head}\n\n输出尺寸：${sizeText}\n原图会被覆盖，但会自动保留一份历史版本，可在详情里「还原上一版本」恢复。`)) return;
   emit('replace', result);
 }
 

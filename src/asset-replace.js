@@ -171,8 +171,13 @@ function replaceAssetImage(services, fid, fileBuffer, { force = false } = {}) {
 /** 还原到指定历史版本：读取 history 文件内容，走同一替换流程（内部会再把当前版本存一份 history）。 */
 async function restoreAssetVersion(services, fid, versionId) {
   const { db } = services;
-  const row = db.prepare("SELECT * FROM derivatives WHERE id=? AND asset_fid=? AND kind='history'")
-    .get(Number(versionId), fid);
+  // versionId 为空 = 还原「最近一次替换前的版本」：前端「还原上一版本」不传 id。
+  const asNum = Number(versionId);
+  const missing = versionId === undefined || versionId === null || versionId === ''
+    || !Number.isFinite(asNum) || asNum <= 0;
+  const row = missing
+    ? db.prepare("SELECT * FROM derivatives WHERE asset_fid=? AND kind='history' ORDER BY id DESC LIMIT 1").get(fid)
+    : db.prepare("SELECT * FROM derivatives WHERE id=? AND asset_fid=? AND kind='history'").get(asNum, fid);
   if (!row) throw httpError('历史版本不存在', 404, 'version_not_found');
   const p = row.storage_ref;
   if (!p || !fs.existsSync(p)) throw httpError('历史版本文件已丢失', 404, 'version_file_missing');

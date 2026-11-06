@@ -4330,6 +4330,9 @@ function handleBatchSendToClip() {
 
 // Pinterest 模式详情大弹窗状态
 const activeModalAsset = ref(null);
+// 替换原图/还原后 fid 与 URL 都不变，浏览器会一直显示缓存里的旧图。
+// 内容每变一次就推进这个版本号，图片 URL 带上 ?v= 强制重新拉取。
+const assetImageVersion = ref(0);
 
 // ===== 素材库图片「直接替换原图」+ 历史版本还原（独立浮层状态）=====
 // 对象型 ref：{ fid, url } | null，打开编辑器时携带原图地址与 fid
@@ -5470,12 +5473,16 @@ async function submitAssetReplace(fid, dataUrl, force) {
       }
       out = json;
     }
-    // 成功：关闭编辑层与冲突层，刷新列表 + 重新拉取当前详情
+    // 成功：关编辑层与冲突层 → 推进版本号破缓存 → 刷新列表 → 按 fid 取最新素材对象
+    // （之前是浅拷贝旧对象，width/height/size 全是旧值，主图 URL 也不变，所以看起来"没替换"）
     assetEditTarget.value = null;
     replaceConflict.value = null;
-    const refreshedAsset = activeModalAsset.value ? { ...activeModalAsset.value } : null;
+    assetImageVersion.value = Date.now();
+    const prevAsset = activeModalAsset.value;
     await reloadAssets(true);
-    if (refreshedAsset?.fid) await openAssetDetailModal(refreshedAsset);
+    const fresh = (assetsList.value || []).find((it) => it.fid === fid);
+    const nextAsset = fresh ? { ...(prevAsset || {}), ...fresh } : (prevAsset ? { ...prevAsset } : null);
+    if (nextAsset) await openAssetDetailModal(nextAsset);
     alert(`已替换原图${out?.versionId ? `（历史版本 ${out.versionId} 已保留）` : ''}，列表与详情已刷新。`);
   } catch (err) {
     const code = err?.code || '';
@@ -5502,9 +5509,11 @@ async function restorePreviousVersion() {
   replacing.value = true;
   try {
     const out = await restoreAssetVersion(asset.fid, '');
-    const refreshedAsset = { ...asset };
+    assetImageVersion.value = Date.now();
     await reloadAssets(true);
-    await openAssetDetailModal(refreshedAsset);
+    const fresh = (assetsList.value || []).find((it) => it.fid === asset.fid);
+    const nextAsset = fresh ? { ...asset, ...fresh } : { ...asset };
+    await openAssetDetailModal(nextAsset);
     alert(`已还原上一版本${out?.versionId ? `（${out.versionId}）` : ''}，列表与详情已刷新。`);
   } catch (err) {
     alert(`还原失败：${err?.message || err}`);
@@ -5629,7 +5638,7 @@ function getModalMainImageUrl() {
   if (activeDerivativeId.value) {
     return getDerivativeImageUrl(fid, activeDerivativeId.value, mediaToken);
   }
-  return getAssetImageUrl(fid, mediaToken);
+  return getAssetImageUrl(fid, mediaToken, '', assetImageVersion.value);
 }
 
 function getDerivativeFileName(d, asset) {
@@ -5780,10 +5789,16 @@ function getThumbnailSrc(item) {
   if (isVideoItem(item)) return getAssetPosterUrl(item.fid, item.mediaToken);
   if (item.thumbUrl) {
     const t = localStorage.getItem('ml_token');
-    return t ? `${item.thumbUrl}&token=${encodeURIComponent(t)}` : item.thumbUrl;
+    const extra = [];
+    if (assetImageVersion.value) extra.push(`v=${assetImageVersion.value}`);
+    if (t) extra.push(`token=${encodeURIComponent(t)}`);
+    if (!extra.length) return item.thumbUrl;
+    const sep = item.thumbUrl.includes('?') ? '&' : '?';
+    return `${item.thumbUrl}${sep}${extra.join('&')}`;
   }
   // 列表卡片只取 256px grid 档；详情/全屏走 getModalMainImageUrl 的默认 preview 档
-  return getAssetImageUrl(item.fid, item.mediaToken, 'grid');
+  // 带 assetImageVersion：替换原图后 fid 不变，不带版本号会命中浏览器缓存显示旧图
+  return getAssetImageUrl(item.fid, item.mediaToken, 'grid', assetImageVersion.value);
 }
 
 function ratioLabelFromSize(width, height) {
