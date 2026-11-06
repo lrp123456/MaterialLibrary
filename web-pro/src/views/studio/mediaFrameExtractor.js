@@ -3,7 +3,8 @@
  * 常用媒体工具箱 - 极速逐帧解码与高精度抽帧引擎
  *
  * 核心设计：
- * 1. 双引擎：WebCodecs（mediabunny 硬解寻帧）一级，增强 HTML5 video 二级，失败自动回落；
+ * 1. 三引擎：WebCodecs（mediabunny 硬解寻帧）一级，增强 HTML5 video 二级，
+ *    浏览器解不了（HEVC 等）时走服务端 FFmpeg 逐 GOP 抽帧；
  * 2. WebCodecs 通道会并行挂载同一个 blob: URL 到隐藏 <video>：
  *    - 寻帧/预览走 VideoSampleSink（1~3ms、可精确到帧）；
  *    - 播放（含声音）与全分辨率原画导出复用该 video，绝不再画到旧样片；
@@ -72,11 +73,22 @@ export class MediaFrameExtractor {
     this.onStatusChange = options.onStatusChange || (() => {});
     this.onError = options.onError || (() => {});
     this.onFrameTick = options.onFrameTick || (() => {});
+    this.serverBridge = options.serverBridge || null;
+    this.onProxyReady = options.onProxyReady || (() => {});
+    this.onFilmstrip = options.onFilmstrip || (() => {});
+    this.proxyNote = '';
+    this._lockSourceSize = false;
+    this._proxyPoll = 0;
+    this._playTimer = 0;
+    this._gopSec = 2;
+    this._liveSeek = 0;
+    this._liveBusy = false;
+    this._livePending = null;
 
     this.cache = new LRUFrameCache(LRU_MAX_FRAMES);
 
     // 状态属性
-    this.strategy = 'idle'; // 'webcodecs' | 'html5' | 'error' | 'idle'
+    this.strategy = 'idle'; // 'webcodecs' | 'html5' | 'proxy' | 'error' | 'idle'
     this.isLoading = false;
     this.isSeeking = false;
     this.isPlaying = false;
@@ -210,6 +222,21 @@ export class MediaFrameExtractor {
 
     this._disposeMediabunny();
     this._revokeOwnedUrls();    // 上一源的 blob URL 在新源开始接管时回收
+    this.sourceFid = sourceConfig.fid || '';
+
+    // 素材库视频：首帧和元数据一次返回。解不了的编码先出画面，代理在后台接上。
+    if ((this.sourceFid || this.rawFile) && this.serverBridge?.open) {
+      try {
+        const opened = await this.serverBridge.open();
+        if (gen !== this._loadGeneration) return;
+        if (opened && opened.browserPlayable === false) {
+          await this._engageFast(opened);
+          return;
+        }
+      } catch (e) {
+        console.warn('[FrameExtractor] 快速打开失败，继续浏览器解码:', e);
+      }
+    }
 
     let webcodecsSuccess = false;
 
@@ -268,6 +295,21 @@ export class MediaFrameExtractor {
       await this.seekToFrame(0, true);
     } catch (err) {
       if (gen !== this._loadGeneration) return;
+      if (this.serverBridge) {
+        try {
+          const opened = this.serverBridge.open
+            ? await this.serverBridge.open()
+            : null;
+          if (gen !== this._loadGeneration) return;
+          if (opened && opened.browserPlayable === false) {
+            await this._engageFast(opened);
+            return;
+          }
+        } catch (ffmpegErr) {
+          console.warn('[FrameExtractor] H.264 代理转码失败:', ffmpegErr);
+          err = ffmpegErr;
+        }
+      }
       this.isLoading = false;
       this.strategy = 'error';
       this.onStatusChange({
@@ -277,6 +319,194 @@ export class MediaFrameExtractor {
       });
       this.onError(err);
     }
+  }
+
+  /**
+   * 遮罩一直盖到副本能逐帧为止，避免半成品可以点。
+   * 副本已缓存时不再探原片、不再抽帧，加载目标在 1 秒内。
+   */
+  async _engageFast(opened) {
+    const gen = this._loadGeneration;
+    this.duration = Number(opened.duration) || this.duration;
+    this.videoWidth = Number(opened.width) || this.videoWidth;
+    this.videoHeight = Number(opened.height) || this.videoHeight;
+    this.fps = Number(opened.fps) > 0 ? Number(opened.fps) : this.fps;
+    this._gopSec = Number(opened.gopSec) > 0 ? Number(opened.gopSec) : 2;
+    this._lockSourceSize = true;
+    this.isLoading = true;
+    this.strategy = 'proxy';
+    this.onStatusChange({
+      loading: true,
+      strategy: 'proxy',
+      message: opened.proxyUrl
+        ? '正在载入，完成后即可逐帧查看…'
+        : '正在准备可实时逐帧的副本，完成前不能操作…'
+    });
+
+    let url = opened.proxyUrl || '';
+    if (!url) url = await this._waitForProxyUrl(gen);
+    if (gen !== this._loadGeneration) return;
+    if (!url) throw new Error('实时副本没有在时限内准备好');
+
+    try {
+      await this._initHTML5Video(url, true);
+    } catch (err) {
+      if (gen !== this._loadGeneration) return;
+      this.isLoading = false;
+      this.strategy = 'error';
+      this.onStatusChange({ loading: false, strategy: 'error', message: '实时副本加载失败' });
+      this.onError(err);
+      return;
+    }
+    if (gen !== this._loadGeneration) return;
+    this.strategy = 'proxy';
+    await this.seekToFrame(0, true);
+    if (gen !== this._loadGeneration) return;
+
+    const strip = await this.generateFilmstrip(12);
+    if (gen !== this._loadGeneration) return;
+    if (strip && strip.length) this.onFilmstrip(strip);
+    await this.seekToFrame(0, true);
+    if (gen !== this._loadGeneration) return;
+
+    this.isLoading = false;
+    this.onStatusChange({
+      loading: false,
+      strategy: 'proxy',
+      message: `可以逐帧查看。导出仍是原片 ${this.videoWidth}×${this.videoHeight}`
+    });
+  }
+
+  _waitForProxyUrl(gen) {
+    return new Promise((resolve) => {
+      let n = 0;
+      const timer = setInterval(async () => {
+        if (gen !== this._loadGeneration) {
+          clearInterval(timer);
+          resolve('');
+          return;
+        }
+        n += 1;
+        try {
+          const st = await this.serverBridge.proxyStatus();
+          if (st?.url) {
+            clearInterval(timer);
+            if (this._proxyPoll === timer) this._proxyPoll = 0;
+            resolve(st.url);
+            return;
+          }
+        } catch (_) {}
+        if (n > 100) {
+          clearInterval(timer);
+          if (this._proxyPoll === timer) this._proxyPoll = 0;
+          resolve('');
+        }
+      }, 300);
+      this._proxyPoll = timer;
+    });
+  }
+
+  _frameBody(time, purpose) {
+    return {
+      time,
+      purpose,
+      fps: this.fps,
+      gopSec: this._gopSec,
+      duration: this.duration,
+      maxEdge: purpose === 'thumb' ? 320 : 960,
+    };
+  }
+
+  _paintDataUrl(dataUrl, frameNumber) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        this._paintToCanvas(img);
+        if (typeof createImageBitmap === 'function') {
+          createImageBitmap(img).then((bmp) => {
+            if (this.currentFrameNumber === frameNumber) this.cache.set(frameNumber, bmp);
+            else { try { bmp.close(); } catch (_) {} }
+          }).catch(() => {});
+        }
+        resolve();
+      };
+      img.onerror = () => reject(new Error('帧图像解码失败'));
+      img.src = dataUrl;
+    });
+  }
+
+  _prefetchOriginal(time) {
+    if (!this.serverBridge?.originalFrame) return;
+    this.serverBridge.originalFrame(this._frameBody(time, 'original')).catch(() => {});
+  }
+
+  async _seekLive(frameNumber) {
+    if (!this.serverBridge?.previewFrame) throw new Error('没有预览抽帧通道');
+    this._livePending = frameNumber;
+    if (this._liveBusy) return;
+    this._liveBusy = true;
+    try {
+      while (this._livePending != null) {
+        const frame = this._livePending;
+        this._livePending = null;
+        const stamp = ++this._liveSeek;
+        const t = Math.min(this.duration, frame / (this.fps || 30));
+        const got = await this.serverBridge.previewFrame(this._frameBody(t, 'preview'));
+        if (stamp !== this._liveSeek && this._livePending != null) continue;
+        if (!got?.dataUrl) throw new Error('预览帧为空');
+        if (this._livePending != null) continue;
+        this.currentFrameNumber = frame;
+        this.currentTime = t;
+        await this._paintDataUrl(got.dataUrl, frame);
+        this._prefetchOriginal(t);
+        this.onFrameTick({ currentTime: t, frameNumber: frame });
+      }
+    } finally {
+      this._liveBusy = false;
+      if (this._livePending != null) {
+        const next = this._livePending;
+        this._livePending = null;
+        await this._seekLive(next);
+      }
+    }
+  }
+
+  async _attachProxy(url, gen) {
+    try {
+      await this._initHTML5Video(url, true);
+    } catch (err) {
+      console.warn('[FrameExtractor] 实时代理挂载失败，继续用预览帧:', err);
+      return;
+    }
+    if (gen !== this._loadGeneration) return;
+    this.strategy = 'proxy';
+    this.onStatusChange({
+      loading: false,
+      strategy: 'proxy',
+      message: `实时寻帧已接上。导出仍是原片 ${this.videoWidth}×${this.videoHeight}`
+    });
+    this.onProxyReady();
+    await this.seekToFrame(this.currentFrameNumber, true);
+  }
+
+  _pollProxy(gen) {
+    if (this._proxyPoll) clearInterval(this._proxyPoll);
+    let n = 0;
+    this._proxyPoll = setInterval(async () => {
+      if (gen !== this._loadGeneration || this.strategy === 'proxy' || n++ > 90) {
+        clearInterval(this._proxyPoll);
+        this._proxyPoll = 0;
+        return;
+      }
+      try {
+        const st = await this.serverBridge.proxyStatus();
+        if (st?.url && gen === this._loadGeneration) {
+          clearInterval(this._proxyPoll);
+          this._proxyPoll = 0;
+          await this._attachProxy(st.url, gen);
+        }
+      } catch (_) {}
+    }, 400);
   }
 
   async _initWebCodecsFromFile(file) {
@@ -344,9 +574,11 @@ export class MediaFrameExtractor {
       let resolved = false;
 
       const applyMeta = () => {
-        this.duration = v.duration || 10;
-        this.videoWidth = v.videoWidth || 1920;
-        this.videoHeight = v.videoHeight || 1080;
+        this.duration = v.duration || this.duration || 10;
+        if (!this._lockSourceSize) {
+          this.videoWidth = v.videoWidth || this.videoWidth || 1920;
+          this.videoHeight = v.videoHeight || this.videoHeight || 1080;
+        }
       };
 
       const onReady = () => {
@@ -464,6 +696,10 @@ export class MediaFrameExtractor {
   // 播放控制
   // ===========================================================================
   startPlayback(playbackRate = 1.0) {
+    if (this.strategy === 'live') {
+      this._startLivePlayback(playbackRate);
+      return;
+    }
     const v = this.videoEl;
     if (!v || !v.src) return;
 
@@ -509,8 +745,30 @@ export class MediaFrameExtractor {
     });
   }
 
+  _startLivePlayback(rate) {
+    this.isPlaying = true;
+    const hop = Math.max(1, Math.round((this.fps || 30) * 0.12 * (Number(rate) || 1)));
+    const tick = async () => {
+      if (!this.isPlaying || this.strategy !== 'live') return;
+      const next = this.currentFrameNumber + hop;
+      if (next >= this.totalFrames - 1) {
+        await this.seekToFrame(this.totalFrames - 1, true);
+        this.isPlaying = false;
+        return;
+      }
+      await this.seekToFrame(next, false);
+      if (!this.isPlaying) return;
+      this._playTimer = setTimeout(tick, 40);
+    };
+    this._playTimer = setTimeout(tick, 40);
+  }
+
   stopPlayback() {
     this.isPlaying = false;
+    if (this._playTimer) {
+      clearTimeout(this._playTimer);
+      this._playTimer = 0;
+    }
     const v = this.videoEl;
     if (v && !v.paused) {
       v.pause();
@@ -540,6 +798,13 @@ export class MediaFrameExtractor {
     if (cachedBitmap) {
       this._paintToCanvas(cachedBitmap);
       this._syncVideoTime(targetTimestamp);
+      if (this.strategy === 'live' || this.strategy === 'proxy') this._prefetchOriginal(this.currentTime);
+      return;
+    }
+
+    // 代理还没接上：用已经预热的 GOP 预览帧，不挡着首屏
+    if (this.strategy === 'live') {
+      await this._seekLive(clampedFrame);
       return;
     }
 
@@ -574,6 +839,7 @@ export class MediaFrameExtractor {
 
     // 3. HTML5 Video 寻帧（带丢帧调度）
     await this._seekHTML5VideoScheduled(this.currentTime, clampedFrame, isPrecise);
+    if (this.strategy === 'proxy') this._prefetchOriginal(this.currentTime);
   }
 
   /**
@@ -716,8 +982,11 @@ export class MediaFrameExtractor {
         return resolve();
       }
 
-      const tolerance = Math.max(0.05, 1.5 / this.fps);
-      // 同步段内没有 await，这里的判断对下面的赋值同样有效
+      // 精确步进必须小于半帧。0.05s 在 60fps 下盖住 3 帧，单帧步进会被当成
+      // 「已经在这一帧」，帧号变了画面却不改，还会把旧画面写进新帧的缓存。
+      const tolerance = isPrecise
+        ? Math.max(0.0004, 0.45 / (this.fps || 30))
+        : Math.max(0.05, 1.5 / (this.fps || 30));
       const alreadyThere = !v.seeking && Math.abs(v.currentTime - targetTime) <= tolerance;
       let settled = false;       // 本次调度是否已收口（含超时放弃）
       let chained = false;
@@ -754,8 +1023,21 @@ export class MediaFrameExtractor {
       };
 
       // seeked 后等真正上屏并核对 mediaTime；失败就继续等，硬超时兜底
-      const onSeeked = async () => {
-        const ok = await this._waitPresentedFrame(v, targetTime, tolerance, SEEK_VERIFY_MS, { strict: isPrecise });
+      const onSeeked = () => {
+        // display 尺寸很小的 video 经常不发 rVFC。seeked 且时间已对准就画，不再干等。
+        if (Math.abs(v.currentTime - targetTime) <= Math.max(tolerance, 1 / (this.fps || 30))) {
+          requestAnimationFrame(() => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(this._seekWatchdog);
+            this._seekWatchdog = null;
+            v.removeEventListener('seeked', onSeeked);
+            paintVerifiedFrame();
+            chainOrResolve();
+          });
+          return;
+        }
+        this._waitPresentedFrame(v, targetTime, tolerance, SEEK_VERIFY_MS, { strict: isPrecise }).then((ok) => {
         if (settled) {
           // 硬超时已收口：迟到帧只有在「仍是最新所求、且没有新寻帧在途」时补画
           if (ok &&
@@ -774,6 +1056,7 @@ export class MediaFrameExtractor {
         v.removeEventListener('seeked', onSeeked);
         paintVerifiedFrame();
         chainOrResolve();
+        });
       };
 
       if (alreadyThere) {
@@ -802,6 +1085,10 @@ export class MediaFrameExtractor {
         if (settled) return;
         settled = true;
         this._seekWatchdog = null;
+        if (v.videoWidth > 0 && Math.abs(v.currentTime - targetTime) <= Math.max(tolerance, 1 / (this.fps || 30))) {
+          v.removeEventListener('seeked', onSeeked);
+          paintVerifiedFrame();
+        }
         chainOrResolve();
       }, SEEK_HARD_TIMEOUT_MS);
 
@@ -881,11 +1168,21 @@ export class MediaFrameExtractor {
   }
 
   async captureFullFrameDataUrl() {
+    if ((this.strategy === 'live' || this.strategy === 'proxy') && this.serverBridge?.originalFrame) {
+      const got = await this.serverBridge.originalFrame(this._frameBody(this.currentTime, 'original'));
+      if (got?.dataUrl) return got.dataUrl;
+    }
     const ok = await this._drawFullFrameToExportCanvas();
     return ok ? this.fullExportCanvas.toDataURL('image/png', 1.0) : '';
   }
 
   async captureFullFrameBlob() {
+    if ((this.strategy === 'live' || this.strategy === 'proxy') && this.serverBridge?.originalFrame) {
+      const url = await this.captureFullFrameDataUrl();
+      if (!url) return null;
+      const res = await fetch(url);
+      return res.blob();
+    }
     const ok = await this._drawFullFrameToExportCanvas();
     if (!ok) return null;
     return new Promise((resolve) => {
@@ -898,6 +1195,18 @@ export class MediaFrameExtractor {
   // ===========================================================================
   async generateFilmstrip(count = 12) {
     const runId = ++this._filmstripRun;
+    const videoReady = !!(this.videoEl && this.videoEl.videoWidth > 0);
+    if (!videoReady && (this.strategy === 'live' || this.strategy === 'proxy') && this.serverBridge?.filmstrip) {
+      const list = await this.serverBridge.filmstrip(count);
+      if (runId !== this._filmstripRun) return null;
+      return (list || []).map((item, i) => ({
+        index: i,
+        time: Number(item.time) || 0,
+        frame: Math.round((Number(item.time) || 0) * this.fps),
+        timeStr: item.timeStr || this.formatTimecode(Number(item.time) || 0),
+        dataUrl: item.dataUrl,
+      })).filter((item) => item.dataUrl);
+    }
     const frames = [];
     const dur = Math.max(0.1, this.duration);
     const step = dur / count;
@@ -920,6 +1229,13 @@ export class MediaFrameExtractor {
         const t = Math.min(dur - 0.05, i * step + step * 0.2);
         const frameIndex = Math.round(t * this.fps);
         let dataUrl = '';
+
+        if ((this.strategy === 'live' || (this.strategy === 'proxy' && !(this.videoEl && this.videoEl.videoWidth > 0))) && this.serverBridge?.thumb) {
+          try {
+            const got = await this.serverBridge.thumb(this._frameBody(t, 'thumb'));
+            if (got?.dataUrl) dataUrl = got.dataUrl;
+          } catch (_) {}
+        }
 
         if (this.strategy === 'webcodecs' && this.mbSink) {
           try {
@@ -959,6 +1275,7 @@ export class MediaFrameExtractor {
       }
     }
 
+    if (runId !== this._filmstripRun) return null;
     return frames;
   }
 
@@ -1073,7 +1390,14 @@ export class MediaFrameExtractor {
       const frameNum = Math.round(t * this.fps);
       let dataUrl = '';
 
-      if (this.strategy === 'webcodecs' && this.mbSink) {
+      if ((this.strategy === 'live' || this.strategy === 'proxy') && this.serverBridge?.originalFrame) {
+        try {
+          const got = await this.serverBridge.originalFrame(this._frameBody(t, 'original'));
+          if (got?.dataUrl) dataUrl = got.dataUrl;
+        } catch (_) {}
+      }
+
+      if (!dataUrl && this.strategy === 'webcodecs' && this.mbSink) {
         try {
           const sample = await this.mbSink.getSample(t);
           if (sample) {
@@ -1139,6 +1463,14 @@ export class MediaFrameExtractor {
   }
 
   destroy() {
+    if (this._proxyPoll) {
+      clearInterval(this._proxyPoll);
+      this._proxyPoll = 0;
+    }
+    if (this._playTimer) {
+      clearTimeout(this._playTimer);
+      this._playTimer = 0;
+    }
     this._loadGeneration++;
     this._filmstripRun++;
     this._batchRun++;

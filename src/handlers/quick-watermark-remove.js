@@ -24,6 +24,7 @@ async function handleWatermarkOrRemove(services, {
   regionClauseText = null,
   maskPath = null,
   outSpec = null,
+  prompt: callerPrompt = null,
 }) {
   const meta = await sharp(imageBuffer).metadata();
   const sw = meta.width;
@@ -35,8 +36,8 @@ async function handleWatermarkOrRemove(services, {
   const nx2 = Math.min(999, Math.max(0, Math.round((maxX / sw) * 1000)));
   const ny2 = Math.min(999, Math.max(0, Math.round((maxY / sh) * 1000)));
   const box1Tag = `${nx1} ${ny1} ${nx2} ${ny2}`;
-  let prompt = '';
-  if (services && services.db) {
+  let prompt = String(callerPrompt || '').trim();
+  if (!prompt && services && services.db) {
     try {
       const { compileNodePrompt } = require('../prompt-compiler');
       const isWm = actionType === 'watermark';

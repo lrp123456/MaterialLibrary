@@ -229,8 +229,12 @@ function handleRequest(req, res) {
     return res.end('Not Found');
   }
 
-  // SPA 路由 fallback 到 index.html
+  // SPA 路由 fallback 到 index.html (注意：/assets/ 下不存在的 chunk 绝对不能回退成 index.html，否则会导致 JS 解析崩溃)
   if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+    if (pathname.startsWith('/assets/')) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end('Chunk file not found (deployment outdated)');
+    }
     filePath = path.join(distRoot, 'index.html');
   }
 
@@ -241,7 +245,10 @@ function handleRequest(req, res) {
 
     res.writeHead(200, {
       'Content-Type': contentType,
-      'Cache-Control': isHtml ? 'no-cache, no-store, must-revalidate' : 'public, max-age=31536000',
+      // 杜绝浏览器强缓存导致代码重构后用户端迟迟不生效
+      'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
+      'Pragma': 'no-cache',
+      'Expires': '0',
     });
     return fs.createReadStream(filePath).pipe(res);
   }

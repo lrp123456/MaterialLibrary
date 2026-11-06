@@ -73,10 +73,18 @@ function contractNumber(key, label, min, max, def, extra) {
 const RATIO_SEEDANCE = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9', 'adaptive'];
 
 function seedance20Params() {
+  const resOptions = ['480p_sr2x', '720p', '1080p', '720p_sr2x', '480p'];
+  const resLabels = {
+    '480p_sr2x': '480p → 720p (2x超分)',
+    '720p': '720p (原生)',
+    '1080p': '1080p (原生)',
+    '720p_sr2x': '720p → 1080p (2x超分)',
+    '480p': '480p (原生)'
+  };
   return [
-    contractEnum('resolution', '分辨率', ['480p', '720p', '1080p', '4k'], '720p'),
+    contractEnum('resolution', '分辨率', resOptions, '720p_sr2x', { option_labels: resLabels }),
     contractDuration('duration', '时长', 4, 15, 5, { extra_stops: [-1], extra_labels: { '-1': '智能' } }),
-    contractEnum('ratio', '画幅', RATIO_SEEDANCE, '16:9'),
+    contractEnum('ratio', '画幅', RATIO_SEEDANCE, '9:16'),
     contractBool('generate_audio', '生成同步音频', true, { visibility: 'public' }),
     contractEnum('mode', '模式', ['text_to_video', 'omni_reference', 'image_to_video', 'first_last_frame'], 'text_to_video', {
       location: 'none',
@@ -91,10 +99,18 @@ function seedance20Params() {
 }
 
 function seedance25Params() {
+  const resOptions = ['480p_sr2x', '720p', '1080p', '720p_sr2x', '480p'];
+  const resLabels = {
+    '480p_sr2x': '480p → 720p (2x超分)',
+    '720p': '720p (原生)',
+    '1080p': '1080p (原生)',
+    '720p_sr2x': '720p → 1080p (2x超分)',
+    '480p': '480p (原生)'
+  };
   return [
-    contractEnum('resolution', '分辨率', ['480p', '720p', '1080p'], '720p'),
-    contractDuration('duration', '时长', 4, 30, -1, { extra_stops: [-1], extra_labels: { '-1': '智能' } }),
-    contractEnum('ratio', '画幅', RATIO_SEEDANCE, 'adaptive'),
+    contractEnum('resolution', '分辨率', resOptions, '720p_sr2x', { option_labels: resLabels }),
+    contractDuration('duration', '时长', 4, 30, 5, { extra_stops: [-1], extra_labels: { '-1': '智能' } }),
+    contractEnum('ratio', '画幅', RATIO_SEEDANCE, '9:16'),
     contractBool('generate_audio', '生成同步音频', true, { visibility: 'public' }),
     contractEnum('mode', '模式', ['text_to_video', 'omni_reference', 'image_to_video', 'first_last_frame', 'video_edit', 'video_extend', 'draft_to_final'], 'text_to_video', {
       location: 'none',
@@ -382,6 +398,7 @@ const DEFAULT_ENDPOINTS = [
     capabilities: [
       { id: 'newapi_chat', name: '对话与视觉', kind: 'chat', type: 'path', path: '/chat/completions', method: 'POST' },
       { id: 'newapi_gemini_image', name: 'Gemini 原生图像', kind: 'image', type: 'path', path: '/v1beta/models/{{model}}:generateContent', method: 'POST' },
+      { id: 'newapi_gpt_image', name: 'GPT 图像生成 (Flare / Sunburst)', kind: 'image', type: 'path', path: '/chat/completions', method: 'POST' },
     ]
   }
 ];
@@ -1095,9 +1112,282 @@ const DEFAULT_MODEL_CONTRACTS = [
     mutex_groups: [],
     optimizer: { optimizer_model_id: 'agnes-3.0-flash', prompt: '' },
   },
-  ...['gemini-3.1-flash-image', 'gemini-3.1-flash-image-preview', 'gemini-3.1-flash-lite-image'].map((vendorModelId, index) => ({
+  {
+    id: 'gpt_image_2_5_flare_vip',
+    name: 'GPT Image 2.5 Flare VIP',
+    vendor_model_id: 'gpt-image-2.5-flare-vip',
+    capability_id: 'newapi_gpt_image',
+    converter: 'newapi_gpt_image',
+    refStyle: 'generic',
+    polishHint: 'NewAPI / 老张 VIP 直连 · GPT Image 2.5 Flare · 极速出图与自然光影 · 概念草图与效果图首选',
+    modes: [
+      { id: 'text_to_image', label: '文生图' },
+      { id: 'image_to_image', label: '图生图' },
+    ],
+    // 实测：该通道只认单张 image_url。传数组会被路由到 gpt-image-2.5-prism 等别的后端模型
+    // （返回体 model 字段会变），不是"多图参考"，所以槽位如实写 1，别再让用户挂 4 张以为都生效。
+    slots: { images: 1, videos: 0, audios: 0 },
+    enabled: 1,
+    params: [
+      {
+        key: 'ratio',
+        label: '宽高比',
+        type: 'enum',
+        default: '9:16',
+        options: ['9:16', '16:9', '1:1', '4:3', '3:4', '21:9'],
+        visibility: 'public',
+        location: 'body',
+      },
+      {
+        key: 'quality',
+        label: '清晰度/渲染质量',
+        type: 'enum',
+        default: 'high',
+        options: ['high', 'xhigh', 'max', 'medium', 'low', 'auto'],
+        option_labels: {
+          'high': '高画质 (推荐)',
+          'xhigh': '超高精 (零件/工业级)',
+          'max': '极致细节 (最高耗额)',
+          'medium': '平衡',
+          'low': '草图速写 (省额度)',
+          'auto': '模型自适应'
+        },
+        visibility: 'public',
+        location: 'body',
+      },
+      {
+        key: 'background',
+        label: '背景模式',
+        type: 'enum',
+        default: 'auto',
+        options: ['auto', 'transparent', 'opaque'],
+        option_labels: {
+          'auto': '自然背景',
+          'transparent': '透明背景 (白底零件/PNG)',
+          'opaque': '实色纯白背景'
+        },
+        visibility: 'public',
+        location: 'body',
+      },
+      {
+        key: 'output_format',
+        label: '输出格式',
+        type: 'enum',
+        default: 'png',
+        options: ['png', 'jpeg', 'webp'],
+        visibility: 'public',
+        location: 'body',
+      },
+    ],
+    table_mappings: {},
+    conditional_rules: [],
+    mutex_groups: [],
+    optimizer: {},
+  },
+  {
+    id: 'gpt_image_2_5_sunburst_vip',
+    name: 'GPT Image 2.5 Sunburst VIP',
+    vendor_model_id: 'gpt-image-2.5-sunburst-vip',
+    capability_id: 'newapi_gpt_image',
+    converter: 'newapi_gpt_image',
+    refStyle: 'generic',
+    polishHint: 'NewAPI / 老张 VIP 直连 · GPT Image 2.5 Sunburst · 超高精度与稳健纹理 · 机械结构与产品正式出图',
+    modes: [
+      { id: 'text_to_image', label: '文生图' },
+      { id: 'image_to_image', label: '图生图' },
+    ],
+    // 实测：该通道只认单张 image_url。传数组会被路由到 gpt-image-2.5-prism 等别的后端模型
+    // （返回体 model 字段会变），不是"多图参考"，所以槽位如实写 1，别再让用户挂 4 张以为都生效。
+    slots: { images: 1, videos: 0, audios: 0 },
+    enabled: 1,
+    params: [
+      {
+        key: 'ratio',
+        label: '宽高比',
+        type: 'enum',
+        default: '9:16',
+        options: ['9:16', '16:9', '1:1', '4:3', '3:4', '21:9'],
+        visibility: 'public',
+        location: 'body',
+      },
+      {
+        key: 'quality',
+        label: '清晰度/渲染质量',
+        type: 'enum',
+        default: 'high',
+        options: ['high', 'xhigh', 'max', 'medium', 'low', 'auto'],
+        option_labels: {
+          'high': '高画质 (推荐)',
+          'xhigh': '超高精 (零件/工业级)',
+          'max': '极致细节 (最高耗额)',
+          'medium': '平衡',
+          'low': '草图速写 (省额度)',
+          'auto': '模型自适应'
+        },
+        visibility: 'public',
+        location: 'body',
+      },
+      {
+        key: 'background',
+        label: '背景模式',
+        type: 'enum',
+        default: 'auto',
+        options: ['auto', 'transparent', 'opaque'],
+        option_labels: {
+          'auto': '自然背景',
+          'transparent': '透明背景 (白底零件/PNG)',
+          'opaque': '实色纯白背景'
+        },
+        visibility: 'public',
+        location: 'body',
+      },
+      {
+        key: 'output_format',
+        label: '输出格式',
+        type: 'enum',
+        default: 'png',
+        options: ['png', 'jpeg', 'webp'],
+        visibility: 'public',
+        location: 'body',
+      },
+    ],
+    table_mappings: {},
+    conditional_rules: [],
+    mutex_groups: [],
+    optimizer: {},
+  },
+  {
+    id: 'gpt_image_2_5_web',
+    name: 'GPT Image 2.5 Web (NewAPI 直连)',
+    vendor_model_id: 'gpt-image-2.5-web',
+    capability_id: 'newapi_gpt_image',
+    converter: 'newapi_gpt_image',
+    refStyle: 'generic',
+    polishHint: 'NewAPI 聚合直连 · GPT Image 2.5 Web · 极速高清写实出图',
+    modes: [
+      { id: 'text_to_image', label: '文生图' },
+      { id: 'image_to_image', label: '图生图' },
+    ],
+    slots: { images: 3, videos: 0, audios: 0 },
+    enabled: 1,
+    params: [
+      {
+        key: 'ratio',
+        label: '宽高比',
+        type: 'enum',
+        default: '9:16',
+        options: ['9:16', '16:9', '1:1', '4:3', '3:4', '21:9'],
+        visibility: 'public',
+        location: 'body',
+      },
+      {
+        key: 'quality',
+        label: '清晰度/渲染质量',
+        type: 'enum',
+        default: 'high',
+        options: ['high', 'xhigh', 'max', 'medium', 'low', 'auto'],
+        option_labels: {
+          'high': '高画质 (推荐)',
+          'xhigh': '超高精 (零件/工业级)',
+          'max': '极致细节 (最高耗额)',
+          'medium': '平衡',
+          'low': '草图速写 (省额度)',
+          'auto': '模型自适应'
+        },
+        visibility: 'public',
+        location: 'body',
+      },
+      {
+        key: 'background',
+        label: '背景模式',
+        type: 'enum',
+        default: 'auto',
+        options: ['auto', 'transparent', 'opaque'],
+        option_labels: {
+          'auto': '自然背景',
+          'transparent': '透明背景 (白底零件/PNG)',
+          'opaque': '实色纯白背景'
+        },
+        visibility: 'public',
+        location: 'body',
+      },
+      {
+        key: 'output_format',
+        label: '输出格式',
+        type: 'enum',
+        default: 'png',
+        options: ['png', 'jpeg', 'webp'],
+        visibility: 'public',
+        location: 'body',
+      },
+    ],
+    table_mappings: {},
+    conditional_rules: [],
+    mutex_groups: [],
+    optimizer: {},
+  },
+  {
+    id: 'gemini_nano_banana_2_1',
+    name: 'Gemini Nano Banana 2.1 (旗舰生图)',
+    vendor_model_id: 'gemini-nano-banana-2.1',
+    capability_id: 'newapi_gemini_image',
+    converter: 'gemini_generate_content',
+    refStyle: 'generic',
+    polishHint: 'NewAPI 聚合直连 · Nano Banana 2.1 · 1K/2K/4K 旗舰生图 · 支持多达 14 张参考图融合',
+    modes: [
+      { id: 'text_to_image', label: '文生图' },
+      { id: 'image_to_image', label: '图生图' },
+      { id: 'image_edit', label: '参考编辑' },
+    ],
+    slots: { images: 14, videos: 0, audios: 0 },
+    enabled: 1,
+    params: [
+      {
+        key: 'ratio',
+        label: '宽高比',
+        type: 'enum',
+        default: '9:16',
+        options: ['9:16', '16:9', '1:1', '4:3', '3:4', '2:3', '3:2', '1:2', '2:1', '4:5', '5:4', '9:21', '21:9'],
+        visibility: 'public',
+        location: 'body',
+      },
+      {
+        key: 'size',
+        label: '清晰度/分辨率档位',
+        type: 'enum',
+        default: '2K',
+        options: ['2K', '4K', '1K'],
+        option_labels: {
+          '2K': '2K 超清 (推荐)',
+          '4K': '4K 旗舰影院级',
+          '1K': '1K 标准清晰'
+        },
+        visibility: 'public',
+        location: 'body',
+      },
+      {
+        key: 'thinking_level',
+        label: '思考级别',
+        type: 'enum',
+        default: 'medium',
+        options: ['medium', 'minimal', 'high'],
+        option_labels: {
+          'medium': '平衡思考 (默认)',
+          'minimal': '快速直出',
+          'high': '深度推演 (复杂构图/文字)'
+        },
+        visibility: 'public',
+        location: 'body',
+      },
+    ],
+    table_mappings: {},
+    conditional_rules: [],
+    mutex_groups: [],
+    optimizer: {},
+  },
+  ...['gemini-3.1-flash-image', 'gemini-3.1-flash-image-preview', 'gemini-3.1-flash-lite-image', 'gemini-3-pro-image'].map((vendorModelId, index) => ({
     id: vendorModelId.replaceAll('.', '_').replaceAll('-', '_'),
-    name: index === 1 ? 'Gemini 3.1 Flash Image Preview' : (vendorModelId.includes('lite') ? 'Gemini 3.1 Flash Lite Image' : 'Gemini 3.1 Flash Image'),
+    name: vendorModelId === 'gemini-3-pro-image' ? 'Gemini 3 Pro Image' : (index === 1 ? 'Gemini 3.1 Flash Image Preview' : (vendorModelId.includes('lite') ? 'Gemini 3.1 Flash Lite Image' : 'Gemini 3.1 Flash Image')),
     vendor_model_id: vendorModelId,
     capability_id: 'newapi_gemini_image',
     converter: 'gemini_generate_content',
@@ -1115,8 +1405,8 @@ const DEFAULT_MODEL_CONTRACTS = [
         key: 'ratio',
         label: '宽高比',
         type: 'enum',
-        default: '1:1',
-        options: ['1:1', '3:4', '4:3', '16:9', '9:16'],
+        default: '9:16',
+        options: ['9:16', '16:9', '1:1', '3:4', '4:3', '21:9'],
         visibility: 'public',
         location: 'body',
       },
@@ -2150,10 +2440,18 @@ function scrubEndpointCredentials(db) {
   }
 }
 
+function modelParamsNeedRatioRepair(params) {
+  if (!Array.isArray(params) || !params.length) return false;
+  const r = params.find((p) => p && (p.key === 'ratio' || p.key === 'aspect_ratio'));
+  if (!r) return false;
+  return r.default !== '9:16' && Array.isArray(r.options) && r.options.includes('9:16');
+}
+
 function seedanceParamsNeedRepair(params) {
   if (!Array.isArray(params) || !params.length) return true;
   const dur = params.find((p) => p.key === 'duration');
-  if (!params.some((p) => p.key === 'resolution')) return true;
+  const res = params.find((p) => p.key === 'resolution');
+  if (!res || !Array.isArray(res.options) || !res.options.includes('480p_sr2x')) return true;
   if (!dur || Number(dur.max) === 12 || dur.type !== 'duration') return true;
   return false;
 }
@@ -2207,10 +2505,26 @@ function seedStoredContract(db, insContract, mc, now) {
   }
 
   const isSeedance = (mc.id === 'seedance2_0' || mc.id === 'seedance2_5');
-  const repair = isSeedance && seedanceParamsNeedRepair(params);
+  const ratioRepair = modelParamsNeedRatioRepair(params);
+  const repair = (isSeedance && seedanceParamsNeedRepair(params)) || ratioRepair;
 
   if (repair) {
-    params = mc.params || [];
+    if (isSeedance) {
+      params = mc.params || [];
+    } else if (ratioRepair && Array.isArray(params)) {
+      for (const p of params) {
+        if (p && (p.key === 'ratio' || p.key === 'aspect_ratio') && Array.isArray(p.options) && p.options.includes('9:16')) {
+          p.default = '9:16';
+          const idx = p.options.indexOf('9:16');
+          if (idx > 0) {
+            p.options.splice(idx, 1);
+            p.options.unshift('9:16');
+          }
+        }
+      }
+    } else {
+      params = mc.params || [];
+    }
     db.prepare(`
       UPDATE model_contracts
       SET name=?, params_json=?, conditional_rules_json=?, optimizer_json=?, updated_at=?
@@ -2416,6 +2730,8 @@ function resolveModelExecution(db, modelIdOrCode) {
         : 'qwenimage_local';
     }
     else if (/portrait/i.test(canonicalId)) capId = 'portrait_group';
+    else if (/gpt.*image|flare|sunburst/i.test(canonicalId) || /gpt.*image|flare|sunburst/i.test(modelCode)) capId = 'newapi_gpt_image';
+    else if (/gemini.*image/i.test(canonicalId) || /gemini.*image/i.test(modelCode)) capId = 'newapi_gemini_image';
     else {
       // 现有对话和识图模型先挂在本地网关上
       capId = 'litellm_chat';
@@ -2726,7 +3042,7 @@ function assembleModelPayload({
  * - 对外专用参数：名字、可选值、默认值
  * 不返回提交位置、换算表、条件、密钥、高级参数。停用模型不出现。
  */
-function getModelPublicCatalog(db) {
+function getModelPublicCatalog(db, visibleModelIds) {
   const domains = ['image', 'video', 'music', 'chat', 'portrait'];
   const catalog = { studio: {}, schemas: {}, models: [] };
 
@@ -2742,7 +3058,12 @@ function getModelPublicCatalog(db) {
 
   for (const d of domains) {
     const block = OFFICIAL_STUDIO[d] || { models: [], defaultModel: null };
-    const enabledOfficial = (block.models || []).filter(m => !m.disabled);
+    let enabledOfficial = (block.models || []).filter(m => !m.disabled);
+    // 按用户白名单过滤：visibleModelIds 为 null/undefined 表示不过滤（全部可见）。
+    // 契约层禁用模型已由上面的 filter 去掉，这里只叠加「按用户可见」维度。
+    if (visibleModelIds) {
+      enabledOfficial = enabledOfficial.filter(m => visibleModelIds.has(m.id));
+    }
     const domainModels = [];
 
     for (const m of enabledOfficial) {
@@ -2765,17 +3086,17 @@ function getModelPublicCatalog(db) {
 
       if (d === 'image') {
         const sizeParam = params.find(p => p.key === 'size') || { label: '尺寸档', options: m.params?.size || ['1K', '1.5K', '2K'], default: '2K' };
-        const ratioParam = params.find(p => p.key === 'ratio') || { label: '宽高比', options: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'], default: '1:1' };
+        const ratioParam = params.find(p => p.key === 'ratio') || { label: '宽高比', options: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'], default: '9:16' };
         commonControls = [
           { name: sizeParam.label || '尺寸档', key: 'size', options: sizeParam.options || ['1K', '1.5K', '2K'], default: sizeParam.default || '2K' },
-          { name: ratioParam.label || '宽高比', key: 'ratio', options: ratioParam.options || ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'], default: ratioParam.default || '1:1' }
+          { name: ratioParam.label || '宽高比', key: 'ratio', options: ratioParam.options || ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'], default: ratioParam.default || '9:16' }
         ];
       } else if (d === 'video') {
-        const ratioParam = params.find(p => p.key === 'ratio' || p.key === 'aspect_ratio') || { label: '画幅', options: ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'], default: '16:9' };
-        const durParam = params.find(p => p.key === 'duration' || p.key === 'seconds') || { label: '时长', min: 4, max: 12, default: 5 };
+        const ratioParam = params.find(p => p.key === 'ratio' || p.key === 'aspect_ratio') || { label: '画幅', options: ['9:16', '16:9', '1:1', '4:3', '3:4', '21:9'], default: '9:16' };
+        const durParam = params.find(p => p.key === 'duration' || p.key === 'seconds') || { label: '时长', min: 4, max: 30, default: 5 };
         commonControls = [
-          { name: ratioParam.label || '画幅', key: 'ratio', options: ratioParam.options || ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'], default: ratioParam.default || '16:9' },
-          { name: durParam.label || '时长', key: 'duration', min: durParam.min || 4, max: durParam.max || 12, default: durParam.default || 5 }
+          { name: ratioParam.label || '画幅', key: 'ratio', options: ratioParam.options || ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'], default: ratioParam.default || '9:16' },
+          { name: durParam.label || '时长', key: 'duration', min: durParam.min || 4, max: durParam.max || (String(m.id || '').includes('2_5') || String(m.id || '').includes('2.5') ? 30 : 15), default: durParam.default || 5 }
         ];
       } else if (d === 'music') {
         const isSong = m.id.includes('song') || m.model_code.includes('song');
@@ -2837,6 +3158,10 @@ function getModelPublicCatalog(db) {
   }
 
   catalog.schemas = getUnifiedSchemasMap(db);
+  try {
+    const { getStudioDefaultSettings } = require('./studio-defaults');
+    catalog.defaults = getStudioDefaultSettings(db);
+  } catch (_) {}
   return catalog;
 }
 
@@ -2844,7 +3169,7 @@ function getModelPublicCatalog(db) {
  * 从单一权威契约 (Model Contract) 动态派生前端与适配器所需的 Schema 结构
  * 彻底消除 model-schemas.js 与 models-contract.js 的双轨硬编码分裂
  */
-function buildSchemaForContract(c) {
+function buildSchemaForContract(c, db = null) {
   if (!c) return null;
   const defC = DEFAULT_MODEL_CONTRACTS.find(d => d.id === c.id) || {};
   const rawParams = c.params_json
@@ -2900,6 +3225,26 @@ function buildSchemaForContract(c) {
       fieldObj.options = p.options.slice();
     } else if (p.key === 'size' && typeof p.default === 'string') {
       fieldObj.options = [p.default];
+    }
+    if ((uiKey === 'ratio' || uiKey === 'aspect_ratio') && Array.isArray(fieldObj.options) && fieldObj.options.includes('9:16')) {
+      if (!fieldObj.default || fieldObj.default === '1:1') {
+        fieldObj.default = '9:16';
+      }
+      const idx916 = fieldObj.options.indexOf('9:16');
+      if (idx916 > 0) {
+        fieldObj.options.splice(idx916, 1);
+        fieldObj.options.unshift('9:16');
+      }
+    }
+    if ((uiKey === 'resolution' || p.key === 'resolution') && Array.isArray(fieldObj.options)) {
+      try {
+        const { getStudioDefaultSettings } = require('./studio-defaults');
+        const sDef = getStudioDefaultSettings(db);
+        const targetRes = sDef?.params?.video_resolution;
+        if (targetRes && fieldObj.options.includes(targetRes)) {
+          fieldObj.default = targetRes;
+        }
+      } catch (_) {}
     }
     if (p.min !== undefined) fieldObj.min = p.min;
     if (p.max !== undefined) fieldObj.max = p.max;
@@ -3004,7 +3349,7 @@ function getUnifiedSchemasMap(db, opts = {}) {
   for (const c of contracts) {
     if (!c || !c.id) continue;
     if (GATEWAY_TEXT_NAMES.has(c.id)) continue;
-    map[c.id] = buildSchemaForContract(c);
+    map[c.id] = buildSchemaForContract(c, db);
   }
   if (map.seedream5flash) map.seedream_portrait = map.seedream5flash;
   if (map.agnes_image_2_5_flash) map.agnes_portrait_2_5 = map.agnes_image_2_5_flash;
@@ -3014,7 +3359,7 @@ function getUnifiedSchemasMap(db, opts = {}) {
 
 /** 契约被改写后必须丢弃缓存，否则 30s 内仍返回旧 schema */
 function invalidateUnifiedSchemasMap(db) {
-  _schemaMapCache.delete(db || _NULL_DB_KEY);
+  _schemaMapCache.clear();
 }
 
 const MODEL_SCHEMAS = new Proxy({}, {

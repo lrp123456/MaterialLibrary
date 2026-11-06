@@ -106,6 +106,14 @@ function git(args, cwd = ROOT) {
     cwd,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'ignore'],
+    timeout: 3500,
+    windowsHide: true,
+    windowsVerbatimArguments: true,
+    env: {
+      ...process.env,
+      GIT_TERMINAL_PROMPT: '0',
+      GIT_OPTIONAL_LOCKS: '0',
+    },
   }).trim();
 }
 function gitSafe(args, cwd = ROOT) {
@@ -122,8 +130,11 @@ function gitOut(args, cwd = ROOT) {
 }
 function ensureDir(p) { fs.mkdirSync(p, { recursive: true }); }
 
+let _wtsCache = { at: 0, list: [] };
 /** 解析 git worktree 列表 → [{ path, branch, head }] */
-function listWorktrees() {
+function listWorktrees(force = false) {
+  const now = Date.now();
+  if (!force && now - _wtsCache.at < 20000) return _wtsCache.list;
   const raw = gitSafe(['worktree', 'list', '--porcelain']);
   const out = [];
   for (const block of raw.split(/\r?\n\r?\n/)) {
@@ -136,6 +147,7 @@ function listWorktrees() {
     }
     if (item.path) out.push(item);
   }
+  _wtsCache = { at: now, list: out };
   return out;
 }
 
@@ -152,12 +164,19 @@ function laneBranch(lane) {
   return lane.branch || gitSafe(['rev-parse', '--abbrev-ref', 'HEAD']);
 }
 
+const _gitInfoCache = new Map();
 function gitInfo(cwd) {
+  const key = path.resolve(cwd).toLowerCase();
+  const now = Date.now();
+  const cached = _gitInfoCache.get(key);
+  if (cached && now - cached.at < 20000) return cached.info;
   const commit = gitSafe(['rev-parse', '--short', 'HEAD'], cwd);
   const subject = gitSafe(['log', '-1', '--format=%s'], cwd);
   const when = gitSafe(['log', '-1', '--format=%ci'], cwd);
   const dirty = gitSafe(['status', '--porcelain'], cwd).split(/\r?\n/).filter(Boolean).length;
-  return { commit, subject, when, dirty };
+  const info = { commit, subject, when, dirty };
+  _gitInfoCache.set(key, { at: now, info });
+  return info;
 }
 
 function portOpen(port, host = '127.0.0.1', timeout = 700) {
@@ -193,7 +212,7 @@ function readPid(file) {
 
 function killPid(pid) {
   try {
-    execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' });
+    execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
   } catch (_) {
     try { process.kill(pid); } catch (_) {}
   }
@@ -222,6 +241,7 @@ function pickNode() {
         stdio: 'ignore',
         timeout: 20000,
         env: { ...process.env, NODE_OPTIONS },
+        windowsHide: true,
       });
       return exe;
     } catch (_) {}
@@ -342,7 +362,7 @@ function prepare(lane) {
       : ['-c', 'core.longpaths=true', 'worktree', 'add', '-b', lane.branch, wtPath, laneBranch(LANES.prod)];
     log(`创建 worktree：${wtPath}（分支 ${lane.branch}）`);
     try {
-      execFileSync('git', args, { cwd: ROOT, stdio: 'inherit' });
+      execFileSync('git', args, { cwd: ROOT, stdio: 'inherit', windowsHide: true });
     } catch (e) {
       fail(`worktree 创建失败：${e.message}`);
     }
@@ -713,6 +733,7 @@ async function promote(lane, { dryRun = false, force = false } = {}) {
       execFileSync('git', ['merge', '--no-ff', lane.branch, '-m', `merge(${lane.branch}): 同步分支测试通道验证通过的改动`], {
         cwd: target.worktree,
         stdio: 'inherit',
+        windowsHide: true,
       });
     } catch (e) {
       warn('合并失败，工作树保持冲突状态；解决后 git add + git commit，或 git merge --abort 放弃');
@@ -752,6 +773,7 @@ async function restartProd() {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 20000,
+      windowsHide: true,
     }).trim();
   } catch (e) {
     return { mode: 'unavailable', error: `wslpath 失败：${e.message}` };
@@ -761,7 +783,7 @@ async function restartProd() {
     execFileSync(
       wsl,
       ['-d', WSL_DISTRO, '-e', 'bash', '-lc', `bash '${wslProject}/start.sh' restart`],
-      { cwd: ROOT, stdio: 'inherit', timeout: 180000 }
+      { cwd: ROOT, stdio: 'inherit', timeout: 180000, windowsHide: true }
     );
   } catch (e) {
     return { mode: 'failed', error: `start.sh restart 失败：${e.message}` };

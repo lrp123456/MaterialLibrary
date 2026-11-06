@@ -8,7 +8,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const net = require('net');
-const { spawn, exec, execFileSync } = require('child_process');
+const { spawn, exec, execFileSync, spawnSync } = require('child_process');
 
 const PORT = Number(process.env.HUB_PORT || 3790);
 const ROOT = path.resolve(__dirname, '..'); // MaterialLibraryServer
@@ -17,6 +17,7 @@ const ROOT = path.resolve(__dirname, '..'); // MaterialLibraryServer
 const mlsCtl = require(path.join(ROOT, 'scripts', 'mls-ctl'));
 const wslLib = require(path.join(ROOT, 'scripts', 'mls', 'lib', 'wsl'));
 const bcLib = require(path.join(ROOT, 'scripts', 'branch-channel'));
+const runtimeLog = require('./lib/runtime-log');
 
 function json(res, code, obj) {
   // SEC-004：不再下发 Access-Control-Allow-Origin:*。总控面板只被同源页面使用，
@@ -136,6 +137,103 @@ const SERVICES = [
 const children = new Map(); // id -> ChildProcess
 const LOG_DIR = path.join(__dirname, 'logs');
 fs.mkdirSync(LOG_DIR, { recursive: true });
+
+const APP_PACKAGE = process.env.ML_APP_PACKAGE || 'lrp.aibum';
+const FAULT_DIR_UNC = path.join(wslLib.PROD_DATA_UNC, 'faults');
+
+function findAdb() {
+  const cands = [
+    process.env.ADB,
+    process.env.LOCALAPPDATA
+      ? path.join(process.env.LOCALAPPDATA, 'Android', 'Sdk', 'platform-tools', 'adb.exe')
+      : '',
+    'C:\\Users\\lrp\\Downloads\\HBuilderX\\plugins\\launcher-tools\\tools\\adbs\\adb.exe',
+    'C:\\Users\\lrp\\Downloads\\scrcpy-win64-v3.3.4\\adb.exe',
+  ].filter(Boolean);
+  for (const c of cands) {
+    if (fs.existsSync(c)) return c;
+  }
+  return 'adb';
+}
+const ADB = findAdb();
+
+let adbCache = { at: 0, devices: [], error: '' };
+function adbDevices() {
+  const now = Date.now();
+  if (now - adbCache.at < 4000) return adbCache;
+  let devices = [];
+  let error = '';
+  try {
+    const r = spawnSync(ADB, ['devices', '-l'], {
+      encoding: 'utf8',
+      timeout: 4000,
+      windowsHide: true,
+    });
+    if (r.error) error = r.error.message;
+    else devices = runtimeLog.parseAdbDevices((r.stdout || '') + '\n' + (r.stderr || ''));
+    if (!devices.length && !error) error = '没有处于 device 状态的 adb 设备';
+  } catch (e) {
+    error = e.message || String(e);
+  }
+  adbCache = { at: now, devices, error };
+  return adbCache;
+}
+
+const appLog = { proc: null, serial: '', lines: [], seq: 0, lastRead: 0, note: '' };
+function stopAppLog() {
+  if (appLog.proc) {
+    try { appLog.proc.kill(); } catch (_) {}
+    appLog.proc = null;
+  }
+}
+function ensureAppLog() {
+  appLog.lastRead = Date.now();
+  if (appLog.proc && appLog.proc.exitCode == null) return;
+  const snap = adbDevices();
+  if (!snap.devices.length) {
+    appLog.note = snap.error || '没有 adb 设备';
+    appLog.serial = '';
+    return;
+  }
+  const serial = snap.devices[0];
+  appLog.serial = serial;
+  appLog.note = snap.devices.length > 1
+    ? `使用 ${serial}（共 ${snap.devices.length} 台，包名 ${APP_PACKAGE}）`
+    : `${serial} · ${APP_PACKAGE}`;
+  let proc;
+  try {
+    proc = spawn(ADB, ['-s', serial, 'logcat', '-v', 'time'], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (e) {
+    appLog.note = 'adb logcat 启动失败：' + e.message;
+    return;
+  }
+  appLog.proc = proc;
+  const onChunk = (buf) => {
+    const text = buf.toString('utf8');
+    for (const line of text.split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      if (!runtimeLog.lineMatchesApp(line)) continue;
+      appLog.seq += 1;
+      appLog.lines.push({ seq: appLog.seq, line });
+      if (appLog.lines.length > 800) appLog.lines.splice(0, appLog.lines.length - 800);
+    }
+  };
+  proc.stdout.on('data', onChunk);
+  proc.stderr.on('data', onChunk);
+  proc.on('exit', () => {
+    if (appLog.proc === proc) appLog.proc = null;
+  });
+}
+setInterval(() => {
+  if (appLog.proc && Date.now() - appLog.lastRead > 20000) stopAppLog();
+}, 5000).unref();
+
+function runtimeFile(source) {
+  if (source === 'server') return path.join(wslLib.PROD_DATA_UNC, 'server.log');
+  if (source === 'web') return path.join(wslLib.PROD_DATA_UNC, 'webpro.log');
+  if (source === 'clip') return path.join(LOG_DIR, 'clip-editor.log');
+  return '';
+}
 
 /* ── 长任务运行器：prod 启停 / test 通道构建 / promote 都可能跑几十秒到几分钟，
    不能阻塞事件循环，统一异步起子进程，前端按 jobId 轮询输出。 ────────────── */
@@ -276,6 +374,7 @@ function pickNodeFor(root) {
         stdio: ['ignore', 'ignore', 'pipe'],
         encoding: 'utf8',
         timeout: 20000,
+        windowsHide: true,
       });
       _pickCache = { exe, reason: tried.length ? '跳过 ' + tried.join('、') : '首个候选即可用' };
       console.error(`[service-hub] 可用 node: ${exe}（${_pickCache.reason}）`);
@@ -471,7 +570,7 @@ function stopService(svc) {
   const c0 = children.get(svc.id);
   if (c0 && c0.exitCode == null) {
     return new Promise((resolve) => {
-      exec(`taskkill /PID ${c0.pid} /T /F`, (err, so) => {
+      exec(`taskkill /PID ${c0.pid} /T /F`, { windowsHide: true }, (err, so) => {
         children.delete(svc.id);
         resolve(
           err
@@ -489,6 +588,7 @@ function stopService(svc) {
     return new Promise((resolve) => {
       exec(
         `powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort ${svc.port} -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }"`,
+        { windowsHide: true },
         (err, so) => {
           const n = (String(so || '').match(/\d+/g) || []).length;
           resolve(
@@ -608,7 +708,7 @@ const server = http.createServer(async (req, res) => {
     const steps = [];
 
     const run = (label, cmd, args, opts) => new Promise((resolve) => {
-      const child = spawn(cmd, args, { cwd: opts.cwd, env: { ...process.env, ...opts.env }, shell: false });
+      const child = spawn(cmd, args, { cwd: opts.cwd, env: { ...process.env, ...opts.env }, shell: false, windowsHide: true });
       let out = '';
       child.stdout.on('data', (c) => { out += c; });
       child.stderr.on('data', (c) => { out += c; });
@@ -655,7 +755,13 @@ const server = http.createServer(async (req, res) => {
   // ── B2：「通道与发布」标签页的统一数据源（与 CLI 完全同源）─────────────────
   if (p === '/api/mls/status' && req.method === 'GET') {
     try {
+      const now = Date.now();
+      if (global._mlsStatusCache && (now - global._mlsStatusCacheAt < 4000)) {
+        return json(res, 200, { ok: true, status: global._mlsStatusCache });
+      }
       const status = await mlsCtl.gather();
+      global._mlsStatusCache = status;
+      global._mlsStatusCacheAt = now;
       return json(res, 200, { ok: true, status });
     } catch (e) {
       return json(res, 500, { ok: false, error: e.message });
@@ -755,6 +861,67 @@ const server = http.createServer(async (req, res) => {
     } catch (e) {
       return json(res, 500, { ok: false, error: '契约清单解析失败：' + e.message });
     }
+  }
+
+  if (p === '/api/runtime/faults' && req.method === 'GET') {
+    let faults = [];
+    let faultError = '';
+    try {
+      faults = runtimeLog.readFaultDir(FAULT_DIR_UNC);
+    } catch (e) {
+      faultError = e.message || String(e);
+    }
+    const adb = adbDevices();
+    const sources = [
+      { id: 'server', label: '服务端', port: 30001, up: await portOpen(30001) },
+      { id: 'web', label: 'Web', port: 30002, up: await portOpen(30002) },
+      { id: 'clip', label: '剪辑', port: 3010, up: await portOpen(3010) },
+      {
+        id: 'app',
+        label: 'App',
+        port: null,
+        up: adb.devices.length > 0,
+        device: adb.devices[0] || '',
+        note: adb.devices.length ? '' : (adb.error || '没有 adb 设备'),
+      },
+    ];
+    return json(res, 200, { ok: true, faults, sources, faultError });
+  }
+
+  if (p === '/api/runtime/tail' && req.method === 'GET') {
+    const source = url.searchParams.get('source') || '';
+    const hasCursor = url.searchParams.has('cursor');
+    const cursor = hasCursor ? url.searchParams.get('cursor') : null;
+    if (source === 'app') {
+      ensureAppLog();
+      const from = cursor == null || cursor === '' ? null : Number(cursor);
+      const fresh = from == null || !Number.isFinite(from);
+      const picked = fresh
+        ? appLog.lines.slice(-80)
+        : appLog.lines.filter((row) => row.seq > from);
+      const text = picked.map((row) => row.line).join('\n') + (picked.length ? '\n' : '');
+      const next = picked.length ? picked[picked.length - 1].seq : (Number.isFinite(from) ? from : appLog.seq);
+      return json(res, 200, {
+        ok: true,
+        text,
+        next,
+        note: appLog.note,
+        fatals: runtimeLog.scanFatals('app', text),
+      });
+    }
+    const file = runtimeFile(source);
+    if (!file) return json(res, 400, { ok: false, error: '未知日志源：' + source });
+    const r = runtimeLog.readTail(file, cursor);
+    if (!r.ok) {
+      return json(res, 200, { ok: true, text: '', next: 0, note: r.error || '日志不可读', fatals: [] });
+    }
+    return json(res, 200, {
+      ok: true,
+      text: r.text,
+      next: r.next,
+      size: r.size,
+      fatals: runtimeLog.scanFatals(source, r.text),
+    });
   }
 
   json(res, 404, { ok: false, error: 'not found' });

@@ -8,6 +8,7 @@
       @update:activeTab="onTabChange"
       @update:libraryLane="libraryLane = $event"
       @logout="handleLogout"
+      @back="handleGlobalBack"
     />
 
     <!-- 核心四大板块工作区 (完全解耦独立的专业视口架构) -->
@@ -136,10 +137,11 @@
 </template>
 
 <script setup>
-import { ref, computed, h, onMounted, onUnmounted, onErrorCaptured, defineAsyncComponent } from 'vue';
+import { ref, computed, h, onMounted, onUnmounted, onErrorCaptured, defineAsyncComponent, watch } from 'vue';
 import TopNav from './components/TopNav.vue';
 import LoginModal from './components/LoginModal.vue';
 import { getCurrentUser, logout, verifySession } from './api.js';
+import { closeTop, hasOverlays } from './service/overlay-stack.js';
 
 // 路由级（板块级）懒加载：四大视图各自独立 chunk，首屏只载素材库所需代码。
 // 异步块加载失败会被 onErrorCaptured / 全局 error 捕获并引导刷新，见下方崩溃屏障。
@@ -304,8 +306,58 @@ function reloadForUpdate() {
   window.location.href = u.toString();
 }
 
+// ===== 统一返回入口 =====
+// 这个 SPA 没有 router，板块切换只靠 activeTab。用一条轻量 tab 历史记录「上一页」，
+// 浮层栈为空时才消费它；浮层非空一律先关最上层弹窗/抽屉。
+const tabHistory = ref(['library']);
+let suppressingHistory = false;
+const MAX_TAB_HISTORY = 20;
+
+watch(activeTab, (tab, prev) => {
+  if (suppressingHistory || !tab || tab === prev) return;
+  if (tabHistory.value[tabHistory.value.length - 1] === tab) return;
+  tabHistory.value.push(tab);
+  if (tabHistory.value.length > MAX_TAB_HISTORY) tabHistory.value.shift();
+}, { flush: 'sync' });
+
 function onTabChange(tab) {
   activeTab.value = tab;
+}
+
+function handleGlobalBack() {
+  // 1. 只关最上层一个浮层；连续点击才逐层关闭。
+  if (closeTop()) return;
+  // 2. 栈空才回退板块，没有上一页则回素材库。
+  if (tabHistory.value.length > 1) {
+    tabHistory.value.pop();
+    const target = tabHistory.value[tabHistory.value.length - 1] || 'library';
+    suppressingHistory = true;
+    activeTab.value = target;
+    suppressingHistory = false;
+  } else {
+    activeTab.value = 'library';
+  }
+}
+
+function onGlobalKeydown(e) {
+  if (e.key !== 'Escape' || !hasOverlays()) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  closeTop();
+}
+
+// 浏览器返回键：SPA 自身不产生历史条目，压一条哨兵记录把后退拦在页面内。
+function ensureBackSentinel() {
+  try {
+    if (!window.history.state || !window.history.state.mlsSentinel) {
+      window.history.pushState({ mlsSentinel: true }, '');
+    }
+  } catch (_) {}
+}
+
+function onPopState() {
+  handleGlobalBack();
+  ensureBackSentinel();
 }
 
 // 跨板块联动：素材库送入 AI 对话（支持多选批量：payload.items 为数组）
@@ -344,6 +396,10 @@ onMounted(() => {
   document.addEventListener('visibilitychange', onVisibilityChange);
   window.addEventListener('unhandledrejection', handleGlobalChunkError);
   window.addEventListener('error', handleGlobalChunkError);
+  // 统一返回入口：ESC 走 capture，先于各组件自己的 keydown 监听执行。
+  ensureBackSentinel();
+  window.addEventListener('popstate', onPopState);
+  window.addEventListener('keydown', onGlobalKeydown, true);
   updateTimer = setInterval(checkForUpdate, 5 * 60 * 1000);
   // 本地有没有 token 字符串不作数：新设备没 token 要登录，有 token 也得让服务端认账。
   // 两条都走 guardSession，区别只在登录框上那行原因。
@@ -355,6 +411,8 @@ onUnmounted(() => {
   document.removeEventListener('visibilitychange', onVisibilityChange);
   window.removeEventListener('unhandledrejection', handleGlobalChunkError);
   window.removeEventListener('error', handleGlobalChunkError);
+  window.removeEventListener('popstate', onPopState);
+  window.removeEventListener('keydown', onGlobalKeydown, true);
   if (updateTimer) clearInterval(updateTimer);
 });
 </script>

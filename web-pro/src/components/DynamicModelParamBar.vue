@@ -454,6 +454,7 @@ function onNumericChange(field, raw) {
   delete sliderDrag[field.key];
   commitNumeric(field, raw);
 }
+const onSliderChange = onNumericChange;
 function stepValue(field, dir) {
   const v = numericValue(field);
   const base = v == null ? Number(field.default ?? field.min) : v;

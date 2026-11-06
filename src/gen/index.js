@@ -21,6 +21,45 @@ function getNested(obj, pathStr) {
   return pathStr.split('.').reduce((acc, part) => (acc !== null && acc !== undefined ? acc[part] : undefined), obj);
 }
 
+/**
+ * GPT Image 2.5 VIP（老张 NewAPI / Firefly shell 逆向通道）的 size 归一化。
+ *
+ * 这条通道只认两种值：`auto` 或 `WxH` 像素串。前端参数条里的「分辨率档位」是
+ * 1K / 1.5K / 2K，视频板块还有 720p / 1080p / 720p_sr2x —— 这些档位一旦被原样透传，
+ * 上游会直接返回 HTTP 400 `invalid_request`（"The request was not accepted…"）。
+ * 实测：1.5K / 1080p / 720p_sr2x 必挂，1K / 2K / auto 侥幸通过（档位被忽略，出图尺寸不可控）。
+ *
+ * 因此这里统一折算成按画幅比例选定的安全像素，保证任何入参都不会再打到 400。
+ */
+const VIP_RATIO_SIZE = {
+  '9:16': '1024x1536',
+  '3:4': '1024x1536',
+  '2:3': '1024x1536',
+  '16:9': '1536x1024',
+  '4:3': '1536x1024',
+  '3:2': '1536x1024',
+  '21:9': '1536x1024',
+  '1:1': '1024x1024',
+};
+
+function normalizeVipSize(rawSize, ratio) {
+  const fallback = VIP_RATIO_SIZE[String(ratio || '').trim()] || VIP_RATIO_SIZE['1:1'];
+  const raw = rawSize == null ? '' : String(rawSize).trim();
+  if (!raw) return fallback;
+  if (/^auto$/i.test(raw)) return 'auto';
+
+  const px = raw.match(/^(\d{2,5})\s*[x×*]\s*(\d{2,5})$/);
+  if (px) {
+    // 通道实测可接受 1024x1024 / 1536x1024 / 1024x1536 / 1792x1024；把越界值夹到 512–2048
+    const w = Math.min(2048, Math.max(512, Number(px[1])));
+    const h = Math.min(2048, Math.max(512, Number(px[2])));
+    return `${w}x${h}`;
+  }
+
+  // 1K / 1.5K / 2K / 4K / 720p / 1080p / 720p_sr2x … 一律按画幅比例换算
+  return fallback;
+}
+
 function fillTemplate(tpl, vars) {
   if (typeof tpl === 'string') {
     let s = tpl;
@@ -529,7 +568,7 @@ async function executeAdapterInner(services, adapter, input) {
       } else {
         try {
           const uObj = new URL(s);
-          if (uObj.port === portStr || uObj.hostname === '127.0.0.1' || uObj.hostname === 'localhost') {
+          if (uObj.port === portStr || uObj.port === '30002' || uObj.hostname === '127.0.0.1' || uObj.hostname === 'localhost' || uObj.pathname.startsWith('/api/')) {
             fetchUrl = `http://127.0.0.1:${portStr}${uObj.pathname}${uObj.search}`;
           }
         } catch (e) {}
@@ -636,6 +675,9 @@ async function executeAdapterInner(services, adapter, input) {
     }
   }
 
+  // size 的默认值会掩盖「调用方到底传没传」：GPT Image VIP 分支必须知道原始意图，
+  // 契约没有分辨率档位的模型压根不该收到 size，此时按画幅比例算像素。
+  const rawSizeInput = input.size;
   const vars = {
     prompt: input.prompt || '',
     negativePrompt: input.negativePrompt || '',
@@ -928,8 +970,16 @@ async function executeAdapterInner(services, adapter, input) {
     const durationNum = Number(body.duration || inp.durationSec || v.duration);
     const out = { model: finalModel, content };
     if (ratio) out.ratio = ratio;
+    const resRaw = body.resolution || (inp && (inp.resolution || inp.size)) || v.resolution || v.size;
+    if (resRaw) {
+      let r = String(resRaw).toLowerCase();
+      if (r === '480p_sr2x') r = '480p';
+      else if (r === '720p_sr2x') r = '720p';
+      out.resolution = r;
+    }
     if (Number.isFinite(durationNum) && durationNum > 0) {
-      out.duration = Math.max(4, Math.min(12, Math.round(durationNum)));
+      const maxDur = String(finalModel).includes('2_5') || String(finalModel).includes('2.5') ? 30 : 15;
+      out.duration = Math.max(3, Math.min(maxDur, Math.round(durationNum)));
     }
     return out;
   }
@@ -1106,12 +1156,29 @@ async function executeAdapterInner(services, adapter, input) {
     if (Array.isArray(vars.image_urls)) vars.image_urls.forEach((u) => pushInline(u));
 
     const generationConfig = { responseModalities: ['TEXT', 'IMAGE'] };
-    const allowedRatios = ['1:1', '3:4', '4:3', '9:16', '16:9'];
-    if (allowedRatios.includes(vars.ratio)) {
-      generationConfig.imageConfig = { aspectRatio: vars.ratio };
+    const allowedRatios = ['1:1', '3:4', '4:3', '9:16', '16:9', '2:3', '3:2', '1:2', '2:1', '4:5', '5:4', '9:21', '21:9', '1:3', '3:1'];
+    const targetRatio = vars.ratio || '9:16';
+    generationConfig.imageConfig = {};
+    if (allowedRatios.includes(targetRatio)) {
+      generationConfig.imageConfig.aspectRatio = targetRatio;
+    }
+    const targetSize = String(vars.size || '').toUpperCase();
+    if (['1K', '2K', '4K'].includes(targetSize)) {
+      generationConfig.imageConfig.outputResolution = targetSize;
+    }
+    if (vars.thinking_level) {
+      generationConfig.thinkingConfig = { thinkingLevel: vars.thinking_level };
+    }
+    // 双保险：若比例非 1:1，在提示词末尾注入比例自然语言约束，确保网关与大模型严格遵循画幅
+    let finalPrompt = vars.prompt || '';
+    if (targetRatio && targetRatio !== '1:1' && !finalPrompt.includes(targetRatio)) {
+      finalPrompt = `${finalPrompt.trim()}\n[Aspect Ratio: ${targetRatio}]`;
+    }
+    if (targetSize && ['1K', '2K', '4K'].includes(targetSize) && !finalPrompt.includes(targetSize)) {
+      finalPrompt = `${finalPrompt.trim()}\n[Resolution: ${targetSize}]`;
     }
     const geminiBody = {
-      contents: [{ role: 'user', parts: [...inlineParts, { text: vars.prompt }] }],
+      contents: [{ role: 'user', parts: [...inlineParts, { text: finalPrompt }] }],
       generationConfig
     };
     const geminiRes = await fetchNet(reqUrl, {
@@ -1155,10 +1222,263 @@ async function executeAdapterInner(services, adapter, input) {
     return { ok: true, success: true, files: geminiFiles, raw: geminiData };
   }
 
-  // ---- 本地 QwenImage（ncnn-vulkan）----
-  // Agnes 的并行补充/降级通道。必须放在 http_json 之前独占分支：
-  // 它要 multipart/form-data + 异步轮询 + 从面板取产物，与通用协议都不同。
-  if (adapter.protocol === 'qwenimage_local') {
+  // ---- NewAPI / GPT Image 2.5 (Flare VIP / Sunburst VIP / Web) 图像生成 ----
+  if (adapter.protocol === 'newapi_gpt_image' || adapter.id === 'newapi_gpt_image') {
+
+    const rawModel = vars.model || cfg.defaultModel || 'gpt-image-2.5-flare-vip';
+    const isVip = rawModel.includes('flare') || rawModel.includes('sunburst') || rawModel.includes('vip');
+    const modelToUse = isVip
+      ? (rawModel.includes('sunburst') ? 'gpt-image-2.5-sunburst-vip' : 'gpt-image-2.5-flare-vip')
+      : 'gpt-image-2.5-web';
+
+    // 宽高比与清晰度自然语言注入
+    const targetRatio = vars.ratio || '9:16';
+    let finalPrompt = vars.prompt || '';
+    if (targetRatio && !finalPrompt.includes(targetRatio)) {
+      finalPrompt = `${finalPrompt.trim()}\n[Aspect Ratio: ${targetRatio}]`;
+    }
+
+    // 收集参考图（Vision 格式图生图 / image_url）
+    const inlineImages = [];
+    const pushImg = (raw) => {
+      if (!raw) return;
+      const s = String(raw).trim();
+      if (!s) return;
+      if (s.startsWith('data:image/')) {
+        inlineImages.push(s);
+        return;
+      }
+      if (s.length > 200 && !s.includes('\n')) {
+        inlineImages.push(`data:image/png;base64,${s}`);
+        return;
+      }
+    };
+    pushImg(vars.image_data_url);
+    pushImg(vars.image_b64);
+    if (Array.isArray(vars.extra_image_data_urls)) vars.extra_image_data_urls.forEach(pushImg);
+    if (Array.isArray(vars.image_urls)) vars.image_urls.forEach(pushImg);
+    if (Array.isArray(vars.imageLocalPaths)) {
+      vars.imageLocalPaths.forEach((lp) => {
+        try {
+          if (fs.existsSync(lp)) {
+            const buf = fs.readFileSync(lp);
+            inlineImages.push(`data:image/png;base64,${buf.toString('base64')}`);
+          }
+        } catch (_) {}
+      });
+    }
+
+    let imgBuf = null;
+    let rawResponse = null;
+
+    if (isVip) {
+      // ===== 老张 VIP 模型分支 (POST /v1/images/generations) =====
+      const reqUrl = resolveUrl(baseUrl, '/images/generations');
+      // extras 里的 size 是参数条上的真实选择（仅当契约声明了 size 字段时才有），优先于顶层 input.size
+      const sizeIntent = (input.extras && input.extras.size != null && input.extras.size !== '')
+        ? input.extras.size
+        : rawSizeInput;
+      const size = normalizeVipSize(sizeIntent, targetRatio);
+
+      if (!String(finalPrompt || '').trim()) {
+        throw new Error('GPT Image VIP 需要提示词：这个通道不支持「只挂参考图不打字」，请补一句画面描述再生成');
+      }
+
+      const vipBody = {
+        model: modelToUse,
+        prompt: finalPrompt,
+        size,
+        quality: vars.quality || 'high',
+        background: vars.background || 'auto',
+        // 不指定 response_format：通道默认回 b64_json，少一次 pre-signed S3 下载就少一个失败点
+        // （之前固定 url，偶发把「下载产物图」的错误算成了「图像生成失败」）
+        num_images: 1
+      };
+
+      if (inlineImages.length > 0) {
+        vipBody.image_url = inlineImages[0];
+      }
+
+      // 上游是老张的 Firefly shell 账号池，同参数会出现「一段时间连续 400、隔一阵又恢复」。
+      // 实测 2026-11-06：04:49 成功 → 04:52–05:00 连续 8 次同参数 400 → 06:57 同参数成功，
+      // 所以这类拒绝不一定是我们的参数错。仅对「网关秒拒」（<8s 就回 400）做一次退避重试，
+      // 上游真跑了 20s 才拒绝的不重试（再跑大概率还是拒，白等几分钟还占额度）。
+      let vipRes = null;
+      let vipText = '';
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        const t0 = Date.now();
+        try {
+          vipRes = await fetchNet(reqUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(vipBody)
+          }, { timeoutMs, what: `GPT Image VIP 图像生成 (${modelToUse})`, retryOn: isPreSendError, onRetry: logNetRetry });
+        } catch (e) {
+          noteVendorOutcome(input, false, e.message || '');
+          throw enrichFetchError(e, 'GPT Image VIP 图像生成网络请求失败');
+        }
+        vipText = await vipRes.text().catch(() => '');
+        if (vipRes.ok) break;
+
+        const elapsed = Date.now() - t0;
+        const deterministic = /prompt is required|invalid size|unsupported/i.test(vipText);
+        if (deterministic || attempt === 2 || elapsed > 8000) break;
+        console.warn(`[gen] GPT Image VIP 网关秒拒 HTTP ${vipRes.status}（${elapsed}ms），5s 后重试一次`);
+        await new Promise((r) => setTimeout(r, 5000));
+      }
+
+      if (!vipRes || !vipRes.ok) {
+        noteVendorOutcome(input, false, vipText);
+        const sent = {
+          model: modelToUse,
+          size,
+          rawSize: sizeIntent == null || sizeIntent === '' ? null : sizeIntent,
+          ratio: targetRatio,
+          promptChars: String(finalPrompt || '').length,
+          refImages: inlineImages.length,
+          quality: vipBody.quality,
+          background: vipBody.background,
+        };
+        const hint = vipRes && vipRes.status === 400
+          ? '（上游账号池临时拒绝：同参数换时间通常能成功，可隔几分钟重试，或临时改用其它图像模型）'
+          : '';
+        throw new Error(`GPT Image VIP 图像生成失败 HTTP ${vipRes ? vipRes.status : '?'}: ${String(vipText).slice(0, 300)}${hint}｜实际请求参数 ${JSON.stringify(sent)}`);
+      }
+
+      noteVendorOutcome(input, true);
+      const data = JSON.parse(vipText);
+      rawResponse = data;
+      const firstItem = data.data?.[0];
+      if (!firstItem) {
+        throw new Error('GPT Image VIP 返回缺少 data 列表: ' + vipText.slice(0, 200));
+      }
+
+      if (firstItem.b64_json) {
+        imgBuf = Buffer.from(firstItem.b64_json, 'base64');
+      } else if (firstItem.url) {
+        const dlRes = await fetchNet(firstItem.url, {}, { timeoutMs: 60000, what: '下载 VIP 产物图' });
+        imgBuf = Buffer.from(await dlRes.arrayBuffer());
+      } else {
+        throw new Error('GPT Image VIP 响应中既无 b64_json 也无 url: ' + vipText.slice(0, 200));
+      }
+    } else {
+      // ===== Web 逆向通道分支 (POST /v1/chat/completions) =====
+      let userContent;
+      if (inlineImages.length > 0) {
+        userContent = [{ type: 'text', text: finalPrompt }];
+        for (const dUrl of inlineImages) {
+          userContent.push({
+            type: 'image_url',
+            image_url: { url: dUrl }
+          });
+        }
+      } else {
+        userContent = finalPrompt;
+      }
+
+      const reqUrl = resolveUrl(baseUrl, '/chat/completions');
+      // 只有方形 / 纵向 / 横向三类可映射，之前 4:3、3:4、21:9 全落到 square_hd，画幅会被悄悄改成正方形
+      const webImageSize = ['9:16', '3:4', '2:3', '4:5'].includes(targetRatio)
+        ? 'portrait_16_9'
+        : (['16:9', '4:3', '3:2', '21:9'].includes(targetRatio) ? 'landscape_16_9' : 'square_hd');
+      const gptBody = {
+        model: modelToUse,
+        messages: [{ role: 'user', content: userContent }],
+        image_size: webImageSize,
+        quality: vars.quality || 'high',
+        background: vars.background || 'auto',
+        num_images: 1,
+        output_format: 'png'
+      };
+
+      let gptRes;
+      try {
+        gptRes = await fetchNet(reqUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(gptBody)
+        }, { timeoutMs, what: `GPT Image Web 图像生成 (${modelToUse})`, retryOn: isPreSendError, onRetry: logNetRetry });
+      } catch (e) {
+        noteVendorOutcome(input, false, e.message || '');
+        throw enrichFetchError(e, 'GPT 图像生成网络请求失败');
+      }
+
+      const gptText = await gptRes.text().catch(() => '');
+      if (!gptRes.ok) {
+        noteVendorOutcome(input, false, gptText);
+        throw new Error(`GPT 图像生成失败 HTTP ${gptRes.status}: ${gptText.slice(0, 300)}`);
+      }
+
+      noteVendorOutcome(input, true);
+      const data = JSON.parse(gptText);
+      rawResponse = data;
+      const content = data.choices?.[0]?.message?.content || '';
+      if (!content) {
+        throw new Error('GPT 图像生成响应 content 为空: ' + gptText.slice(0, 200));
+      }
+
+      if (content.startsWith('iVBORw0KGgo') || /^[A-Za-z0-9+/=]{100,}$/.test(content.slice(0, 500).trim())) {
+        imgBuf = Buffer.from(content.trim(), 'base64');
+      } else {
+        const mDataUrl = content.match(/data:image\/([a-zA-Z]+);base64,([A-Za-z0-9+/=]+)/);
+        if (mDataUrl) {
+          imgBuf = Buffer.from(mDataUrl[2], 'base64');
+        } else {
+          const mUrl = content.match(/https?:\/\/[^\s\)\"\']+/);
+          if (mUrl) {
+            const dlRes = await fetchNet(mUrl[0], { headers }, { timeoutMs: 60000, what: '下载产物图' });
+            imgBuf = Buffer.from(await dlRes.arrayBuffer());
+          } else {
+            throw new Error('未能在 GPT Image 返回中解析出有效图像数据: ' + content.slice(0, 300));
+          }
+        }
+      }
+    }
+
+    // 上游（Firefly shell 通道）完全忽略 output_format：参数条选 jpeg / webp 也一律回 PNG（已实测）。
+    // 要让「输出格式」真的生效，只能本地转码；转不动就老实回退 PNG，别把错扩展名写进缓存。
+    const wantFormat = String(vars.output_format || 'png').toLowerCase();
+    const targetExt = (wantFormat === 'jpeg' || wantFormat === 'jpg')
+      ? 'jpg'
+      : (wantFormat === 'webp' ? 'webp' : 'png');
+    let finalBuf = imgBuf;
+    if (targetExt !== 'png') {
+      try {
+        const encoder = targetExt === 'jpg' ? 'jpeg' : 'webp';
+        finalBuf = await sharp(imgBuf)[encoder](targetExt === 'jpg' ? { quality: 92, mozjpeg: true } : { quality: 92 }).toBuffer();
+      } catch (e) {
+        console.warn(`[gen] output_format=${wantFormat} 本地转码失败，回退 PNG: ${e.message}`);
+        finalBuf = imgBuf;
+      }
+    }
+    const realExt = finalBuf === imgBuf ? 'png' : targetExt;
+
+    const outFileName = `gen_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.${realExt}`;
+    const outPath = path.join(tempDir, outFileName);
+    fs.writeFileSync(outPath, finalBuf);
+
+    let meta = { mime: 'image/png' };
+    try {
+      const info = await sharp(outPath).metadata();
+      const fmt = info.format;
+      meta = {
+        width: info.width,
+        height: info.height,
+        mime: fmt === 'jpeg' ? 'image/jpeg' : (fmt === 'webp' ? 'image/webp' : 'image/png'),
+      };
+    } catch {}
+
+    const previewUrl = `/api/cache/temp/${outFileName}`;
+    return {
+      ok: true,
+      success: true,
+      files: [{ localPath: outPath, previewUrl, mime: meta.mime, width: meta.width, height: meta.height }],
+      model: modelToUse,
+      raw: rawResponse
+    };
+  }
+
+    if (adapter.protocol === 'qwenimage_local') {
     const qwenLocal = require('./qwenimage-local');
     return qwenLocal.runImageJob(services, adapter, input);
   }
@@ -1249,6 +1569,7 @@ async function executeAdapterInner(services, adapter, input) {
     const pollUrlTemplate = cfg.pollPathTemplate || '/v1/tasks/{{taskId}}';
 
     let pollNetFailures = 0;
+    let lastPollErr = null;
     while (Date.now() - startTime < timeoutMs) {
       await new Promise(r => setTimeout(r, pollInterval));
       const pollUrl = resolvePollUrl(baseUrl, pollUrlTemplate, vars, taskId);

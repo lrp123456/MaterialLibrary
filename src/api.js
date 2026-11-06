@@ -46,6 +46,7 @@ const {
 const mediaTools = require('./media-tools');
 const studioPresets = require('./studio-presets');
 const menuTree = require('./menu-tree');
+const studioAcl = require('./studio-acl');
 
 // B6：上传体积上限（与 stream-upload 共享同一环境变量约定，默认 2GB）
 function resolveMlMaxUploadBytes() {
@@ -69,6 +70,29 @@ function schemaCheckedOnce(db, key) {
   return false;
 }
 
+// 需求1/2 新增列的懒兜底：migrate 正常会在启动时补齐，这里防御「懒建表 / 旧库直连」场景。
+function ensureIsolationSchema(db) {
+  if (schemaCheckedOnce(db, 'isolation_v1')) return;
+  try { db.exec('ALTER TABLE users ADD COLUMN allow_all_models INTEGER DEFAULT 0;'); } catch (e) {}
+  try { db.exec('ALTER TABLE chat_sessions ADD COLUMN params_json TEXT;'); } catch (e) {}
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN builtin INTEGER DEFAULT 0;'); } catch (e) {}
+  try { db.exec('ALTER TABLE presets ADD COLUMN user_id INTEGER DEFAULT 0;'); } catch (e) {}
+  // studio_presets 可能由 studio-presets.js 懒创建，先兜底建表（含新列）再补列
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS studio_presets (
+      id TEXT PRIMARY KEY, title TEXT NOT NULL, prompt TEXT NOT NULL,
+      negative_prompt TEXT DEFAULT '', aspect_ratio TEXT DEFAULT '16:9',
+      category TEXT DEFAULT 'general', tags_json TEXT DEFAULT '[]', model TEXT DEFAULT '',
+      user_id INTEGER DEFAULT 0, builtin INTEGER DEFAULT 1,
+      created_at INTEGER, updated_at INTEGER);`);
+  } catch (e) {}
+  try { db.exec('ALTER TABLE studio_presets ADD COLUMN user_id INTEGER DEFAULT 0;'); } catch (e) {}
+  try { db.exec('ALTER TABLE studio_presets ADD COLUMN builtin INTEGER DEFAULT 0;'); } catch (e) {}
+  // 测试账号固定拥有全模型可见权限（需求 2：白名单之外的模型仅测试用户可用）。
+  // 放在启动兜底里，避免 migrate 未跑到的旧库/灰测通道漏配。
+  try { db.exec("UPDATE users SET allow_all_models=1 WHERE username='naite_test_user';"); } catch (e) {}
+}
+
 const MIME = {
   '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
@@ -77,37 +101,108 @@ const MIME = {
 };
 
 function sendJson(res, status, data) {
-  const body = Buffer.from(JSON.stringify(data));
+  let body;
+  try {
+    body = Buffer.from(JSON.stringify(data));
+  } catch (err) {
+    body = Buffer.from(JSON.stringify({ error: 'JSON序列化失败: ' + err.message }));
+    status = 500;
+  }
   const headers = { 'Content-Type': 'application/json; charset=utf-8' };
   const req = res.req;
   const accept = req ? String(req.headers['accept-encoding'] || '') : '';
-  if (body.length >= 1024 && /\bgzip\b/.test(accept)) {
-    const gz = zlib.gzipSync(body);
-    headers['Content-Encoding'] = 'gzip';
-    headers['Content-Length'] = gz.length;
-    headers.Vary = 'Accept-Encoding';
-    res.writeHead(status, headers);
-    res.end(gz);
+  // 1KB ~ 5MB 之间走异步 gzip，避免在主线程 gzipSync 阻塞事件循环；超大 JSON 跳过压缩防内存尖刺
+  if (body.length >= 1024 && body.length <= 5 * 1024 * 1024 && /\bgzip\b/.test(accept)) {
+    zlib.gzip(body, (err, gz) => {
+      if (res.destroyed || res.writableEnded) return;
+      if (err || !gz) {
+        headers['Content-Length'] = body.length;
+        endJsonBody(res, status, headers, body);
+        return;
+      }
+      headers['Content-Encoding'] = 'gzip';
+      headers['Content-Length'] = gz.length;
+      headers.Vary = 'Accept-Encoding';
+      endJsonBody(res, status, headers, gz);
+    });
     return;
   }
   headers['Content-Length'] = body.length;
-  res.writeHead(status, headers);
-  res.end(body);
+  endJsonBody(res, status, headers, body);
+}
+
+function endJsonBody(res, status, headers, body) {
+  try {
+    if (res.destroyed || res.writableEnded) return;
+    if (!res.headersSent) res.writeHead(status, headers);
+    res.end(body);
+  } catch (_) {}
+}
+
+function pipeFileStream(req, res, filePath, contentType, disp, cacheControl) {
+  let stat;
+  try {
+    stat = fs.statSync(filePath);
+  } catch (_) {
+    if (!res.headersSent) sendJson(res, 404, { error: '文件读取失败' });
+    return;
+  }
+  if (!stat.isFile()) {
+    if (!res.headersSent) sendJson(res, 404, { error: '文件读取失败' });
+    return;
+  }
+  const headers = {
+    'Content-Type': contentType,
+    'Content-Length': stat.size,
+    'Cache-Control': cacheControl || 'public, max-age=86400'
+  };
+  if (disp) headers['Content-Disposition'] = disp;
+  res.writeHead(200, headers);
+  if (req.method === 'HEAD') return res.end();
+  const stream = fs.createReadStream(filePath);
+  const destroyStream = () => {
+    if (!stream.destroyed) {
+      try { stream.destroy(); } catch (_) {}
+    }
+  };
+  // GET 的 req close 表示请求体已收完，不能在那里拆流。
+  // 只在响应未写完时（客户端中断）销毁读流。
+  res.on('close', () => {
+    if (!res.writableFinished) destroyStream();
+  });
+  stream.on('error', () => {
+    destroyStream();
+    if (!res.headersSent) {
+      try {
+        res.writeHead(500);
+        res.end();
+      } catch (_) {}
+    } else if (!res.writableEnded) {
+      try { res.destroy(); } catch (_) {}
+    }
+  });
+  return stream.pipe(res);
 }
 
 // 创作目录/Schema 契约体量大且极少变动，短 TTL 缓存避免每次请求重建 schema map
 const STUDIO_CATALOG_TTL_MS = 60 * 1000;
-let _studioCatalogCache = null;
-function getStudioCatalogCache(db) {
-  if (!_studioCatalogCache) return null;
-  if (Date.now() - _studioCatalogCache.at > STUDIO_CATALOG_TTL_MS) {
-    _studioCatalogCache = null;
+// 按 ACL 分桶缓存：/studio/catalog 在免登录白名单内，必须留 anon 桶；
+// allow_all_models 变化会切换桶，避免把全量目录泄漏给普通账号。
+const _studioCatalogCache = new Map();
+function studioCatalogAclKey(sessionUser) {
+  return (sessionUser?.id || 'anon') + ':' + (Number(sessionUser?.allow_all_models) === 1 ? 1 : 0);
+}
+function getStudioCatalogCache(db, aclKey) {
+  const hit = _studioCatalogCache.get(aclKey);
+  if (!hit) return null;
+  if (Date.now() - hit.at > STUDIO_CATALOG_TTL_MS) {
+    _studioCatalogCache.delete(aclKey);
     return null;
   }
-  return _studioCatalogCache.payload;
+  return hit.payload;
 }
-function setStudioCatalogCache(payload) {
-  _studioCatalogCache = { at: Date.now(), payload };
+function setStudioCatalogCache(aclKey, payload) {
+  _studioCatalogCache.set(aclKey, { at: Date.now(), payload });
 }
 
 /**
@@ -972,7 +1067,8 @@ function queryAssets(db, query = {}) {
            a.thumb_url, a.main_derivative_id, a.status, a.ready_flags,
            a.has_watermark, a.auth_state, COALESCE(a.created_at, a.discovered_at, 0) AS created_at,
            a.kind, a.is_ai, a.source_asset_id, a.poster_path, a.duration_s, a.size,
-           a.phash, a.md5, a.sha256, a.favorited_at, a.library_shelf
+           a.phash, a.md5, a.sha256, a.favorited_at, a.library_shelf,
+           a.parent_fid, a.lineage_json, a.dup_group_id
     FROM assets a
     WHERE ${whereSql}
     ORDER BY ${orderSql}
@@ -1196,6 +1292,71 @@ function serveFromTrash(services, fid, res) {
   });
   res.end(buf);
   return true;
+}
+
+/** 回收站里该 fid 的实际文件路径；不存在返回 null。 */
+function trashFilePath(services, fid) {
+  const { db, config } = services;
+  if (!config?.dataDir) return null;
+  let row = null;
+  try {
+    row = db.prepare('SELECT trash_rel FROM asset_trash WHERE fid=? ORDER BY id DESC LIMIT 1').get(fid);
+  } catch (_) { return null; }
+  if (!row?.trash_rel) return null;
+  const p = path.isAbsolute(row.trash_rel) ? row.trash_rel : path.join(config.dataDir, row.trash_rel);
+  return fs.existsSync(p) ? p : null;
+}
+
+/**
+ * 回收站图片回读（带档位缓存）。
+ *
+ * 列表需要 256px、详情需要 1280px，但软删后 derivatives 仍指向原路径，
+ * 常规缩略图链路会先 302 到失效的 thumb_url，导致 App 端整片空白。
+ * 这里直接从 dataDir/trash 读取原文件，按档位生成/复用缓存后返回。
+ */
+async function serveTrashImage(services, fid, req, res, { tier = '', wantsWebp = false } = {}) {
+  const src = trashFilePath(services, fid);
+  if (!src) return false;
+  const ext = path.extname(src).toLowerCase();
+  if (!/\.(jpg|jpeg|png|webp|gif|bmp|tif|tiff|heic|heif|avif)$/.test(ext)) return false;
+
+  const dataDir = services.config.dataDir;
+  const isGrid = tier === 'grid';
+  const isPreview = tier === 'preview';
+  const bucket = isGrid ? 'grid' : (isPreview ? 'preview' : 'thumbs');
+  const maxSide = isGrid ? 256 : (isPreview ? 1280 : 768);
+  const outJpg = path.join(dataDir, 'cache', bucket, `${fid}.jpg`);
+
+  const sendFile = (file, mime = 'image/jpeg') => {
+    const buf = fs.readFileSync(file);
+    res.writeHead(200, {
+      'Content-Type': mime,
+      'Content-Length': buf.length,
+      'Cache-Control': 'private, max-age=3600',
+    });
+    if (req.method === 'HEAD') return res.end();
+    res.end(buf);
+    return true;
+  };
+
+  if (fs.existsSync(outJpg)) return sendFile(outJpg);
+  try {
+    const sharp = require('sharp');
+    await sharp(src)
+      .rotate()
+      .resize(maxSide, maxSide, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: isGrid ? 72 : 82 })
+      .toFile(outJpg);
+    if (fs.existsSync(outJpg)) return sendFile(outJpg);
+  } catch (e) {
+    console.warn('[api] 回收站图片缩略生成失败', fid, e.message);
+  }
+  // sharp 失败时退回原图，至少保证详情页不是空白
+  const mime = ext === '.png' ? 'image/png'
+    : ext === '.webp' ? 'image/webp'
+    : ext === '.gif' ? 'image/gif'
+    : 'image/jpeg';
+  return sendFile(src, mime);
 }
 
 /**
@@ -1437,6 +1598,7 @@ async function handleApi(services, req, res, prefix = '/api') {
 
 async function handleApiImpl(services, req, res, prefix = '/api') {
   const { db, config, interpreter } = services;
+  ensureIsolationSchema(db);
   const urlObj = new URL(req.url, 'http://127.0.0.1');
   let pathname = urlObj.pathname;
   if (prefix && pathname.startsWith(prefix)) {
@@ -1460,13 +1622,22 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     // SSE (/events) 标准浏览器 EventSource 无法自定义 Header，亦允许 query token 鉴权。
     allowQuery:
       (req.method === 'GET' || req.method === 'HEAD') &&
-      /(image|poster|file|mask|temp|masks|video|audio|download|media|voice|preview|basecolor|swatch|scene|events)/.test(pathname || urlObj.pathname || ''),
+      /(image|poster|file|mask|temp|masks|video|audio|download|media|voice|preview|basecolor|swatch|scene|events|models)/.test(pathname || urlObj.pathname || ''),
   });
   const isViewerRoute = pathname === '/viewer' || pathname.startsWith('/viewer/');
   // SEC-001：已移除 lanInternalSession 免密提权后门——会话只认真实登录 token。
   const sessionUser = auth.verifySession(db, token);
   const isAdmin = sessionUser?.role === 'admin';
   const isViewerOrAdmin = !!sessionUser;
+  // 需求2：auth.verifySession 不返回 allow_all_models，这里补一次供模型白名单 / 缓存分桶使用。
+  if (sessionUser) {
+    try {
+      const aclRow = db.prepare('SELECT allow_all_models FROM users WHERE id=?').get(sessionUser.id);
+      sessionUser.allow_all_models = Number(aclRow?.allow_all_models || 0) ? 1 : 0;
+    } catch (_) {
+      sessionUser.allow_all_models = 0;
+    }
+  }
 
   // ===== 视角端白名单 (/api/viewer/*)：浏览/详情/媒体 + 同步快照 + App/H5 写操作（删除/画幅/AI/生成）=====
   // 非只读：DELETE assets、restage、main-derivative、AI/gen/chat、portrait 等供客户端使用。
@@ -1480,6 +1651,7 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     ['GET', /^\/assets\/trash$/],
     ['GET', /^\/assets\/trash\/[^\/]+$/],
     ['POST', /^\/assets\/trash\/restore$/],
+    ['POST', /^\/assets\/trash\/purge$/],
     // R6：purge / rehome-gate 处理器要求 admin，viewer 账号命中也只会吃 403；
     // 管理员经 /api/* 根路径（绕过白名单）访问，故从 viewer 白名单移除（viewer 调则 404）。
     ['POST', /^\/assets\/[^\/]+\/favorite$/],
@@ -1517,6 +1689,7 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     ['GET', /^\/tools\/lip-sync\/status$/],
     ['POST', /^\/tools\/lip-sync$/],
     ['GET', /^\/tools\/lip-sync\/tasks\/[^\/]+$/],
+    ['GET', /^\/gen\/(?:videos\/)?tasks\/[^\/]+$/],
     ['GET', /^\/stats$/],
     ['GET', /^\/vectors\/status$/],
     ['POST', /^\/snapshot$/],
@@ -1567,6 +1740,7 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     ['POST', /^\/ai\/expand-jimeng$/],
     ['POST', /^\/ai\/vlm-describe$/],
     ['POST', /^\/edit\/run$/],
+    ['POST', /^\/edit\/preview$/],
     ['POST', /^\/exports\/register$/],
     ['POST', /^\/ai\/upload$/],
     ['GET', /^\/products\/presets$/],
@@ -1584,6 +1758,13 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     ['POST', /^\/gen\/images$/],
     ['POST', /^\/gen\/videos$/],
     ['POST', /^\/gen\/chat$/],
+    // 后台生成任务队列（viewer 视角端同样需要入队 / 轮询）
+    ['POST', /^\/gen\/jobs$/],
+    ['GET', /^\/gen\/jobs$/],
+    ['GET', /^\/gen\/jobs\/[^\/]+$/],
+    // 替换原图 / 还原历史版本
+    ['POST', /^\/assets\/[^\/]+\/replace-image$/],
+    ['POST', /^\/assets\/[^\/]+\/restore-version$/],
     ['GET', /^\/portrait-library$/],
     ['GET', /^\/portrait-library\/catalog$/],
     ['GET', /^\/portrait-library\/consent$/],
@@ -1890,7 +2071,16 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
   if (pathname === '/studio/presets' && req.method === 'GET') {
     try {
       const category = urlObj.searchParams.get('category') || 'all';
-      const list = studioPresets.listPresets(db, category);
+      // 内置种子（懒建表时插入）显式标记为 builtin=1，保持全局可见
+      try { studioPresets.ensureStudioPresetsTable(db); } catch (e) {}
+      try { db.exec("UPDATE studio_presets SET builtin=1 WHERE id IN ('preset_1','preset_2','preset_3','preset_4') AND COALESCE(builtin,0)=0;"); } catch (e) {}
+      // 读隔离：本人 + 全局 builtin（user_id=0 且 builtin=1）
+      const curUid = Number(sessionUser?.id || 0);
+      const list = studioPresets.listPresets(db, category).filter((r) => {
+        if (r.user_id === undefined) return true; // 列缺失（懒建表）→ 视为内置全局，避免误清空
+        const uid = Number(r.user_id || 0);
+        return uid === curUid || (uid === 0 && Number(r.builtin || 0) === 1);
+      });
       return sendJson(res, 200, { success: true, data: list });
     } catch (e) {
       return sendJson(res, 500, { error: e.message });
@@ -1902,6 +2092,11 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     try {
       const body = await parseBody(req);
       const created = studioPresets.createPreset(db, body);
+      // 写入强制归属当前用户（createPreset 不带 user_id），且不标记为全局 builtin
+      try {
+        db.prepare('UPDATE studio_presets SET user_id=?, builtin=0 WHERE id=?')
+          .run(sessionUser.id, created.id);
+      } catch (e) {}
       return sendJson(res, 200, { success: true, data: created });
     } catch (e) {
       return sendJson(res, 400, { error: e.message });
@@ -1973,6 +2168,194 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
       return sendJson(res, 200, { success: true, data: result });
     } catch (e) {
       return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 浏览器解不了 HEVC / ProRes 时，抽帧工作台改走这里。fid 由服务端解析路径。
+  const resolveToolVideo = async (body) => {
+    let videoPath = body && body.videoPath ? String(body.videoPath) : '';
+    if (videoPath && !isAllowedMediaPath(videoPath)) {
+      const err = new Error('videoPath 超出允许的目录范围');
+      err.statusCode = 403;
+      throw err;
+    }
+    if (!videoPath && body && body.fid) {
+      const deriv = db.prepare("SELECT * FROM derivatives WHERE asset_fid=? ORDER BY CASE kind WHEN 'origin' THEN 0 ELSE 1 END LIMIT 1").get(body.fid);
+      if (deriv) videoPath = await resolveDerivativeFile(services, deriv);
+    }
+    if (!videoPath || !fs.existsSync(videoPath)) {
+      const err = new Error('未找到有效视频文件，请提供有效 fid 或 videoPath');
+      err.statusCode = 400;
+      throw err;
+    }
+    return videoPath;
+  };
+
+  if (pathname === '/tools/video-probe' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const body = await parseBody(req);
+      const videoPath = await resolveToolVideo(body);
+      const meta = await mediaTools.probeVideo(videoPath);
+      return sendJson(res, 200, { success: true, data: meta });
+    } catch (e) {
+      return sendJson(res, e.statusCode || 500, { error: e.message });
+    }
+  }
+
+  if (pathname === '/tools/filmstrip' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const body = await parseBody(req);
+      const videoPath = await resolveToolVideo(body);
+      const proxyDir = path.join(config.dataDir, 'cache', 'temp');
+      const described = mediaTools.describeBrowserProxy(videoPath, proxyDir);
+      const src = described.ready ? described.path : videoPath;
+      const meta = await mediaTools.probeVideo(videoPath);
+      const cacheRoot = path.join(config.dataDir, 'cache', 'frame-gop');
+      const frames = await mediaTools.readFilmstrip(src, {
+        count: Number(body.count) || 12,
+        maxEdge: 280,
+        cacheRoot,
+        duration: meta.duration || 0,
+      });
+      return sendJson(res, 200, {
+        success: true,
+        data: frames.map((frame) => ({
+          time: frame.time,
+          dataUrl: `data:image/jpeg;base64,${frame.buffer.toString('base64')}`,
+        })),
+      });
+    } catch (e) {
+      return sendJson(res, e.statusCode || 500, { error: e.message });
+    }
+  }
+
+  // 打开抽帧：首帧和元数据一起返回，代理在后台转，不挡住画面。
+  if (pathname === '/tools/video-open' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const body = await parseBody(req);
+      const videoPath = await resolveToolVideo(body);
+      const cacheRoot = path.join(config.dataDir, 'cache', 'frame-gop');
+      const proxyDir = path.join(config.dataDir, 'cache', 'temp');
+      const session = await mediaTools.openScrubSession(videoPath, { cacheRoot, proxyDir, maxEdge: 960 });
+      const meta = session.meta || {};
+      const proxy = session.proxy || {};
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          browserPlayable: !!meta.browserPlayable,
+          codec: meta.codec || '',
+          pixFmt: meta.pixFmt || '',
+          width: meta.width || 0,
+          height: meta.height || 0,
+          fps: meta.fps || 0,
+          duration: meta.duration || 0,
+          gopSec: meta.gopSec || 2,
+          frames: meta.frames || 0,
+          frame0: session.preview ? `data:image/jpeg;base64,${session.preview.toString('base64')}` : '',
+          proxyUrl: proxy.ready ? `/api/cache/temp/${proxy.fileName}` : '',
+          pendingProxy: !meta.browserPlayable && !proxy.ready,
+        },
+      });
+    } catch (e) {
+      return sendJson(res, e.statusCode || 500, { error: e.message });
+    }
+  }
+
+  // 代理状态：已转好就给地址；没好就确保后台任务在跑，马上返回。
+  if (pathname === '/tools/browser-proxy' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const body = await parseBody(req);
+      const videoPath = await resolveToolVideo(body);
+      const destDir = path.join(config.dataDir, 'cache', 'temp');
+      if (body.wait) {
+        const result = await mediaTools.ensureBrowserProxy(videoPath, { destDir, maxEdge: 1280 });
+        const meta = result.meta || {};
+        const source = result.source || meta;
+        return sendJson(res, 200, {
+          success: true,
+          data: {
+            proxied: !!result.proxied,
+            pending: false,
+            url: result.proxied ? `/api/cache/temp/${result.fileName}` : '',
+            width: meta.width || 0,
+            height: meta.height || 0,
+            fps: meta.fps || 0,
+            duration: meta.duration || 0,
+            codec: meta.codec || '',
+            sourceCodec: source.codec || '',
+            sourceWidth: source.width || 0,
+            sourceHeight: source.height || 0,
+          },
+        });
+      }
+      const described = mediaTools.describeBrowserProxy(videoPath, destDir);
+      if (!described.ready) mediaTools.kickBrowserProxy(videoPath, destDir);
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          proxied: described.ready,
+          pending: !described.ready,
+          url: described.ready ? `/api/cache/temp/${described.fileName}` : '',
+        },
+      });
+    } catch (e) {
+      return sendJson(res, e.statusCode || 500, { error: e.message });
+    }
+  }
+
+  if (pathname === '/tools/frame-at' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const body = await parseBody(req);
+      const videoPath = await resolveToolVideo(body);
+      const purpose = String(body.purpose || 'preview');
+      const time = Math.max(0, Number(body.time) || 0);
+      const gopSec = Number(body.gopSec) > 0 ? Number(body.gopSec) : 2;
+      const fps = Number(body.fps) > 0 ? Number(body.fps) : 30;
+      const duration = Number(body.duration) > 0 ? Number(body.duration) : 0;
+      const cacheRoot = path.join(config.dataDir, 'cache', 'frame-gop');
+
+      let buffer;
+      let mime = 'image/jpeg';
+      let extra = {};
+      if (purpose === 'original') {
+        buffer = await mediaTools.readOriginalJpeg(videoPath, {
+          cacheRoot, time, gopSec, fps, duration,
+        });
+        mime = 'image/jpeg';
+      } else if (purpose === 'full') {
+        const dest = path.join(cacheRoot, `full_${crypto.randomBytes(6).toString('hex')}.png`);
+        buffer = await mediaTools.grabFullPng(videoPath, { time, gopSec, duration, destPath: dest });
+        mime = 'image/png';
+        try { fs.unlinkSync(dest); } catch (_) {}
+      } else if (purpose === 'thumb') {
+        const edge = Math.max(64, Math.min(640, Number(body.maxEdge) || 320));
+        const dest = path.join(cacheRoot, `thumb_${crypto.randomBytes(6).toString('hex')}.jpg`);
+        buffer = await mediaTools.grabFastThumb(videoPath, { time, maxEdge: edge, destPath: dest });
+        try { fs.unlinkSync(dest); } catch (_) {}
+      } else {
+        const edge = Math.max(64, Math.min(1920, Number(body.maxEdge) || 960));
+        const hit = await mediaTools.readPreviewFrame(videoPath, {
+          cacheRoot, time, gopSec, fps, maxEdge: edge, duration,
+        });
+        buffer = hit.buffer;
+        extra = { index: hit.index, gopStart: hit.gopStart, gopCount: hit.count, frameTime: hit.time };
+      }
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          time,
+          mime,
+          dataUrl: `data:${mime};base64,${buffer.toString('base64')}`,
+          ...extra,
+        },
+      });
+    } catch (e) {
+      return sendJson(res, e.statusCode || 500, { error: e.message });
     }
   }
 
@@ -2140,18 +2523,66 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
   }
 
   // ===== 官方创作模型目录与 Schema 契约 (唯一权威源) =====
+  // ===== 动态配置服务端工作室默认值 (GET/POST) =====
+  if (pathname === '/studio/defaults') {
+    const { getStudioDefaultSettings, updateStudioDefaultSettings } = require('./studio-defaults');
+    if (req.method === 'GET') {
+      return sendJson(res, 200, { success: true, data: getStudioDefaultSettings(db) });
+    }
+    if (req.method === 'POST') {
+      if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+      try {
+        const body = await parseBody(req);
+        const updated = updateStudioDefaultSettings(db, body);
+        _studioCatalogCache.clear();
+        try {
+          const { invalidateUnifiedSchemasMap } = require('./models-contract');
+          invalidateUnifiedSchemasMap();
+        } catch (_) {}
+        return sendJson(res, 200, { success: true, data: updated });
+      } catch (e) {
+        return sendJson(res, 400, { success: false, error: e.message });
+      }
+    }
+  }
+
   if (pathname === '/studio/catalog' && req.method === 'GET') {
     const { getModelPublicCatalog } = require('./models-contract');
     const { MODEL_SCHEMAS } = require('./model-schemas');
-    const cached = getStudioCatalogCache(db);
-    if (cached) return sendJson(res, 200, { success: true, data: cached });
-    const cat = getModelPublicCatalog(db);
+    const { getStudioDefaultSettings } = require('./studio-defaults');
+    const defaults = getStudioDefaultSettings(db);
+    const aclKey = studioCatalogAclKey(sessionUser);
+    const cached = getStudioCatalogCache(db, aclKey);
+    if (cached) {
+      cached.defaults = defaults;
+      return sendJson(res, 200, { success: true, data: cached });
+    }
+    // 按用户可见集合过滤；allow_all_models=1 时 resolveVisibleModels 返回 null（不过滤）
+    const visibleModelIds = studioAcl.resolveVisibleModels(sessionUser);
+    const cat = getModelPublicCatalog(db, visibleModelIds);
+    if (cat && cat.studio) {
+      if (defaults?.models?.image && cat.studio.image) cat.studio.image.defaultModel = defaults.models.image;
+      if (defaults?.models?.video && cat.studio.video) cat.studio.video.defaultModel = defaults.models.video;
+      if (defaults?.models?.chat && cat.studio.chat) cat.studio.chat.defaultModel = defaults.models.chat;
+    }
+    if (visibleModelIds) {
+      for (const d of Object.keys(cat?.studio || {})) {
+        const block = cat.studio[d];
+        if (!block) continue;
+        if (Array.isArray(block.models)) block.models = block.models.filter(m => visibleModelIds.has(m.id));
+        if (block.defaultModel && !visibleModelIds.has(block.defaultModel)) {
+          block.defaultModel = (block.models && block.models[0] && block.models[0].id) || null;
+        }
+      }
+      if (Array.isArray(cat.models)) cat.models = cat.models.filter(m => visibleModelIds.has(m.id));
+    }
     const payload = {
       studio: cat.studio,
       schemas: cat.schemas || MODEL_SCHEMAS,
       models: cat.models,
+      defaults,
     };
-    setStudioCatalogCache(payload);
+    setStudioCatalogCache(aclKey, payload);
     return sendJson(res, 200, { success: true, data: payload });
   }
 
@@ -2403,6 +2834,48 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
       return sendJson(res, 200, { ok: true, ...data });
     } catch (e) {
       return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  // ===== 替换原图（覆盖但留历史版本）/ 一键还原 =====
+  const mReplaceImage = pathname.match(/^\/assets\/([^\/]+)\/replace-image$/);
+  if (mReplaceImage && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const fid = decodeParamLoose(mReplaceImage[1]);
+    const b = await parseBody(req, 64 * 1024 * 1024);
+    if (b.__bodyTooLarge) return sendJson(res, 413, { error: '请求数据过大，超出上限' });
+    try {
+      let buf = null;
+      if (typeof b.dataUrl === 'string' && b.dataUrl) {
+        const m = /^data:([^;,]+)?(;base64)?,([\s\S]*)$/.exec(b.dataUrl);
+        if (!m || !m[2]) {
+          const e = new Error('dataUrl 必须是 base64 编码');
+          e.status = 400; e.code = 'invalid_data_url';
+          throw e;
+        }
+        buf = Buffer.from(m[3], 'base64');
+      } else if (typeof b.base64 === 'string' && b.base64) {
+        const raw = b.base64.includes(',') ? b.base64.slice(b.base64.indexOf(',') + 1) : b.base64;
+        buf = Buffer.from(raw, 'base64');
+      }
+      if (!buf || !buf.length) return sendJson(res, 400, { error: '缺少 dataUrl 或 base64 图片数据' });
+      const out = await require('./asset-replace').replaceAssetImage(services, fid, buf, { force: !!b.force });
+      return sendJson(res, 200, out);
+    } catch (e) {
+      return sendJson(res, e.status || 500, { error: e.message, code: e.code });
+    }
+  }
+
+  const mRestoreVersion = pathname.match(/^\/assets\/([^\/]+)\/restore-version$/);
+  if (mRestoreVersion && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const fid = decodeParamLoose(mRestoreVersion[1]);
+    const b = await parseBody(req);
+    try {
+      const out = await require('./asset-replace').restoreAssetVersion(services, fid, b.versionId);
+      return sendJson(res, 200, out);
+    } catch (e) {
+      return sendJson(res, e.status || 500, { error: e.message, code: e.code });
     }
   }
 
@@ -2928,7 +3401,14 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
   // 快捷处理预设（viewer 只读；admin 可管理）
   if (pathname === '/presets' && req.method === 'GET') {
     const gatewayReady = processSvc.isGatewayConfigured(processSvc.getGatewayAdapter(db));
-    return sendJson(res, 200, { success: true, data: { presets: processSvc.listPresets(db), gatewayReady } });
+    // 读隔离：本人 + 全局 builtin（user_id=0 且 builtin=1）
+    const curUid = Number(sessionUser?.id || 0);
+    const visible = new Set(
+      db.prepare('SELECT id FROM presets WHERE user_id=? OR (builtin=1 AND user_id=0)')
+        .all(curUid).map((r) => r.id)
+    );
+    const presets = processSvc.listPresets(db).filter((p) => visible.has(p.id));
+    return sendJson(res, 200, { success: true, data: { presets, gatewayReady } });
   }
 
   if (pathname === '/presets' && req.method === 'POST') {
@@ -2937,6 +3417,10 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     if (!b.id || !b.label || !b.action) return sendJson(res, 400, { error: '缺少 id/label/action' });
     try {
       processSvc.upsertPreset(db, { ...b, builtin: false });
+      // 写入强制归属当前用户
+      try {
+        db.prepare('UPDATE presets SET user_id=? WHERE id=?').run(sessionUser.id, b.id);
+      } catch (e) {}
       return sendJson(res, 200, { success: true });
     } catch (e) {
       return sendJson(res, 400, { error: e.message });
@@ -3328,14 +3812,12 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
   // ===== 企业级 AI 对话流持久化 (/api/chat/*) =====
   // 1. 会话列表
   // ===== Chat 会话与消息 =====
-  // SEC-007：chat 会话属主校验。规则：管理员全通；会话不存在视为可创建（无数据可泄露）；
-  // user_id=0 为共享默认会话；其余仅属主可读写。
+  // 严格用户隔离：仅属主可读写。管理员不自动放行；会话不存在 / user_id=0 不再视为共享。
   const chatSessionOwned = (sId) => {
-    if (isAdmin) return true;
+    if (!sessionUser) return false;
     const row = db.prepare('SELECT user_id FROM chat_sessions WHERE id=?').get(String(sId || ''));
-    if (!row) return true;
-    const uid = Number(row.user_id || 0);
-    return uid === 0 || uid === Number(sessionUser?.id || 0);
+    if (!row) return false;
+    return Number(row.user_id || 0) === Number(sessionUser.id);
   };
 
   if (pathname === '/chat/sessions' && req.method === 'GET') {
@@ -3348,9 +3830,9 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
         )) as product_count,
         (SELECT m.mode FROM chat_messages m WHERE m.session_id = s.id ORDER BY m.created_at DESC LIMIT 1) as last_mode
       FROM chat_sessions s
-      WHERE s.user_id=? OR s.user_id=0
+      WHERE s.user_id=?
       ORDER BY s.updated_at DESC LIMIT 100
-    `).all(sessionUser?.id || 0);
+    `).all(sessionUser.id);
     return sendJson(res, 200, { success: true, data: sessions });
   }
 
@@ -3361,12 +3843,23 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     const sessionId = b.id || `sess_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
     const title = (b.title || '新创作会话').slice(0, 50);
     const now = Date.now();
+    // 强制归属当前用户；已存在但不属于当前用户的会话不允许越权改写。
+    const existing = db.prepare('SELECT user_id FROM chat_sessions WHERE id=?').get(sessionId);
+    if (existing && Number(existing.user_id) !== Number(sessionUser.id)) {
+      return sendJson(res, 403, { error: '无权操作该会话' });
+    }
+    const paramsJson = b.params_json != null
+      ? (typeof b.params_json === 'string' ? b.params_json : JSON.stringify(b.params_json))
+      : (b.params != null ? JSON.stringify(b.params) : null);
     db.prepare(`
-      INSERT INTO chat_sessions (id, user_id, title, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET title=excluded.title, updated_at=excluded.updated_at
-    `).run(sessionId, sessionUser?.id || 0, title, now, now);
-    return sendJson(res, 200, { success: true, data: { id: sessionId, title, updated_at: now } });
+      INSERT INTO chat_sessions (id, user_id, title, params_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        title=excluded.title,
+        updated_at=excluded.updated_at,
+        params_json=COALESCE(excluded.params_json, chat_sessions.params_json)
+    `).run(sessionId, sessionUser.id, title, paramsJson, now, now);
+    return sendJson(res, 200, { success: true, data: { id: sessionId, title, params_json: paramsJson, updated_at: now } });
   }
 
   // 3. 删除会话
@@ -3408,6 +3901,16 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     const b = await parseBody(req, 64 * 1024 * 1024);
     if (b.__bodyTooLarge) return sendJson(res, 413, { error: '请求数据过大，超出上限' });
     const sessionId = b.sessionId || 'default_session';
+    // 严格隔离下 chatSessionOwned 不再放行「不存在的会话」：新会话先以当前 user_id 建行，
+    // 之后属主校验才能通过；已存在的他人会话仍会 403。
+    const _sessRow = db.prepare('SELECT user_id FROM chat_sessions WHERE id=?').get(sessionId);
+    if (!_sessRow) {
+      db.prepare(`
+        INSERT INTO chat_sessions (id, user_id, title, created_at, updated_at)
+        VALUES (?, ?, '新创作会话', ?, ?)
+        ON CONFLICT(id) DO NOTHING
+      `).run(sessionId, sessionUser.id, Date.now(), Date.now());
+    }
     if (!chatSessionOwned(sessionId)) return sendJson(res, 403, { error: '无权写入该会话' });
     const msgId = b.id || `msg_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
     const now = Date.now();
@@ -3671,8 +4174,10 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     const filterStyle = (urlObj.searchParams.get('style') || '').trim();
     const pinnedOnly = urlObj.searchParams.get('pinned_only') === '1';
 
-    let sql = 'SELECT * FROM creation_templates WHERE 1=1';
-    const params = [];
+    // 读隔离：本人 + 全局 builtin（user_id=0 且 builtin=1）
+    const curUid = Number(sessionUser?.id || 0);
+    let sql = 'SELECT * FROM creation_templates WHERE (user_id = ? OR (builtin = 1 AND user_id = 0))';
+    const params = [curUid];
 
     if (filterType && filterType !== 'all') {
       sql += ' AND type = ?';
@@ -3831,6 +4336,12 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     const posterW = b.poster_w !== undefined && b.poster_w !== null ? Number(b.poster_w) : (b.posterW !== undefined && b.posterW !== null ? Number(b.posterW) : null);
     const posterH = b.poster_h !== undefined && b.poster_h !== null ? Number(b.poster_h) : (b.posterH !== undefined && b.posterH !== null ? Number(b.posterH) : null);
 
+    // 严格隔离：携带已存在的他人配方 id 时不允许覆盖
+    const _tplExisting = db.prepare('SELECT user_id FROM creation_templates WHERE id=?').get(id);
+    if (_tplExisting && Number(_tplExisting.user_id) !== Number(sessionUser.id)) {
+      return sendJson(res, 403, { error: '无权覆盖他人配方' });
+    }
+
     const postTx = db.transaction(() => {
       const maxRow = db.prepare('SELECT MAX(updated_at) as max_u FROM creation_templates').get();
       const now = Date.now();
@@ -3858,7 +4369,7 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
           updated_at=excluded.updated_at,
           poster_w=COALESCE(creation_templates.poster_w, excluded.poster_w),
           poster_h=COALESCE(creation_templates.poster_h, excluded.poster_h)
-      `).run(id, sessionUser?.id || 1, title, prompt, aspectRatio, originImages, resultImages, paramsJson, tagsJson, type, space, style, purpose, isPinned, useCount, created_at, updated_at, posterW, posterH);
+      `).run(id, sessionUser.id, title, prompt, aspectRatio, originImages, resultImages, paramsJson, tagsJson, type, space, style, purpose, isPinned, useCount, created_at, updated_at, posterW, posterH);
 
       return updated_at;
     });
@@ -4017,6 +4528,45 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     delTx.immediate();
 
     return sendJson(res, 200, { success: true, data: { id: tplId } });
+  }
+
+  // 主动拉取/同步外部数据源创作资产 (POST /api/creation-templates/pull-external)
+  if (pathname === '/creation-templates/pull-external' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req).catch(() => ({}));
+    try {
+      const baResource = require('./ba-resource');
+      const keywords = Array.isArray(b.keywords) && b.keywords.length ? b.keywords : (b.keyword ? [String(b.keyword)] : undefined);
+      const summary = await baResource.syncBaCreationCatalog(services, {
+        keywords,
+        size: Math.min(50, Math.max(1, Number(b.size) || 50)),
+        maxPages: Math.min(5, Math.max(1, Number(b.maxPages) || 2)),
+        type: b.type || 'all'
+      });
+      // 若有新资产入库，广播事件
+      try {
+        if (summary.cards > 0 && typeof services.broadcastAssetChange === 'function') {
+          services.broadcastAssetChange({ type: 'creation_templates', count: summary.cards });
+        }
+      } catch {}
+      return sendJson(res, 200, { success: true, count: summary.cards, summary });
+    } catch (err) {
+      const isUnconfigured = /未配置/.test(err.message);
+      if (isUnconfigured) {
+        return sendJson(res, 200, {
+          success: false,
+          unconfigured: true,
+          count: 0,
+          error: '外部数据源未配置，已跳过主动同步'
+        });
+      }
+      console.warn('[creation-templates] 主动拉取外部数据源异常:', err.message);
+      return sendJson(res, 200, {
+        success: false,
+        error: err.message,
+        count: 0
+      });
+    }
   }
 
     // ===== 基础属性库 (/api/base-library/*) =====
@@ -4772,79 +5322,104 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     }
   }
 
-  // ===== 统一精修 /edit/run =====
+  // ===== 统一精修 /edit/run 与 /edit/preview（共用同一段组装逻辑） =====
   // POST /edit/run  { assetFid|image, op, region, prompt?, glb?, product? }
+  const buildEditRunArgs = async (b) => {
+    const aiTasksMod = require('./ai-tasks');
+    // 复用素材解析
+    const resolveAssetBuffer = aiTasksMod.resolveAssetBuffer || (async (svc, raw) => {
+      if (!raw) return null;
+      const s = String(raw).trim();
+      if (s.startsWith('data:image/')) return Buffer.from(s.split(',')[1], 'base64');
+      const asset = db.prepare('SELECT * FROM assets WHERE fid=?').get(s);
+      if (!asset) return null;
+      const { ensureOriginalFile } = require('./originals');
+      const p = await ensureOriginalFile(services, asset);
+      return p ? fs.readFileSync(p) : null;
+    });
+    const sourceImgRaw = b.image || b.imageUrl || b.url || b.src || b.assetFid || b.fid;
+    const sceneImageBuffer = await resolveAssetBuffer(services, sourceImgRaw);
+    if (!sceneImageBuffer) { const e = new Error('无法读取源图'); e.clientCode = 400; throw e; }
+
+    let refImageBuffer = null;
+    if (b.refImage || b.ref_image || (b.glb && b.glb.viewDataUrl)) {
+      refImageBuffer = await resolveAssetBuffer(services, b.refImage || b.ref_image || (b.glb && b.glb.viewDataUrl));
+    }
+    let productImageBuffer = null;
+    if (b.productImage || b.product_image) {
+      productImageBuffer = await resolveAssetBuffer(services, b.productImage || b.product_image);
+    }
+
+    return {
+      sceneImageBuffer,
+      op: b.op,
+      region: b.region,
+      prompt: b.prompt,
+      productName: b.subject || b.productName,
+      targetStyle: b.targetStyle || b.style || b.target_style,
+      sourceStyle: b.sourceStyle || b.source_style,
+      strengthLevel: b.strengthLevel || b.strength,
+      stylePrompt: b.stylePrompt || b.style_prompt || b.styleDescription,
+      extraPrompt: b.extraPrompt || b.extra_prompt,
+      assetFid: b.assetFid || b.fid,
+      yaw: (b.glb && b.glb.yaw) != null ? b.glb.yaw : (b.yaw != null ? b.yaw : b.modelYaw),
+      refImageBuffer,
+      productImageBuffer,
+      glbFid: (b.glb && b.glb.modelUrl) || b.glbFid,
+      pasteback: b.pasteback,
+      installMode: b.installMode || b.fidelity || 'B',
+      expandRatios: b.expandRatios,
+      expandRatio: b.expandRatio,
+      useJimeng: b.useJimeng !== false,
+      model: b.model,
+      targetClarity: b.targetClarity || b.clarity || null,
+      removeWatermark: b.removeWatermark === true || b.remove_watermark === true,
+      vlmInfo: b.vlmInfo || b.vlm_info || null,
+      describeRegion: b.describeRegion,
+      avoidBBox: b.avoidBBox || b.clearBBox,
+      gapPct: b.gapPct || b.addGapPct,
+      // 出图参数：档位/画幅按字面传下去，由 handlers/edit-size 依据模型契约换算
+      size: b.size || null,
+      ratio: b.ratio || null,
+      bindings: b.bindings,
+      regions: b.regions,
+      light_mode: b.light_mode || b.lightMode,
+      kelvin: b.kelvin,
+      light_clause: b.light_clause || b.lightClause,
+    };
+  };
+
   if (pathname === '/edit/run' && req.method === 'POST') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
     const b = await parseBody(req);
     try {
       const { handleEditRun } = require('./handlers/edit-run');
-      const aiTasksMod = require('./ai-tasks');
-      // 复用素材解析
-      const resolveAssetBuffer = aiTasksMod.resolveAssetBuffer || (async (svc, raw) => {
-        if (!raw) return null;
-        const s = String(raw).trim();
-        if (s.startsWith('data:image/')) return Buffer.from(s.split(',')[1], 'base64');
-        const asset = db.prepare('SELECT * FROM assets WHERE fid=?').get(s);
-        if (!asset) return null;
-        const { ensureOriginalFile } = require('./originals');
-        const p = await ensureOriginalFile(services, asset);
-        return p ? fs.readFileSync(p) : null;
-      });
-      const sceneImageBuffer = await resolveAssetBuffer(services, b.image || b.assetFid || b.fid);
-      if (!sceneImageBuffer) return sendJson(res, 400, { error: '无法读取源图' });
+      const out = await handleEditRun(services, await buildEditRunArgs(b));
 
-      let refImageBuffer = null;
-      if (b.refImage || b.ref_image || (b.glb && b.glb.viewDataUrl)) {
-        refImageBuffer = await resolveAssetBuffer(services, b.refImage || b.ref_image || (b.glb && b.glb.viewDataUrl));
+      let previewUrl = '';
+      try {
+        const outFileName = `edit_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.jpg`;
+        const tempDir = path.join(services.config.dataDir, 'cache', 'temp');
+        if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+        const outFilePath = path.join(tempDir, outFileName);
+        fs.writeFileSync(outFilePath, out.buffer);
+        previewUrl = `/api/cache/temp/${outFileName}`;
+      } catch (err) {
+        console.warn('[edit/run] 缓存临时结果失败:', err.message);
       }
-      let productImageBuffer = null;
-      if (b.productImage || b.product_image) {
-        productImageBuffer = await resolveAssetBuffer(services, b.productImage || b.product_image);
-      }
-
-      const out = await handleEditRun(services, {
-        sceneImageBuffer,
-        op: b.op,
-        region: b.region,
-        prompt: b.prompt,
-        productName: b.subject || b.productName,
-        targetStyle: b.targetStyle || b.style || b.target_style,
-        sourceStyle: b.sourceStyle || b.source_style,
-        strengthLevel: b.strengthLevel || b.strength,
-        stylePrompt: b.stylePrompt || b.style_prompt || b.styleDescription,
-        extraPrompt: b.extraPrompt || b.extra_prompt,
-        assetFid: b.assetFid || b.fid,
-        yaw: (b.glb && b.glb.yaw) != null ? b.glb.yaw : (b.yaw != null ? b.yaw : b.modelYaw),
-        refImageBuffer,
-        productImageBuffer,
-        glbFid: (b.glb && b.glb.modelUrl) || b.glbFid,
-        pasteback: b.pasteback,
-        installMode: b.installMode || b.fidelity || 'B',
-        expandRatios: b.expandRatios,
-        expandRatio: b.expandRatio,
-        useJimeng: b.useJimeng !== false,
-        model: b.model,
-        targetClarity: b.targetClarity || b.clarity || null,
-        removeWatermark: b.removeWatermark === true || b.remove_watermark === true,
-        vlmInfo: b.vlmInfo || b.vlm_info || null,
-        describeRegion: b.describeRegion,
-        avoidBBox: b.avoidBBox || b.clearBBox,
-        gapPct: b.gapPct || b.addGapPct,
-        // 出图参数：档位/画幅按字面传下去，由 handlers/edit-size 依据模型契约换算
-        size: b.size || null,
-        ratio: b.ratio || null,
-        bindings: b.bindings,
-        regions: b.regions,
-        light_mode: b.light_mode || b.lightMode,
-        kelvin: b.kelvin,
-        light_clause: b.light_clause || b.lightClause,
-      });
 
       return sendJson(res, 200, {
         success: true,
+        url: previewUrl,
+        imageUrl: previewUrl,
+        outputUrl: previewUrl,
+        previewUrl,
         data: {
           image: { b64: out.buffer.toString('base64') },
+          url: previewUrl,
+          imageUrl: previewUrl,
+          outputUrl: previewUrl,
+          previewUrl,
           apiBox: out.apiBox,
           untouchedDiff: out.untouchedDiff,
           prompt: out.prompt,
@@ -4854,11 +5429,28 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
           // ★ 选区出口 / 是否降级 / 降级原因；客户端必须把 regionNote 原样展示给用户
           region: out.region || null,
           regionNote: out.regionNote || '',
+          // ★ 服务端落盘的衍生图 id；App 可据此跳转素材详情
+          derivativeId: out.derivativeFid || null,
         },
       });
     } catch (e) {
       console.error('[edit/run] 执行失败:', e);
-      return sendJson(res, 502, { success: false, error: e.message });
+      return sendJson(res, e.clientCode || 502, { success: false, error: e.message });
+    }
+  }
+
+  // POST /edit/preview — 精准编辑「预览请求」：与 /edit/run 共用同一段组装逻辑，
+  // 直到供应商调用前为止；不生成图片、不落任何衍生记录。
+  if (pathname === '/edit/preview' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    try {
+      const { handleEditRun } = require('./handlers/edit-run');
+      const args = await buildEditRunArgs(b);
+      const out = await handleEditRun(services, Object.assign(args, { dryRun: true }));
+      return sendJson(res, 200, { success: true, data: out });
+    } catch (e) {
+      return sendJson(res, e.clientCode || 502, { success: false, error: e.message });
     }
   }
 
@@ -5298,6 +5890,29 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
       } catch {}
     }
 
+    // 回收站视频：原文件已移到 dataDir/trash/，按需抽帧兜底
+    try {
+      const trashSrc = trashFilePath(services, fid);
+      if (trashSrc && /\.(mp4|mov|m4v|webm|avi|mkv)$/i.test(trashSrc)) {
+        const outTrashThumb = path.join(config.dataDir, 'cache', 'thumbs', `${fid}.jpg`);
+        fs.mkdirSync(path.dirname(outTrashThumb), { recursive: true });
+        const { extractPoster } = require('./umbra');
+        const ok = await extractPoster(trashSrc, outTrashThumb);
+        if (ok && fs.existsSync(outTrashThumb) && fs.statSync(outTrashThumb).size > 0) {
+          const buf = fs.readFileSync(outTrashThumb);
+          res.writeHead(200, {
+            'Content-Type': 'image/jpeg',
+            'Content-Length': buf.length,
+            'Cache-Control': 'private, max-age=3600'
+          });
+          if (req.method === 'HEAD') return res.end();
+          return res.end(buf);
+        }
+      }
+    } catch (err) {
+      console.warn(`[api] 回收站视频封面生成失败 (${fid}):`, err.message);
+    }
+
     return sendJson(res, 404, { error: '海报不存在' });
   }
 
@@ -5506,21 +6121,45 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     const acceptHeader = String(req.headers['accept'] || '').toLowerCase();
     const formatParam = String(urlObj.searchParams.get('format') || '').toLowerCase();
     const wantsWebp = !isFileOrVideo && !isDl && (formatParam === 'webp' || acceptHeader.includes('image/webp'));
-    const assetRow = db.prepare('SELECT thumb_url, main_derivative_id FROM assets WHERE fid=?').get(fid);
+    const assetRow = db.prepare('SELECT thumb_url, main_derivative_id, kind, file_name FROM assets WHERE fid=?').get(fid);
 
     const buildStandardDisposition = (targetName, defaultExt = '.jpg', kind = 'origin') => {
-      const ext = path.extname(targetName || '') || defaultExt;
+      let ext = path.extname(targetName || '') || defaultExt;
+      // 权威扩展名纠偏：严防视频/音频被错误命名为 .jpg
+      const rowKind = String(assetRow?.kind || '').toLowerCase();
+      const isTargetVideo = /\.(mp4|mov|webm|avi|mkv|m4v)$/i.test(targetName || '') || rowKind === 'video' || kind === 'video' || kind === 'gen_video';
+      const isTargetAudio = /\.(mp3|wav|m4a|aac|flac|ogg)$/i.test(targetName || '') || rowKind === 'audio' || kind === 'audio' || kind === 'music';
+      if (isTargetVideo && !/\.(mp4|mov|webm|avi|mkv|m4v)$/i.test(ext)) {
+        ext = '.mp4';
+      } else if (isTargetAudio && !/\.(mp3|wav|m4a|aac|flac|ogg)$/i.test(ext)) {
+        ext = '.mp3';
+      }
+
       const safeFid = String(fid).replace(/[^A-Za-z0-9_-]/g, '');
       const safeVar = String(kind || 'origin').replace(/[^A-Za-z0-9_-]/g, '');
       let baseName = requestedFileName || targetName;
       if (!baseName || !baseName.toLowerCase().startsWith('ml_saved_')) {
         baseName = `ML_SAVED_${safeFid}_${safeVar}${ext}`;
+      } else {
+        // 如果客户端传了 ML_SAVED_xxx.jpg，但实际是视频/音频，强制校正后缀
+        const reqExt = path.extname(baseName).toLowerCase();
+        if (isTargetVideo && reqExt !== ext) {
+          baseName = baseName.replace(/\.[^.]+$/, '') + ext;
+        } else if (isTargetAudio && reqExt !== ext) {
+          baseName = baseName.replace(/\.[^.]+$/, '') + ext;
+        }
       }
       const asciiExportName = baseName.replace(/[^\w.-]/g, '_');
       const utf8ExportName = baseName;
       const dispositionType = (isDl || urlObj.searchParams.get('download') === '1' || urlObj.searchParams.get('export') === '1') ? 'attachment' : 'inline';
       return `${dispositionType}; filename="${asciiExportName}"; filename*=UTF-8''${encodeURIComponent(utf8ExportName)}`;
     };
+
+    // 回收站素材：原文件被 rename 到 dataDir/trash/，derivatives 仍指向旧路径。
+    // 必须在 302 thumb_url 之前回读，否则文件已清理的记录会先跳到失效外链、整片空白。
+    if (!isFileOrVideo && !isDl && !isRaw && !derivativeId) {
+      if (await serveTrashImage(services, fid, req, res, { tier, wantsWebp })) return;
+    }
 
     // 仅在「公网隧道且未指定产物」时 302 外链；内网/本机直接读 NAS，更快
     const host = String(req.headers.host || '').split(':')[0] || '';
@@ -5543,106 +6182,50 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     } else {
       // 网格档 (256px)：App 列表专用，命中缓存时零解码、零原图读取
       if (!isFileOrVideo && !isDl && !isRaw && tier === 'grid') {
-        if (wantsWebp) {
+                if (wantsWebp) {
           if (fs.existsSync(gridWebpPath)) {
-            const gbuf = fs.readFileSync(gridWebpPath);
             const gridDisp = buildStandardDisposition(`ML_SAVED_${fid}_grid.webp`, '.webp', 'grid');
-            res.writeHead(200, {
-              'Content-Type': 'image/webp',
-              'Content-Length': gbuf.length,
-              'Content-Disposition': gridDisp,
-              'Cache-Control': 'public, max-age=86400'
-            });
-            if (req.method === 'HEAD') return res.end();
-            return res.end(gbuf);
+            return pipeFileStream(req, res, gridWebpPath, 'image/webp', gridDisp, 'public, max-age=86400');
           }
           if (fs.existsSync(thumb)) {
             const { ensureGridWebpFromThumb } = require('./derivatives');
             const made = await ensureGridWebpFromThumb(thumb, gridWebpPath);
             if (made && fs.existsSync(made)) {
-              const gbuf = fs.readFileSync(made);
               const gridDisp = buildStandardDisposition(`ML_SAVED_${fid}_grid.webp`, '.webp', 'grid');
-              res.writeHead(200, {
-                'Content-Type': 'image/webp',
-                'Content-Length': gbuf.length,
-                'Content-Disposition': gridDisp,
-                'Cache-Control': 'public, max-age=86400'
-              });
-              if (req.method === 'HEAD') return res.end();
-              return res.end(gbuf);
+              return pipeFileStream(req, res, made, 'image/webp', gridDisp, 'public, max-age=86400');
             }
           }
           if (fs.existsSync(gridPath)) {
             const { ensureGridWebpFromThumb } = require('./derivatives');
             const made = await ensureGridWebpFromThumb(gridPath, gridWebpPath);
             if (made && fs.existsSync(made)) {
-              const gbuf = fs.readFileSync(made);
               const gridDisp = buildStandardDisposition(`ML_SAVED_${fid}_grid.webp`, '.webp', 'grid');
-              res.writeHead(200, {
-                'Content-Type': 'image/webp',
-                'Content-Length': gbuf.length,
-                'Content-Disposition': gridDisp,
-                'Cache-Control': 'public, max-age=86400'
-              });
-              if (req.method === 'HEAD') return res.end();
-              return res.end(gbuf);
+              return pipeFileStream(req, res, made, 'image/webp', gridDisp, 'public, max-age=86400');
             }
           }
         }
         if (fs.existsSync(gridPath)) {
-          const gbuf = fs.readFileSync(gridPath);
           const gridDisp = buildStandardDisposition(`ML_SAVED_${fid}_grid.jpg`, '.jpg', 'grid');
-          res.writeHead(200, {
-            'Content-Type': 'image/jpeg',
-            'Content-Length': gbuf.length,
-            'Content-Disposition': gridDisp,
-            'Cache-Control': 'public, max-age=86400'
-          });
-          if (req.method === 'HEAD') return res.end();
-          return res.end(gbuf);
+          return pipeFileStream(req, res, gridPath, 'image/jpeg', gridDisp, 'public, max-age=86400');
         }
         if (fs.existsSync(thumb)) {
           const { ensureGridFromThumb } = require('./derivatives');
           const made = await ensureGridFromThumb(thumb, gridPath);
           if (made && fs.existsSync(made)) {
-            const gbuf = fs.readFileSync(made);
             const gridDisp = buildStandardDisposition(`ML_SAVED_${fid}_grid.jpg`, '.jpg', 'grid');
-            res.writeHead(200, {
-              'Content-Type': 'image/jpeg',
-              'Content-Length': gbuf.length,
-              'Content-Disposition': gridDisp,
-              'Cache-Control': 'public, max-age=86400'
-            });
-            if (req.method === 'HEAD') return res.end();
-            return res.end(gbuf);
+            return pipeFileStream(req, res, made, 'image/jpeg', gridDisp, 'public, max-age=86400');
           }
         }
       }
       // 预览档 (1280px)：命中缓存时零解码、零原图读取直接返回
       if (!isFileOrVideo && !isDl && !isRaw && tier === 'preview') {
         if (wantsWebp && fs.existsSync(previewWebpPath)) {
-          const pbuf = fs.readFileSync(previewWebpPath);
           const previewDisp = buildStandardDisposition(`ML_SAVED_${fid}_preview.webp`, '.webp', 'preview');
-          res.writeHead(200, {
-            'Content-Type': 'image/webp',
-            'Content-Length': pbuf.length,
-            'Content-Disposition': previewDisp,
-            'Cache-Control': 'private, max-age=3600, must-revalidate'
-          });
-          if (req.method === 'HEAD') return res.end();
-          return res.end(pbuf);
+          return pipeFileStream(req, res, previewWebpPath, 'image/webp', previewDisp, 'private, max-age=3600, must-revalidate');
         }
         if (!wantsWebp && fs.existsSync(previewJpegPath)) {
-          const pbuf = fs.readFileSync(previewJpegPath);
           const previewDisp = buildStandardDisposition(`ML_SAVED_${fid}_preview.jpg`, '.jpg', 'preview');
-          res.writeHead(200, {
-            'Content-Type': 'image/jpeg',
-            'Content-Length': pbuf.length,
-            'Content-Disposition': previewDisp,
-            'Cache-Control': 'private, max-age=3600, must-revalidate'
-          });
-          if (req.method === 'HEAD') return res.end();
-          return res.end(pbuf);
+          return pipeFileStream(req, res, previewJpegPath, 'image/jpeg', previewDisp, 'private, max-age=3600, must-revalidate');
         }
       }
       // 浏览网格：无 derivative 时允许共享缩略图；raw=1 时强制拉高清原图
@@ -5749,31 +6332,31 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     try {
       filePath = await resolveDerivativeFile(services, deriv);
     } catch (e) {
-      // 夸克下载失败时优先外链，再回落缩略图
-      if (!isDl && assetRow?.thumb_url) {
-        res.writeHead(302, { Location: assetRow.thumb_url, 'Cache-Control': 'public, max-age=600' });
-        return res.end();
-      }
-      if (fs.existsSync(thumb)) {
+      // 本地缩略图 > 回收站原文件 > 外链，避免把已失效的 thumb_url 放在最前
+      if (!isDl && fs.existsSync(thumb)) {
         const b = fs.readFileSync(thumb);
         res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': b.length, 'Cache-Control': 'public, max-age=600' });
         return res.end(b);
       }
-      if (serveFromTrash(services, fid, res)) return;
-      return sendJson(res, 404, { error: e.message || '文件未找到或夸克拉取失败' });
-    }
-    if (!filePath || !fs.existsSync(filePath)) {
+      if (!isFileOrVideo && !isDl && await serveTrashImage(services, fid, req, res, { tier })) return;
       if (!isDl && assetRow?.thumb_url) {
         res.writeHead(302, { Location: assetRow.thumb_url, 'Cache-Control': 'public, max-age=600' });
         return res.end();
       }
-      if (fs.existsSync(thumb)) {
+      return sendJson(res, 404, { error: e.message || '文件未找到或夸克拉取失败' });
+    }
+    if (!filePath || !fs.existsSync(filePath)) {
+      if (!isDl && fs.existsSync(thumb)) {
         const b = fs.readFileSync(thumb);
         res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': b.length, 'Cache-Control': 'public, max-age=600' });
         return res.end(b);
       }
       // 回收站素材：原文件已移到 dataDir/trash/，从那里回读（回收站详情页预览依赖这条）
-      if (serveFromTrash(services, fid, res)) return;
+      if (!isFileOrVideo && !isDl && await serveTrashImage(services, fid, req, res, { tier })) return;
+      if (!isDl && assetRow?.thumb_url) {
+        res.writeHead(302, { Location: assetRow.thumb_url, 'Cache-Control': 'public, max-age=600' });
+        return res.end();
+      }
       return sendJson(res, 404, { error: '文件未找到或夸克拉取失败' });
     }
 
@@ -5785,8 +6368,8 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     const ext = path.extname(filePath).toLowerCase();
     const contentType = deriv.mime || MIME[ext] || 'image/jpeg';
     const fileName = deriv.file_name || path.basename(filePath);
-    const isVideo = (deriv.mime || '').includes('video') || deriv.kind === 'gen_video' || /\.(mp4|mov|m4v|webm|avi|mkv)$/i.test(fileName);
-    const isAudio = (deriv.mime || '').includes('audio') || /\.(mp3|wav|m4a|aac|flac|ogg)$/i.test(fileName);
+    const isVideo = (deriv.mime || '').includes('video') || deriv.kind === 'gen_video' || /\.(mp4|mov|m4v|webm|avi|mkv)$/i.test(fileName) || assetRow?.kind === 'video';
+    const isAudio = (deriv.mime || '').includes('audio') || /\.(mp3|wav|m4a|aac|flac|ogg)$/i.test(fileName) || assetRow?.kind === 'audio';
 
     if (!isDl && !isRaw && !isVideo && !isAudio && actionType === 'image' && tier === 'grid') {
       try {
@@ -7609,7 +8192,7 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
       const b = await parseBody(req);
       const { saveModelContractData } = require('./models-contract');
       const row = saveModelContractData(db, b);
-      _studioCatalogCache = null;
+      _studioCatalogCache.clear();
       return sendJson(res, 200, { success: true, data: row });
     } catch (e) {
       return sendJson(res, 400, { error: e.message });
@@ -8588,11 +9171,12 @@ module.exports = {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer ***'
       };
+      const isVideoModel = modelExec?.model?.domain === 'video' || String(modelId).includes('video') || String(modelId).includes('seedance');
       const sanitizedBody = {
         model: modelExec?.model?.vendor_model_id || modelId,
         prompt: compiledPrompt,
-        size: values.size,
-        ratio: values.ratio,
+        ...(isVideoModel ? {} : { size: values.size }),
+        ...(isVideoModel ? {} : { ratio: values.ratio }),
         ...(prepared.assembled?.body || {})
       };
       const curlStr = [
@@ -8622,10 +9206,82 @@ module.exports = {
       return sendJson(res, 500, { error: e.message });
     }
   }
+  // ===== 后台生成任务队列（契约固定，前端按此对接）=====
+  // 入队：body = 原 /gen/images 参数 + modality / sessionId / clientRequestId
+  if (pathname === '/gen/jobs' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req, 64 * 1024 * 1024);
+    if (b.__bodyTooLarge) return sendJson(res, 413, { error: '请求数据过大，超出上限' });
+    try {
+      studioAcl.assertModelAllowed(db, sessionUser, b.model);
+    } catch (e) {
+      return sendJson(res, e.status || 403, { error: e.message, code: e.code });
+    }
+    try {
+      const modality = ['image', 'video', 'chat', 'music'].includes(b.modality) ? b.modality : 'image';
+      const payload = {
+        ...b,
+        modality,
+        userId: sessionUser.id,
+        sessionId: b.sessionId || '',
+        clientRequestId: b.clientRequestId || '',
+      };
+      const out = require('./gen-jobs').enqueueGenJob(db, payload);
+      return sendJson(res, 200, { success: true, jobId: out.jobId, status: 'queued' });
+    } catch (e) {
+      return sendJson(res, e.status || 500, { error: e.message, code: e.code || 'enqueue_failed' });
+    }
+  }
+
+  // 单任务查询：result / error 为解析后的对象
+  const mGenJobGet = pathname.match(/^\/gen\/jobs\/([^\/]+)$/);
+  if (mGenJobGet && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const jobId = decodeURIComponent(mGenJobGet[1]);
+    const row = require('./gen-jobs').getGenJob(db, jobId);
+    if (!row) return sendJson(res, 404, { error: '任务不存在' });
+    if (Number(row.user_id) !== Number(sessionUser.id)) {
+      return sendJson(res, 403, { error: '无权读取该任务' });
+    }
+    let result = null;
+    let error = null;
+    try { result = row.result_json ? JSON.parse(row.result_json) : null; } catch (_) {}
+    try { error = row.error_json ? JSON.parse(row.error_json) : null; } catch (_) {}
+    return sendJson(res, 200, {
+      success: true,
+      job: {
+        job_id: row.job_id,
+        status: row.status,
+        progress: Number(row.progress || 0),
+        result,
+        error,
+      },
+    });
+  }
+
+  // 会话任务列表：仅当前用户
+  if (pathname === '/gen/jobs' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const sessionId = urlObj.searchParams.get('sessionId') || undefined;
+    const jobs = require('./gen-jobs').listGenJobs(db, { sessionId, userId: sessionUser.id }).map((r) => ({
+      job_id: r.job_id,
+      status: r.status,
+      progress: Number(r.progress || 0),
+      modality: r.modality,
+      model: r.model,
+      session_id: r.session_id,
+      created_at: r.created_at,
+      updated_at: r.updated_at,
+      completed_at: r.completed_at,
+    }));
+    return sendJson(res, 200, { success: true, jobs });
+  }
+
   if (pathname === '/gen/images' && req.method === 'POST') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
     try {
       const b = await parseBody(req);
+      studioAcl.assertModelAllowed(db, sessionUser, b.model);
       const { executeAdapter } = require('./gen');
       const { engineStatus } = require('./lab');
       const { resolveModelExecution, prepareGovernedSubmit } = require('./models-contract');
@@ -8663,7 +9319,7 @@ module.exports = {
       // 提取输入中的参数（兼容旧字段与对外共有控件）
       const values = {
         size: b.size || '2K',
-        ratio: b.ratio || '1:1',
+        ratio: b.ratio || '9:16',
         ...(b.params || {}),
         ...(b.extras || {}),
         ...(b.layer_decomposition != null ? { layer_decomposition: b.layer_decomposition } : {}),
@@ -8711,7 +9367,7 @@ module.exports = {
         prompt: finalPrompt,
         model: mCode,
         size: assembled?.body?.size || b.size,
-        ratio: assembled?.body?.ratio || b.ratio,
+        ratio: assembled?.body?.ratio || b.ratio || '9:16',
         imageUrls: b.imageUrls || (b.image ? [b.image] : []),
         imageLocalPaths: b.imageLocalPaths || [],
         extras: {
@@ -8723,7 +9379,21 @@ module.exports = {
       });
       return sendJson(res, 200, result);
     } catch (e) {
-      return sendJson(res, 500, { error: e.message });
+      // 上游错误对象透传：优先 e.status/statusCode，其次从消息里的 HTTP 码推断，
+      // 不再把所有失败统一压成 500；同时带出 upstreamStatus / requestId 便于定位。
+      const msg = String(e?.message || '');
+      const mHttp = /HTTP\s+(\d{3})/.exec(msg);
+      const upstreamStatus = Number(e?.upstreamStatus || e?.status || e?.statusCode) || (mHttp ? Number(mHttp[1]) : null);
+      const mReq = /request_id=([A-Za-z0-9_.:-]+)/.exec(msg);
+      const requestId = e?.requestId || e?.request_id || (mReq ? mReq[1] : null);
+      const explicit = Number(e?.status || e?.statusCode) || 0;
+      const status = explicit || (upstreamStatus && upstreamStatus >= 400 && upstreamStatus < 600 ? upstreamStatus : 500);
+      return sendJson(res, status, {
+        error: e.message,
+        code: e.code || 'error',
+        upstreamStatus: upstreamStatus || null,
+        requestId: requestId || null,
+      });
     }
   }
 
@@ -8731,6 +9401,7 @@ module.exports = {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
     try {
       const b = await parseBody(req);
+      studioAcl.assertModelAllowed(db, sessionUser, b.model);
       const { executeAdapter } = require('./gen');
       const { engineStatus } = require('./lab');
       const { resolveModelExecution, prepareGovernedSubmit } = require('./models-contract');
@@ -8816,7 +9487,8 @@ module.exports = {
         contractId: modelContract?.id || '',
         prompt: finalPrompt,
         model: mCode,
-        size: assembled?.body?.size || b.size,
+        size: assembled?.body?.size || b.size || assembled?.body?.resolution || b.resolution,
+        resolution: assembled?.body?.resolution || b.resolution || assembled?.body?.size || b.size,
         ratio: assembled?.body?.ratio || b.ratio,
         durationSec: assembled?.body?.duration || assembled?.body?.seconds || b.durationSec || b.seconds || b.duration,
         imageUrls: b.imageUrls || (b.image ? [b.image] : []),
@@ -8830,7 +9502,7 @@ module.exports = {
         },
         allowPendingTimeout: true,
         // 云端视频渲染普遍 1~3 分钟，90s 会频繁以 pending 返回，而前端拿不到视频地址只能报错
-        timeoutMs: Number(b.timeoutMs) || 240000,
+        timeoutMs: Number(b.timeoutMs) || 600000,
       });
       return sendJson(res, 200, result);
     } catch (e) {
@@ -8840,8 +9512,56 @@ module.exports = {
         'public_base_missing', 'public_base_private',
         'frame_blob', 'frame_bad_data_url', 'frame_unresolved',
       ].includes(e.code);
-      const status = userFixable ? 400 : 500;
-      return sendJson(res, status, { error: e.message, code: e.code || 'error' });
+      const explicit = Number(e?.status || e?.statusCode) || 0;
+      const status = explicit || (userFixable ? 400 : 500);
+      return sendJson(res, status, {
+        error: e.message,
+        code: e.code || 'error',
+        upstreamStatus: Number(e?.upstreamStatus || e?.status || e?.statusCode) || null,
+        requestId: e?.requestId || e?.request_id || null,
+      });
+    }
+  }
+
+  // ===== 阿里云视频超分辨率 (SuperResolveVideo) 独立调用与轮询端点 =====
+  if (pathname === '/video/super-resolve' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const b = await parseBody(req);
+      const { submitSuperResolveVideo } = require('./services/aliyun-video-sr');
+      const videoUrl = b.videoUrl || b.video_url || b.url;
+      if (!videoUrl) return sendJson(res, 400, { error: 'videoUrl 不能为空' });
+      const jobId = await submitSuperResolveVideo(videoUrl, b.bitRate || b.bit_rate || 10);
+      return sendJson(res, 200, { success: true, jobId });
+    } catch (e) {
+      return sendJson(res, 400, { success: false, error: e.message });
+    }
+  }
+
+  const mSrTask = pathname.match(/^\/video\/super-resolve\/tasks\/([^\/]+)$/);
+  if (mSrTask && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const jobId = decodeURIComponent(mSrTask[1]).trim();
+    try {
+      const { querySuperResolveResult } = require('./services/aliyun-video-sr');
+      const result = await querySuperResolveResult(jobId);
+      return sendJson(res, 200, { success: true, data: result });
+    } catch (e) {
+      return sendJson(res, 500, { success: false, error: e.message });
+    }
+  }
+
+  // ===== 异步生成任务查询与结果兑现端点 =====
+  const mGenTask = pathname.match(/^\/gen\/(?:videos\/)?tasks\/([^\/]+)$/);
+  if (mGenTask && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const taskId = decodeURIComponent(mGenTask[1]).trim();
+    try {
+      const { queryGenTask } = require('./gen/task-query');
+      const result = await queryGenTask(services, taskId);
+      return sendJson(res, 200, result);
+    } catch (e) {
+      return sendJson(res, 500, { success: false, error: e.message });
     }
   }
 
@@ -8906,6 +9626,7 @@ module.exports = {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
     try {
       const b = await parseBody(req);
+      studioAcl.assertModelAllowed(db, sessionUser, b.model);
       const model = b.model || 'agnes-3.0-flash';
       const { resolveModelExecution, assembleModelPayload } = require('./models-contract');
       const { capsFor } = require('./studio-catalog');
@@ -8987,7 +9708,14 @@ module.exports = {
         },
       });
     } catch (e) {
-      return sendJson(res, 500, { error: e.message, image_notes: Array.isArray(e.image_notes) ? e.image_notes : [] });
+      const st = Number(e?.status || e?.statusCode) || 0;
+      return sendJson(res, st >= 400 && st < 600 ? st : 500, {
+        error: e.message,
+        code: e.code || 'error',
+        upstreamStatus: Number(e?.upstreamStatus || e?.status || e?.statusCode) || null,
+        requestId: e?.requestId || e?.request_id || null,
+        image_notes: Array.isArray(e.image_notes) ? e.image_notes : [],
+      });
     }
   }
 
@@ -9121,6 +9849,7 @@ module.exports = {
     const b = await parseBody(req);
     try {
       const nu = auth.createUser(db, { username: b.username, password: b.password, role: b.role || 'viewer' }, sessionUser.username);
+      _studioCatalogCache.clear();
       return sendJson(res, 200, { success: true, data: nu });
     } catch (err) {
       return sendJson(res, 400, { error: err.message });
@@ -9169,6 +9898,7 @@ module.exports = {
     const userId = Number(mUserId[1]);
     try {
       auth.deleteUser(db, userId, sessionUser.username);
+      _studioCatalogCache.clear();
       return sendJson(res, 200, { success: true, message: '用户已删除' });
     } catch (err) {
       return sendJson(res, 400, { error: err.message });
@@ -9182,6 +9912,7 @@ module.exports = {
     const b = await parseBody(req);
     try {
       const u = auth.updateUser(db, userId, { role: b.role }, sessionUser.username);
+      _studioCatalogCache.clear();
       return sendJson(res, 200, { success: true, data: u });
     } catch (err) {
       return sendJson(res, 400, { error: err.message });
@@ -9232,6 +9963,8 @@ function register(services) {
 
 module.exports = {
   handleApi,
+  sendJson,
+  pipeFileStream,
   register,
   queryAssets,
   getAssetDetail,

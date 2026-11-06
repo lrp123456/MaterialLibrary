@@ -758,8 +758,14 @@ async function run(action) {
   }
 }
 
+let currentSSE = null
 function connectSSE() {
+  if (currentSSE) {
+    try { currentSSE.close() } catch (_) {}
+    currentSSE = null
+  }
   const es = new EventSource(api('/api/events'))
+  currentSSE = es
   es.onmessage = (ev) => {
     try {
       const msg = JSON.parse(ev.data)
@@ -799,9 +805,16 @@ function connectSSE() {
     } catch (e) {}
   }
   es.onerror = () => {
-    setTimeout(() => { try { es.close() } catch (_) {} ; connectSSE() }, 2500)
+    // 浏览器原生 EventSource 遇断开会自动重连，无需重复实例化
   }
 }
+
+window.addEventListener('beforeunload', () => {
+  if (currentSSE) {
+    try { currentSSE.close() } catch (_) {}
+    currentSSE = null
+  }
+})
 
 async function openDeviceModal() {
   $('devModal').classList.add('show')

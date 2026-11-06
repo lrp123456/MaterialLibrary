@@ -297,14 +297,26 @@
         v-for="(img, idx) in images"
         :key="img.url || idx"
         @click="$emit('select', idx)"
+        @dragover.prevent.stop="onViewerDragOver($event, idx)"
+        @dragleave="onViewerDragLeave(idx)"
+        @drop.prevent.stop="onViewerDrop($event, idx)"
         :class="[
           'relative flex flex-col h-full rounded-2xl border p-3 transition-all cursor-pointer bg-studio-850',
+          dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx ? 'ring-2 ring-amber-400 border-amber-400 scale-[1.01] bg-amber-500/10' : '',
+          draggingIdx === idx ? 'opacity-40 border-dashed border-studio-500' : '',
           isSubRefImage(img, idx)
             ? 'w-[340px] max-w-[380px] shrink-0'
             : (images.length === 2 && isSubRefImage(images[1], 1) ? 'flex-1 min-w-[480px]' : (aspectDiff2.verticalIdx === idx ? 'w-[32%] min-w-[240px] max-w-[380px]' : 'flex-1 min-w-0')),
           getSubRefBorderClass(img, idx)
         ]"
       >
+        <!-- 拖放换位视觉覆盖层 -->
+        <div
+          v-if="dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx"
+          class="absolute inset-0 z-40 bg-amber-500/20 backdrop-blur-xs flex items-center justify-center font-bold text-amber-200 border-2 border-dashed border-amber-400 rounded-2xl pointer-events-none text-sm shadow-xl"
+        >
+          ⇄ 释放以与图{{ idx + 1 }}调换顺序
+        </div>
         <div
           @click.stop="onImageClick(idx)"
           class="group/img relative flex-1 min-h-0 flex items-center justify-center overflow-hidden rounded-xl bg-studio-950/60 cursor-pointer"
@@ -460,11 +472,30 @@
         </div>
 
         <div class="mt-2.5 flex items-center justify-between shrink-0 px-1">
-          <div class="flex items-center gap-2 min-w-0">
+          <div class="flex items-center gap-1.5 min-w-0">
             <span
-              class="px-2 py-0.5 rounded font-mono text-xs font-bold transition-all"
-              :class="isSubRefImage(img, idx) ? 'bg-amber-400/20 text-amber-300 border border-amber-400/40' : 'bg-studio-cyan/15 text-studio-cyan'"
-            >{{ getSubRefLabel(img, idx) }}</span>
+              class="px-2 py-0.5 rounded font-mono text-xs font-bold transition-all flex items-center gap-1 select-none cursor-grab active:cursor-grabbing border"
+              :class="isSubRefImage(img, idx) ? 'bg-amber-400/20 text-amber-300 border-amber-400/40' : 'bg-studio-cyan/15 text-studio-cyan border-studio-cyan/30'"
+              draggable="true"
+              @dragstart.stop="onViewerDragStart($event, idx)"
+              @dragend="onViewerDragEnd"
+              title="按住拖拽可调整图片顺序（与其它图对调）"
+            >
+              <span class="opacity-60 text-[10px]">⋮⋮</span>
+              <span>{{ getSubRefLabel(img, idx) }}</span>
+            </span>
+
+            <button
+              v-if="images.length > 1"
+              type="button"
+              @click.stop="quickSwap(idx, idx === 0 ? 1 : 0)"
+              class="px-1.5 py-0.5 rounded bg-studio-800 hover:bg-studio-700 text-slate-300 hover:text-white transition cursor-pointer text-[10px] font-bold border border-studio-700 flex items-center gap-0.5"
+              :title="`与图${idx === 0 ? 2 : 1}调换顺序`"
+            >
+              <span>⇄</span>
+              <span>对调</span>
+            </button>
+
             <span class="text-xs font-mono text-slate-400 truncate">{{ img.name || `ARCH_REF_0${idx+1}` }}</span>
           </div>
           <div class="flex items-center gap-1 shrink-0">
@@ -506,11 +537,22 @@
         v-for="(img, idx) in images"
         :key="img.url || idx"
         @click="$emit('select', idx)"
+        @dragover.prevent.stop="onViewerDragOver($event, idx)"
+        @dragleave="onViewerDragLeave(idx)"
+        @drop.prevent.stop="onViewerDrop($event, idx)"
         :class="[
           'relative flex-1 min-w-0 flex flex-col h-full rounded-2xl border p-3 transition-all cursor-pointer bg-studio-850',
+          dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx ? 'ring-2 ring-amber-400 border-amber-400 scale-[1.01] bg-amber-500/10' : '',
+          draggingIdx === idx ? 'opacity-40 border-dashed border-studio-500' : '',
           selectedIndex === idx ? 'border-studio-accent ring-1 ring-studio-accent' : 'border-studio-700 hover:border-studio-600'
         ]"
       >
+        <div
+          v-if="dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx"
+          class="absolute inset-0 z-40 bg-amber-500/20 backdrop-blur-xs flex items-center justify-center font-bold text-amber-200 border-2 border-dashed border-amber-400 rounded-2xl pointer-events-none text-sm shadow-xl"
+        >
+          ⇄ 释放以与图{{ idx + 1 }}调换顺序
+        </div>
         <div
           @click.stop="onImageClick(idx)"
           class="group/img relative flex-1 min-h-0 flex items-center justify-center overflow-hidden rounded-xl bg-studio-950/60 cursor-pointer"
@@ -695,11 +737,22 @@
         v-for="(img, idx) in images"
         :key="img.url || idx"
         @click="$emit('select', idx)"
+        @dragover.prevent.stop="onViewerDragOver($event, idx)"
+        @dragleave="onViewerDragLeave(idx)"
+        @drop.prevent.stop="onViewerDrop($event, idx)"
         :class="[
           'relative flex flex-col w-[300px] shrink-0 h-full rounded-2xl border p-3 transition-all cursor-pointer bg-studio-850',
+          dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx ? 'ring-2 ring-amber-400 border-amber-400 scale-[1.01] bg-amber-500/10' : '',
+          draggingIdx === idx ? 'opacity-40 border-dashed border-studio-500' : '',
           selectedIndex === idx ? 'border-studio-accent ring-1 ring-studio-accent' : 'border-studio-700 hover:border-studio-600'
         ]"
       >
+        <div
+          v-if="dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx"
+          class="absolute inset-0 z-40 bg-amber-500/20 backdrop-blur-xs flex items-center justify-center font-bold text-amber-200 border-2 border-dashed border-amber-400 rounded-2xl pointer-events-none text-sm shadow-xl"
+        >
+          ⇄ 释放以与图{{ idx + 1 }}调换顺序
+        </div>
         <div
           @click.stop="onImageClick(idx)"
           class="group/img relative flex-1 min-h-0 flex items-center justify-center overflow-hidden rounded-xl bg-studio-950/60 cursor-pointer"
@@ -897,16 +950,76 @@ const emit = defineEmits([
   'region-hover',
   'open-picker',
   'upload-files',
+  'reorder',
 ]);
 
 const isDragging = ref(false);
+const draggingIdx = ref(null);
+const dragOverIdx = ref(null);
 
-function onDropFiles(e) {
-  isDragging.value = false;
+function onViewerDragStart(e, idx) {
+  draggingIdx.value = idx;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('application/x-studio-tray-idx', String(idx));
+  e.dataTransfer.setData('text/plain', `tray:${idx}`);
+}
+
+function onViewerDragOver(e, idx) {
+  if (draggingIdx.value !== null && draggingIdx.value !== idx) {
+    dragOverIdx.value = idx;
+    e.dataTransfer.dropEffect = 'move';
+  }
+}
+
+function onViewerDragLeave(idx) {
+  if (dragOverIdx.value === idx) {
+    dragOverIdx.value = null;
+  }
+}
+
+function onViewerDrop(e, targetIdx) {
+  const rawIdx = e.dataTransfer.getData('application/x-studio-tray-idx');
+  if (rawIdx !== '') {
+    const fromIdx = Number(rawIdx);
+    if (!Number.isNaN(fromIdx) && fromIdx !== targetIdx) {
+      emit('reorder', { from: fromIdx, to: targetIdx });
+    }
+    resetViewerDragState();
+    return;
+  }
+  resetViewerDragState();
   const files = e.dataTransfer?.files;
   if (files && files.length) {
     emit('upload-files', Array.from(files));
   }
+}
+
+function onViewerDragEnd() {
+  resetViewerDragState();
+}
+
+function onDropFiles(e) {
+  isDragging.value = false;
+  // 核心：若为看图区内部卡片拖拽，不触发外部文件重复挂载
+  const rawIdx = e.dataTransfer.getData('application/x-studio-tray-idx');
+  if (rawIdx !== '') {
+    resetViewerDragState();
+    return;
+  }
+  const files = e.dataTransfer?.files;
+  if (files && files.length) {
+    emit('upload-files', Array.from(files));
+  }
+}
+
+function resetViewerDragState() {
+  isDragging.value = false;
+  draggingIdx.value = null;
+  dragOverIdx.value = null;
+}
+
+function quickSwap(fromIdx, toIdx) {
+  emit('reorder', { from: fromIdx, to: toIdx });
 }
 
 const hiddenRegionOverlayMap = reactive(new Set());
@@ -1173,7 +1286,8 @@ const aspectDiff2 = computed(() => {
 // 3D 朝向参考图 / 次级参考图专属判断与视觉辅助
 function isSubRefImage(img, idx) {
   if (!img) return false;
-  return Boolean(img.isRefObject || img.origin === '3d_snapshot' || img.isSubRef);
+  // 必须是真正的 3D 产物或次级参考，杜绝普通 2D 图片误判
+  return Boolean(img.glb || img.modelUrl || (img.origin === '3d_snapshot' && (img.glb || img.modelUrl || img.sourceRegionId)) || img.isSubRef);
 }
 
 function getSubRefLabel(img, idx) {

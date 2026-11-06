@@ -357,6 +357,11 @@ input, select, textarea {
   border-color: var(--theme-border) !important;
 }
 
+select option {
+  background-color: var(--theme-bg-panel);
+  color: var(--theme-text-primary);
+}
+
 input::placeholder, textarea::placeholder {
   color: var(--theme-text-muted) !important;
 }
@@ -429,7 +434,11 @@ html.light .text-blue-400 {
 html.eye-care .text-indigo-300,
 html.eye-care .text-blue-300,
 html.eye-care .text-indigo-400,
-html.eye-care .text-blue-400 {
+html.eye-care .text-blue-400,
+html.eye-care .text-indigo-200,
+html.eye-care .text-blue-200,
+html.light .text-indigo-200,
+html.light .text-blue-200 {
   color: var(--theme-badge-text) !important;
 }
 
@@ -655,10 +664,10 @@ html.eye-care .on-media .text-white {
 /* ==============================================================================
    全局深色浮层与媒体叠层防反色白字保护（彻底消灭黑底黑字）
    ============================================================================== */
-html.light [class*="bg-black"] .text-white,
-html.eye-care [class*="bg-black"] .text-white,
-html.light [class*="bg-black/"] .text-white,
-html.eye-care [class*="bg-black/"] .text-white,
+html.light :not(.fixed):not([class*="fixed"])[class*="bg-black"] .text-white,
+html.eye-care :not(.fixed):not([class*="fixed"])[class*="bg-black"] .text-white,
+html.light :not(.fixed):not([class*="fixed"])[class*="bg-black/"] .text-white,
+html.eye-care :not(.fixed):not([class*="fixed"])[class*="bg-black/"] .text-white,
 html.light [class*="bg-emerald-950"] .text-emerald-300,
 html.eye-care [class*="bg-emerald-950"] .text-emerald-300,
 html.light [class*="bg-purple-900"] .text-purple-300,
@@ -747,14 +756,34 @@ html.eye-care .media-scrim-pill * {
   color: #FFFFFF !important;
 }
 
+
+
+/* 弹窗与面板容器内的高对比保护：杜绝任何由祖先蒙版 bg-black/* 导致的文字发白反差不足 */
+html.light [class*="bg-studio-9"] .text-white:not(.on-media):not(.media-badge):not([data-scrim]):not(.bg-studio-accent),
+html.light [class*="bg-studio-8"] .text-white:not(.on-media):not(.media-badge):not([data-scrim]):not(.bg-studio-accent),
+html.light [class*="bg-slate-9"] .text-white:not(.on-media):not(.media-badge):not([data-scrim]):not(.bg-studio-accent),
+html.light [class*="bg-slate-8"] .text-white:not(.on-media):not(.media-badge):not([data-scrim]):not(.bg-studio-accent),
+html.eye-care [class*="bg-studio-9"] .text-white:not(.on-media):not(.media-badge):not([data-scrim]):not(.bg-studio-accent),
+html.eye-care [class*="bg-studio-8"] .text-white:not(.on-media):not(.media-badge):not([data-scrim]):not(.bg-studio-accent),
+html.eye-care [class*="bg-slate-9"] .text-white:not(.on-media):not(.media-badge):not([data-scrim]):not(.bg-studio-accent),
+html.eye-care [class*="bg-slate-8"] .text-white:not(.on-media):not(.media-badge):not([data-scrim]):not(.bg-studio-accent),
+html.light [class*="bg-studio-9"] select,
+html.light [class*="bg-studio-8"] select,
+html.eye-care [class*="bg-studio-9"] select,
+html.eye-care [class*="bg-studio-8"] select {
+  color: var(--theme-text-primary) !important;
+}
+
 /* 模态弹窗在明朗和护眼下的背景蒙版（保持深色半透明聚焦，绝不变成实心大白幕） */
 html.light .modal-backdrop,
 html.light .bg-black\/75,
 html.light .bg-black\/80,
+html.light .bg-black\/85,
 html.light .bg-black\/90,
 html.eye-care .modal-backdrop,
 html.eye-care .bg-black\/75,
 html.eye-care .bg-black\/80,
+html.eye-care .bg-black\/85,
 html.eye-care .bg-black\/90 {
   background-color: rgba(15, 23, 42, 0.75) !important;
 }

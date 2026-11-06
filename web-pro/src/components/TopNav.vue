@@ -1,11 +1,18 @@
 <template>
   <header class="top-bar" role="banner">
-    <div class="top-brand">
+    <button
+      type="button"
+      class="top-brand top-back-btn"
+      title="返回（优先关闭当前弹窗，无弹窗时回到上一板块）"
+      aria-label="返回"
+      @click="emit('back')"
+    >
+      <StudioIcon name="arrowLeft" :size="18" custom-class="back-arrow" />
       <div class="top-logo" aria-hidden="true">
         <StudioIcon name="sparkles" :size="18" />
       </div>
-      <span class="sr-only">灵感空间</span>
-    </div>
+      <span class="sr-only">灵感空间 · 返回</span>
+    </button>
 
     <!-- 顶部主板块导航胶囊 (滑块平移跟随) -->
     <div class="top-nav-slot">
@@ -114,6 +121,7 @@
 <script setup>
 import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import StudioIcon from './StudioIcon.vue';
+import { bindOverlays } from '../service/overlay-stack.js';
 import {
   ensureServerBase,
   listCandidates,
@@ -128,7 +136,7 @@ const props = defineProps({
   username: { type: String, default: '' }
 });
 
-const emit = defineEmits(['update:activeTab', 'update:libraryLane', 'logout']);
+const emit = defineEmits(['update:activeTab', 'update:libraryLane', 'logout', 'back']);
 
 const laneColumns = [
   {
@@ -149,6 +157,8 @@ const laneColumns = [
   }
 ];
 const laneMenuOpen = ref(false);
+// 顶栏的 lane 下拉同样是浮层：返回时优先收起它，而不是直接跳走板块。
+bindOverlays({ laneMenu: laneMenuOpen }, { prefix: 'topnav:' });
 let laneCloseTimer = null;
 function openLaneMenu() {
   clearTimeout(laneCloseTimer);
@@ -309,3 +319,32 @@ function applySeniorMode(enabled) {
   } catch (_) {}
 }
 </script>
+
+<style scoped>
+/* top-brand 原本是纯展示 div，改成返回按钮后需要抹掉浏览器默认 button 样式 */
+.top-back-btn {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+}
+.top-back-btn :deep(.back-arrow) {
+  opacity: 0.65;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.top-back-btn:hover :deep(.back-arrow),
+.top-back-btn:focus-visible :deep(.back-arrow) {
+  opacity: 1;
+  transform: translateX(-2px);
+}
+.top-back-btn:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+  border-radius: 8px;
+}
+</style>

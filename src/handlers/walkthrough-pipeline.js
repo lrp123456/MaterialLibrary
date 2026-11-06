@@ -627,7 +627,7 @@ async function scheduleSeedanceRender(services, { sequenceData, sourceFids = [] 
   const aspect = sequenceData.aspect_ratio || '16:9';
   const perShot = Number(sequenceData.duration_per_shot) || 4;
   const shotCount = Math.max(1, shots.length || sourceFids.length || 1);
-  const durationSec = Math.max(4, Math.min(12, shotCount * perShot));
+  const durationSec = Math.max(4, Math.min(30, shotCount * perShot));
   const shotPrompts = shots.map((s, i) => serverShotLine(s, i, style)).join('；');
   const fullPrompt = `室内第一人称漫游运镜视频。整体画幅 ${aspect}，运镜风格：${style}。镜头动线：${shotPrompts}。画面平稳流畅，空间几何结构稳定，真实自然光影。`;
 

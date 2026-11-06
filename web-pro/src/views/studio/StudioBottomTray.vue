@@ -4,13 +4,13 @@
     v-if="mode === 'vertical'"
     class="studio-tray-vertical relative w-[76px] shrink-0 h-full bg-studio-900 border-l border-studio-700 py-3 px-2 flex flex-col items-center select-none overflow-y-auto scrollbar-thin transition-colors"
     :class="{ 'ring-2 ring-studio-accent bg-studio-800/80': isDragging }"
-    @dragover.prevent="isDragging = true"
-    @dragleave.prevent="isDragging = false"
-    @drop.prevent="onDropFiles"
+    @dragover.prevent="onContainerDragOver"
+    @dragleave="onContainerDragLeave"
+    @drop.prevent="onContainerDrop"
   >
-    <!-- 拖拽提示遮罩 -->
+    <!-- 外部拖拽提示遮罩（仅外部拖入时显现） -->
     <div
-      v-if="isDragging"
+      v-if="isDragging && draggingIdx === null"
       class="absolute inset-0 z-20 bg-studio-accent/20 backdrop-blur-xs flex flex-col items-center justify-center p-2 text-center pointer-events-none"
     >
       <StudioIcon name="wand" :size="20" class="text-white animate-bounce mb-1" />
@@ -22,27 +22,35 @@
     </div>
 
     <div class="flex flex-col items-center gap-2.5 w-full">
-      <!-- 已挂载图片缩略索引格 -->
+      <!-- 已挂载图片缩略索引格（支持内部拖拽互换顺序） -->
       <div
         v-for="(item, idx) in images"
         :key="item.url || item.fid || idx"
+        draggable="true"
+        @dragstart="onItemDragStart($event, idx)"
+        @dragover.prevent.stop="onItemDragOver($event, idx)"
+        @dragleave="onItemDragLeave(idx)"
+        @drop.prevent.stop="onItemDrop($event, idx)"
+        @dragend="onItemDragEnd"
         @click="$emit('select', idx)"
         :class="[
-          'group relative flex flex-col items-center justify-between w-[58px] h-[64px] rounded-xl border p-1 transition-all cursor-pointer bg-studio-850 shrink-0',
-          selectedIndex === idx
+          'group relative flex flex-col items-center justify-between w-[58px] h-[64px] rounded-xl border p-1 transition-all cursor-grab active:cursor-grabbing bg-studio-850 shrink-0',
+          dragOverIdx === idx ? 'ring-2 ring-amber-400 border-amber-400 scale-105 bg-amber-500/10' : '',
+          draggingIdx === idx ? 'opacity-40 border-dashed border-studio-500' : '',
+          selectedIndex === idx && dragOverIdx !== idx
             ? 'border-studio-accent shadow-sm shadow-studio-accent/20 ring-1 ring-studio-accent'
-            : 'border-studio-700 hover:border-studio-600 hover:bg-studio-800'
+            : (dragOverIdx !== idx ? 'border-studio-700 hover:border-studio-600 hover:bg-studio-800' : '')
         ]"
-        :title="`${item.name || '参考图'} (图${idx + 1})`"
+        :title="`拖动可调整顺序 · ${item.name || '参考图'} (图${idx + 1})`"
       >
-        <div class="w-full flex-1 flex items-center justify-center overflow-hidden rounded-lg bg-studio-950">
+        <div class="w-full flex-1 flex items-center justify-center overflow-hidden rounded-lg bg-studio-950 pointer-events-none">
           <img
             :src="item.thumbUrl || item.url || item.imgUrl"
-            class="max-w-full max-h-full object-contain"
+            class="max-w-full max-h-full object-contain pointer-events-none"
             :alt="`图${idx + 1}`"
           />
         </div>
-        <div class="mt-1 flex items-center justify-center">
+        <div class="mt-1 flex items-center justify-center pointer-events-none">
           <span class="px-1.5 py-0.2 rounded bg-studio-cyan/15 text-studio-cyan font-mono text-[10px] font-bold leading-tight">
             图{{ idx + 1 }}
           </span>
@@ -66,14 +74,14 @@
   <div
     v-else
     class="studio-tray-horizontal relative h-[56px] w-full bg-studio-900/95 backdrop-blur border-t border-studio-700/80 px-4 flex items-center shrink-0 select-none overflow-x-auto scrollbar-thin transition-colors"
-    :class="{ 'ring-2 ring-studio-accent bg-studio-800/80': isDragging }"
-    @dragover.prevent="isDragging = true"
-    @dragleave.prevent="isDragging = false"
-    @drop.prevent="onDropFiles"
+    :class="{ 'ring-2 ring-studio-accent bg-studio-800/80': isDragging && draggingIdx === null }"
+    @dragover.prevent="onContainerDragOver"
+    @dragleave="onContainerDragLeave"
+    @drop.prevent="onContainerDrop"
   >
-    <!-- 拖拽高亮提示 -->
+    <!-- 拖拽高亮提示（仅外部拖入） -->
     <div
-      v-if="isDragging"
+      v-if="isDragging && draggingIdx === null"
       class="absolute inset-0 z-20 bg-studio-accent/20 backdrop-blur-xs flex items-center justify-center text-white text-xs font-bold pointer-events-none"
     >
       松手立即挂载参考图
@@ -88,23 +96,31 @@
       <div
         v-for="(item, idx) in images"
         :key="item.url || item.fid || idx"
+        draggable="true"
+        @dragstart="onItemDragStart($event, idx)"
+        @dragover.prevent.stop="onItemDragOver($event, idx)"
+        @dragleave="onItemDragLeave(idx)"
+        @drop.prevent.stop="onItemDrop($event, idx)"
+        @dragend="onItemDragEnd"
         @click="$emit('select', idx)"
         :class="[
-          'group relative flex items-center gap-2 h-9 px-2 rounded-lg border transition-all cursor-pointer bg-studio-850 shrink-0',
-          selectedIndex === idx
+          'group relative flex items-center gap-2 h-9 px-2 rounded-lg border transition-all cursor-grab active:cursor-grabbing bg-studio-850 shrink-0',
+          dragOverIdx === idx ? 'ring-2 ring-amber-400 border-amber-400 scale-105 bg-amber-500/10' : '',
+          draggingIdx === idx ? 'opacity-40 border-dashed border-studio-500' : '',
+          selectedIndex === idx && dragOverIdx !== idx
             ? 'border-studio-accent shadow-sm shadow-studio-accent/20 ring-1 ring-studio-accent'
-            : 'border-studio-700 hover:border-studio-600 hover:bg-studio-800'
+            : (dragOverIdx !== idx ? 'border-studio-700 hover:border-studio-600 hover:bg-studio-800' : '')
         ]"
-        :title="`${item.name || '参考图'} (图${idx + 1}) - 点击展开看图区`"
+        :title="`拖动可调整顺序 · ${item.name || '参考图'} (图${idx + 1})`"
       >
-        <div class="w-6 h-6 rounded overflow-hidden bg-studio-950 flex items-center justify-center shrink-0">
+        <div class="w-6 h-6 rounded overflow-hidden bg-studio-950 flex items-center justify-center shrink-0 pointer-events-none">
           <img
             :src="item.thumbUrl || item.url || item.imgUrl"
-            class="max-w-full max-h-full object-contain"
+            class="max-w-full max-h-full object-contain pointer-events-none"
             :alt="`图${idx + 1}`"
           />
         </div>
-        <span class="px-1 py-0.2 rounded bg-studio-cyan/15 text-studio-cyan font-mono text-[10px] font-bold leading-tight">
+        <span class="px-1 py-0.2 rounded bg-studio-cyan/15 text-studio-cyan font-mono text-[10px] font-bold leading-tight pointer-events-none">
           图{{ idx + 1 }}
         </span>
       </div>
@@ -137,21 +153,92 @@
 import { ref } from 'vue';
 import StudioIcon from '../../components/StudioIcon.vue';
 
-defineProps({
+const props = defineProps({
   images: { type: Array, default: () => [] },
   selectedIndex: { type: Number, default: 0 },
   mode: { type: String, default: 'vertical' }, // 'vertical' | 'horizontal'
 });
 
-const emit = defineEmits(['select', 'open-picker', 'expand-viewer', 'upload-files']);
+const emit = defineEmits(['select', 'open-picker', 'expand-viewer', 'upload-files', 'reorder']);
 
 const isDragging = ref(false);
+const draggingIdx = ref(null);
+const dragOverIdx = ref(null);
 
-function onDropFiles(e) {
-  isDragging.value = false;
+function onItemDragStart(e, idx) {
+  draggingIdx.value = idx;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('application/x-studio-tray-idx', String(idx));
+  e.dataTransfer.setData('text/plain', `tray:${idx}`);
+}
+
+function onItemDragOver(e, idx) {
+  if (draggingIdx.value !== null && draggingIdx.value !== idx) {
+    dragOverIdx.value = idx;
+    e.dataTransfer.dropEffect = 'move';
+  }
+}
+
+function onItemDragLeave(idx) {
+  if (dragOverIdx.value === idx) {
+    dragOverIdx.value = null;
+  }
+}
+
+function onItemDrop(e, targetIdx) {
+  const rawIdx = e.dataTransfer.getData('application/x-studio-tray-idx');
+  if (rawIdx !== '') {
+    const fromIdx = Number(rawIdx);
+    if (!Number.isNaN(fromIdx) && fromIdx !== targetIdx) {
+      emit('reorder', { from: fromIdx, to: targetIdx });
+    }
+    resetDragState();
+    return;
+  }
+
+  // 外部拖入
+  resetDragState();
   const files = e.dataTransfer?.files;
   if (files && files.length) {
     emit('upload-files', Array.from(files));
   }
+}
+
+function onItemDragEnd() {
+  resetDragState();
+}
+
+function onContainerDragOver(e) {
+  if (draggingIdx.value === null) {
+    isDragging.value = true;
+  }
+}
+
+function onContainerDragLeave() {
+  isDragging.value = false;
+}
+
+function onContainerDrop(e) {
+  const rawIdx = e.dataTransfer.getData('application/x-studio-tray-idx');
+  if (rawIdx !== '') {
+    const fromIdx = Number(rawIdx);
+    if (!Number.isNaN(fromIdx) && fromIdx !== props.images.length - 1) {
+      emit('reorder', { from: fromIdx, to: props.images.length - 1 });
+    }
+    resetDragState();
+    return;
+  }
+
+  resetDragState();
+  const files = e.dataTransfer?.files;
+  if (files && files.length) {
+    emit('upload-files', Array.from(files));
+  }
+}
+
+function resetDragState() {
+  isDragging.value = false;
+  draggingIdx.value = null;
+  dragOverIdx.value = null;
 }
 </script>

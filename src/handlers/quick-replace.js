@@ -64,6 +64,7 @@ async function handleReplace(services, {
   regionClauseText = null,
   maskPath = null,
   outSpec = null,
+  prompt: callerPrompt = null,
 }) {
   if (!glbFid) throw new Error('改（物体替换）必须选择带 GLB 的单品');
   if (!fixedCameraRefBuffer) {
@@ -82,8 +83,8 @@ async function handleReplace(services, {
   const box1Tag = `${nx1} ${ny1} ${nx2} ${ny2}`;
 
   const facingSentence = buildFacingDesc(yaw, productName);
-  let prompt = '';
-  if (services && services.db) {
+  let prompt = String(callerPrompt || '').trim();
+  if (!prompt && services && services.db) {
     try {
       const { compileNodePrompt } = require('../prompt-compiler');
       const compiled = compileNodePrompt(services.db, {

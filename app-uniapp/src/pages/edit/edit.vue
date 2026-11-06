@@ -46,28 +46,15 @@
           </view>
         </view>
         <input v-model="prompt" class="op-input" placeholder="描述要做什么（如：换成浅灰色三人沙发）" placeholder-class="ph" />
-        <view v-if="selectedOp === 'replace'" class="op-ref">
-          <button class="btn-ghost" @click="toggleGlb">替换物（GLB）调整</button>
-        </view>
       </view>
 
-      <!-- ch03 GLB 调整面板 -->
-      <view v-if="glbOpen" class="card">
-        <GlbAdjuster :model-name="glbName" :model-url="glbUrl" @confirm="onGlbConfirm" @change="onGlbChange" />
-      </view>
-
-      <!-- 执行 -->
+      <!-- 执行：只交接给创作页，不在此直接生成 -->
       <view class="card">
+        <view class="handoff-note">下一步会带你到创作页：可核对实际参考图、选区与请求提示词，再决定发送。</view>
         <view class="action-row">
-          <button class="btn-primary" :loading="editing" @click="runEdit">生成并贴回</button>
+          <button class="btn-primary" :loading="editing" @click="runEdit">带入创作页并预览请求</button>
         </view>
         <view v-if="editErr" class="err">{{ editErr }}</view>
-      </view>
-
-      <!-- 结果 -->
-      <view v-if="resultUrl" class="card">
-        <view class="card-title">结果（引擎：{{ engine }}）</view>
-        <image class="result-img" :src="resultUrl" mode="widthFix" />
       </view>
 
       <view style="height: 40rpx" />
@@ -77,8 +64,8 @@
 
 <script>
 import TouchSelector from '../../components/TouchSelector.vue'
-import GlbAdjuster from '../../components/GlbAdjuster.vue'
-import { aiEdit, aiSegment, mediaUrl } from '../../service/ViewerApi'
+import { aiSegment, mediaUrl } from '../../service/ViewerApi'
+import { handoffPreciseEdit } from '../../common/handoff'
 
 const OPS = [
   { id: 'replace', name: '替换', icon: '🔁' },
@@ -90,7 +77,7 @@ const OPS = [
 ]
 
 export default {
-  components: { TouchSelector, GlbAdjuster },
+  components: { TouchSelector },
   data() {
     return {
       statusBarHeight: 20,
@@ -100,19 +87,14 @@ export default {
       naturalW: 0,
       naturalH: 0,
       detections: [],
+      selection: null,
       toolMode: 'box',
       selectedOp: 'replace',
       prompt: '',
       segmenting: false,
       editing: false,
       editErr: '',
-      resultUrl: '',
-      engine: '',
       segNote: '',
-      glbOpen: false,
-      glbUrl: '',
-      glbName: '沙发替换物',
-      glbTransform: { yaw: 180, pitch: 0, roll: 0, scale: 1, x: 0, y: 0 },
       ops: OPS
     }
   },
@@ -160,16 +142,9 @@ export default {
         this.segmenting = false
       }
     },
-    toggleGlb() {
-      this.glbOpen = !this.glbOpen
-    },
-    onGlbChange(t) {
-      this.glbTransform = t
-    },
-    onGlbConfirm(t) {
-      this.glbTransform = t
-      this.glbOpen = false
-    },
+    toggleGlb() {},
+    onGlbChange(t) {},
+    onGlbConfirm(t) {},
     async runEdit() {
       const sel = this.selection
       if (!sel || (!sel.bbox && !sel.quad && !sel.polygon)) {
@@ -178,36 +153,22 @@ export default {
       }
       this.editing = true
       this.editErr = ''
-      this.resultUrl = ''
       try {
-        const body = {
-          fid: this.fid || undefined,
-          imageUrl: this.fid ? undefined : this.srcImage,
+        const opName = OPS.find((o) => o.id === this.selectedOp)
+        handoffPreciseEdit({
+          fid: this.fid,
+          imgUrl: this.srcImage,
           op: this.selectedOp,
-          prompt: this.prompt || this.selectedOp,
-          bbox: sel.bbox, quad: sel.quad, polygon: sel.polygon,
-          glb: this.selectedOp === 'replace' && this.glbOpen ? this.glbTransform : undefined
-        }
-        const data = await aiEdit(body)
-        const f = data.files && data.files[0]
-        if (f && (f.localPath || f.url)) {
-          this.resultUrl = await this.absUrl(f.url || f.localPath)
-          this.engine = data.engine || 'server'
-        }
+          recipe: this.prompt || '',
+          recipeHint: opName ? opName.name : this.selectedOp,
+          selection: sel,
+        })
       } catch (e) {
-        this.editErr = e.message || '编辑失败'
+        this.editErr = e.message || '无法带入创作页'
       } finally {
         this.editing = false
       }
     },
-    async absUrl(u) {
-      if (!u) return ''
-      if (/^https?:\/\//.test(u)) return u
-      // 服务端相对路径：拼当前服务器地址
-      const { store } = require('../../service/SyncStateStore')
-      const srv = store.getServerUrl()
-      return srv + (u.startsWith('/') ? u : '/' + u)
-    }
   }
 }
 </script>
@@ -237,6 +198,7 @@ export default {
 .op-ref { margin-top: 16rpx; }
 .ph { color: #94A3B8; font-size: 24rpx; }
 .note { font-size: 24rpx; color: #64748B; margin-top: 16rpx; }
+.handoff-note { font-size: 24rpx; line-height: 1.6; color: #64748B; background: #EFF6FF; border-radius: 16rpx; padding: 18rpx; }
 .err { font-size: 24rpx; color: #DC2626; margin-top: 16rpx; }
 .action-row { display: flex; gap: 20rpx; margin-top: 20rpx; }
 .action-row button { flex: 1; margin: 0; font-size: 28rpx; }

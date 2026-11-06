@@ -1,193 +1,268 @@
 <template>
   <view class="page">
     <view class="status-bar" :style="{ paddingTop: statusBarHeight + 'px' }" />
-    <view class="nav">
-      <text v-if="canGoBack" class="back" @click="goBack">‹</text>
-      <view v-else class="nav-placeholder" />
-      <text class="nav-title">设置与个人中心</text>
-      <view class="spacer" />
+
+    <!-- 顶栏 -->
+    <view class="topbar">
+      <view class="topbar-side">
+        <view v-if="canGoBack" class="back" @click="goBack" hover-class="back-hover"><text class="back-t">‹</text></view>
+      </view>
+      <text class="topbar-title">我的</text>
+      <view class="topbar-side right">
+        <view class="logout-link" @click="logout" hover-class="logout-link-hover"><text class="logout-t">退出</text></view>
+      </view>
     </view>
-    <scroll-view scroll-y class="scroll">
-      <!-- 账号信息 -->
-      <view class="card">
-        <text class="section">当前账号</text>
-        <view class="account-card">
-          <view class="account-avatar">{{ (username || 'U').slice(0, 1).toUpperCase() }}</view>
-          <view class="account-info">
-            <text class="account-username">{{ username || '未登录' }}</text>
-            <view class="account-badge">
-              <text class="account-role">{{ roleText }}</text>
+
+    <!-- 入库横条（WS asset.ingested 推送） -->
+    <view class="ingest-bar" :class="{ show: ingest.show }" :style="{ top: (statusBarHeight + 54) + 'px' }">
+      <image v-if="ingest.show && ingest.thumb" :src="ingest.thumb" class="ingest-thumb" mode="aspectFill" />
+      <view class="ingest-meta">
+        <text class="ingest-title">{{ ingest.title }}</text>
+        <text class="ingest-sub">{{ ingest.sub }}</text>
+      </view>
+      <view class="ingest-go" @click="openIngested" hover-class="ingest-go-hover"><text class="ingest-go-t">查看</text></view>
+      <view class="ingest-close" @click="dismissIngest" hover-class="ingest-close-hover"><text class="ingest-close-t">✕</text></view>
+    </view>
+
+    <scroll-view scroll-y class="scroll" :style="{ height: 'calc(100vh - ' + (statusBarHeight + 48) + 'px)' }">
+      <!-- 账号 -->
+      <view class="profile rise d1">
+        <view class="avatar">{{ (username || 'U').slice(0, 1).toUpperCase() }}</view>
+        <view class="profile-meta">
+          <text class="profile-name">{{ username || '未登录' }}</text>
+          <view class="profile-tags">
+            <text class="role">{{ roleText }}</text>
+            <view class="conn" :class="{ ok: pushConnected }">
+              <view class="conn-dot" />
+              <text class="conn-t">{{ pushConnected ? '实时在线' : '离线缓存' }}</text>
             </view>
           </view>
         </view>
-        <button class="btn-logout" @click="logout">退出登录</button>
       </view>
 
-      <!-- 版本与远程更新 -->
-      <view class="card">
-        <text class="section">版本与更新</text>
-        <view class="row-between">
-          <text class="label">当前版本</text>
-          <text class="label">{{ appVersionLabel }}</text>
+      <!-- 同步优先 -->
+      <view class="sync-card rise d2">
+        <view class="sync-head">
+          <view class="sync-head-l">
+            <text class="sync-title">相册同步</text>
+            <text class="sync-sub">{{ lastSyncText || '还没同步过，先扫一次相册' }}</text>
+          </view>
+          <view class="sync-date" v-if="windowDays !== 0">
+            <text class="sync-date-t">{{ windowDays }} 天窗口</text>
+          </view>
         </view>
-        <text class="hint">支持 wgt 资源热更新；原生权限变更时会提示安装完整包。</text>
-        <button class="btn-primary-sm" :disabled="checkingUpdate" @click="manualCheckUpdate">
-          {{ checkingUpdate ? '检查中…' : '检查更新' }}
-        </button>
-      </view>
 
-      <!-- 服务器地址 -->
-      <view class="card">
-        <text class="section">服务器地址</text>
-        <text class="hint">
-          手机与电脑不在同一网络时，请填写电脑在局域网中的地址（形如 http://192.168.1.59:30001）。
-          留空则自动按「手动地址 → 上次成功 → 本机 → 局域网」顺序探测。
-        </text>
-        <input class="input" v-model="serverUrlInput" placeholder="http://192.168.1.59:30001" />
-        <view class="row-between mt-sm">
-          <text class="label">当前连接</text>
-          <text class="perm" :class="{ ok: serverStatus === 'ok' }">{{ serverStatusText }}</text>
+        <view v-if="pendingText" class="sync-alert warn">
+          <text class="sync-alert-t">{{ pendingText }}</text>
+          <text class="sync-alert-go" @click="doSync">重试</text>
         </view>
-        <view class="btn-row">
-          <button class="btn-line half" :disabled="serverTesting" @click="testServer">
-            {{ serverTesting ? '测试中…' : '测试连接' }}
-          </button>
-          <button class="btn-primary-sm half" @click="saveServerUrl">保存地址</button>
+        <view v-if="!photoPerm" class="sync-alert perm">
+          <text class="sync-alert-t">相册权限未开启，同步不会读取任何照片</text>
+          <text class="sync-alert-go" @click="goPermission">去开启</text>
         </view>
-        <text v-if="serverCandidatesText" class="hint mt">候选地址：{{ serverCandidatesText }}</text>
-      </view>
 
-      <!-- 后台保活 -->
-      <view class="card">
-        <text class="section">后台保活</text>
-        <text class="hint">
-          息屏后系统可能掐断长连接，AI 任务进度就会停住。把本 App 加入「电池优化白名单」可避免。
-        </text>
-        <view class="row-between mt-sm">
-          <text class="label">电池优化白名单</text>
-          <text class="perm" :class="{ ok: batteryWhitelisted }">{{ batteryWhitelistText }}</text>
+        <view class="sync-btn" :class="{ busy: syncing }" @click="doSync" hover-class="sync-btn-hover">
+          <text class="sync-btn-t">{{ syncing ? '同步中…' : '立即同步相册' }}</text>
+          <text class="sync-btn-s">{{ photoPerm ? '新增照片自动入库' : '需先授权相册' }}</text>
         </view>
-        <view class="btn-row">
-          <button class="btn-primary-sm half" @click="openBatteryWhitelist">去设置</button>
-        </view>
-      </view>
 
-      <!-- 同步通道（AlbumSync 原能力） -->
-      <view class="card">
-        <text class="section">同步通道</text>
-        <text class="hint">快照上传可单独使用 Bearer Token，与浏览会话相互独立。</text>
-        <input class="input" v-model="serverToken" password placeholder="Bearer Token（可选，留空免鉴权）" />
-        <view class="row-between">
-          <text class="label">相册权限</text>
-          <text class="perm" :class="{ ok: photoPerm }" @click="goPermission">
-            {{ photoPerm ? '已授权' : '未授权 ›' }}
-          </text>
+        <view v-if="queueStats.isUploading || queueStats.total > 0" class="queue">
+          <view class="queue-head">
+            <text class="queue-title">{{ queueStats.isUploading ? '正在直传 NAS…' : 'NAS 传输已就绪' }}</text>
+            <text class="queue-count">{{ queueStats.current }}/{{ queueStats.total }}</text>
+          </view>
+          <text v-if="queueStats.currentFileName" class="queue-name">{{ queueStats.currentFileName }}</text>
+          <progress :percent="queueStats.progressPercent" stroke-width="4" activeColor="#3B82F6" backgroundColor="#E2E8F0" class="queue-bar" />
         </view>
-      </view>
 
-      <!-- 智能同步 -->
-      <view class="card">
-        <text class="section">智能同步（辅助）</text>
-        <text class="hint">
-          直传至私有 NAS 素材库。相册只扫描近 3 天新图入库；库里已有素材不会因相册删除而消失，只有在本应用内删除才会移除。
-        </text>
-        <view class="row-between">
-          <text class="label">打开应用时自动同步</text>
-          <switch :checked="autoSync" color="#2563EB" @change="onAuto" />
+        <view class="switch-list">
+          <view class="switch-row">
+            <view class="switch-meta">
+              <text class="switch-t">打开应用时自动同步</text>
+              <text class="switch-s">只扫描近 3 天新图，库里已有素材不受影响</text>
+            </view>
+            <switch :checked="autoSync" color="#3B82F6" @change="onAuto" />
+          </view>
+          <view class="switch-row">
+            <view class="switch-meta">
+              <text class="switch-t">仅 Wi-Fi 同步原图 / 视频</text>
+              <text class="switch-s">移动网络下只同步缩略与元数据</text>
+            </view>
+            <switch :checked="wifiOnly" color="#3B82F6" @change="onWifiOnly" />
+          </view>
         </view>
-        <view class="row-between mt-sm">
-          <text class="label">仅在 Wi-Fi 下同步原图/视频</text>
-          <switch :checked="wifiOnly" color="#2563EB" @change="onWifiOnly" />
-        </view>
+
         <view class="chips">
           <view
             v-for="d in dayOptions"
             :key="d"
             class="chip"
             :class="{ active: windowDays === d }"
-            @click="windowDays = d"
+            @click="setWindow(d)"
           >{{ d === 0 ? '关闭' : d + ' 天' }}</view>
         </view>
-        <text class="hint mt">下方天数仅作快照窗口记录；扫描范围固定近 3 天。72 小时冻结锁已停用。</text>
-        <button class="btn-primary-sm" :disabled="syncing" @click="doSync">
-          {{ syncing ? '同步中…' : '立即同步相册' }}
-        </button>
-        <view v-if="lastSyncText" class="sync-status">
-          <text>{{ lastSyncText }}</text>
-        </view>
-        <view v-if="pendingText" class="sync-status warn">
-          <text>{{ pendingText }}</text>
-        </view>
+      </view>
 
-        <!-- 媒体直传进度卡片 -->
-        <view v-if="queueStats.isUploading || queueStats.total > 0" class="queue-card">
-          <view class="row-between">
-            <text class="queue-title">{{ queueStats.isUploading ? '正在直传至 NAS…' : 'NAS 传输已就绪' }}</text>
-            <text class="queue-count">{{ queueStats.current }}/{{ queueStats.total }} 项</text>
+      <!-- 快捷入口 -->
+      <view class="quick-grid rise d3">
+        <view class="quick" @click="openTrash" hover-class="quick-hover">
+          <view class="quick-ico trash">🗑</view>
+          <view class="quick-meta">
+            <text class="quick-t">回收站</text>
+            <text class="quick-s">{{ trashCount ? trashCount + ' 项待处理' : '暂无待处理' }}</text>
           </view>
-          <text v-if="queueStats.currentFileName" class="queue-filename">{{ queueStats.currentFileName }}</text>
-          <progress :percent="queueStats.progressPercent" stroke-width="4" activeColor="#2563EB" backgroundColor="#E2E8F0" class="queue-bar" />
+          <text v-if="trashCount" class="quick-badge">{{ trashCount > 99 ? '99+' : trashCount }}</text>
+        </view>
+
+        <view class="quick" @click="goPermission" hover-class="quick-hover">
+          <view class="quick-ico photo">📷</view>
+          <view class="quick-meta">
+            <text class="quick-t">相册权限</text>
+            <text class="quick-s" :class="{ warn: !photoPerm }">{{ photoPerm ? '已授权' : '未授权' }}</text>
+          </view>
+          <text class="quick-chev">›</text>
+        </view>
+
+        <view class="quick" @click="clearFrontendCache" hover-class="quick-hover">
+          <view class="quick-ico cache">✦</view>
+          <view class="quick-meta">
+            <text class="quick-t">清理缓存</text>
+            <text class="quick-s">{{ cacheStats.queryCount }} 查询 · {{ cacheStats.localIndexedCount }} 本地</text>
+          </view>
+          <text class="quick-chev">›</text>
+        </view>
+
+        <view class="quick" @click="manualCheckUpdate" hover-class="quick-hover">
+          <view class="quick-ico update">↓</view>
+          <view class="quick-meta">
+            <text class="quick-t">检查更新</text>
+            <text class="quick-s">{{ checkingUpdate ? '检查中…' : appVersionLabel }}</text>
+          </view>
+          <text class="quick-chev">›</text>
         </view>
       </view>
 
-
-      <!-- 兜底落盘 -->
-      <view class="card">
-        <text class="section">兜底落盘目录（可选）</text>
-        <text class="hint">
-          上传失败时，除存入应用内待重传队列外，快照 JSON 会额外落盘到此目录。可选择网盘的自动同步监控目录，实现断网也能同步。
-        </text>
-        <view v-if="fallbackDir" class="mono-box">
-          <text>{{ fallbackDir }}</text>
+      <!-- 高级设置 -->
+      <view class="advanced rise d4">
+        <view class="advanced-head" @click="advancedOpen = !advancedOpen">
+          <view class="advanced-head-l">
+            <text class="advanced-title">高级设置</text>
+            <text class="advanced-sub">{{ serverHostLabel }} · {{ batteryWhitelistText }}</text>
+          </view>
+          <text class="chev" :class="{ open: advancedOpen }">›</text>
         </view>
-        <view class="btn-row">
-          <button class="btn-line half" @click="pickFallbackDir">选择目录</button>
-          <button v-if="fallbackDir" class="btn-logout half" @click="clearFallbackDir">清除</button>
+
+        <view v-if="advancedOpen" class="advanced-body">
+          <!-- 服务器 -->
+          <view class="adv-block">
+            <text class="adv-title">服务器地址</text>
+            <text class="adv-hint">手机与电脑不在同一网络时，填电脑局域网地址（形如 http://192.168.1.59:30001）。留空自动探测。</text>
+            <input class="input" v-model="serverUrlInput" placeholder="http://192.168.1.59:30001" />
+            <view class="adv-row">
+              <text class="adv-label">当前连接</text>
+              <text class="adv-value" :class="{ ok: serverStatus === 'ok', bad: serverStatus === 'fail' }">{{ serverStatusText }}</text>
+            </view>
+            <view class="btn-row">
+              <view class="btn-line half" :class="{ disabled: serverTesting }" @click="testServer" hover-class="btn-line-hover">
+                <text class="btn-line-t">{{ serverTesting ? '测试中…' : '测试连接' }}</text>
+              </view>
+              <view class="btn-primary half" @click="saveServerUrl" hover-class="btn-primary-hover">
+                <text class="btn-primary-t">保存地址</text>
+              </view>
+            </view>
+            <text v-if="serverCandidatesText" class="adv-hint mt">候选：{{ serverCandidatesText }}</text>
+          </view>
+
+          <!-- Token -->
+          <view class="adv-block">
+            <text class="adv-title">Bearer Token</text>
+            <text class="adv-hint">快照上传可单独使用，与浏览会话相互独立。留空免鉴权。</text>
+            <input class="input" v-model="serverToken" password placeholder="Bearer Token（可选）" @blur="saveToken" />
+          </view>
+
+          <!-- 保活 -->
+          <view class="adv-block">
+            <view class="adv-row">
+              <view class="adv-row-l">
+                <text class="adv-label">后台保活</text>
+                <text class="adv-hint">息屏后系统可能掐断长连接，AI 进度会停住。加入电池白名单可避免。</text>
+              </view>
+              <text class="adv-value" :class="{ ok: batteryWhitelisted }">{{ batteryWhitelistText }}</text>
+            </view>
+            <view class="btn-row">
+              <view class="btn-line half" @click="openBatteryWhitelist" hover-class="btn-line-hover">
+                <text class="btn-line-t">去系统设置</text>
+              </view>
+            </view>
+          </view>
+
+          <!-- 兜底落盘 -->
+          <view class="adv-block">
+            <text class="adv-title">兜底落盘目录</text>
+            <text class="adv-hint">上传失败时，快照 JSON 额外落盘到此目录。可指向网盘自动同步目录，断网也能同步。</text>
+            <view v-if="fallbackDir" class="mono-box"><text class="mono">{{ fallbackDir }}</text></view>
+            <view class="btn-row">
+              <view class="btn-line half" @click="pickFallbackDir" hover-class="btn-line-hover"><text class="btn-line-t">选择目录</text></view>
+              <view v-if="fallbackDir" class="btn-danger half" @click="clearFallbackDir" hover-class="btn-line-hover"><text class="btn-danger-t">清除</text></view>
+            </view>
+          </view>
+
+          <!-- 缓存 -->
+          <view class="adv-block">
+            <text class="adv-title">前端缓存</text>
+            <view class="adv-row">
+              <text class="adv-label">数据缓存（SWR）</text>
+              <text class="adv-value">{{ cacheStats.queryCount }} 组 · {{ cacheStats.detailCount }} 详情</text>
+            </view>
+            <view class="adv-row">
+              <text class="adv-label">相册直连索引</text>
+              <text class="adv-value">{{ cacheStats.localIndexedCount }} 项</text>
+            </view>
+            <view class="btn-row">
+              <view class="btn-line half" @click="clearFrontendCache" hover-class="btn-line-hover"><text class="btn-line-t">清空本地缓存</text></view>
+            </view>
+          </view>
+
+          <!-- 设备 -->
+          <view class="adv-block">
+            <text class="adv-title">设备标识</text>
+            <text class="adv-hint">首次启动生成的 UUID，作为快照 device_id，服务器据此区分设备。</text>
+            <view class="device-row">
+              <text class="device-id">{{ deviceId }}</text>
+              <text class="copy" @click="copyDeviceId">复制</text>
+            </view>
+          </view>
+
+          <!-- 更新与建议 -->
+          <view class="adv-block last">
+            <view class="adv-row">
+              <view class="adv-row-l">
+                <text class="adv-label">当前版本</text>
+                <text class="adv-hint">支持 wgt 资源热更新；原生权限变更会提示安装完整包。</text>
+              </view>
+              <text class="adv-value">{{ appVersionLabel }}</text>
+            </view>
+            <view class="btn-row">
+              <view class="btn-line half" :class="{ disabled: checkingUpdate }" @click="manualCheckUpdate" hover-class="btn-line-hover">
+                <text class="btn-line-t">{{ checkingUpdate ? '检查中…' : '检查更新' }}</text>
+              </view>
+            </view>
+            <text class="adv-hint mt">定时同步：用系统「快捷指令 / 自动化」定时拉起本应用；开启自动同步后，拉起即静默同步一次。</text>
+          </view>
         </view>
       </view>
 
-      <!-- 前端缓存与相册直连 -->
-      <view class="card">
-        <text class="section">前端缓存与直连</text>
-        <text class="hint">
-          SWR 双层数据缓存与手机相册快速索引，实现列表与详情 0 流量秒开，避免重复拉取网络图片。
-        </text>
-        <view class="row-between">
-          <text class="label">数据缓存（SWR）</text>
-          <text class="perm">{{ cacheStats.queryCount }} 组查询 · {{ cacheStats.detailCount }} 条详情</text>
-        </view>
-        <view class="row-between">
-          <text class="label">相册直连索引</text>
-          <text class="perm">{{ cacheStats.localIndexedCount }} 项本地照片</text>
-        </view>
-        <button class="btn-line" @click="clearFrontendCache">一键清空本地缓存</button>
-      </view>
-
-      <!-- 设备标识 -->
-      <view class="card">
-        <text class="section">设备标识</text>
-        <text class="hint">首次启动本地生成的 UUID，作为快照 device_id 上传，服务器据此区分设备。</text>
-        <view class="row-between">
-          <text class="mono-text">{{ deviceId }}</text>
-          <text class="copy" @click="copyDeviceId">复制</text>
-        </view>
-      </view>
-
-      <!-- 定时说明 -->
-      <view class="card">
-        <text class="section">定时同步建议</text>
-        <text class="hint">
-          可用系统「快捷指令 / 自动化」或桌面小组件定时拉起本应用；开启上方「打开应用时自动同步」后，拉起即静默同步一次。
-          鸿蒙端可配合「智慧生活」场景使用 autoSync 参数。
-        </text>
-      </view>
+      <text class="footnote">素材只在本应用内删除才会从库里消失</text>
     </scroll-view>
+
+    <!-- 全局后台 AI 任务状态浮窗 -->
+    <ai-task-pill />
   </view>
 </template>
 
 <script>
 import { store } from '../../service/SyncStateStore'
-import { logout as apiLogout } from '../../service/ViewerApi'
+import { logout as apiLogout, fetchTrashAssets, gridUrl } from '../../service/ViewerApi'
 import { runSync } from '../../service/SyncEngine'
 import { viewerCache } from '../../service/ViewerCache'
 import { localMediaIndex } from '../../service/LocalMediaIndex'
@@ -196,8 +271,13 @@ import { checkAppUpdate, currentAppVersionLabel } from '../../service/AppUpdater
 import { currentServerUrl, buildCandidates, setManualServerUrl } from '../../service/ServerResolve'
 import { pushClient } from '../../service/PushClient'
 import { isIgnoringBatteryOptimizations, requestIgnoreBatteryOptimizations } from '../../service/KeepAlive'
+import { switchTabTo } from '../../common/nav'
+import AiTaskPill from '../../components/AiTaskPill.vue'
+
+const INGEST_AUTO_HIDE_MS = 6000
 
 export default {
+  components: { AiTaskPill },
   data() {
     return {
       canGoBack: false,
@@ -219,6 +299,11 @@ export default {
       fallbackDir: '',
       photoPerm: false,
       syncing: false,
+      checkingUpdate: false,
+      appVersionLabel: '',
+      advancedOpen: false,
+      pushConnected: false,
+      trashCount: 0,
       queueStats: {
         isUploading: false,
         total: 0,
@@ -231,46 +316,109 @@ export default {
         detailCount: 0,
         localIndexedCount: 0,
       },
-      checkingUpdate: false,
-      appVersionLabel: '',
+      ingest: {
+        show: false,
+        count: 0,
+        thumb: '',
+        title: '',
+        sub: '',
+        at: 0,
+      },
     }
   },
   computed: {
     roleText() {
       if (this.role === 'admin') return '系统管理员'
       if (this.role === 'viewer') return '普通查看者'
-      return this.role ? `角色: ${this.role}` : '已登录'
+      return this.role ? `角色：${this.role}` : '已登录'
     },
     serverStatusText() {
       if (this.serverStatus === 'ok') return '已连接'
       if (this.serverStatus === 'fail') return '连接失败'
       return '未检测'
     },
+    serverHostLabel() {
+      const raw = String(this.serverUrlInput || '').replace(/^https?:\/\//, '')
+      if (!raw) return '自动探测'
+      return raw.length > 26 ? raw.slice(0, 24) + '…' : raw
+    },
     serverCandidatesText() {
       return buildCandidates().map((u) => u.replace(/^https?:\/\//, '')).join(' / ')
     },
     batteryWhitelistText() {
-      if (this.batteryWhitelisted) return '已加入'
-      return '未加入'
+      return this.batteryWhitelisted ? '已加入' : '未加入'
     },
   },
   onLoad() {
     this.refresh()
+    this.refreshTrashCount()
     this.unsubQueue = store.onMediaQueueChange((stats) => {
       this.queueStats = { ...stats }
+    })
+    this.unsubPush = pushClient.subscribe((evt) => {
+      if (!evt || evt.event !== 'asset.ingested') return
+      this.onAssetIngested(evt.payload)
+    })
+    this.unsubState = pushClient.onState((v) => {
+      this.pushConnected = !!v
     })
   },
   onUnload() {
     if (this.unsubQueue) this.unsubQueue()
+    if (this.unsubPush) this.unsubPush()
+    if (this.unsubState) this.unsubState()
+    if (this._ingestTimer) clearTimeout(this._ingestTimer)
   },
   onShow() {
     this.refresh()
     this.refreshBatteryWhitelist()
+    this.refreshTrashCount()
   },
   methods: {
+    // ─────────── 入库横条 ───────────
+    onAssetIngested(payload) {
+      const p = payload || {}
+      const kind = p.kind === 'video' ? '视频' : p.kind === 'audio' ? '音频' : '图片'
+      this.ingest.count = this.ingest.show ? this.ingest.count + 1 : 1
+      this.ingest.thumb = p.fid ? gridUrl(p.fid) : ''
+      this.ingest.title = this.ingest.count > 1 ? `${this.ingest.count} 项新素材已入库` : '新素材已入库'
+      this.ingest.sub = `${kind} · 点开可直接查看`
+      this.ingest.at = Date.now()
+      this.ingest.show = true
+      if (this._ingestTimer) clearTimeout(this._ingestTimer)
+      this._ingestTimer = setTimeout(() => {
+        this.ingest.show = false
+      }, INGEST_AUTO_HIDE_MS)
+    },
+    dismissIngest() {
+      this.ingest.show = false
+      if (this._ingestTimer) {
+        clearTimeout(this._ingestTimer)
+        this._ingestTimer = null
+      }
+    },
+    openIngested() {
+      this.dismissIngest()
+      switchTabTo('/pages/browse/browse')
+    },
+
+    // ─────────── 回收站 ───────────
+    async refreshTrashCount() {
+      try {
+        const data = await fetchTrashAssets({ page: 1, pageSize: 1 })
+        this.trashCount = Number((data && data.total) || 0)
+      } catch (e) {
+        // 未授权或离线时静默
+      }
+    },
+    openTrash() {
+      try { uni.setStorageSync('browse_tab', 'trash') } catch (e) {}
+      switchTabTo('/pages/browse/browse')
+    },
+
+    // ─────────── 同步 ───────────
     refreshBatteryWhitelist() {
-      const r = isIgnoringBatteryOptimizations()
-      this.batteryWhitelisted = r === true
+      this.batteryWhitelisted = isIgnoringBatteryOptimizations() === true
     },
     openBatteryWhitelist() {
       const ok = requestIgnoreBatteryOptimizations()
@@ -279,6 +427,11 @@ export default {
         return
       }
       setTimeout(() => this.refreshBatteryWhitelist(), 1500)
+    },
+    setWindow(d) {
+      if (this.windowDays === d) return
+      this.windowDays = d
+      this.saveConfig()
     },
     async manualCheckUpdate() {
       if (this.checkingUpdate) return
@@ -290,7 +443,6 @@ export default {
         this.checkingUpdate = false
       }
     },
-    /** 测试指定地址能否连通（不写入配置） */
     testServer() {
       if (this.serverTesting) return
       const url = String(this.serverUrlInput || '').trim().replace(/\/+$/, '')
@@ -320,14 +472,12 @@ export default {
         },
       })
     },
-    /** 保存手动地址并立即重新探活 */
     async saveServerUrl() {
       const url = String(this.serverUrlInput || '').trim().replace(/\/+$/, '')
       store.setManualServerUrl(url)
       const picked = await setManualServerUrl(url)
       this.serverUrlInput = store.getManualServerUrl() || picked
       this.serverStatus = picked && picked === url ? 'ok' : 'fail'
-      // 地址变了，推送长连接要跟着换端点
       pushClient.stop()
       pushClient.start()
       uni.showToast({
@@ -338,7 +488,11 @@ export default {
     refresh() {
       const pages = typeof getCurrentPages === 'function' ? getCurrentPages() : []
       this.canGoBack = pages.length > 1
-      this.statusBarHeight = uni.getSystemInfoSync().statusBarHeight || 20
+      try {
+        this.statusBarHeight = uni.getSystemInfoSync().statusBarHeight || 20
+      } catch (e) {
+        this.statusBarHeight = 20
+      }
       this.appVersionLabel = currentAppVersionLabel()
       this.username = store.getUsername()
       this.role = store.getRole()
@@ -390,6 +544,9 @@ export default {
       store.setWifiOnlyEnabled(this.wifiOnly)
       store.setWindowDays(this.windowDays)
     },
+    saveToken() {
+      store.setServerToken(String(this.serverToken || '').trim())
+    },
     onAuto(e) {
       this.autoSync = !!e.detail.value
       this.saveConfig()
@@ -415,6 +572,7 @@ export default {
     },
     async doSync() {
       this.saveConfig()
+      if (this.syncing) return
       if (!store.isPhotoPermissionGranted()) {
         uni.showModal({
           title: '需要相册权限',
@@ -431,6 +589,7 @@ export default {
       try {
         const r = await runSync(false)
         this.refresh()
+        this.refreshTrashCount()
         uni.hideLoading()
         uni.showToast({
           title:
@@ -450,7 +609,6 @@ export default {
     },
     pickFallbackDir() {
       // #ifdef APP-PLUS
-      // Android：让用户粘贴/输入已授权的目录路径（SAF 完整选择器需原生插件）
       uni.showModal({
         title: '兜底目录',
         editable: true,
@@ -493,279 +651,721 @@ export default {
 
 <style scoped>
 .page {
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   background: #f8fafc;
 }
-.nav {
-  height: 92rpx;
-  display: flex;
-  align-items: center;
-  padding: 0 20rpx;
+.status-bar {
   background: #f8fafc;
 }
-.back,
-.nav-placeholder {
-  width: 72rpx;
-  height: 72rpx;
-}
-.back {
-  border-radius: 36rpx;
-  background: #fff;
-  border: 1rpx solid #e2e8f0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 40rpx;
-  color: #0f172a;
-}
-.nav-title {
-  flex: 1;
-  text-align: center;
-  font-size: 30rpx;
-  font-weight: 700;
-  color: #0f172a;
-}
-.spacer {
-  width: 72rpx;
-}
-.scroll {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 16rpx 24rpx 60rpx;
-}
-.card {
-  width: 100%;
-  box-sizing: border-box;
-  background: #fff;
-  border-radius: 28rpx;
-  padding: 28rpx;
-  margin-bottom: 24rpx;
-  border: 1rpx solid #e2e8f0;
-  box-shadow: 0 4rpx 16rpx rgba(15, 23, 42, 0.03);
-}
-.section {
-  font-size: 28rpx;
-  font-weight: 700;
-  color: #0f172a;
-  display: block;
-  margin-bottom: 10rpx;
-}
-.hint {
-  font-size: 22rpx;
-  color: #64748b;
-  line-height: 1.55;
-  display: block;
-  margin-bottom: 18rpx;
-}
-.hint.mt {
-  margin-top: 12rpx;
-}
-.input {
-  height: 84rpx;
-  background: #f8fafc;
-  border: 1rpx solid #e2e8f0;
-  border-radius: 18rpx;
-  padding: 0 22rpx;
-  font-size: 26rpx;
-  margin-bottom: 14rpx;
-  width: 100%;
-  box-sizing: border-box;
-  color: #0f172a;
-}
-.btn-line {
-  height: 84rpx;
-  line-height: 84rpx;
-  border-radius: 42rpx;
-  background: #eff6ff;
-  color: #2563eb;
-  font-size: 26rpx;
-  font-weight: 600;
-  margin-top: 8rpx;
-  border: 1rpx solid #bfdbfe;
-}
-.btn-line.half {
-  flex: 1;
-  margin-top: 0;
-}
-.btn-logout {
-  height: 72rpx;
-  line-height: 72rpx;
-  border-radius: 36rpx;
-  background: #fef2f2;
-  color: #dc2626;
-  font-size: 24rpx;
-  margin-top: 16rpx;
-}
-.btn-logout.half {
-  flex: 1;
-  margin-top: 0;
-  margin-left: 12rpx;
-}
-.btn-row {
-  display: flex;
-  align-items: center;
-}
-.row-between {
+
+/* ── 顶栏 ─────────────────────────── */
+.topbar {
+  height: 48px;
+  padding: 0 8px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 16rpx;
-}
-.label {
-  font-size: 26rpx;
-  color: #0f172a;
-  font-weight: 500;
-}
-.perm {
-  font-size: 24rpx;
-  color: #d97706;
-  font-weight: 600;
-}
-.perm.ok {
-  color: #059669;
-}
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12rpx;
-}
-.chip {
-  padding: 12rpx 24rpx;
-  border-radius: 999rpx;
-  background: #f1f5f9;
-  font-size: 24rpx;
-  color: #64748b;
-  border: 1rpx solid transparent;
-}
-.chip.active {
-  background: #2563eb;
-  color: #fff;
-  font-weight: 600;
-  border-color: #2563eb;
-}
-.btn-primary-sm {
-  height: 88rpx;
-  line-height: 88rpx;
-  border-radius: 44rpx;
-  background: #2563eb;
-  color: #fff;
-  font-size: 28rpx;
-  font-weight: 600;
-  margin-top: 24rpx;
-  box-shadow: 0 8rpx 20rpx rgba(37, 99, 235, 0.25);
-}
-.btn-primary-sm[disabled] {
-  opacity: 0.6;
-}
-.sync-status {
-  margin-top: 14rpx;
-  font-size: 22rpx;
-  color: #64748b;
-  text-align: center;
-}
-.sync-status.warn {
-  color: #d97706;
-  font-weight: 600;
-}
-.mono-box {
   background: #f8fafc;
-  border: 1rpx solid #e2e8f0;
-  border-radius: 14rpx;
-  padding: 16rpx;
-  margin-bottom: 14rpx;
 }
-.mono-box text {
-  font-size: 20rpx;
+.topbar-side {
+  width: 64px;
+  display: flex;
+  align-items: center;
+}
+.topbar-side.right {
+  justify-content: flex-end;
+}
+.back {
+  width: 34px;
+  height: 34px;
+  border-radius: 17px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+  border: 1px solid #e7ecf3;
+}
+.back-hover {
+  background: #f1f5f9;
+}
+.back-t {
+  font-size: 20px;
+  color: #0f172a;
+  line-height: 1;
+}
+.topbar-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: #0f172a;
+}
+.logout-link {
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: #ffffff;
+  border: 1px solid #e7ecf3;
+}
+.logout-link-hover {
+  background: #fef2f2;
+}
+.logout-t {
+  font-size: 12px;
   color: #64748b;
-  word-break: break-all;
-}
-.mono-text {
-  flex: 1;
-  font-size: 20rpx;
-  color: #64748b;
-  margin-right: 12rpx;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.copy {
-  font-size: 24rpx;
-  color: #2563eb;
   font-weight: 600;
+}
+
+/* ── 入库横条 ─────────────────────── */
+.ingest-bar {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid #bfdbfe;
+  box-shadow: 0 10px 28px rgba(37, 99, 235, 0.16);
+  transform: translateY(-16px) scale(0.98);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.34s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.24s ease;
+}
+.ingest-bar.show {
+  transform: translateY(0) scale(1);
+  opacity: 1;
+  pointer-events: auto;
+}
+.ingest-thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: #eff6ff;
   flex-shrink: 0;
 }
-.mt-sm {
-  margin-top: 14rpx;
+.ingest-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
-.queue-card {
-  margin-top: 20rpx;
+.ingest-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+}
+.ingest-sub {
+  font-size: 11px;
+  color: #64748b;
+}
+.ingest-go {
+  padding: 7px 13px;
+  border-radius: 999px;
+  background: #3b82f6;
+}
+.ingest-go-hover {
+  opacity: 0.82;
+}
+.ingest-go-t {
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffffff;
+}
+.ingest-close {
+  width: 26px;
+  height: 26px;
+  border-radius: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ingest-close-hover {
   background: #f1f5f9;
-  border-radius: 16rpx;
-  padding: 20rpx;
+}
+.ingest-close-t {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.scroll {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 14px 40px;
+}
+
+/* ── 进场 ─────────────────────────── */
+.rise {
+  animation: rise 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.d1 { animation-delay: 40ms; }
+.d2 { animation-delay: 90ms; }
+.d3 { animation-delay: 140ms; }
+.d4 { animation-delay: 190ms; }
+@keyframes rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── 账号 ─────────────────────────── */
+.profile {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 14px;
+  margin-bottom: 12px;
+  background: #ffffff;
+  border: 1px solid #e7ecf3;
+  border-radius: 18px;
+}
+.avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 19px;
+  font-weight: 700;
+  color: #ffffff;
+  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  box-shadow: 0 8px 18px rgba(59, 130, 246, 0.28);
+}
+.profile-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.profile-name {
+  font-size: 17px;
+  font-weight: 700;
+  color: #0f172a;
+}
+.profile-tags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.role {
+  font-size: 10px;
+  font-weight: 700;
+  color: #2563eb;
+  background: #eff6ff;
+  border: 1px solid #dbeafe;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.conn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f1f5f9;
+}
+.conn-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: #94a3b8;
+}
+.conn.ok {
+  background: #ecfdf5;
+}
+.conn.ok .conn-dot {
+  background: #10b981;
+}
+.conn-t {
+  font-size: 10px;
+  font-weight: 600;
+  color: #64748b;
+}
+.conn.ok .conn-t {
+  color: #047857;
+}
+
+/* ── 同步卡 ───────────────────────── */
+.sync-card {
+  padding: 16px 14px;
+  margin-bottom: 12px;
+  background: #ffffff;
+  border: 1px solid #e7ecf3;
+  border-radius: 18px;
+}
+.sync-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.sync-head-l {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sync-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+}
+.sync-sub {
+  font-size: 11px;
+  color: #64748b;
+  line-height: 1.45;
+}
+.sync-date {
+  flex-shrink: 0;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #f8fafc;
+  border: 1px solid #e7ecf3;
+}
+.sync-date-t {
+  font-size: 10px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+.sync-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 12px;
+}
+.sync-alert.warn {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+}
+.sync-alert.perm {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+}
+.sync-alert-t {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #92400e;
+}
+.sync-alert.perm .sync-alert-t {
+  color: #b91c1c;
+}
+.sync-alert-go {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: #2563eb;
+}
+.sync-btn {
+  position: relative;
+  margin-top: 12px;
+  padding: 11px 16px;
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  box-shadow: 0 10px 22px rgba(59, 130, 246, 0.26);
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.sync-btn-hover {
+  transform: scale(0.985);
+}
+.sync-btn.busy {
+  opacity: 0.72;
+}
+.sync-btn-t {
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffffff;
+}
+.sync-btn-s {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.78);
+}
+.queue {
+  margin-top: 12px;
+  padding: 10px;
+  background: #f8fafc;
+  border: 1px solid #e7ecf3;
+  border-radius: 12px;
+}
+.queue-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 .queue-title {
-  font-size: 24rpx;
+  font-size: 12px;
   font-weight: 600;
   color: #1e293b;
 }
 .queue-count {
-  font-size: 22rpx;
-  color: #2563eb;
-  font-weight: 600;
+  font-size: 11px;
+  font-weight: 700;
+  color: #3b82f6;
 }
-.queue-filename {
-  font-size: 20rpx;
+.queue-name {
+  display: block;
+  margin: 4px 0 7px;
+  font-size: 10px;
   color: #64748b;
-  margin-top: 8rpx;
-  margin-bottom: 12rpx;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .queue-bar {
-  border-radius: 4rpx;
+  border-radius: 4px;
 }
-.account-card {
+.switch-list {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.switch-row {
   display: flex;
   align-items: center;
-  padding: 16rpx 0 24rpx;
-  gap: 20rpx;
+  gap: 12px;
 }
-.account-avatar {
-  width: 88rpx;
-  height: 88rpx;
-  border-radius: 44rpx;
-  background: linear-gradient(135deg, #2563eb, #3b82f6);
-  color: #ffffff;
-  font-size: 36rpx;
+.switch-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.switch-t {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+}
+.switch-s {
+  font-size: 10px;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 12px;
+}
+.chip {
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  font-size: 11px;
+  color: #64748b;
+  border: 1px solid transparent;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+.chip.active {
+  background: #eff6ff;
+  color: #2563eb;
   font-weight: 700;
+  border-color: #bfdbfe;
+}
+
+/* ── 快捷入口 ─────────────────────── */
+.quick-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.quick {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 11px;
+  background: #ffffff;
+  border: 1px solid #e7ecf3;
+  border-radius: 16px;
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), background 0.2s ease;
+}
+.quick-hover {
+  transform: scale(0.975);
+  background: #f8fafc;
+}
+.quick-ico {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 6rpx 16rpx rgba(37, 99, 235, 0.25);
+  font-size: 16px;
+  flex-shrink: 0;
 }
-.account-info {
+.quick-ico.trash { background: #eff6ff; }
+.quick-ico.photo { background: #f0fdf4; }
+.quick-ico.cache { background: #fefce8; color: #ca8a04; font-size: 15px; }
+.quick-ico.update { background: #f5f3ff; color: #7c3aed; font-weight: 700; }
+.quick-meta {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 8rpx;
+  gap: 2px;
 }
-.account-username {
-  font-size: 32rpx;
+.quick-t {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+}
+.quick-s {
+  font-size: 10px;
+  color: #94a3b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.quick-s.warn {
+  color: #d97706;
+  font-weight: 600;
+}
+.quick-badge {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #ef4444;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 17px;
+  text-align: center;
+}
+.quick-chev {
+  font-size: 16px;
+  color: #cbd5e1;
+  flex-shrink: 0;
+}
+
+/* ── 高级设置 ─────────────────────── */
+.advanced {
+  background: #ffffff;
+  border: 1px solid #e7ecf3;
+  border-radius: 18px;
+  overflow: hidden;
+}
+.advanced-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px;
+}
+.advanced-head-l {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.advanced-title {
+  font-size: 14px;
   font-weight: 700;
   color: #0f172a;
 }
-.account-badge {
-  display: inline-flex;
-  align-self: flex-start;
-  padding: 4rpx 14rpx;
-  border-radius: 999rpx;
-  background: #eff6ff;
-  border: 1rpx solid #bfdbfe;
+.advanced-sub {
+  font-size: 10px;
+  color: #94a3b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.account-role {
-  font-size: 20rpx;
+.chev {
+  font-size: 16px;
+  color: #cbd5e1;
+  transition: transform 0.26s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.chev.open {
+  transform: rotate(90deg);
+  color: #3b82f6;
+}
+.advanced-body {
+  border-top: 1px solid #f1f5f9;
+  animation: fadeIn 0.3s ease both;
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.adv-block {
+  padding: 14px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.adv-block.last {
+  border-bottom: 0;
+}
+.adv-title {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 5px;
+}
+.adv-hint {
+  display: block;
+  font-size: 10px;
+  color: #94a3b8;
+  line-height: 1.5;
+  margin-bottom: 9px;
+}
+.adv-hint.mt {
+  margin-top: 8px;
+  margin-bottom: 0;
+}
+.adv-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+}
+.adv-row-l {
+  flex: 1;
+  min-width: 0;
+}
+.adv-row-l .adv-hint {
+  margin-bottom: 0;
+}
+.adv-label {
+  font-size: 12px;
+  color: #334155;
+  font-weight: 500;
+}
+.adv-value {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #64748b;
   font-weight: 600;
+  text-align: right;
+}
+.adv-value.ok {
+  color: #059669;
+}
+.adv-value.bad {
+  color: #dc2626;
+}
+.input {
+  width: 100%;
+  box-sizing: border-box;
+  height: 40px;
+  padding: 0 12px;
+  margin-bottom: 6px;
+  background: #f8fafc;
+  border: 1px solid #e7ecf3;
+  border-radius: 11px;
+  font-size: 12px;
+  color: #0f172a;
+}
+.btn-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.btn-line,
+.btn-primary,
+.btn-danger {
+  flex: 1;
+  height: 36px;
+  border-radius: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.btn-line {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+}
+.btn-line-hover {
+  opacity: 0.78;
+}
+.btn-line-t {
+  font-size: 12px;
+  font-weight: 700;
   color: #2563eb;
 }
+.btn-primary {
+  background: #3b82f6;
+}
+.btn-primary-hover {
+  opacity: 0.86;
+}
+.btn-primary-t {
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffffff;
+}
+.btn-danger {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+}
+.btn-danger-t {
+  font-size: 12px;
+  font-weight: 700;
+  color: #dc2626;
+}
+.disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+.mono-box {
+  padding: 8px 10px;
+  margin-bottom: 4px;
+  background: #f8fafc;
+  border: 1px solid #e7ecf3;
+  border-radius: 10px;
+}
+.mono {
+  font-size: 10px;
+  color: #64748b;
+  word-break: break-all;
+}
+.device-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: #f8fafc;
+  border: 1px solid #e7ecf3;
+  border-radius: 10px;
+}
+.device-id {
+  flex: 1;
+  min-width: 0;
+  font-size: 10px;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.copy {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: #2563eb;
+}
+.footnote {
+  display: block;
+  text-align: center;
+  margin: 18px 0 0;
+  font-size: 10px;
+  color: #cbd5e1;
+}
 </style>
-

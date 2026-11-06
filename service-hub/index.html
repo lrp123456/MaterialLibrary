@@ -88,6 +88,14 @@ pre.console{background:#05080f;border:1px solid var(--line);border-radius:12px;p
 .tab{display:none}.tab.on{display:block}
 .stat-row{display:flex;gap:10px;flex-wrap:wrap;font-size:12px}
 .stat-row .pill{cursor:default}
+.fault-banner{display:flex;gap:12px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;
+  padding:10px 16px;background:#3f1212;color:#fecaca;border-bottom:1px solid #7f1d1d;font-size:13px}
+.fault-banner[hidden]{display:none !important}
+.fault-banner b{color:#fff}
+.runtime-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:860px){.runtime-grid{grid-template-columns:1fr}}
+main.wide{max-width:1100px}
+pre.console.live{max-height:260px;min-height:120px}
 </style>
 </head>
 <body>
@@ -97,10 +105,15 @@ pre.console{background:#05080f;border:1px solid var(--line);border-radius:12px;p
   <nav>
     <button data-tab="services" class="on">服务</button>
     <button data-tab="channels">通道与发布</button>
+    <button data-tab="runtime">运行日志</button>
     <button data-tab="contract">三端对接契约</button>
   </nav>
 </header>
-<main>
+<div id="faultBanner" class="fault-banner" hidden>
+  <div id="faultText"></div>
+  <button class="btn stop sm" id="btnFaultRetry" type="button">重启再试</button>
+</div>
+<main id="main">
   <!-- ======================== Tab 1：服务 ======================== -->
   <section id="tab-services" class="tab on">
     <div class="hero">
@@ -196,6 +209,36 @@ pre.console{background:#05080f;border:1px solid var(--line);border-radius:12px;p
       </div>
     </div>
   </section>
+
+  <!-- ======================== Tab：运行日志 ======================== -->
+  <section id="tab-runtime" class="tab">
+    <div class="card">
+      <h3>当前故障 <span class="mut" style="font-weight:500">启动失败会停住自动重启；下面是四路里刚出现的致命行</span></h3>
+      <div id="fatalList" class="findings"><div class="mut">检测中…</div></div>
+    </div>
+    <div class="runtime-grid">
+      <div class="card">
+        <h3>服务端 <span class="pill" id="st-server"><span class="dot off"></span> —</span></h3>
+        <div class="mut" id="note-server"></div>
+        <pre class="console live" id="log-server" data-follow="1"></pre>
+      </div>
+      <div class="card">
+        <h3>Web <span class="pill" id="st-web"><span class="dot off"></span> —</span></h3>
+        <div class="mut" id="note-web"></div>
+        <pre class="console live" id="log-web" data-follow="1"></pre>
+      </div>
+      <div class="card">
+        <h3>剪辑 <span class="pill" id="st-clip"><span class="dot off"></span> —</span></h3>
+        <div class="mut" id="note-clip"></div>
+        <pre class="console live" id="log-clip" data-follow="1"></pre>
+      </div>
+      <div class="card">
+        <h3>App（adb） <span class="pill" id="st-app"><span class="dot off"></span> —</span></h3>
+        <div class="mut" id="note-app"></div>
+        <pre class="console live" id="log-app" data-follow="1"></pre>
+      </div>
+    </div>
+  </section>
 </main>
 <div class="toast" id="toast"></div>
 <script>
@@ -236,8 +279,11 @@ document.querySelectorAll('nav button').forEach((b) => {
     activeTab = b.dataset.tab
     document.querySelectorAll('nav button').forEach((x) => x.classList.toggle('on', x === b))
     document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('on', x.id === 'tab-' + activeTab))
+    $('main').classList.toggle('wide', activeTab === 'runtime')
     if (activeTab === 'channels') { loadChannels(); pollJob() }
     if (activeTab === 'contract') loadContract()
+    if (activeTab === 'runtime') startRuntime()
+    else stopRuntime()
   }
 })
 
@@ -593,9 +639,122 @@ $('btnAll').onclick = async () => {
   setTimeout(loadServices, 1500)
 }
 
+const runtimeCursor = { server: null, web: null, clip: null, app: null }
+let runtimeTimer = null
+let lastFaults = []
+let liveFatals = []
+
+function appendLiveLog(id, text) {
+  if (!text) return
+  const el = $(id)
+  const follow = el.dataset.follow !== '0'
+  el.textContent += text
+  if (el.textContent.length > 180000) el.textContent = el.textContent.slice(-100000)
+  if (follow) el.scrollTop = el.scrollHeight
+}
+for (const id of ['log-server', 'log-web', 'log-clip', 'log-app']) {
+  $(id).addEventListener('scroll', () => {
+    const el = $(id)
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+    el.dataset.follow = near ? '1' : '0'
+  })
+}
+
+function renderFatalList() {
+  const box = $('fatalList')
+  const blocks = []
+  for (const f of lastFaults) {
+    blocks.push(`<div class="finding high"><div class="ftop"><span class="sev high">启动失败</span><b>${esc(f.label || f.service)}</b><span class="mut">exit ${esc(f.exitCode)} · 存活 ${esc(f.uptimeSec)}s · ${esc(f.at || '')}</span></div><div>${esc(f.reason || '')}</div></div>`)
+  }
+  const recent = liveFatals.slice(-12).reverse()
+  for (const hit of recent) {
+    blocks.push(`<div class="finding medium"><div class="ftop"><span class="sev medium">${esc(hit.source)}</span></div><div>${esc(hit.line)}</div></div>`)
+  }
+  box.innerHTML = blocks.length ? blocks.join('') : '<div class="mut">最近没有致命行。四路日志在下面滚动，滚上去会暂停跟随，回到底部会继续贴底。</div>'
+}
+
+function pushFatals(items) {
+  let changed = false
+  for (const it of items || []) {
+    const key = it.source + '\n' + it.line
+    if (liveFatals.some((x) => x.key === key)) continue
+    liveFatals.push({ key, source: it.source, line: it.line })
+    changed = true
+  }
+  if (liveFatals.length > 40) liveFatals = liveFatals.slice(-40)
+  if (changed) renderFatalList()
+}
+
+function renderFaultBanner(d) {
+  lastFaults = (d && d.faults) || []
+  const banner = $('faultBanner')
+  if (!lastFaults.length) {
+    banner.hidden = true
+  } else {
+    banner.hidden = false
+    $('faultText').innerHTML = lastFaults.map((f) =>
+      `<div><b>${esc(f.label || f.service)}</b> 启动失败，已停止自动重启（exit ${esc(f.exitCode)}，存活 ${esc(f.uptimeSec)}s）<div>${esc(f.reason || '')}</div></div>`
+    ).join('')
+  }
+  if (d && d.sources) {
+    for (const s of d.sources) {
+      const pill = $('st-' + s.id)
+      if (!pill) continue
+      const on = !!s.up
+      pill.innerHTML = `<span class="dot ${on ? 'on' : 'off'}"></span> ${on ? '在线' : '离线'}${s.device ? ' · ' + esc(s.device) : ''}`
+    }
+  }
+  renderFatalList()
+}
+
+async function pollFaults() {
+  try {
+    const d = await safeJson(await fetch(API + '/api/runtime/faults'))
+    renderFaultBanner(d)
+  } catch (_) {}
+}
+
+async function pollOneTail(source) {
+  const q = runtimeCursor[source] == null ? '' : ('&cursor=' + encodeURIComponent(runtimeCursor[source]))
+  const d = await safeJson(await fetch(API + '/api/runtime/tail?source=' + source + q))
+  if (!d || d.ok === false) {
+    $('note-' + source).textContent = (d && d.error) || '读取失败'
+    return
+  }
+  if (d.note) $('note-' + source).textContent = d.note
+  else if (source !== 'app') $('note-' + source).textContent = ''
+  if (d.next != null) runtimeCursor[source] = d.next
+  appendLiveLog('log-' + source, d.text || '')
+  pushFatals(d.fatals)
+}
+
+async function pollRuntime() {
+  await Promise.all(['server', 'web', 'clip', 'app'].map((s) => pollOneTail(s).catch((e) => {
+    $('note-' + s).textContent = e.message
+  })))
+}
+
+function startRuntime() {
+  if (runtimeTimer) return
+  pollRuntime()
+  runtimeTimer = setInterval(pollRuntime, 1000)
+}
+function stopRuntime() {
+  if (!runtimeTimer) return
+  clearInterval(runtimeTimer)
+  runtimeTimer = null
+}
+
+$('btnFaultRetry').onclick = () => {
+  const btn = document.querySelector('[data-prod="restart"]')
+  if (btn) btn.click()
+}
+
 loadServices()
+pollFaults()
 statusTimer = setInterval(() => {
   loadServices()
+  pollFaults()
   if (activeTab === 'channels') loadChannels()
 }, 5000)
 </script>

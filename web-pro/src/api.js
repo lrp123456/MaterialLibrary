@@ -248,15 +248,33 @@ export function getBaseItemImageUrl(item, isScene = false) {
   return targetRel;
 }
 
-export function getAssetDownloadUrl(fid) {
+export function getAssetDownloadUrl(fid, rawNameOrKind, mime) {
   if (!fid) return '';
   const token = getToken();
   const safeFid = String(fid).replace(/[^A-Za-z0-9_-]/g, '');
-  const saveName = `ML_SAVED_${safeFid}_origin.jpg`;
+  let ext = '.jpg';
+  const testStr = `${rawNameOrKind || ''} ${mime || ''}`.toLowerCase();
+  if (testStr.includes('video') || /\.(mp4|mov|webm|mkv|avi|m4v)$/i.test(testStr)) {
+    ext = '.mp4';
+  } else if (testStr.includes('audio') || testStr.includes('music') || /\.(mp3|wav|m4a|aac|flac|ogg)$/i.test(testStr)) {
+    ext = '.mp3';
+  } else if (testStr.includes('glb') || /\.glb$/i.test(testStr)) {
+    ext = '.glb';
+  }
+  const saveName = `ML_SAVED_${safeFid}_origin${ext}`;
   const q = new URLSearchParams();
   q.set('download', '1');
   if (token) q.set('token', token);
   return resolveApiUrl(`/api/viewer/assets/${encodeURIComponent(fid)}/file/${encodeURIComponent(saveName)}?${q.toString()}`);
+}
+
+export function getAssetPlayUrl(fid) {
+  if (!fid) return '';
+  const token = getToken();
+  const q = new URLSearchParams();
+  q.set('play', '1');
+  if (token) q.set('token', token);
+  return resolveApiUrl(`/api/viewer/assets/${encodeURIComponent(fid)}/file?${q.toString()}`);
 }
 
 /**
@@ -493,18 +511,28 @@ export function getDerivativeImageUrl(fid, derivativeId, mediaToken = '') {
 /**
  * 获取指定衍生版本的原图下载 URL
  */
-export function getDerivativeDownloadUrl(fid, derivativeId, kind = 'derivative') {
+export function getDerivativeDownloadUrl(fid, derivativeId, kind = 'derivative', rawNameOrMime = '', parentKind = '') {
   if (!fid) return '';
   const token = getToken();
   const safeFid = String(fid).replace(/[^A-Za-z0-9_-]/g, '');
-  const safeKind = String(kind || 'derivative').replace(/[^A-Za-z0-9_-]/g, '');
-  const saveName = `ML_SAVED_${safeFid}_${safeKind}.jpg`;
+  let ext = '.jpg';
+  const testStr = `${kind || ''} ${rawNameOrMime || ''} ${parentKind || ''}`.toLowerCase();
+  if (testStr.includes('video') || /\.(mp4|mov|webm|mkv|avi|m4v)$/i.test(testStr)) {
+    ext = '.mp4';
+  } else if (testStr.includes('audio') || testStr.includes('music') || /\.(mp3|wav|m4a|aac|flac|ogg)$/i.test(testStr)) {
+    ext = '.mp3';
+  } else if (testStr.includes('glb') || /\.glb$/i.test(testStr)) {
+    ext = '.glb';
+  }
+  const safeKind = String(kind || (ext === '.mp4' ? 'video' : 'derivative')).replace(/[^A-Za-z0-9_-]/g, '');
+  const saveName = `ML_SAVED_${safeFid}_${safeKind}${ext}`;
   const q = new URLSearchParams();
   if (derivativeId) q.set('derivative', String(derivativeId));
   q.set('dl', '1');
   q.set('download', '1');
   if (token) q.set('token', token);
-  return resolveApiUrl(`/api/viewer/assets/${encodeURIComponent(fid)}/image/${encodeURIComponent(saveName)}?${q.toString()}`);
+  const routeSegment = (ext === '.mp4' || ext === '.mp3') ? 'file' : 'image';
+  return resolveApiUrl(`/api/viewer/assets/${encodeURIComponent(fid)}/${routeSegment}/${encodeURIComponent(saveName)}?${q.toString()}`);
 }
 
 /**
@@ -654,17 +682,16 @@ export async function previewAiGeneration(params) {
   return json.data || json;
 }
 
+/**
+ * 图片生成：改走后台任务队列。
+ *
+ * 返回形状与旧 /gen/images 完全一致（{ files, imageUrl, ... }），
+ * 所以 ChatStudio.vue 的调用方无需任何改动。区别在于请求现在是「短入队 + 等结果」：
+ * 任务在服务端 gen_jobs 表持久化，切换对话、刷新页面都不会打断，
+ * worker 完成后会把结果落成 chat_messages，刷新后自然能看到结果卡。
+ */
 export async function generateAiImage(params) {
-  const res = await authFetch('/api/gen/images', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params)
-  });
-  const json = await res.json();
-  if (!res.ok || json.error) {
-    throw new Error(json.error || `生图请求失败: HTTP ${res.status}`);
-  }
-  return json.data || json;
+  return submitGenerationJob('image', params);
 }
 
 /**
@@ -692,6 +719,18 @@ export async function generateAiVideo(params) {
   const json = await res.json();
   if (!res.ok || json.error) {
     throw new Error(json.error || `视频生成请求失败: HTTP ${res.status}`);
+  }
+  return json.data || json;
+}
+
+/**
+ * 查询异步生成任务状态 (/gen/videos/tasks/:taskId)
+ */
+export async function queryGenTask(taskId) {
+  const res = await authFetch(`/api/gen/videos/tasks/${encodeURIComponent(taskId)}`);
+  const json = await res.json();
+  if (!res.ok || json.error) {
+    throw new Error(json.error || `查询生成任务失败: HTTP ${res.status}`);
   }
   return json.data || json;
 }
@@ -964,6 +1003,15 @@ export {
 
 
 
+export async function pullExternalCreationTemplates(opts = {}) {
+  const res = await authFetch('/api/creation-templates/pull-external', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(opts)
+  });
+  return res.json();
+}
+
 export async function fetchCreationTemplatesIncremental({ since, sinceId, deletedSince, deletedSinceId } = {}) {
   const params = new URLSearchParams();
   if (since !== undefined && since !== null) {
@@ -996,5 +1044,109 @@ export async function patchBaseMaterial(id, data) {
     body: JSON.stringify(data)
   });
   return res.json();
+}
+
+// ===== 后台生成任务队列 =====
+// 生成任务在服务端 gen_jobs 表持久化：切换对话、刷新页面都不会打断，
+// worker 完成后把结果落成 chat_messages，刷新后 fetchChatMessages 即可看到结果卡。
+
+export async function enqueueGenJob(body) {
+  const res = await authFetch('/api/gen/jobs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const json = await res.json();
+  if (!res.ok || json.error) {
+    throw new Error(json.error || `生成任务入队失败: HTTP ${res.status}`);
+  }
+  return json;
+}
+
+export async function fetchGenJob(jobId) {
+  const res = await authFetch(`/api/gen/jobs/${encodeURIComponent(jobId)}`);
+  const json = await res.json();
+  if (!res.ok || json.error) {
+    throw new Error(json.error || `查询生成任务失败: HTTP ${res.status}`);
+  }
+  return json;
+}
+
+export async function listGenJobs(sessionId) {
+  const qs = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : '';
+  const res = await authFetch(`/api/gen/jobs${qs}`);
+  const json = await res.json();
+  if (!res.ok || json.error) {
+    throw new Error(json.error || `查询会话任务失败: HTTP ${res.status}`);
+  }
+  return json;
+}
+
+/** 等待任务完成：以轮询为准（不依赖 SSE 事件名匹配），网络抖动不中断。 */
+function waitForGenJob(jobId, { timeoutMs = 15 * 60 * 1000, intervalMs = 2000 } = {}) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timer = 0;
+    let timeout = 0;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearInterval(timer);
+      if (timeout) clearTimeout(timeout);
+      fn(value);
+    };
+    const settle = (job) => {
+      if (!job || settled) return;
+      if (job.status === 'succeeded') {
+        finish(resolve, job.result || { files: [] });
+      } else if (job.status === 'failed' || job.status === 'cancelled') {
+        const detail = job.error || {};
+        const err = new Error(detail.message || detail.error || `生成任务${job.status}`);
+        err.upstreamStatus = detail.upstreamStatus || detail.status;
+        err.requestId = detail.requestId;
+        err.code = detail.code;
+        finish(reject, err);
+      }
+    };
+    const poll = async () => {
+      if (settled) return;
+      try {
+        const j = await fetchGenJob(jobId);
+        settle(j.job || j);
+      } catch (_) {
+        // 断线/网关抖动：不中断，下一轮继续轮询
+      }
+    };
+    timer = setInterval(poll, intervalMs);
+    timeout = setTimeout(() => {
+      finish(reject, new Error('生成任务超时，结果仍会在后台完成，请稍后回到该会话查看'));
+    }, timeoutMs);
+    poll();
+  });
+}
+
+/** 入队 + 等待，返回形状与旧同步 /gen/images 完全一致。 */
+export async function submitGenerationJob(modality, params) {
+  const sessionId = params.sessionId || 'default_session';
+  const body = {
+    ...params,
+    modality,
+    sessionId,
+    clientRequestId: params.clientRequestId
+      || `${sessionId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  };
+  const json = await enqueueGenJob(body);
+  if (!json.jobId) throw new Error('生成任务入队失败：未返回 jobId');
+  return waitForGenJob(json.jobId);
+}
+
+// ===== 素材库图片替换（覆盖但留历史版本，可一键还原）=====
+
+export function replaceAssetImage(fid, dataUrl, { force = false } = {}) {
+  return postJson(`/api/assets/${encodeURIComponent(fid)}/replace-image`, { dataUrl, force });
+}
+
+export function restoreAssetVersion(fid, versionId) {
+  return postJson(`/api/assets/${encodeURIComponent(fid)}/restore-version`, { versionId });
 }
 

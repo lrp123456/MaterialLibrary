@@ -213,7 +213,7 @@ function verifySession(db, token) {
   if (!token) return null;
   const now = Date.now();
   const session = db.prepare(
-    'SELECT s.token, s.role, s.expires_at, u.id, u.username, COALESCE(u.is_locked, 0) AS is_locked, u.password_hash FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ?'
+    'SELECT s.token, s.role, s.expires_at, u.id, u.username, COALESCE(u.is_locked, 0) AS is_locked, COALESCE(u.allow_all_models, 0) AS allow_all_models, u.password_hash FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ?'
   ).get(token, now);
   if (!session) return null;
   // SEC-009：空密码账户（历史遗留）的会话一律无效。
@@ -225,6 +225,8 @@ function verifySession(db, token) {
     username: session.username,
     role: session.role,
     is_locked: Number(session.is_locked || 0),
+    // 模型可见性 ACL：测试账号置 1 后可见全部模型，普通账号只见白名单。
+    allow_all_models: Number(session.allow_all_models || 0),
     token: session.token
   };
 }

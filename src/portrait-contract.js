@@ -269,7 +269,8 @@ function shapeVolcVideo({
   if (ratio) out.ratio = ratio;
   const durationNum = Number(duration);
   if (Number.isFinite(durationNum) && durationNum > 0) {
-    out.duration = Math.max(4, Math.min(12, Math.round(durationNum)));
+    const maxDur = String(model).includes('2_5') || String(model).includes('2.5') ? 30 : 15;
+    out.duration = Math.max(3, Math.min(maxDur, Math.round(durationNum)));
   }
   out.caption = caption;
   return out;

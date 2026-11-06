@@ -889,6 +889,17 @@
             <span>网格</span>
           </button>
         </div>
+        <button
+          type="button"
+          class="tool-btn"
+          :class="{ 'is-on': groupDerivatives }"
+          aria-label="聚合衍生"
+          :title="groupDerivatives ? '已开启同源衍生版本折叠聚合（点击平铺全部）' : '已平铺所有版本（点击开启衍生折叠）'"
+          @click="toggleGroupDerivatives"
+        >
+          <span class="text-xs">🗂️</span>
+          <span>{{ groupDerivatives ? '已聚合衍生' : '聚合衍生' }}</span>
+        </button>
         <button type="button" class="tool-btn" :class="{ 'is-on': selectMode }" aria-label="多选" title="多选" @click="toggleSelectMode">
           <StudioIcon name="check" :size="16" />
           <span>多选</span>
@@ -898,7 +909,8 @@
           <span>刷新</span>
         </button>
         <div class="toolbar-count">
-          <span>共 {{ totalAssetsCount }} 条素材</span>
+          <span v-if="groupDerivatives && totalFoldedCount < assetsList.length">共 {{ totalFoldedCount }} 组素材（{{ totalAssetsCount }} 件）</span>
+          <span v-else>共 {{ totalAssetsCount }} 条素材</span>
         </div>
       </div>
     <!-- ========================================================================= -->
@@ -1159,7 +1171,7 @@
                     {{ group.weekday }}
                   </span>
                   <span class="px-2 py-0.5 text-[10px] font-mono font-semibold bg-studio-900 text-slate-300 rounded-full border border-studio-750">
-                    {{ group.items.length }} 件素材
+                    {{ group.items.length }} 组素材{{ group.totalRawCount && group.totalRawCount > group.items.length ? ' (' + group.totalRawCount + '件 · 折叠' + (group.totalRawCount - group.items.length) + '件衍生)' : '' }}
                   </span>
                 </div>
 
@@ -1202,6 +1214,38 @@
                     class="relative bg-studio-950 overflow-hidden flex items-center justify-center"
                     :style="getCardAspectStyle(item)"
                   >
+                    <!-- 多版本聚合角标 -->
+                    <div
+                      v-if="item.variants && item.variants.length > 1"
+                      class="absolute top-2 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-studio-900/90 text-studio-cyan text-[10px] font-bold border border-studio-accent/40 backdrop-blur-md shadow-md z-20 flex items-center gap-1 select-none pointer-events-none"
+                    >
+                      <span>🗂️</span>
+                      <span>{{ item.variants.length }}个版本</span>
+                    </div>
+
+                    <!-- 左右快速翻版按钮 (仅当卡片悬浮且存在多版本时出现) -->
+                    <div
+                      v-if="item.variants && item.variants.length > 1 && !selectMode"
+                      class="absolute inset-y-0 inset-x-1 flex items-center justify-between pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-20"
+                    >
+                      <button
+                        type="button"
+                        @click.stop="stepLibraryCardVariant(item, -1)"
+                        class="w-6 h-6 rounded-full bg-black/75 hover:bg-black text-white flex items-center justify-center pointer-events-auto transition cursor-pointer text-xs"
+                        title="上一个衍生版本"
+                      >
+                        ‹
+                      </button>
+                      <button
+                        type="button"
+                        @click.stop="stepLibraryCardVariant(item, 1)"
+                        class="w-6 h-6 rounded-full bg-black/75 hover:bg-black text-white flex items-center justify-center pointer-events-auto transition cursor-pointer text-xs"
+                        title="下一个衍生版本"
+                      >
+                        ›
+                      </button>
+                    </div>
+
                     <img
                       v-if="item.kind !== 'audio' && item.media_type !== 'music'"
                       :src="getThumbnailSrc(item)"
@@ -1333,8 +1377,8 @@
                         </button>
 
                         <a
-                          :href="getAssetDownloadUrl(item.fid)"
-                          download
+                          :href="getAssetDownloadUrl(item.fid, item.file_name || item.kind, item.mime)"
+                          :download="item.kind === 'video' || String(item.file_name || '').toLowerCase().endsWith('.mp4') ? (item.file_name || `ML_SAVED_${item.fid}.mp4`) : (item.file_name || `ML_SAVED_${item.fid}.jpg`)"
                           @click.stop
                           class="p-2 rounded-lg bg-studio-800/90 hover:bg-studio-accent text-white transition-all shadow-md cursor-pointer"
                           title="下载原始素材"
@@ -2016,10 +2060,10 @@
               <div class="w-8 h-8 rounded-full border-4 border-studio-accent border-t-transparent animate-spin"></div>
             </div>
 
-            <!-- 视频播放器 -->
+            <!-- 视频播放器 (使用专用 play URL，杜绝 download 拦截与 range 失效) -->
             <video
               v-if="activeModalAsset.kind === 'video' || activeModalAsset.media_type === 'video'"
-              :src="getAssetDownloadUrl(activeModalAsset.fid)"
+              :src="getAssetPlayUrl(activeModalAsset.fid)"
               controls
               autoplay
               class="max-h-full max-w-full rounded-xl object-contain shadow-2xl border border-white/5"
@@ -2038,7 +2082,7 @@
                 <div class="text-xs text-slate-400 font-mono">{{ formatFileSize(activeModalAsset.size) }}</div>
               </div>
               <audio
-                :src="getAssetDownloadUrl(activeModalAsset.fid)"
+                :src="getAssetPlayUrl(activeModalAsset.fid)"
                 controls
                 autoplay
                 class="w-full rounded-lg"
@@ -2140,6 +2184,34 @@
               </div>
             </div>
 
+            <!-- 🗂️ 同组多衍生版本切换面板 (当从聚合卡片点开时) -->
+            <div
+              v-if="activeModalAsset?.variants && activeModalAsset.variants.length > 1"
+              class="mb-3 p-2.5 bg-studio-950 rounded-xl border border-studio-800 space-y-1.5"
+            >
+              <div class="flex items-center justify-between px-0.5">
+                <span class="text-xs font-bold text-studio-cyan flex items-center gap-1.5">
+                  <span>🗂️</span>
+                  <span>同组衍生版本 (共 {{ activeModalAsset.variants.length }} 项)</span>
+                </span>
+                <span class="text-[10px] text-slate-400">点击切换查看不同版本</span>
+              </div>
+              <div class="flex items-center gap-2 overflow-x-auto py-1 scrollbar-thin">
+                <div
+                  v-for="(v, vIdx) in activeModalAsset.variants"
+                  :key="v.fid"
+                  @click.stop="switchModalVariant(v)"
+                  class="shrink-0 w-16 h-16 rounded-lg overflow-hidden border cursor-pointer transition-all relative"
+                  :class="activeModalAsset.fid === v.fid ? 'border-studio-accent ring-2 ring-studio-accent/50 scale-105' : 'border-studio-800 hover:border-studio-600 opacity-70 hover:opacity-100'"
+                  :title="v.file_name"
+                >
+                  <img :src="getAssetImageUrl(v.fid, v.mediaToken)" class="w-full h-full object-cover" />
+                  <span v-if="v.kind === 'video'" class="absolute bottom-0.5 right-0.5 text-[8px] bg-black/70 text-white px-1 rounded">视频</span>
+                  <span class="absolute top-0.5 left-0.5 text-[8px] bg-black/60 text-slate-200 px-0.5 rounded font-mono">#{{ vIdx + 1 }}</span>
+                </div>
+              </div>
+            </div>
+
             <!-- 核心衍生图版本详细清单 (9:16、3:4、精修等) -->
             <div class="space-y-3 pt-2 border-t border-studio-800">
               <div class="flex items-center justify-between">
@@ -2200,8 +2272,8 @@
                   </div>
 
                   <a
-                    :href="getDerivativeDownloadUrl(activeModalAsset.fid, d.id)"
-                    download
+                    :href="getDerivativeDownloadUrl(activeModalAsset.fid, d.id, d.kind, d.file_name || activeModalAsset.file_name, activeModalAsset.kind)"
+                    :download="getDerivativeFileName(d, activeModalAsset)"
                     @click.stop
                     class="p-1.5 rounded-lg bg-studio-800 hover:bg-studio-700 text-slate-300 hover:text-white transition-all border border-studio-700 shrink-0 cursor-pointer"
                     title="下载此衍生图"
@@ -2421,6 +2493,16 @@
                   <span>对话引用</span>
                 </button>
 
+                <a
+                  :href="getModalDownloadUrl()"
+                  :download="activeModalAsset.kind === 'video' || String(activeModalAsset.file_name || '').toLowerCase().endsWith('.mp4') ? (activeModalAsset.file_name || `ML_SAVED_${activeModalAsset.fid}.mp4`) : undefined"
+                  class="w-full py-2.5 bg-studio-850 hover:bg-studio-800 text-slate-100 font-bold rounded-xl border border-studio-700 transition-all flex items-center justify-center space-x-2 cursor-pointer text-center"
+                  title="下载当前展示的素材文件"
+                >
+                  <StudioIcon name="download" :size="15" />
+                  <span>下载文件 ({{ activeModalAsset.kind === 'video' ? 'MP4 视频' : (activeModalAsset.kind === 'audio' ? 'MP3 音频' : '原图') }})</span>
+                </a>
+
                 <button
                   v-if="activeModalAsset.kind === 'image' || activeModalAsset.media_type === 'image'"
                   @click="openExtractMaterial"
@@ -2428,6 +2510,28 @@
                 >
                   <StudioIcon name="wand" :size="16" />
                   <span>提取材质</span>
+                </button>
+
+                <!-- 图片操作：打开 StudioEditLayer 的 asset-replace 模式，编辑后直接替换原图 -->
+                <button
+                  v-if="activeModalAsset.kind === 'image' || activeModalAsset.media_type === 'image'"
+                  @click="openAssetImageEditor"
+                  class="w-full py-2.5 bg-studio-850 hover:bg-studio-800 text-slate-100 font-bold rounded-xl border border-studio-700 transition-all flex items-center justify-center space-x-2 cursor-pointer"
+                >
+                  <StudioIcon name="crop" :size="16" />
+                  <span>图片操作 / 替换原图</span>
+                </button>
+
+                <!-- 历史版本入口：后端暂无版本列表接口，提供「还原上一版本」（versionId 留空由后端取最新 history） -->
+                <button
+                  v-if="activeModalAsset.kind === 'image' || activeModalAsset.media_type === 'image'"
+                  @click="restorePreviousVersion"
+                  :disabled="replacing"
+                  class="w-full py-2 bg-studio-850 hover:bg-studio-800 text-slate-300 font-bold rounded-xl border border-studio-700 transition-all flex flex-col items-center justify-center space-y-0.5 cursor-pointer disabled:opacity-40"
+                  title="替换原图会保留历史版本；当前无历史版本列表接口，此按钮还原最近一次备份（versionId 留空由后端取最新 history）。"
+                >
+                  <span class="flex items-center space-x-2"><StudioIcon name="undo" :size="14" /><span>历史版本 · 还原上一版本</span></span>
+                  <span class="text-[10px] font-normal text-slate-500">无列表接口，还原最近一次替换前的备份</span>
                 </button>
 
                 <button
@@ -2460,6 +2564,48 @@
               </template>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 素材库图片操作 / 直接替换原图（复用 StudioEditLayer 的 asset-replace 模式） -->
+    <StudioEditLayer
+      v-if="assetEditTarget"
+      :visible="true"
+      mode="asset-replace"
+      :asset-fid="assetEditTarget.fid"
+      :asset-image-url="assetEditTarget.url"
+      :target-tag="''"
+      @close="assetEditTarget = null"
+      @replace="handleAssetReplace"
+    />
+
+    <!-- 409 referenced_by_clip_projects：提供「仍然替换」(force=true) 二次确认 -->
+    <div
+      v-if="replaceConflict"
+      class="fixed inset-0 z-[70] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
+      @click.self="replaceConflict = null"
+    >
+      <div class="w-full max-w-md bg-studio-900 border border-studio-700 rounded-2xl shadow-2xl p-6 space-y-4">
+        <h3 class="text-sm font-bold text-white">检测到剪辑工程引用</h3>
+        <p class="text-xs text-slate-300 leading-relaxed">{{ replaceConflict.message }}</p>
+        <p class="text-xs text-amber-300 leading-relaxed">该素材已被剪辑工程引用。直接替换可能导致工程内画面变化；「仍然替换」会以 force=true 强制覆盖原图，历史版本仍会保留。</p>
+        <div class="flex justify-end gap-3 pt-2">
+          <button
+            type="button"
+            @click="replaceConflict = null"
+            class="px-4 py-2 rounded-xl bg-studio-800 hover:bg-studio-750 text-slate-300 text-xs font-bold border border-studio-700 cursor-pointer transition-colors"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            @click="confirmForceReplace"
+            :disabled="replacing"
+            class="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold cursor-pointer transition-colors disabled:opacity-40"
+          >
+            仍然替换
+          </button>
         </div>
       </div>
     </div>
@@ -2647,10 +2793,13 @@ const StyleSchemeStudio = defineAsyncComponent(() => import('./library/StyleSche
 const LineageGraph = defineAsyncComponent(() => import('../components/LineageGraph.vue'));
 const Product3DManager = defineAsyncComponent(() => import('../components/library/Product3DManager.vue'));
 const SimilarityWorkbenchModal = defineAsyncComponent(() => import('../components/SimilarityWorkbenchModal.vue'));
+// 素材库「图片操作 / 直接替换原图」复用工作室编辑层（asset-replace 模式），按需加载
+const StudioEditLayer = defineAsyncComponent(() => import('./studio/StudioEditLayer.vue'));
 import VirtualMasonry from '../components/library/VirtualMasonry.vue';
 import { buildSchemeBrowse } from '../../../src/base-library/scheme-browse.mjs';
 import { processClientVocalPreview } from '../utils/audio-preview-webgpu.js';
 import { onAssetChange } from '../service/sse.js';
+import { bindOverlays } from '../service/overlay-stack.js';
 import {
   ensureToken,
   getCurrentUser,
@@ -2670,6 +2819,7 @@ import {
   getBaseItemImageUrl,
   getAssetPosterUrl,
   getAssetDownloadUrl,
+  getAssetPlayUrl,
   authFetch,
   moveAssetShelf,
   classifyAsset,
@@ -2682,7 +2832,9 @@ import {
   setManualServer,
   getManualServer,
   onServerStatusChange,
-  triggerRestageDerivatives
+  triggerRestageDerivatives,
+  replaceAssetImage,
+  restoreAssetVersion
 } from '../api.js';
 
 const props = defineProps({
@@ -4043,6 +4195,9 @@ let stopServerWatch = null;
 const currentPage = ref(1);
 const pageSize = 60;
 const totalAssetsCount = ref(0);
+const totalFoldedCount = computed(() => {
+  return groupedAssets.value.reduce((acc, grp) => acc + (grp.items?.length || 0), 0);
+});
 const hasMore = ref(true);
 
 const assetsList = ref([]);
@@ -4175,6 +4330,40 @@ function handleBatchSendToClip() {
 
 // Pinterest 模式详情大弹窗状态
 const activeModalAsset = ref(null);
+
+// ===== 素材库图片「直接替换原图」+ 历史版本还原（独立浮层状态）=====
+// 对象型 ref：{ fid, url } | null，打开编辑器时携带原图地址与 fid
+const assetEditTarget = ref(null);
+// 对象型 ref：{ fid, dataUrl, message } | null，409 引用冲突的 force 二次确认
+const replaceConflict = ref(null);
+// 非浮层状态：提交中，防重复点击
+const replacing = ref(false);
+// 素材库有十来个各自独立的弹窗/抽屉，统一登记到全局浮层栈，
+// 左上角返回 / 浏览器返回 / ESC 才能按「最上层优先」逐层关闭。
+// sidebarOpen 在桌面宽屏默认常开，属于布局而非浮层，故意不登记。
+bindOverlays({
+  lineageGraph: { ref: lineageGraphOpen, priority: 30 },
+  similarityWorkbench: similarityWorkbenchOpen,
+  vocalExtractor: showVocalExtractorModal,
+  baseItem: activeBaseItemModal,
+  schemeDetail: { ref: schemeDetail, priority: 30 },
+  catalogIngest: catalogIngestOpen,
+  styleStudio: styleStudioOpen,
+  filter: filterOpen,
+  assetDetail: { ref: activeModalAsset, priority: 10 },
+  // 新增浮层：对象型 ref 用 computed(() => !!x) 包装，并配自定义 close 把对象置回 null；
+  // priority 高于 assetDetail(10)，保证 ESC / 左上角返回先逐层关掉编辑层与 force 确认层。
+  assetEdit: {
+    ref: computed(() => !!assetEditTarget.value),
+    close: () => { assetEditTarget.value = null; },
+    priority: 30
+  },
+  replaceConflict: {
+    ref: computed(() => !!replaceConflict.value),
+    close: () => { replaceConflict.value = null; },
+    priority: 40
+  }
+}, { prefix: 'library:' });
 const currentDetail = ref(null);
 const activeDerivativeId = ref(null);
 const isDetailLoading = ref(false);
@@ -4375,7 +4564,45 @@ function getWeekdayDisplay(dateStr) {
   return isNaN(d.getDay()) ? '' : WEEKDAYS[d.getDay()];
 }
 
-// 核心计算属性：将素材按日期连续分组 (贯穿随着滚动而滚动)
+// 智能折叠聚合开关：支持记忆
+const groupDerivatives = ref(typeof localStorage !== 'undefined' ? localStorage.getItem('ml_library_group_derivatives') !== '0' : true);
+
+function toggleGroupDerivatives() {
+  groupDerivatives.value = !groupDerivatives.value;
+  try {
+    localStorage.setItem('ml_library_group_derivatives', groupDerivatives.value ? '1' : '0');
+  } catch (_) {}
+}
+
+function stepLibraryCardVariant(item, delta) {
+  if (!item.variants || item.variants.length <= 1) return;
+  const len = item.variants.length;
+  const nextIdx = ((item.activeVariantIdx || 0) + delta + len) % len;
+  item.activeVariantIdx = nextIdx;
+  const activeVar = item.variants[nextIdx];
+  item.fid = activeVar.fid;
+  item.file_name = activeVar.file_name;
+  item.thumb_url = activeVar.thumb_url;
+  item.width = activeVar.width;
+  item.height = activeVar.height;
+  item.kind = activeVar.kind;
+  item.orientation = activeVar.orientation;
+  item.origin_orientation = activeVar.origin_orientation;
+  item.library_shelf = activeVar.library_shelf;
+  item.tags = activeVar.tags;
+  item.colors = activeVar.colors;
+  item.size = activeVar.size;
+  item.mediaToken = activeVar.mediaToken;
+  item.favorited_at = activeVar.favorited_at;
+}
+
+function switchModalVariant(v) {
+  if (!v) return;
+  const oldVariants = activeModalAsset.value?.variants || [];
+  openAssetDetailModal({ ...v, variants: oldVariants });
+}
+
+// 核心计算属性：将素材按日期连续分组 (贯穿随着滚动而滚动)，并支持智能折叠聚合
 const groupedAssets = computed(() => {
   if (!assetsList.value || !assetsList.value.length) return [];
   const groups = [];
@@ -4389,13 +4616,76 @@ const groupedAssets = computed(() => {
         dateStr,
         formattedDate: formatDateDisplay(dateStr),
         weekday: getWeekdayDisplay(dateStr),
+        rawItems: [],
         items: []
       };
       map.set(dateStr, grp);
       groups.push(grp);
     }
-    grp.items.push(item);
+    grp.rawItems.push(item);
   }
+
+  for (const grp of groups) {
+    grp.totalRawCount = grp.rawItems.length;
+    if (!groupDerivatives.value) {
+      grp.items = grp.rawItems;
+      continue;
+    }
+
+    // 并查集 (Union-Find)：将属于同一会话(sessionId)、具有父子/祖先血缘(parent_fid)或查重组的资产折叠聚合
+    const ufParent = new Map();
+    function ufFind(i) {
+      if (!ufParent.has(i)) ufParent.set(i, i);
+      if (ufParent.get(i) === i) return i;
+      const root = ufFind(ufParent.get(i));
+      ufParent.set(i, root);
+      return root;
+    }
+    function ufUnion(i, j) {
+      const rootI = ufFind(i);
+      const rootJ = ufFind(j);
+      if (rootI !== rootJ) ufParent.set(rootI, rootJ);
+    }
+
+    for (const a of grp.rawItems) {
+      ufFind(a.fid);
+      let lin = {};
+      try {
+        lin = typeof a.lineage_json === 'string' ? JSON.parse(a.lineage_json) : (a.lineage_json || {});
+      } catch (_) {}
+
+      if (lin.sessionId) {
+        ufUnion(a.fid, 'sess:' + lin.sessionId);
+      }
+      const p = a.parent_fid || lin.parentFid || a.source_asset_id;
+      if (p) {
+        ufUnion(a.fid, 'asset:' + p);
+        ufUnion('asset:' + a.fid, 'asset:' + p);
+      }
+      if (a.dup_group_id) {
+        ufUnion(a.fid, 'dup:' + a.dup_group_id);
+      }
+    }
+
+    const clustersMap = new Map();
+    for (const a of grp.rawItems) {
+      const r = ufFind(a.fid);
+      if (!clustersMap.has(r)) clustersMap.set(r, []);
+      clustersMap.get(r).push(a);
+    }
+
+    const collapsed = [];
+    for (const [, list] of clustersMap.entries()) {
+      const primary = {
+        ...list[0],
+        variants: list,
+        activeVariantIdx: 0
+      };
+      collapsed.push(primary);
+    }
+    grp.items = collapsed;
+  }
+
   return groups;
 });
 
@@ -5128,6 +5418,101 @@ function onGraphOpenDetail(asset) {
   openAssetDetailModal(same || { fid: asset.fid, file_name: asset.name || '' });
 }
 
+// ===== 素材库图片：打开像素编辑器 / 直接替换原图 / 历史版本还原 =====
+function openAssetImageEditor() {
+  const asset = activeModalAsset.value;
+  if (!asset?.fid) return;
+  const url = getAssetImageUrl(asset.fid, asset.mediaToken);
+  if (!url) { alert('无法获取该素材的原图地址。'); return; }
+  assetEditTarget.value = { fid: asset.fid, url };
+}
+
+async function handleAssetReplace(result) {
+  const fid = assetEditTarget.value?.fid;
+  const dataUrl = result?.dataUrl;
+  if (!fid || !dataUrl) return;
+  await submitAssetReplace(fid, dataUrl, false);
+}
+
+async function confirmForceReplace() {
+  const pending = replaceConflict.value;
+  if (!pending) return;
+  replaceConflict.value = null;
+  await submitAssetReplace(pending.fid, pending.dataUrl, true);
+}
+
+/**
+ * 提交替换。
+ * api.js 的 postJson 封装在 409 时只保留 error.message、丢掉 code，
+ * 因此首次尝试（force=false）直接用 authFetch 解析完整响应体以拿到 code，
+ * 从而区分 referenced_by_clip_projects 与 duplicate_sha256；
+ * force=true 的二次确认走官方封装 replaceAssetImage。
+ */
+async function submitAssetReplace(fid, dataUrl, force) {
+  if (replacing.value) return;
+  replacing.value = true;
+  try {
+    let out;
+    if (force) {
+      out = await replaceAssetImage(fid, dataUrl, { force: true });
+    } else {
+      const res = await authFetch(`/api/assets/${encodeURIComponent(fid)}/replace-image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dataUrl, force: false })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json.ok === false) {
+        const err = new Error(json.error || `替换失败 (${res.status})`);
+        err.code = json.code || '';
+        err.status = res.status;
+        throw err;
+      }
+      out = json;
+    }
+    // 成功：关闭编辑层与冲突层，刷新列表 + 重新拉取当前详情
+    assetEditTarget.value = null;
+    replaceConflict.value = null;
+    const refreshedAsset = activeModalAsset.value ? { ...activeModalAsset.value } : null;
+    await reloadAssets(true);
+    if (refreshedAsset?.fid) await openAssetDetailModal(refreshedAsset);
+    alert(`已替换原图${out?.versionId ? `（历史版本 ${out.versionId} 已保留）` : ''}，列表与详情已刷新。`);
+  } catch (err) {
+    const code = err?.code || '';
+    const msg = err?.message || '替换失败';
+    if (!force && (code === 'referenced_by_clip_projects' || (!code && /剪辑工程引用|force=true/.test(msg)))) {
+      replaceConflict.value = { fid, dataUrl, message: msg };
+      return;
+    }
+    if (code === 'duplicate_sha256' || (!code && /重复/.test(msg))) {
+      alert(`替换失败：新图片与已有素材重复（sha256 去重）。\n${msg}`);
+      return;
+    }
+    alert(`替换失败：${msg}`);
+  } finally {
+    replacing.value = false;
+  }
+}
+
+// 历史版本：当前没有列表接口，传空 versionId 让后端取最新 history
+async function restorePreviousVersion() {
+  const asset = activeModalAsset.value;
+  if (!asset?.fid || replacing.value) return;
+  if (!window.confirm('确认还原上一版本？\n\n当前没有历史版本列表接口，此操作会把最近一次「替换原图」前的备份恢复为当前图片。')) return;
+  replacing.value = true;
+  try {
+    const out = await restoreAssetVersion(asset.fid, '');
+    const refreshedAsset = { ...asset };
+    await reloadAssets(true);
+    await openAssetDetailModal(refreshedAsset);
+    alert(`已还原上一版本${out?.versionId ? `（${out.versionId}）` : ''}，列表与详情已刷新。`);
+  } catch (err) {
+    alert(`还原失败：${err?.message || err}`);
+  } finally {
+    replacing.value = false;
+  }
+}
+
 async function openAssetDetailModal(item) {
   lineageGraphOpen.value = false;
   activeModalAsset.value = item;
@@ -5247,13 +5632,35 @@ function getModalMainImageUrl() {
   return getAssetImageUrl(fid, mediaToken);
 }
 
+function getDerivativeFileName(d, asset) {
+  if (!d && !asset) return 'download.jpg';
+  const fid = asset?.fid || d?.asset_fid || 'asset';
+  const isVid = asset?.kind === 'video' || d?.kind === 'video' || /\.(mp4|mov|webm|mkv|avi|m4v)$/i.test(`${d?.file_name || ''} ${asset?.file_name || ''}`);
+  const isAud = asset?.kind === 'audio' || d?.kind === 'audio' || /\.(mp3|wav|m4a|aac|flac|ogg)$/i.test(`${d?.file_name || ''} ${asset?.file_name || ''}`);
+  const ext = isVid ? '.mp4' : (isAud ? '.mp3' : '.jpg');
+  const safeKind = String(d?.kind || (isVid ? 'video' : 'derivative')).replace(/[^A-Za-z0-9_-]/g, '');
+  return d?.file_name || `ML_SAVED_${fid}_${safeKind}${ext}`;
+}
+
 function getModalDownloadUrl() {
   if (!activeModalAsset.value) return '';
-  const fid = activeModalAsset.value.fid;
-  if (activeDerivativeId.value) {
-    return getDerivativeDownloadUrl(fid, activeDerivativeId.value, activeDerivativeObj.value?.kind || 'derivative');
+  const asset = activeModalAsset.value;
+  const fid = asset.fid;
+  // 权威保障：视频资产无论是否展示了封面缩略图，一律走原视频 MP4 流式下载
+  if (asset.kind === 'video' || String(asset.file_name || '').toLowerCase().endsWith('.mp4')) {
+    return getAssetDownloadUrl(fid, asset.file_name || 'video.mp4', 'video/mp4');
   }
-  return getAssetDownloadUrl(fid);
+  if (asset.kind === 'audio' || String(asset.file_name || '').toLowerCase().endsWith('.mp3')) {
+    return getAssetDownloadUrl(fid, asset.file_name || 'audio.mp3', 'audio/mp3');
+  }
+  if (activeDerivativeId.value) {
+    const deriv = activeDerivativeObj.value || {};
+    const dKind = deriv.kind || 'derivative';
+    const dName = deriv.file_name || deriv.name || asset.file_name || '';
+    const dMime = deriv.mime || deriv.content_type || '';
+    return getDerivativeDownloadUrl(fid, activeDerivativeId.value, dKind, `${dName} ${dMime}`, asset.kind);
+  }
+  return getAssetDownloadUrl(fid, asset.file_name || asset.kind, asset.mime);
 }
 
 function openExtractMaterial() {

@@ -1,7 +1,12 @@
 /**
  * AI 任务全局管理服务 (AiTaskManager)
- * 负责客户端异步 AI 任务（如多空间漫游视频渲染、图像精修等）的生命周期管理、
- * 本地持久化、后台静默状态轮询与全局浮窗通知联动。
+ *
+ * 两类任务共用这一份状态：
+ * 1) 服务端异步任务（/lab 提交，带 remoteTaskId，靠 WS 推送或轮询更新）；
+ * 2) 创作页同步生成（/gen/images|videos|audio、/edit/run），由页面用
+ *    trackTask / finishTask / failTask 手动登记，用于跨 Tab 的任务浮窗。
+ *
+ * 统一负责：本地持久化、进度呼吸、后台轮询兜底与全局浮窗联动。
  */
 import { submitAiTask, queryAiTask, queryAiTaskById } from './ViewerApi'
 import { viewerCache } from './ViewerCache'
@@ -9,12 +14,15 @@ import { pushClient } from './PushClient'
 
 const STORAGE_KEY = 'ai_active_tasks'
 const POLL_INTERVAL_MS = 3000
+const TICK_INTERVAL_MS = 1800
+const TRACKED_TTL_MS = 6 * 60 * 1000
 
 class AiTaskManager {
   constructor() {
     this.tasks = []
     this.listeners = new Set()
     this.pollTimer = null
+    this.tickTimer = null
     this.init()
   }
 
@@ -38,6 +46,10 @@ class AiTaskManager {
     })
     if (this.getActiveTasks().length > 0) {
       this.ensureFallbackPolling()
+      // 上次退出时仍在跑的前台生成任务：靠本地 tick 推进并在超时后收口
+      if (this.getActiveTasks().some((t) => !t.fid && !t.remoteTaskId)) {
+        this.startTick()
+      }
     }
   }
 
@@ -52,7 +64,7 @@ class AiTaskManager {
   subscribe(fn) {
     if (typeof fn === 'function') {
       this.listeners.add(fn)
-      fn(this.getActiveTasks(), this.getLatestActiveTask())
+      fn(this.getActiveTasks(), this.getLatestTask())
     }
     return () => {
       this.listeners.delete(fn)
@@ -61,7 +73,7 @@ class AiTaskManager {
 
   notify() {
     const active = this.getActiveTasks()
-    const latest = this.getLatestActiveTask()
+    const latest = this.getLatestTask()
     for (const fn of this.listeners) {
       try {
         fn(active, latest)
@@ -80,14 +92,122 @@ class AiTaskManager {
     return active.length ? active[0] : null
   }
 
+  /** 最近一条任务（含已完成，供浮窗短暂展示结果） */
+  getLatestTask() {
+    return this.tasks.length ? this.tasks[0] : null
+  }
+
   getAllTasks() {
     return [...this.tasks]
+  }
+
+  // ─────────── 创作页同步生成任务（跨 Tab 浮窗） ───────────
+  /**
+   * 登记一条前台生成任务。页面拿到结果后调用 finishTask / failTask。
+   * 与 createTask 的区别：不提交服务端、不轮询，只做本地进度与浮窗。
+   */
+  trackTask(meta = {}) {
+    const taskId = meta.taskId || 'gen_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7)
+    const task = {
+      taskId,
+      type: meta.type || 'generation',
+      title: meta.title || 'AI 生成',
+      status: 'running',
+      progress: Number(meta.progress) || 8,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      sessionId: meta.sessionId || '',
+      messageId: meta.messageId || '',
+      outputFid: null,
+      outputKind: meta.outputKind || '',
+      error: null,
+    }
+    this.tasks = [task, ...this.tasks].slice(0, 30)
+    this.save()
+    this.startTick()
+    this.notify()
+    return task
+  }
+
+  updateTask(taskId, patch = {}) {
+    const task = this.tasks.find((t) => t.taskId === taskId)
+    if (!task) return null
+    Object.assign(task, patch, { updatedAt: Date.now() })
+    this.save()
+    this.notify()
+    return task
+  }
+
+  finishTask(taskId, { outputFid = null, outputKind = '' } = {}) {
+    const task = this.tasks.find((t) => t.taskId === taskId)
+    if (!task) return null
+    task.status = 'success'
+    task.progress = 100
+    task.outputFid = outputFid || null
+    if (outputKind) task.outputKind = outputKind
+    task.updatedAt = Date.now()
+    this.save()
+    this.stopTickIfIdle()
+    this.notify()
+    return task
+  }
+
+  failTask(taskId, error) {
+    const task = this.tasks.find((t) => t.taskId === taskId)
+    if (!task) return null
+    task.status = 'failed'
+    task.error = error || '生成失败'
+    task.updatedAt = Date.now()
+    this.save()
+    this.stopTickIfIdle()
+    this.notify()
+    return task
+  }
+
+  startTick() {
+    if (this.tickTimer) return
+    this.tickTimer = setInterval(() => {
+      const now = Date.now()
+      let changed = false
+      for (const t of this.tasks) {
+        if (t.status !== 'running' && t.status !== 'pending') continue
+        // 只推进本地登记的任务；服务端任务由推送/轮询给出真实进度
+        if (t.remoteTaskId || t.fid) continue
+        if (now - (t.createdAt || now) > TRACKED_TTL_MS) {
+          t.status = 'failed'
+          t.error = '任务超时，请回创作页重试'
+          t.updatedAt = now
+          changed = true
+          continue
+        }
+        const p = Number(t.progress) || 0
+        const next = Math.min(92, Math.round(p + (92 - p) * 0.08 + 0.5))
+        if (next !== p) {
+          t.progress = next
+          t.updatedAt = now
+          changed = true
+        }
+      }
+      if (changed) {
+        this.save()
+        this.notify()
+      }
+      this.stopTickIfIdle()
+    }, TICK_INTERVAL_MS)
+  }
+
+  stopTickIfIdle() {
+    if (this.getActiveTasks().length > 0) return
+    if (this.tickTimer) {
+      clearInterval(this.tickTimer)
+      this.tickTimer = null
+    }
   }
 
   /**
    * 提交并注册一个全新任务
    */
-  async createTask({ fid, type = 'spatial_walkthrough', title = '室内漫游视频生成', sourceAssets = [], payload = {} }) {
+  async createTask({ fid, type = 'generation', title = 'AI 生成', sourceAssets = [], payload = {} }) {
     const taskId = 'task_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7)
     const task = {
       taskId,
@@ -169,7 +289,7 @@ class AiTaskManager {
   }
 
   async pollCycle() {
-    const active = this.getActiveTasks()
+    const active = this.getActiveTasks().filter((t) => t.fid || t.remoteTaskId)
     if (!active.length) {
       this.stopPolling()
       return
@@ -191,7 +311,7 @@ class AiTaskManager {
               task.status = 'success'
               task.progress = 100
               task.outputFid = res.output_fid || res.outputFid || res.fid || task.fid
-              task.outputKind = res.output_kind || res.outputKind || (task.type === 'walkthrough' ? 'video' : 'derivative')
+              task.outputKind = res.output_kind || res.outputKind || (task.type === 'video' ? 'video' : 'derivative')
               this.onTaskSuccess(task)
               changed = true
             } else if (res.status === 'failed' || res.status === 'error') {
@@ -250,7 +370,7 @@ class AiTaskManager {
       task.status = 'success'
       task.progress = 100
       task.outputFid = p.output_fid || p.outputFid || p.fid || task.fid
-      task.outputKind = p.output_kind || p.outputKind || (task.type === 'walkthrough' ? 'video' : 'derivative')
+      task.outputKind = p.output_kind || p.outputKind || (task.type === 'video' ? 'video' : 'derivative')
       this.onTaskSuccess(task)
     } else if (status === 'failed' || status === 'error') {
       task.status = 'failed'

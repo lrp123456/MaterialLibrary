@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="eye-care senior-mode">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>素材工作台 · 资产 / 创作 / 剪辑 / 设置</title>
+  <link rel="stylesheet" href="./fonts.css" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <!-- ============ 顶部三层导航 ============ -->
+  <header class="top">
+    <!-- 一级板块 + 二级泳道（同一行，用尺寸差表达层级，不写标签） -->
+    <div class="nav-row">
+      <div class="brand">
+        <span class="logo-slot" id="logo-slot" aria-label="当前标识"></span>
+        <strong>素材工作台</strong>
+      </div>
+      <nav class="main-nav" id="main-nav" aria-label="一级板块"></nav>
+      <span class="nav-rule" aria-hidden="true"></span>
+      <div class="lane-row" id="lane-row" aria-label="二级分类"></div>
+      <div class="nav-right">
+        <button type="button" class="btn" id="btn-display">显示设置</button>
+        <button type="button" class="btn" id="btn-user">管理员</button>
+      </div>
+    </div>
+
+    <!-- 第一栏：常规操作 + 结果计数 -->
+    <div class="bar-row bar-primary">
+      <label class="search-box">
+        <span class="search-icon" id="search-icon" aria-hidden="true"></span>
+        <input type="search" id="global-search" placeholder="搜索资产、会话、配方……" aria-label="全局搜索" />
+        <button type="button" class="voice-inline" id="btn-voice" aria-label="语音输入" title="语音输入"></button>
+      </label>
+      <button type="button" class="btn primary" id="btn-upload">上传素材</button>
+      <span class="result-count" id="result-count">共匹配 12 件素材</span>
+    </div>
+
+    <!-- 第二栏：左「归类」互斥 + 右「收窄」叠加，中间 1px 组线 -->
+    <div class="bar-row bar-secondary">
+      <div class="group-classify" id="classify-group" role="tablist" aria-label="归类"></div>
+      <span class="group-rule" aria-hidden="true"></span>
+      <div class="group-narrow" id="narrow-group" aria-label="收窄条件"></div>
+    </div>
+  </header>
+
+  <!-- ============ 主视口：6:4 分栏，中间是全站唯一 2px 区线 ============ -->
+  <main class="workspace" id="workspace">
+    <section class="pane pane-main" id="pane-main" aria-label="当前工作对象"></section>
+    <section class="pane pane-side" id="pane-side" aria-label="浏览与上下文"></section>
+  </main>
+
+  <!-- ============ 状态栏 ============ -->
+  <footer class="statusbar">
+    <span class="status-dot" aria-hidden="true"></span>
+    <span>服务正常 · 已连接本机素材库</span>
+    <span class="status-rule"></span>
+    <span id="loop-status">循环动效 1 / 2</span>
+    <div class="march kc-loop" aria-hidden="true"><i></i><i></i><i></i></div>
+    <span class="status-spacer"></span>
+    <span id="rm-status">减少动态效果：关</span>
+    <span class="status-rule"></span>
+    <span id="path-text">资产 / 图片 / 室内外设计</span>
+  </footer>
+
+  <!-- 右抽屉 / 遮罩 / 提示 -->
+  <div class="drawer" id="drawer" hidden>
+    <div class="drawer-head"><strong id="drawer-title">筛选条件</strong>
+      <button type="button" class="btn" id="drawer-close" aria-label="关闭">关闭</button></div>
+    <div class="drawer-body" id="drawer-body"></div>
+  </div>
+  <div class="scrim" id="scrim" hidden></div>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

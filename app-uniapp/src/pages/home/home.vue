@@ -2,995 +2,733 @@
   <view class="page">
     <view class="status-bar" :style="{ paddingTop: statusBarHeight + 'px' }" />
 
-    <!-- 顶栏：抽屉 | 素材库·操作 | 动作 -->
-    <view class="nav-bar">
-      <!-- 创作工作台下显示返回和模式标题 -->
-      <template v-if="mainView === 'operate' && inStudioDesk">
-        <view class="nav-left desk-back" @click="exitStudioDesk">
-          <text class="desk-back-arrow">‹</text>
-        </view>
-        <view class="desk-mode-header" @click="showDomainDropdown = !showDomainDropdown">
-          <text class="desk-mode-title">{{ deskTitle }}</text>
-          <text class="desk-mode-arrow">{{ showDomainDropdown ? '▴' : '▾' }}</text>
-        </view>
-        <view class="nav-right">
-          <view class="icon-btn" @click="resetDeskState">
-            <text class="action-icon">重置</text>
-          </view>
-        </view>
-      </template>
+    <!-- 顶栏：抽屉汉堡 | 4大模式分段器 (对话/图片/视频/音乐) | 创作库与清空 -->
+    <view class="topbar">
+      <!-- 左侧：会话抽屉入口 -->
+      <view class="icon-btn" @click="drawerOpen = true" hover-class="icon-btn-hover" title="会话管理">
+        <AppIcon name="menu" :size="20" color="#1E293B" />
+      </view>
 
-      <!-- 默认主态顶栏 -->
-      <template v-else>
-        <view class="nav-left" @click="openDrawer">
-          <view class="hamburger">
-            <view class="ham-line" />
-            <view class="ham-line" />
-            <view class="ham-line short" />
-          </view>
-        </view>
-
-        <view class="segment-pill">
-          <view
-            :class="['seg-item', { active: mainView === 'library' }]"
-            @click="switchMain('library')"
-          >
-            <text class="seg-text">素材库</text>
-          </view>
-          <view
-            :class="['seg-item', { active: mainView === 'operate' }]"
-            @click="switchMain('operate')"
-          >
-            <text class="seg-text">操作</text>
-          </view>
-        </view>
-
-        <view class="nav-right">
-          <view v-if="mainView === 'operate' && chatList.length" class="icon-btn" @click="confirmClearChat">
-            <text class="action-icon">清空</text>
-          </view>
-          <view v-else class="icon-btn placeholder" />
-        </view>
-      </template>
-    </view>
-
-    <!-- 沉浸工作台顶栏模态下拉菜单 -->
-    <view v-if="mainView === 'operate' && inStudioDesk && showDomainDropdown" class="desk-menu-mask" @click="showDomainDropdown = false">
-      <view class="desk-menu-popover" @click.stop>
+      <!-- 中间：原生 Segmented Control (对话/图片/视频/音乐) -->
+      <view class="segment-wrap">
         <view
-          v-for="d in deskModes"
+          v-for="d in visibleDomains"
           :key="d.id"
-          :class="['desk-menu-item', { active: domain === d.id }]"
-          @click="switchDeskDomain(d.id)"
+          class="segment-item"
+          :class="{ active: domain === d.id }"
+          @click="switchDomain(d.id)"
+          hover-class="segment-hover"
         >
-          <text class="desk-menu-icon">{{ d.icon }}</text>
-          <text class="desk-menu-label">{{ d.label }}</text>
-          <text v-if="domain === d.id" class="desk-menu-check">✓</text>
+          <text class="segment-t">{{ d.label }}</text>
+        </view>
+      </view>
+
+      <!-- 右侧：创作库入口 & 清空 -->
+      <view class="topbar-right">
+        <view class="top-lib-btn" @click="libraryOpen = true" hover-class="top-lib-hover" title="打开创作库">
+          <AppIcon name="sparkle" :size="14" color="#007AFF" />
+          <text class="top-lib-t">创作库</text>
+        </view>
+        <view v-if="chatList.length" class="icon-btn clear" @click="confirmClearChat" hover-class="icon-btn-hover">
+          <text class="topbar-clear">清空</text>
         </view>
       </view>
     </view>
 
-    <!-- 素材库 -->
-    <home-library
-      v-show="mainView === 'library'"
-      :active="mainView === 'library'"
-      @quick="onHomeLibraryQuick"
-      @use="onHomeLibraryUse"
-      @open-picker="openSlotAssetPicker"
-    />
-
-    <!-- 操作页 -->
-    <view v-show="mainView === 'operate'" class="operate" :style="{ background: inStudioDesk ? '#F8FAFC' : domainSoftBg }">
-      <!-- 态一：工坊首页 / 纯对话态（图 6 风格） -->
-      <view v-if="!inStudioDesk" class="home-desk-view">
-        <scroll-view
-          scroll-y
-          class="chat-scroll"
-          :scroll-into-view="scrollIntoId"
-          :scroll-with-animation="true"
-        >
-          <view v-if="!chatList.length" class="welcome">
-            <view class="welcome-badge">✨ AI 工坊</view>
-            <text class="welcome-title">开始创作 ~</text>
-            <text class="welcome-desc">探索室内光影与空间魔法，支持生图、生视频、配乐与精修</text>
-
-            <view class="studio-feature-cards">
-              <view class="feature-card banner" @click="enterDesk('video')">
-                <view class="feat-badge">Wan 3.0</view>
-                <view class="feat-info">
-                  <text class="feat-title">Wan 3.0 视频生成全新上线</text>
-                  <text class="feat-sub">多图全能参考 · 电影质感光影位移</text>
-                </view>
-                <text class="feat-go">立即体验 ›</text>
-              </view>
-              <view class="feature-card" @click="enterDesk('image')">
-                <view class="feat-badge img">Agnes 2.5</view>
-                <view class="feat-info">
-                  <text class="feat-title">空间效果图与全能生图</text>
-                  <text class="feat-sub">现代轻奢/奶油风效果图一键生成</text>
-                </view>
-                <text class="feat-go">开始作图 ›</text>
-              </view>
-            </view>
-
-            <view class="preset-list">
-              <view
-                v-for="p in chatPresets"
-                :key="p"
-                class="preset-pill"
-                @click="applyPreset(p)"
-              >
-                <text class="preset-t">{{ p }}</text>
-              </view>
-            </view>
-          </view>
-
-          <!-- 聊天流水记录 -->
-          <view
-            v-for="(msg, idx) in chatList"
-            :key="msg.id || idx"
-            :id="'msg-' + (msg.id || idx)"
-            class="chat-group"
-          >
-            <view v-if="msg.role === 'user'" class="bubble-row user">
-              <view class="bubble user">
-                <view class="user-meta">
-                  <text class="mode-tag">{{ domainLabelOf(msg.mode) }}</text>
-                  <template v-for="(pv, pk) in msg.params" :key="'pt' + pk">
-                    <text v-if="paramTagText(pk, pv)" class="param-tag">{{ paramTagText(pk, pv) }}</text>
-                  </template>
-                </view>
-                <view class="user-prompt-rich">
-                  <template v-for="(seg, sI) in promptSegments(msg.prompt, msg.images)">
-                    <text v-if="seg.type === 'text'" :key="'t' + sI" class="user-prompt">{{ seg.value }}</text>
-                    <view v-else :key="'r' + sI" class="inline-ref-chip">
-                      <image v-if="seg.img" :src="seg.img" class="inline-ref-thumb" mode="aspectFill" />
-                      <text class="inline-ref-label">{{ seg.label }}</text>
-                    </view>
-                  </template>
-                </view>
-                <view v-if="msg.images && msg.images.length" class="ref-tray">
-                  <view
-                    v-for="(im, iIdx) in msg.images"
-                    :key="iIdx"
-                    class="ref-thumb"
-                  >
-                    <image :src="im.url || im" class="ref-img" mode="aspectFill" />
-                    <text v-if="im.label" class="ref-label">{{ im.label }}</text>
-                  </view>
-                </view>
-              </view>
-            </view>
-
-            <view v-else class="bubble-row ai">
-              <view class="ai-avatar">🤖</view>
-              <view class="bubble ai">
-                <view v-if="msg.status === 'running'" class="status-running">
-                  <view class="spinner" />
-                  <view class="run-info">
-                    <text class="run-title">{{ msg.engineTitle || '生成中…' }}</text>
-                    <text class="run-sub">{{ msg.progress ? `已完成 ${msg.progress}%` : '正在处理' }}</text>
-                  </view>
-                </view>
-                <view v-else-if="msg.status === 'failed'" class="status-failed">
-                  <text class="failed-t">{{ msg.error || '生成失败，请重试' }}</text>
-                </view>
-                <view v-else-if="msg.kind === 'text' || (msg.result && msg.result.kind === 'text')" class="text-result">
-                  <text class="text-body">{{ msg.result && (msg.result.text || msg.result.url) }}</text>
-                </view>
-                <view v-else class="result-card">
-                  <video
-                    v-if="msg.result && msg.result.kind === 'video' && msg.result.url"
-                    :src="msg.result.url"
-                    class="result-video"
-                    controls
-                    :autoplay="false"
-                    :loop="false"
-                  />
-                  <audio
-                    v-else-if="msg.result && msg.result.kind === 'audio' && msg.result.url"
-                    :src="msg.result.url"
-                    class="result-audio"
-                    controls
-                  />
-                  <image
-                    v-else-if="msg.result && msg.result.url"
-                    :src="msg.result.url"
-                    class="result-image"
-                    mode="widthFix"
-                    @click="previewMedia(msg.result.url)"
-                  />
-                  <view v-if="msg.result && msg.result.url" class="result-actions">
-                    <view
-                      v-if="msg.result.kind === 'image'"
-                      class="act-btn"
-                      @click="copyToDomain('video', msg.result.url)"
-                    >
-                      <text class="act-t">转生视频</text>
-                    </view>
-                    <view
-                      v-if="msg.result.kind === 'image'"
-                      class="act-btn"
-                      @click="copyToDomain('image', msg.result.url)"
-                    >
-                      <text class="act-t">以此图生图</text>
-                    </view>
-                    <view
-                      v-if="msg.result.kind === 'image'"
-                      class="act-btn"
-                      @click="previewMedia(msg.result.url)"
-                    >
-                      <text class="act-t">放大</text>
-                    </view>
-                  </view>
-                </view>
-              </view>
-            </view>
-          </view>
-          <view class="chat-pad" />
-        </scroll-view>
-
-        <!-- 态一底部：快捷胶囊 + 输入框（图 6 规范） -->
-        <view class="home-composer">
-          <view class="quick-pill-row">
-            <view class="quick-desk-pill video" @click="enterDesk('video')">
-              <text class="q-icon">🎬</text>
-              <text class="q-label">AI 生视频</text>
-            </view>
-            <view class="quick-desk-pill image" @click="enterDesk('image')">
-              <text class="q-icon">🖼️</text>
-              <text class="q-label">AI 生图</text>
-            </view>
-            <view class="quick-desk-pill music" @click="enterDesk('music')">
-              <text class="q-icon">🎵</text>
-              <text class="q-label">AI 生音乐</text>
-            </view>
-            <view class="quick-desk-pill portrait" @click="enterDesk('portrait')">
-              <text class="q-icon">👤</text>
-              <text class="q-label">AI 生人像</text>
-            </view>
-          </view>
-
-          <view v-if="slotImages.length && domain === 'chat'" class="home-ref-row">
-            <view
-              v-for="(img, sIdx) in slotImages"
-              :key="'home_ref_' + sIdx"
-              class="desk-ref-chip"
-              @click="onRefChipClick(sIdx)"
-            >
-              <text class="chip-at">@</text>
-              <text class="chip-name">{{ getSlotTagLabel(sIdx) }}</text>
-              <text class="chip-plus" @click.stop="removeSlotImage(sIdx)">✕</text>
-            </view>
-          </view>
-          <view class="home-input-bar">
-            <view class="home-attach" @click="chooseChatMedia">
-              <text class="home-attach-t">＋</text>
-            </view>
-            <view class="home-input-wrap">
-              <textarea
-                v-model="inputPrompt"
-                class="home-main-input"
-                placeholder="发消息，可 @图片1 / @视频1 引用素材…"
-                :maxlength="1000"
-                :auto-height="true"
-                :show-confirm-bar="false"
-              />
-            </view>
-            <button class="home-send-btn" :disabled="!canSend || sending" @click="handleSend">
-              <text class="home-send-t">{{ sending ? '…' : '↑' }}</text>
-            </button>
-          </view>
-          <view class="safe-bottom" />
-        </view>
+    <!-- 次级模式胶囊（图片：标准生图/人像；音乐：纯音乐/文生歌） -->
+    <view v-if="domain === 'image'" class="sub-mode-bar">
+      <view class="sub-chip" :class="{ active: imageSub === 'standard' }" @click="setImageSub('standard')">
+        <text class="sub-chip-t">标准生图</text>
       </view>
-
-      <!-- 态二：沉浸式创作工作台（图 7~10 规范） -->
-      <view v-else class="studio-desk-view">
-        <scroll-view scroll-y class="desk-scroll">
-          <view class="desk-canvas-stage">
-            <view v-if="isLibraryMode" class="portrait-lib">
-              <text class="stage-title">虚拟人像库</text>
-              <text class="stage-desc">只收录虚拟形象。全身竖图和正面无表情特写放在同一角色组里。入库完成后才能在视频里当参考图。</text>
-              <view v-if="!portraitConsented" class="portrait-consent">
-                <text class="portrait-warn">上传前需确认：你合法拥有该素材并有完整使用权；形象不与任何自然人雷同，也不抄袭盗用；内容不违法、不违背公序良俗。</text>
-                <view class="opt-btn" @click="confirmPortraitConsent">
-                  <text class="opt-btn-t">我确认并继续</text>
-                </view>
-              </view>
-              <view v-else>
-                <view class="portrait-new-row">
-                  <input class="portrait-name-input" v-model="portraitGroupName" placeholder="角色名称" />
-                  <view class="opt-btn" @click="createPortraitGroupLocal">
-                    <text class="opt-btn-t">新建角色组</text>
-                  </view>
-                </view>
-                <view v-if="!portraitLibraryGroups.length" class="stage-desc">还没有角色组</view>
-                <view v-for="g in portraitLibraryGroups" :key="'pg_' + g.id" class="portrait-group">
-                  <view class="portrait-group-head">
-                    <text class="portrait-group-name">{{ g.name }}</text>
-                    <text class="portrait-link" @click="removePortraitGroup(g)">删除组</text>
-                  </view>
-                  <view class="portrait-asset-row">
-                    <view v-for="a in g.assets" :key="'pa_' + a.id" class="portrait-asset">
-                      <text class="portrait-asset-name">{{ a.name || '图片' }}</text>
-                      <text :class="['portrait-status', a.status]">{{ portraitStatusText(a.status) }}</text>
-                      <text v-if="a.error" class="portrait-err">{{ a.error }}</text>
-                      <text class="portrait-link" @click="removePortraitAsset(a)">删除</text>
-                    </view>
-                    <view class="opt-btn" @click="pickPortraitFile(g)">
-                      <text class="opt-btn-t">上传图片</text>
-                    </view>
-                  </view>
-                </view>
-              </view>
-            </view>
-
-            <!-- 纯文生模式态（文生人像、文生图、文生视频等）：展示轻量纯文创作台，不挂图片卡片 -->
-            <view v-else-if="isTextOnlyMode" class="desk-text-stage">
-              <view class="text-stage-card">
-                <view class="stage-icon-box">
-                  <text class="stage-icon">✍️</text>
-                </view>
-                <text class="stage-title">纯文本自由创作</text>
-                <text class="stage-desc">当前为【{{ currentModeLabel }}】模式，无需输入参考素材，直接在下方描述提示词即可生成</text>
-                <view class="stage-switch-btn" @click="switchToImageMode">
-                  <text class="stage-btn-t">+ 切换为参考素材生成</text>
-                </view>
-              </view>
-            </view>
-
-            <!-- 图生模式态：未选素材时的大虚线卡片（图 7 风格） -->
-            <view v-else-if="!slotImages.length" class="desk-big-slot" @click="chooseSlotMedia">
-              <view class="big-plus-box">
-                <text class="big-plus-icon">+</text>
-              </view>
-              <text class="big-slot-hint">添加图片 / 视频 / 音频作为参考</text>
-              <text class="big-slot-sub">支持相册导入与素材库直接调取</text>
-            </view>
-
-            <!-- 已选素材时：横向大卡片轮播（图 9、10 风格） -->
-            <scroll-view v-else scroll-x class="desk-slider" :show-scrollbar="false">
-              <view class="slider-track">
-                <view
-                  v-for="(img, sIdx) in slotImages"
-                  :key="'desk_slot_' + sIdx"
-                  class="desk-card"
-                >
-                  <image :src="img" class="desk-card-img" mode="aspectFill" />
-                  <view class="desk-card-tag">
-                    <text class="desk-card-tag-t">{{ currentMode === 'first_last_frame' ? (sIdx === 0 ? '首帧' : '尾帧') : '图片' + (sIdx + 1) }}</text>
-                  </view>
-                  <view class="desk-card-del" @click.stop="removeSlotImage(sIdx)">
-                    <text class="del-x">✕</text>
-                  </view>
-                </view>
-
-                <!-- 末尾追加卡片 (+) 按钮（图 10 规范） -->
-                <view v-if="slotImages.length < slotPickMax" class="desk-card-add" @click="chooseSlotMedia">
-                  <view class="add-circle">
-                    <text class="add-plus">+</text>
-                  </view>
-                  <text class="add-t">添加更多</text>
-                </view>
-              </view>
-            </scroll-view>
-          </view>
-
-          <!-- 生成中与成果展示（在当前创作工作台内直接呈现） -->
-          <view v-if="currentDeskRun" class="desk-result-tray">
-            <view v-if="currentDeskRun.status === 'running'" class="desk-run-card">
-              <view class="desk-spinner" />
-              <view class="run-text-col">
-                <text class="run-h1">{{ deskTitle }} 正在全力生成中…</text>
-                <text class="run-h2">{{ deskRunProgressText }}</text>
-              </view>
-            </view>
-            <view v-else-if="currentDeskRun.status === 'failed'" class="desk-fail-card">
-              <text class="fail-t">生成失败：{{ currentDeskRun.error || '服务器处理超时，请重试' }}</text>
-              <view class="retry-pill" @click="handleRetry">
-                <text class="retry-t">重试生成</text>
-              </view>
-            </view>
-            <view v-else-if="currentDeskRun.result && currentDeskRun.result.url" class="desk-success-card">
-              <video
-                v-if="currentDeskRun.result.kind === 'video'"
-                :src="currentDeskRun.result.url"
-                class="desk-result-video"
-                controls
-              />
-              <audio
-                v-else-if="currentDeskRun.result.kind === 'audio'"
-                :src="currentDeskRun.result.url"
-                class="desk-result-audio"
-                controls
-              />
-              <image
-                v-else
-                :src="currentDeskRun.result.url"
-                class="desk-result-image"
-                mode="widthFix"
-                @click="previewMedia(currentDeskRun.result.url)"
-              />
-              <view class="desk-actions-bar">
-                <view
-                  v-if="currentDeskRun.result.kind === 'image'"
-                  class="desk-act-btn"
-                  @click="copyToDomain('video', currentDeskRun.result.url)"
-                >
-                  <text class="act-btn-t">🎬 转生视频</text>
-                </view>
-                <view
-                  v-if="currentDeskRun.result.kind === 'image'"
-                  class="desk-act-btn"
-                  @click="copyToDomain('image', currentDeskRun.result.url)"
-                >
-                  <text class="act-btn-t">🔄 以此图生图</text>
-                </view>
-                <view class="desk-act-btn" @click="previewMedia(currentDeskRun.result.url)">
-                  <text class="act-btn-t">🔍 放大查看</text>
-                </view>
-              </view>
-            </view>
-          </view>
-          <view class="desk-scroll-pad" />
-        </scroll-view>
-
-        <!-- 底部一体化输入坞 -->
-        <view v-if="!isLibraryMode" class="desk-composer">
-          <view v-if="domain === 'video' && activePortraitAssets.length" class="portrait-pick">
-            <text class="portrait-pick-label">虚拟人像参考</text>
-            <view class="portrait-pick-row">
-              <view
-                v-for="a in activePortraitAssets"
-                :key="'vp_' + a.id"
-                :class="['portrait-chip', { on: isPortraitSelected(a.id) }]"
-                @click="togglePortraitChip(a)"
-              >
-                <text class="portrait-chip-t">{{ portraitChipLabel(a) }}</text>
-              </view>
-            </view>
-            <text v-if="portraitCaption" class="portrait-caption">{{ portraitCaption }}</text>
-          </view>
-          <view v-if="domain === 'music' && musicMode === 'text_to_song'" class="portrait-pick-row">
-            <view :class="['portrait-chip', { on: songInputKind === 'prompt' }]" @click="songInputKind = 'prompt'">
-              <text class="portrait-chip-t">提示词</text>
-            </view>
-            <view :class="['portrait-chip', { on: songInputKind === 'lyrics' }]" @click="songInputKind = 'lyrics'">
-              <text class="portrait-chip-t">歌词</text>
-            </view>
-          </view>
-          <!-- 当输入中键入 @ 时的浮动联想补全气泡 -->
-          <view v-if="showAtPicker && !isTextOnlyMode && slotImages.length" class="at-suggest-popup">
-            <view class="at-suggest-head">
-              <text class="at-suggest-title">选择要引用的素材：</text>
-              <text class="at-suggest-close" @click="showAtPicker = false">✕</text>
-            </view>
-            <view class="at-suggest-list">
-              <view
-                v-for="(img, sIdx) in slotImages"
-                :key="'at_sug_' + sIdx"
-                class="at-suggest-item"
-                @click="completeAtReference(sIdx)"
-              >
-                <image :src="img" class="at-suggest-thumb" mode="aspectFill" />
-                <text class="at-suggest-name">@{{ getSlotTagLabel(sIdx) }}</text>
-              </view>
-            </view>
-          </view>
-
-          <!-- 提示词功能条：@素材、优化、撤回、完成编辑、3/4屏全屏查看 -->
-          <view class="opt-row">
-            <view class="opt-left-btns">
-              <view
-                v-if="!isTextOnlyMode && slotImages.length"
-                class="opt-btn at-btn"
-                @click="toggleAtPicker"
-              >
-                <text class="opt-btn-t">@ 素材</text>
-              </view>
-              <view :class="['opt-btn', { busy: optimizingPrompt }]" @click="handleOptimizePrompt">
-                <text class="opt-btn-t">{{ optimizingPrompt ? '优化中…' : '优化提示词' }}</text>
-              </view>
-              <view v-if="promptBeforeOptimize" class="opt-btn undo" @click="undoOptimize">
-                <text class="opt-btn-t">撤回</text>
-              </view>
-              <view v-if="isEditingPrompt && inputPrompt" class="opt-btn done-edit" @click="isEditingPrompt = false">
-                <text class="opt-btn-t">完成编辑</text>
-              </view>
-            </view>
-            <view class="expand-trigger" @click="promptDrawerOpen = true">
-              <text class="expand-trigger-icon">⤢</text>
-              <text class="expand-trigger-t">全屏查看</text>
-            </view>
-          </view>
-
-          <!-- 提示词输入区（正文行内流式混排，彻底移除顶部提炼栏） -->
-          <view class="desk-input-box" @click="startEditPrompt">
-            <!-- 展示态：文字与行内微缩图胶囊融为一行 -->
-            <view
-              v-if="!isEditingPrompt && inputPrompt"
-              class="composer-inline-flow"
-            >
-              <template v-for="(seg, sI) in currentPromptSegments" :key="'cf_' + sI">
-                <text v-if="seg.type === 'text'" class="flow-text">{{ seg.value }}</text>
-                <view v-else class="inline-ref-chip flow-chip" @click.stop>
-                  <image
-                    v-if="seg.img"
-                    :src="seg.img"
-                    class="inline-ref-thumb clickable"
-                    mode="aspectFill"
-                    @click.stop="previewMedia(seg.img)"
-                  />
-                  <text class="inline-ref-label">@{{ seg.label }}</text>
-                  <text class="inline-ref-x" @click.stop="removeRefFromPrompt(seg.tag)">✕</text>
-                </view>
-              </template>
-              <text class="flow-edit-hint">✎</text>
-            </view>
-
-            <!-- 编辑态：原生文本域，支持光标与打字 -->
-            <textarea
-              v-else
-              v-model="inputPrompt"
-              class="desk-input"
-              :placeholder="deskPlaceholder"
-              :maxlength="4000"
-              :show-confirm-bar="false"
-              :focus="isEditingPrompt"
-              @input="onPromptInput"
-              @blur="onPromptBlur"
-            />
-          </view>
-
-          <!-- 底栏控制条：模型胶囊 + 模式胶囊 + 生成按钮 -->
-          <view class="desk-bottom-row">
-            <view class="desk-left-capsules">
-              <view class="desk-capsule" @click="openParamSheet('model')">
-                <text class="cap-name">{{ currentModelInfo.name || '默认模型' }}</text>
-                <text class="cap-arrow">▾</text>
-              </view>
-              <view class="desk-capsule" @click="openParamSheet('mode')">
-                <text class="cap-name">{{ currentModeLabel }}</text>
-                <text class="cap-arrow">⊸</text>
-              </view>
-            </view>
-
-            <view
-              :class="['desk-send-btn', { active: canSend && !sending, disabled: !canSend || sending }]"
-              @click="handleSend"
-            >
-              <text class="desk-send-t">{{ sending ? '生成中' : '生成' }}</text>
-            </view>
-          </view>
-          <view class="safe-bottom" />
-        </view>
-
-        <!-- 底部参数配置半屏抽屉（对齐图 7、8 规范：模型卡片、模式、清晰度、比例） -->
-        <view v-if="paramSheetOpen" class="param-sheet-mask" @click="paramSheetOpen = false">
-          <view class="param-sheet" @click.stop>
-            <view class="sheet-head">
-              <text class="sheet-title">生成参数与模型配置</text>
-              <text class="sheet-close-btn" @click="paramSheetOpen = false">完成</text>
-            </view>
-            <scroll-view scroll-y class="sheet-scroll">
-              <!-- 模型选择：按提供商分组呈现（图 1、图 2 规范） -->
-              <view class="sheet-sec">
-                <text class="sec-label">模型提供商与可用模型</text>
-                <view v-for="grp in domainModelsGrouped" :key="grp.name" class="provider-model-group">
-                  <view class="provider-group-header">
-                    <text class="provider-group-icon">{{ grp.icon }}</text>
-                    <text class="provider-group-name">{{ grp.name }}</text>
-                    <text class="provider-group-count">{{ grp.items.length }}款</text>
-                  </view>
-                  <view class="model-grid-2x2">
-                    <view
-                      v-for="m in grp.items"
-                      :key="m.id"
-                      :class="['model-card-item', { active: currentModelId === m.id }]"
-                      @click="selectDomainModel(m)"
-                    >
-                      <view class="m-card-head">
-                        <text class="m-card-name">{{ m.name }}</text>
-                        <text v-if="m.badge" class="m-card-badge">{{ m.badge }}</text>
-                      </view>
-                      <text class="m-card-desc">{{ m.polishHint || m.description || m.providerName || '' }}</text>
-                    </view>
-                  </view>
-                </view>
-              </view>
-
-              <view v-if="currentSchema && currentSchema.polishHint" class="sheet-sec polish-card">
-                <text class="sec-label">提示词优化配方</text>
-                <text class="polish-hint">{{ currentSchema.polishHint }}</text>
-                <text class="polish-at">引用素材请写 @图片1 @视频1 @音频1，提交时自动转成该模型记号。</text>
-              </view>
-
-              <view v-if="domainSubModes.length" class="sheet-sec">
-                <text class="sec-label">模式</text>
-                <view class="mode-seg-row">
-                  <view
-                    v-for="sub in domainSubModes"
-                    :key="sub.id"
-                    :class="['mode-seg-item', { active: currentMode === sub.id }]"
-                    @click="switchSubMode(sub.id)"
-                  >
-                    <text class="mode-seg-t">{{ sub.label }}</text>
-                  </view>
-                </view>
-              </view>
-
-              <view v-for="f in schemaCommonFields" :key="f.key" class="sheet-sec">
-                <text class="sec-label">{{ f.label }}<text v-if="isFieldLocked(f.key)" class="lock-tag">{{ lockReason(f.key) }}</text></text>
-                <view v-if="f.type === 'enum'" class="chip-row">
-                  <view
-                    v-for="opt in fieldOptions(f)"
-                    :key="String(opt)"
-                    :class="['sheet-chip', { active: genParams[f.key] === opt, locked: isFieldLocked(f.key) }]"
-                    @click="!isFieldLocked(f.key) && setGenParam(f.key, opt)"
-                  >
-                    <text class="chip-t">{{ optionLabel(f, opt) }}{{ f.key === 'duration' && opt !== -1 ? 's' : '' }}</text>
-                  </view>
-                </view>
-                <view v-else-if="f.type === 'range'" class="range-row">
-                  <view
-                    v-if="f.extraStops && f.extraStops.indexOf(-1) >= 0"
-                    :class="['sheet-chip', { active: genParams[f.key] === -1, locked: isFieldLocked(f.key) }]"
-                    @click="!isFieldLocked(f.key) && setGenParam(f.key, -1)"
-                  >
-                    <text class="chip-t">{{ (f.labels && f.labels['-1']) || '智能' }}</text>
-                  </view>
-                  <slider
-                    class="range-slider"
-                    :min="f.min"
-                    :max="f.max"
-                    :step="f.step || 1"
-                    :value="genParams[f.key] === -1 ? f.min : Number(genParams[f.key])"
-                    :disabled="isFieldLocked(f.key) || genParams[f.key] === -1"
-                    @change="onRangeChange(f, $event)"
-                  />
-                  <text class="range-val">{{ genParams[f.key] === -1 ? '智能' : genParams[f.key] }}</text>
-                </view>
-                <view v-else-if="f.type === 'bool'" class="chip-row">
-                  <view :class="['sheet-chip', { active: !!genParams[f.key], locked: isFieldLocked(f.key) }]" @click="!isFieldLocked(f.key) && setGenParam(f.key, !genParams[f.key])">
-                    <text class="chip-t">{{ genParams[f.key] ? '开' : '关' }}</text>
-                  </view>
-                </view>
-                <input v-else-if="f.type === 'number'" class="adv-input" type="number" :value="genParams[f.key]" :disabled="isFieldLocked(f.key)" @input="setGenParam(f.key, $event.detail.value)" />
-              </view>
-
-              <view v-if="schemaAdvancedFields.length" class="sheet-sec advanced-sec">
-                <view class="advanced-toggle" @click="showAdvancedParams = !showAdvancedParams">
-                  <view class="adv-left">
-                    <text class="adv-icon">⚙️</text>
-                    <text class="sec-label adv-title">高级参数</text>
-                  </view>
-                  <text class="adv-arrow">{{ showAdvancedParams ? '收起 ▴' : '展开 ▾' }}</text>
-                </view>
-                <view v-if="showAdvancedParams" class="advanced-body">
-                  <view v-for="f in schemaAdvancedFields" :key="'adv-' + f.key" class="adv-field">
-                    <text class="adv-field-label">{{ f.label }}<text v-if="isFieldLocked(f.key)" class="lock-tag">{{ lockReason(f.key) }}</text></text>
-                    <view v-if="f.type === 'enum'" class="chip-row">
-                      <view
-                        v-for="opt in fieldOptions(f)"
-                        :key="String(opt)"
-                        :class="['sheet-chip', { active: genParams[f.key] === opt, locked: isFieldLocked(f.key) }]"
-                        @click="!isFieldLocked(f.key) && setGenParam(f.key, opt)"
-                      >
-                        <text class="chip-t">{{ optionLabel(f, opt) }}</text>
-                      </view>
-                    </view>
-                    <view v-else-if="f.type === 'bool'" class="chip-row">
-                      <view :class="['sheet-chip', { active: !!genParams[f.key], locked: isFieldLocked(f.key) }]" @click="!isFieldLocked(f.key) && setGenParam(f.key, !genParams[f.key])">
-                        <text class="chip-t">{{ genParams[f.key] ? '开' : '关' }}</text>
-                      </view>
-                    </view>
-                    <input v-else-if="f.type === 'text'" class="adv-input" type="text" :value="genParams[f.key] || ''" @input="setGenParam(f.key, $event.detail.value)" />
-                    <input v-else class="adv-input" type="number" :value="genParams[f.key]" @input="setGenParam(f.key, $event.detail.value)" />
-                  </view>
-                </view>
-              </view>
-
-              <view v-if="ruleEval.warnings && ruleEval.warnings.length" class="rule-warn">
-                <text v-for="(w, wi) in ruleEval.warnings" :key="'w' + wi" class="rule-warn-t">{{ w }}</text>
-              </view>
-
-              <view class="sheet-pad" />
-            </scroll-view>
-          </view>
-        </view>
-
+      <view class="sub-chip" :class="{ active: imageSub === 'portrait' }" @click="setImageSub('portrait')">
+        <text class="sub-chip-t">人像写真</text>
+      </view>
+    </view>
+    <view v-else-if="domain === 'music'" class="sub-mode-bar">
+      <view class="sub-chip" :class="{ active: musicMode === 'text_to_bgm' }" @click="setMusicMode('text_to_bgm')">
+        <text class="sub-chip-t">纯音乐</text>
+      </view>
+      <view class="sub-chip" :class="{ active: musicMode === 'text_to_song' }" @click="setMusicMode('text_to_song')">
+        <text class="sub-chip-t">文生歌</text>
       </view>
     </view>
 
-    <!-- 左抽屉：豆包式竖向置顶结构 -->
-    <view v-if="drawerOpen" class="drawer-mask" @click="drawerOpen = false">
-      <view class="drawer" @click.stop>
-        <view class="drawer-safe" :style="{ height: statusBarHeight + 'px' }" />
+    <!-- 精准编辑交接横幅（可退出） -->
+    <view v-if="pendingEdit" class="edit-banner">
+      <image v-if="pendingEdit.sourceFid" class="edit-banner-img" :src="media(pendingEdit.sourceFid)" mode="aspectFill" />
+      <view class="edit-banner-meta">
+        <text class="edit-banner-title">精准编辑 · {{ pendingEditLabel }}</text>
+        <text class="edit-banner-sub" number-of-lines="1">{{ pendingEditDetail }}</text>
+      </view>
+      <view class="edit-banner-close" @click="clearPendingEdit" hover-class="edit-banner-close-hover"><text class="edit-banner-close-t">✕</text></view>
+    </view>
 
-        <view class="drawer-sec quick-sec">
-          <view class="drawer-sec-head">
-            <text class="drawer-sec-title">快捷操作</text>
-          </view>
-          <view v-for="g in quickGroups" :key="g.id" class="quick-group">
-            <view class="quick-cat-row" @click="toggleQuickGroup(g)">
-              <view class="quick-ico-box" :style="{ background: g.tint }">
-                <text class="quick-ico">{{ g.icon }}</text>
-              </view>
-              <view class="quick-text">
-                <text class="quick-name">{{ g.title }}</text>
-                <text class="quick-sub">{{ g.hint }}</text>
-              </view>
-              <text class="quick-arrow">{{ expandedQuickId === g.id ? '▴' : '›' }}</text>
+    <!-- 家具参考 · 3D 朝向 -->
+    <view v-if="needs3dModel" class="model3d-card">
+      <view class="model3d-head">
+        <text class="model3d-title">家具参考 · 3D 朝向</text>
+        <text class="model3d-status" :class="{ ok: !!modelSnapshotUrl }">{{ modelSnapshotUrl ? '已截图' : '待截图' }}</text>
+      </view>
+      <view v-if="!selectedProduct" class="model3d-empty">
+        <text class="model3d-empty-t">{{ pendingEdit.op === 'add' ? '新增物体需要先选一个带 3D 模型的家具单品' : '替换物体需要先选一个带 3D 模型的家具单品' }}</text>
+        <view class="model3d-pick" @click="openProductPicker" hover-class="model3d-pick-hover">
+          <text class="model3d-pick-t">选择家具单品</text>
+        </view>
+      </view>
+      <view v-else class="model3d-body">
+        <image
+          v-if="modelSnapshotUrl"
+          :src="modelSnapshotUrl"
+          class="model3d-thumb"
+          mode="aspectFit"
+          @click="openRefLightboxByUrl(modelSnapshotUrl, '3D 朝向截图')"
+        />
+        <image v-else :src="selectedProductPreview" class="model3d-thumb" mode="aspectFill" />
+        <view class="model3d-meta">
+          <text class="model3d-name" number-of-lines="1">{{ selectedProduct.name }}</text>
+          <text class="model3d-sub">左右 {{ modelYaw }}° · 上下 {{ modelPitch }}°</text>
+          <view class="model3d-actions">
+            <view class="model3d-btn" @click="openModel3d" hover-class="model3d-btn-hover">
+              <text class="model3d-btn-t">{{ modelSnapshotUrl ? '重新调整朝向' : '调整朝向并截图' }}</text>
             </view>
-            <view v-if="expandedQuickId === g.id" class="quick-list">
-              <view v-if="g.comingSoon" class="quick-coming">
-                <text class="quick-coming-t">即将开放，后续可在此选择具体方式</text>
+            <view class="model3d-btn ghost" @click="openProductPicker" hover-class="model3d-btn-hover">
+              <text class="model3d-btn-t">换单品</text>
+            </view>
+          </view>
+          <text v-if="modelSnapshotError" class="model3d-error">{{ modelSnapshotError }} · 未完成截图前不能发送</text>
+          <text v-else-if="!modelSnapshotUrl" class="model3d-warn">未完成 3D 朝向截图前不能发送</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- ========================================================================= -->
+    <!-- 创作主工作区：参考图大图工作台 (默认展开) VS 过程记录 -->
+    <!-- ========================================================================= -->
+    <view class="workspace">
+      <!-- 模式 A：默认大图工作台 (敲关键字时可以看到参考大图，沉浸创作) -->
+      <view v-if="bigImageMode" class="big-stage-container">
+        <!-- 切换收缩胶囊 -->
+        <view class="stage-toggle-bar">
+          <view class="session-crumb" @click="drawerOpen = true">
+            <text class="session-crumb-t" number-of-lines="1">{{ sessionTitle }}</text>
+            <AppIcon name="chevron-down" :size="10" color="#94A3B8" />
+          </view>
+          <view class="stage-toggle-btn" @click="bigImageMode = false" hover-class="stage-toggle-hover">
+            <AppIcon name="history" :size="12" color="#64748B" />
+            <text class="stage-toggle-t">查看历史记录 ({{ chatList.length }})</text>
+          </view>
+        </view>
+
+        <!-- 1. 无参考图且无最新视觉产物：居中优雅大卡片 (参考图 0，支持素材库与相册双板块) -->
+        <view v-if="!refs.length && !canvasVisualResult && !canvasRunning" class="big-empty-wrap">
+          <view class="big-stage-card">
+            <!-- 上半区：导入主触控区 -->
+            <view class="big-stage-hero" @click="chooseLocalImage" hover-class="big-stage-hero-hover">
+              <view class="big-stage-plus-circle">
+                <AppIcon name="plus" :size="30" color="#0F172A" />
               </view>
-              <view
-                v-for="q in g.items"
-                :key="q.id"
-                class="quick-row-v nested"
-                @click="launchQuick(q)"
-              >
-                <view class="quick-ico-box sm" :style="{ background: q.tint }">
-                  <text class="quick-ico">{{ q.icon }}</text>
+              <text class="big-stage-label">{{ domain === 'video' ? '导入参考画面' : '导入图片' }}</text>
+              <text class="big-stage-hint">轻触选图 · 即刻开展 AI 创作</text>
+            </view>
+
+            <!-- 下半区：两个核心导入板块 -->
+            <view class="big-stage-plates">
+              <!-- 板块 1：素材库内素材 -->
+              <view class="stage-plate-item" @click.stop="openPicker" hover-class="stage-plate-hover">
+                <view class="stage-plate-icon blue">
+                  <AppIcon name="folder" :size="16" color="#007AFF" />
                 </view>
-                <view class="quick-text">
-                  <text class="quick-name">{{ q.label }}</text>
-                  <text class="quick-sub">{{ q.sub }}</text>
+                <view class="stage-plate-texts">
+                  <text class="stage-plate-title">素材库素材</text>
+                  <text class="stage-plate-sub">选用云端资产</text>
                 </view>
-                <text class="quick-arrow">›</text>
+                <AppIcon name="chevron-right" :size="11" color="#94A3B8" />
+              </view>
+
+              <view class="stage-plate-divider" />
+
+              <!-- 板块 2：相册内素材 -->
+              <view class="stage-plate-item" @click.stop="chooseLocalImage" hover-class="stage-plate-hover">
+                <view class="stage-plate-icon green">
+                  <AppIcon name="album" :size="16" color="#10B981" />
+                </view>
+                <view class="stage-plate-texts">
+                  <text class="stage-plate-title">相册内素材</text>
+                  <text class="stage-plate-sub">本地照片/拍照</text>
+                </view>
+                <AppIcon name="chevron-right" :size="11" color="#94A3B8" />
               </view>
             </view>
           </view>
         </view>
 
-        <view class="drawer-divider" />
-
-        <!-- 历史对话按时间优雅分组，且清洗过滤空壳会话 -->
-        <view class="drawer-sec grow">
-          <view class="drawer-sec-head">
-            <view class="type-filter-trigger" @click="showSessionTypeMenu = !showSessionTypeMenu">
-              <text class="type-filter-t">{{ sessionFilterLabel }}</text>
-              <text class="type-filter-arrow">{{ showSessionTypeMenu ? '▴' : '▾' }}</text>
-            </view>
-            <view class="new-session" @click="newSession()">
-              <text class="new-t">+ 新建</text>
-            </view>
-          </view>
-          <view v-if="showSessionTypeMenu" class="type-menu">
-            <view
-              v-for="f in sessionFilters"
-              :key="f.id"
-              :class="['type-menu-item', { active: sessionFilter === f.id }]"
-              @click="selectSessionFilter(f.id)"
-            >
-              <text class="type-menu-t">{{ f.label }}</text>
-              <text v-if="sessionFilter === f.id" class="type-menu-check">✓</text>
-            </view>
-          </view>
-          <scroll-view scroll-y class="session-scroll">
-            <view v-if="!sessionGroups.length" class="session-empty">
-              <text class="session-empty-t">暂无历史会话</text>
-              <text class="session-empty-s">发送一条消息后会自动保存</text>
-            </view>
-            <view
-              v-for="group in sessionGroups"
-              :key="group.label"
-              class="session-group-block"
-            >
-              <text class="group-header-label">{{ group.label }}</text>
+        <!-- 2. 有参考图时：横向大卡片流 (参考图 1) -->
+        <view v-else-if="refs.length" class="big-refs-section">
+          <scroll-view scroll-x class="big-refs-scroll" :show-scrollbar="false">
+            <view class="big-refs-row">
               <view
-                v-for="s in group.list"
-                :key="s.sessionId"
-                :class="['session-row', 'session-row-' + (s.type || 'chat'), { active: s.sessionId === currentSessionId }]"
-                @click="openSession(s)"
+                v-for="(r, i) in refs"
+                :key="r.id || i"
+                class="big-ref-card"
+                @click="openRefLightbox(i)"
               >
-                <view class="session-icon-wrap" :style="{ background: typeTint(s.type) }">
-                  <text class="session-icon">{{ typeIcon(s.type) }}</text>
+                <image :src="r.url" class="big-ref-img" mode="aspectFill" />
+                <view class="big-ref-close" @click.stop="removeRef(i)" hover-class="big-ref-close-hover">
+                  <AppIcon name="close" :size="11" color="#FFFFFF" />
                 </view>
-                <view class="session-main">
-                  <text class="session-title">{{ s.title || defaultTitle(s) }}</text>
-                  <text class="session-meta">{{ typeLabel(s.type) }} · {{ formatTime(s.updatedAt) }}</text>
+                <view class="big-ref-tag">
+                  <text class="big-ref-tag-t">图{{ i + 1 }}</text>
                 </view>
-                <text class="session-del" @click.stop="confirmDeleteSession(s)">✕</text>
+              </view>
+              <!-- 尾随 + 小卡片继续追加 -->
+              <view v-if="canAddRef" class="big-ref-add-card" @click="openRefAddOptions" hover-class="big-ref-add-hover">
+                <AppIcon name="plus" :size="22" color="#64748B" />
+                <text class="big-ref-add-t">添加</text>
               </view>
             </view>
           </scroll-view>
         </view>
 
-        <!-- 抽屉底部个人设置 -->
-        <view class="drawer-footer" @click="openSettings">
-          <view class="user-avatar">
-            <text class="user-initial">{{ userInitial }}</text>
+        <!-- 3. 最新生成产物或正在生成态展示 -->
+        <view v-if="canvasRunning || canvasVisualResult || canvasFailed" class="big-result-card">
+          <!-- 生成中状态：原地脉冲进度条，非阻塞 -->
+          <view v-if="canvasRunning" class="result-running">
+            <view class="result-pulse-ring" />
+            <text class="result-running-t">{{ canvasRunning.engineTitle || 'AI 正在全力构思中…' }}</text>
+            <view class="result-prog-bar">
+              <view class="result-prog-fill" :style="{ width: (canvasRunning.progress || 24) + '%' }" />
+            </view>
+            <text class="result-running-sub" number-of-lines="2">{{ canvasRunning.prompt }}</text>
           </view>
-          <view class="user-meta-col">
-            <text class="user-name">{{ userName || '未登录' }}</text>
-            <text class="user-sub">个人设置</text>
+
+          <!-- 失败状态 -->
+          <view v-else-if="canvasFailed" class="result-failed">
+            <text class="result-failed-t">{{ canvasFailed.error || '生成失败' }}</text>
+            <view class="canvas-mini-btn" @click="retryMessage(canvasFailed)">
+              <text class="canvas-mini-btn-t">重新尝试</text>
+            </view>
           </view>
-          <text class="user-arrow">›</text>
+
+          <!-- 成功结果展示 -->
+          <block v-else-if="canvasVisualResult">
+            <view class="result-media-wrap">
+              <image
+                v-if="canvasVisualResult.kind === 'image' || canvasVisualResult.kind === 'portrait'"
+                class="result-media-img"
+                :src="canvasVisualResult.url"
+                mode="aspectFit"
+                :show-menu-by-longpress="true"
+                @click="openLightbox(canvasVisualResult.url, 'image', canvasVisualResult.label || '生成结果')"
+              />
+              <video
+                v-else-if="canvasVisualResult.kind === 'video'"
+                class="result-media-video"
+                :src="canvasVisualResult.url"
+                controls
+                object-fit="contain"
+              />
+              <audio
+                v-else-if="canvasVisualResult.kind === 'audio'"
+                class="canvas-audio"
+                :src="canvasVisualResult.url"
+                controls
+                :name="canvasVisualResult.label || '音频'"
+              />
+            </view>
+
+            <!-- 产物快捷动作条 -->
+            <view class="result-actions">
+              <view class="result-act" @click="copyMessage(canvasMsg)" hover-class="result-act-hover">
+                <AppIcon name="copy" :size="13" color="#0F172A" />
+                <text class="result-act-t">复制词</text>
+              </view>
+              <view v-if="isImageResult(canvasMsg)" class="result-act" @click="mountResultAsRef(canvasMsg, 'image_to_image')" hover-class="result-act-hover">
+                <AppIcon name="image" :size="13" color="#0F172A" />
+                <text class="result-act-t">以此图生图</text>
+              </view>
+              <view v-if="isImageResult(canvasMsg)" class="result-act" @click="mountResultAsRef(canvasMsg, 'image_to_video')" hover-class="result-act-hover">
+                <AppIcon name="video" :size="13" color="#0F172A" />
+                <text class="result-act-t">转生视频</text>
+              </view>
+              <view v-if="canvasVisualResult.url" class="result-act accent" @click="saveResultToAlbum(canvasMsg)" hover-class="result-act-hover">
+                <AppIcon name="download" :size="13" color="#007AFF" />
+                <text class="result-act-t">存相册</text>
+              </view>
+            </view>
+          </block>
         </view>
       </view>
-    </view>
 
-    <!-- 快捷操作直达选图高视野弹层（88vh 多维筛选与素材库直通） -->
-    <view v-if="quickPickerOpen" class="quick-picker-mask" @click="quickPickerOpen = false">
-      <view class="quick-picker-sheet" @click.stop>
-        <view class="picker-head">
-          <view class="picker-head-left">
-            <text class="picker-title">选择底图进行【{{ currentQuickItem ? currentQuickItem.label : '精修' }}】</text>
-            <text class="picker-subtitle">从素材库即选即用，或通过本地相册直接拍摄导入</text>
+      <!-- 模式 B：过程记录模式 (收缩大图，展示完整对话流) -->
+      <view v-else class="compact-history-container">
+        <!-- 顶部收缩参考图指示条：点击即可随时展开回大图 -->
+        <view class="compact-top-bar" @click="bigImageMode = true" hover-class="compact-top-hover">
+          <view class="compact-top-left">
+            <AppIcon name="expand" :size="14" color="#007AFF" />
+            <text class="compact-top-t">点击展开参考大图</text>
           </view>
-          <text class="picker-close" @click="quickPickerOpen = false">✕</text>
-        </view>
-
-        <!-- 顶部快捷导入条（相册/拍照） -->
-        <view class="picker-actions-row">
-          <view class="picker-btn album" @click="pickImageFromLocal('album')">
-            <text class="p-btn-icon">🖼️</text>
-            <text class="p-btn-text">手机相册选图</text>
-          </view>
-          <view class="picker-btn camera" @click="pickImageFromLocal('camera')">
-            <text class="p-btn-icon">📷</text>
-            <text class="p-btn-text">拍照拍摄导入</text>
+          <view v-if="refs.length" class="compact-refs-strip">
+            <image v-for="(r, i) in refs" :key="r.id || i" :src="r.url" class="compact-thumb" mode="aspectFill" />
           </view>
         </view>
 
-        <!-- 素材库搜索与多维分类胶囊栏 -->
-        <view class="picker-search-bar">
-          <view class="p-search-box">
-            <text class="p-search-icon">⌕</text>
-            <input
-              class="p-search-input"
-              v-model="pickerSearchKeyword"
-              placeholder="搜索空间、风格、材质或文件名…"
-              confirm-type="search"
-              @confirm="() => loadRecentLibraryImages(pickerActiveCategory, pickerSearchKeyword)"
-            />
-            <text v-if="pickerSearchKeyword" class="p-search-clear" @click="clearPickerSearch">✕</text>
+        <!-- 历史滚动列表 -->
+        <scroll-view
+          scroll-y
+          class="history-scroll"
+          :scroll-into-view="scrollIntoId"
+          :scroll-with-animation="true"
+          :enhanced="true"
+          :bounces="false"
+        >
+          <view v-if="!chatList.length" class="history-empty">
+            <AppIcon name="chat" :size="32" color="#CBD5E1" />
+            <text class="history-empty-t">还没有创作记录，在下方输入你的画面构想</text>
           </view>
-        </view>
-
-        <!-- 分类快速切换胶囊条 -->
-        <view class="picker-category-row">
           <view
-            v-for="cat in pickerCategories"
-            :key="cat.id"
-            :class="['p-cat-chip', { active: pickerActiveCategory === cat.id }]"
-            @click="switchPickerCategory(cat.id)"
+            v-for="(msg, idx) in chatList"
+            :key="msg.id || idx"
+            :id="'msg-' + (msg.id || idx)"
+            class="h-row"
+            :class="msg.role === 'user' ? 'h-user' : 'h-ai'"
           >
-            <text class="p-cat-t">{{ cat.label }}</text>
-          </view>
-          <view class="picker-reload-pill" @click="() => loadRecentLibraryImages(pickerActiveCategory, pickerSearchKeyword)">
-            <text class="p-reload-icon" :class="{ spinning: loadingRecentImages }">↻</text>
-          </view>
-        </view>
-
-        <!-- 素材大图网格与瀑布流 -->
-        <scroll-view scroll-y class="picker-images-scroll" :lower-threshold="150" @scrolltolower="onPickerScrollToLower">
-          <view v-if="loadingRecentImages && !recentLibraryImages.length" class="picker-loading-box">
-            <view class="loading-spinner" />
-            <text class="p-empty-t">正在读取素材库图片资产…</text>
-          </view>
-          <view v-else-if="!recentLibraryImages.length" class="picker-empty">
-            <text class="p-empty-ico">📂</text>
-            <text class="p-empty-t">暂无匹配的图片素材</text>
-            <text class="p-empty-sub">可尝试切换分类、清空关键词，或从上方相册直接导入</text>
-          </view>
-          <view v-else class="picker-grid">
-            <view
-              v-for="item in recentLibraryImages"
-              :key="item.fid"
-              class="picker-card"
-              @click="confirmQuickWithAsset(item)"
-            >
-              <view class="picker-img-wrapper">
-                <image :src="item.imgUrl" class="picker-thumb" mode="aspectFill" :lazy-load="true" />
-                <text v-if="item.category" class="picker-cat-tag">{{ item.category }}</text>
+            <block v-if="msg.role === 'user'">
+              <view class="h-user-bubble">
+                <text class="h-user-t">{{ msg.prompt }}</text>
+                <view v-if="msg.images && msg.images.length" class="h-user-refs">
+                  <text class="h-user-refs-t">参考图 {{ msg.images.length }} 张</text>
+                </view>
               </view>
-              <view class="picker-card-info">
-                <text class="picker-card-name">{{ item.fileName }}</text>
-                <text v-if="item.tagsText" class="picker-card-tag">{{ item.tagsText }}</text>
+            </block>
+            <block v-else>
+              <view class="h-ai-row" @click="focusHistoryMessage(msg)">
+                <view class="h-ai-thumb" :class="'kind-' + ((msg.result && msg.result.kind) || 'text')">
+                  <image v-if="itemThumb(msg)" :src="itemThumb(msg)" class="h-ai-thumb-img" mode="aspectFill" />
+                  <AppIcon v-else :name="itemKindIconName(msg)" :size="16" color="#007AFF" />
+                </view>
+                <view class="h-ai-main">
+                  <view class="h-ai-meta">
+                    <text class="h-ai-model" number-of-lines="1">{{ msg.modelName || '创作助手' }}</text>
+                    <text class="h-ai-status" :class="'st-' + (msg.status || 'done')">{{ historyStatusText(msg) }}</text>
+                  </view>
+                  <text class="h-ai-text" number-of-lines="2">{{ historySummary(msg) }}</text>
+                </view>
               </view>
-            </view>
+            </block>
           </view>
-          <view class="picker-scroll-pad" />
+          <view class="msg-tail" />
         </scroll-view>
       </view>
     </view>
 
+    <!-- ========================================================================= -->
+    <!-- 底部输入坞 (严格按照规格重排：首位模型 -> 画幅/清晰度 -> 高级配置 -> 发送) -->
+    <!-- ========================================================================= -->
+    <view class="composer-card">
+      <!-- 上半部分：多行文本输入框 -->
+      <view class="composer-input-row">
+        <textarea
+          class="composer-textarea"
+          v-model="inputPrompt"
+          :auto-height="true"
+          :maxlength="-1"
+          :show-confirm-bar="false"
+          :adjust-position="true"
+          :placeholder="placeholderText"
+          placeholder-class="composer-ph"
+          @focus="isEditingPrompt = true"
+          @blur="onPromptBlur"
+          @input="onPromptInput"
+          confirm-type="send"
+          @confirm="sendMessage"
+        />
+      </view>
 
-    <!-- 3/4 屏提示词查看与编辑抽屉面板 -->
-    <view v-if="promptDrawerOpen" class="prompt-drawer-mask" @click="promptDrawerOpen = false">
-      <view class="prompt-drawer-sheet" @click.stop>
-        <view class="prompt-drawer-head">
-          <view class="prompt-drawer-title-col">
-            <text class="prompt-drawer-title">完整提示词编辑与全屏查看</text>
-            <text class="prompt-drawer-count">{{ (inputPrompt || '').length }} 字符</text>
-          </view>
-          <view class="prompt-drawer-actions">
+      <!-- 规则警告 / 限制提示 -->
+      <view v-if="ruleWarnings.length || refError" class="composer-warnings">
+        <text v-for="(w, wi) in ruleWarnings" :key="'warn-' + wi" class="composer-warn-t">{{ w }}</text>
+        <text v-if="refError" class="composer-warn-t">{{ refError }}</text>
+      </view>
+
+      <!-- 下半部分：常用参数排布与操作按钮 -->
+      <view class="composer-controls-row">
+        <scroll-view scroll-x class="composer-pills-scroll" :show-scrollbar="false">
+          <view class="composer-pills-left">
+            <!-- 1. 模型选择胶囊 (必放首位) -->
+            <view class="capsule-pill model-pill" @click="sheetMode = 'model'" hover-class="capsule-hover">
+              <AppIcon name="model" :size="12" color="#475569" />
+              <text class="capsule-t strong">{{ currentModelInfo.name || '模型选择' }}</text>
+              <AppIcon name="chevron-down" :size="9" color="#64748B" />
+            </view>
+
+            <!-- 2. 常用核心参数 (生图优先展示画幅与清晰度；生视频优先展示画幅与时长) -->
             <view
-              v-if="!isTextOnlyMode && slotImages.length"
-              class="drawer-act-pill at-btn"
-              @click="toggleAtPicker"
+              v-for="f in primaryParams"
+              :key="'param-' + f.key"
+              class="capsule-pill"
+              :class="{ locked: isFieldLocked(f.key) }"
+              @click="onParamPill(f)"
+              hover-class="capsule-hover"
             >
-              <text class="drawer-act-t">@ 素材</text>
+              <AppIcon :name="paramFieldIcon(f)" :size="11" color="#64748B" />
+              <text class="capsule-t">
+                <text class="capsule-prefix">{{ paramPrefix(f) }}</text>
+                <text class="capsule-sep">·</text>
+                <text class="capsule-val">{{ paramDisplay(f) }}</text>
+              </text>
+              <AppIcon name="chevron-down" :size="9" color="#64748B" />
             </view>
-            <view class="drawer-act-pill" @click="copyInputPrompt">
-              <text class="drawer-act-t">复制内容</text>
+
+            <!-- 3. 高级配置胶囊 (图层拆分/水印/步数/种子统统收纳进此处) -->
+            <view class="capsule-pill more-pill" @click="openMoreParams" hover-class="capsule-hover">
+              <AppIcon name="settings" :size="12" color="#64748B" />
+              <text class="capsule-t">高级配置</text>
+              <text v-if="advancedCustomCount" class="capsule-badge">{{ advancedCustomCount }}</text>
             </view>
-            <view class="drawer-act-pill done" @click="promptDrawerOpen = false">
-              <text class="drawer-act-t done">完成</text>
-            </view>
+          </view>
+        </scroll-view>
+
+        <!-- 右侧：灵感优化 & 纯圆发送按钮 -->
+        <view class="composer-actions-right">
+          <!-- 智能优化 ✨ -->
+          <view
+            :class="['composer-opt-btn', { disabled: optimizingPrompt || !inputPrompt.trim() }]"
+            @click="optimizePromptAction"
+            hover-class="opt-hover"
+            title="AI 润色提示词"
+          >
+            <AppIcon name="sparkles" :size="16" :color="inputPrompt.trim() ? '#007AFF' : '#94A3B8'" />
+          </view>
+
+          <!-- 发送按钮 ↑ -->
+          <view
+            :class="['composer-send-btn', { active: canSend && !sending }]"
+            @click="sendMessage"
+            hover-class="send-hover"
+            title="发送"
+          >
+            <AppIcon name="arrow-up" :size="16" color="#FFFFFF" :strokeWidth="2.6" />
+          </view>
+        </view>
+      </view>
+
+      <!-- 底部微字提示 -->
+      <view class="composer-foot-note">
+        <text class="foot-note-t">内容由 AI 生成，请核实</text>
+      </view>
+    </view>
+
+    <!-- @ 联想浮层 -->
+    <view v-if="showAtPicker && refs.length" class="at-popup">
+      <view class="at-list">
+        <view v-for="(r, i) in refs" :key="r.id" class="at-item" @click="insertAtRef(i)">
+          <image :src="r.url" class="at-thumb" mode="aspectFill" />
+          <view class="at-meta"><text class="at-name">@图{{ i + 1 }}</text><text class="at-sub">{{ r.label }}</text></view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 参数配置底 Sheet -->
+    <view v-if="sheetMode" class="sheet-mask" @click="sheetMode = ''">
+      <view class="sheet" @click.stop>
+        <view class="sheet-head">
+          <text class="sheet-title">{{ sheetTitle }}</text>
+          <view class="sheet-close" @click="sheetMode = ''">
+            <AppIcon name="close" :size="16" color="#64748B" />
           </view>
         </view>
 
-        <!-- 抽屉内的 @ 浮动选择面板 -->
-        <view v-if="showAtPicker && !isTextOnlyMode && slotImages.length" class="at-suggest-popup in-drawer">
-          <view class="at-suggest-head">
-            <text class="at-suggest-title">选择要插入的素材：</text>
-            <text class="at-suggest-close" @click="showAtPicker = false">✕</text>
-          </view>
-          <view class="at-suggest-list">
+        <scroll-view scroll-y class="sheet-body">
+          <!-- 模型选择列表 -->
+          <template v-if="sheetMode === 'model'">
             <view
-              v-for="(img, sIdx) in slotImages"
-              :key="'drawer_at_' + sIdx"
-              class="at-suggest-item"
-              @click="completeAtReference(sIdx)"
+              v-for="m in domainModels"
+              :key="m.id"
+              :class="['model-item', { active: m.id === currentModelId }]"
+              @click="selectModel(m)"
+              hover-class="model-hover"
             >
-              <image :src="img" class="at-suggest-thumb" mode="aspectFill" />
-              <text class="at-suggest-name">@{{ getSlotTagLabel(sIdx) }}</text>
+              <view class="model-item-main">
+                <text class="model-name">{{ m.name }}</text>
+                <text class="model-desc" number-of-lines="2">{{ m.desc || m.providerName || '' }}</text>
+              </view>
+              <AppIcon v-if="m.id === currentModelId" name="check" :size="16" color="#007AFF" />
             </view>
-          </view>
-        </view>
+            <view style="height: 16px" />
+          </template>
 
-        <!-- 抽屉内的行内图文混排呈现卡片 -->
-        <view v-if="hasPromptReferences" class="drawer-flow-card">
-          <view class="drawer-flow-header">
-            <text class="drawer-flow-title">行内图文混排呈现：</text>
-            <text class="drawer-flow-tip">（点击缩略图全屏放大，点击✕删除）</text>
-          </view>
-          <view class="composer-inline-flow drawer-flow-body">
-            <template v-for="(seg, sI) in currentPromptSegments" :key="'df_' + sI">
-              <text v-if="seg.type === 'text'" class="flow-text">{{ seg.value }}</text>
-              <view v-else class="inline-ref-chip flow-chip" @click.stop>
-                <image
-                  v-if="seg.img"
-                  :src="seg.img"
-                  class="inline-ref-thumb clickable"
-                  mode="aspectFill"
-                  @click.stop="previewMedia(seg.img)"
+          <!-- 单个参数选项调节 -->
+          <template v-else-if="sheetMode === 'param'">
+            <view v-if="paramSheetField" class="param-detail">
+              <view class="param-detail-head">
+                <text class="param-detail-title">{{ paramSheetField.label || paramSheetField.key }}</text>
+                <text v-if="isFieldLocked(paramSheetField.key)" class="param-detail-lock">已锁定 · {{ lockReasonOf(paramSheetField.key) }}</text>
+                <text v-else-if="paramRangeHint(paramSheetField)" class="param-detail-range">{{ paramRangeHint(paramSheetField) }}</text>
+              </view>
+
+              <view v-if="paramSheetField.type === 'enum'" class="option-grid">
+                <view
+                  v-for="opt in paramOptionsOf(paramSheetField)"
+                  :key="String(opt)"
+                  :class="['option', { active: sameValue(paramValueOf(paramSheetField), opt), disabled: isFieldLocked(paramSheetField.key) }]"
+                  @click="setSchemaParam(paramSheetField.key, opt)"
+                >
+                  <text class="option-t">{{ optionText(paramSheetField, opt) }}</text>
+                </view>
+              </view>
+
+              <view v-else-if="paramSheetField.type === 'bool'" class="param-detail-switch">
+                <text class="param-detail-switch-t">{{ paramValueOf(paramSheetField) ? '已开启' : '已关闭' }}</text>
+                <switch
+                  :checked="!!paramValueOf(paramSheetField)"
+                  :disabled="isFieldLocked(paramSheetField.key)"
+                  color="#007AFF"
+                  @change="setSchemaParam(paramSheetField.key, $event.detail.value)"
                 />
-                <text class="inline-ref-label">@{{ seg.label }}</text>
-                <text class="inline-ref-x" @click.stop="removeRefFromPrompt(seg.tag)">✕</text>
               </view>
-            </template>
-          </view>
-        </view>
 
-        <scroll-view scroll-y class="prompt-drawer-scroll">
-          <textarea
-            v-model="inputPrompt"
-            class="prompt-drawer-textarea"
-            placeholder="在宽阔视野中编辑提示词，支持输入 @ 关联素材…"
-            :maxlength="4000"
-            :show-confirm-bar="false"
-            @input="onPromptInput"
-          />
+              <view v-else-if="['number', 'range', 'duration'].includes(paramSheetField.type)" class="param-detail-range-wrap">
+                <view class="param-detail-value">
+                  <text class="param-detail-value-t">{{ paramValueOf(paramSheetField) }}{{ paramUnit(paramSheetField) }}</text>
+                  <view
+                    v-if="hasSmartStop(paramSheetField)"
+                    class="param-smart-chip"
+                    :class="{ active: Number(paramValueOf(paramSheetField)) === -1 }"
+                    @click="setSchemaParam(paramSheetField.key, -1)"
+                  >
+                    <text class="param-smart-t">智能</text>
+                  </view>
+                </view>
+                <slider
+                  v-if="Number(paramValueOf(paramSheetField)) !== -1 || !hasSmartStop(paramSheetField)"
+                  class="param-slider"
+                  :min="Number(paramSheetField.min != null ? paramSheetField.min : 0)"
+                  :max="Number(paramSheetField.max != null ? paramSheetField.max : 100)"
+                  :step="numericStepOf(paramSheetField)"
+                  :value="Number(paramValueOf(paramSheetField)) || Number(paramSheetField.min || 0)"
+                  :disabled="isFieldLocked(paramSheetField.key)"
+                  activeColor="#007AFF"
+                  backgroundColor="#E2E8F0"
+                  block-size="20"
+                  @change="setSchemaParam(paramSheetField.key, $event.detail.value)"
+                />
+                <view class="param-stepper-row">
+                  <view class="param-step-btn" @click="stepParam(paramSheetField, -1)"><text class="param-step-t">－</text></view>
+                  <text class="param-step-hint">{{ paramRangeHint(paramSheetField) }}</text>
+                  <view class="param-step-btn" @click="stepParam(paramSheetField, 1)"><text class="param-step-t">＋</text></view>
+                </view>
+              </view>
+
+              <view v-else class="param-detail-switch">
+                <input
+                  class="param-text-input"
+                  :value="paramValueOf(paramSheetField) || ''"
+                  :disabled="isFieldLocked(paramSheetField.key)"
+                  placeholder="按模型契约填写"
+                  placeholder-class="input-ph"
+                  @blur="setSchemaParam(paramSheetField.key, $event.detail.value)"
+                />
+              </view>
+            </view>
+            <view style="height: 16px" />
+          </template>
+
+          <!-- 高级配置总览 (次要参数收纳 + 最底部预览请求) -->
+          <template v-else-if="sheetMode === 'more'">
+            <view v-if="schemaParamSections.length">
+              <view v-for="sec in schemaParamSections" :key="'sec-' + sec.key" class="param-section">
+                <text class="param-section-title">{{ sec.title }}</text>
+                <view v-for="f in sec.fields" :key="'pf-' + f.key" class="param-field">
+                  <view class="param-field-label">
+                    <text class="param-field-t">{{ f.label || f.key }}</text>
+                    <text v-if="isFieldLocked(f.key)" class="param-field-lock">🔒 {{ lockReasonOf(f.key) }}</text>
+                    <text v-else-if="paramRangeHint(f)" class="param-field-hint">{{ paramRangeHint(f) }}</text>
+                  </view>
+                  <switch
+                    v-if="f.type === 'bool'"
+                    :checked="!!paramValueOf(f)"
+                    :disabled="isFieldLocked(f.key)"
+                    color="#007AFF"
+                    @change="setSchemaParam(f.key, $event.detail.value)"
+                  />
+                  <view v-else-if="f.type === 'enum'" class="param-field-enum">
+                    <scroll-view scroll-x class="param-enum-scroll" :show-scrollbar="false">
+                      <view class="param-enum-row">
+                        <view
+                          v-for="opt in paramOptionsOf(f)"
+                          :key="String(opt)"
+                          class="param-enum-chip"
+                          :class="{ active: sameValue(paramValueOf(f), opt), disabled: isFieldLocked(f.key) }"
+                          @click="setSchemaParam(f.key, opt)"
+                        >
+                          <text class="param-enum-t">{{ optionText(f, opt) }}</text>
+                        </view>
+                      </view>
+                    </scroll-view>
+                  </view>
+                  <view v-else-if="['number', 'range', 'duration'].includes(f.type)" class="param-field-num">
+                    <view class="param-step-btn small" @click="stepParam(f, -1)"><text class="param-step-t">－</text></view>
+                    <input
+                      class="param-num-input"
+                      type="number"
+                      :value="String(paramValueOf(f))"
+                      :disabled="isFieldLocked(f.key)"
+                      @blur="setSchemaParam(f.key, $event.detail.value)"
+                    />
+                    <text class="param-num-unit">{{ paramUnit(f) }}</text>
+                    <view class="param-step-btn small" @click="stepParam(f, 1)"><text class="param-step-t">＋</text></view>
+                  </view>
+                  <input
+                    v-else
+                    class="param-text-input"
+                    :value="paramValueOf(f) || ''"
+                    :disabled="isFieldLocked(f.key)"
+                    placeholder="按模型契约填写"
+                    placeholder-class="input-ph"
+                    @blur="setSchemaParam(f.key, $event.detail.value)"
+                  />
+                </view>
+              </view>
+
+              <!-- 隐藏到更深处的“预览请求”入口 (极客调试) -->
+              <view class="sheet-preview-wrap">
+                <view class="sheet-preview-btn" @click="openRequestPreview" hover-class="sheet-preview-hover">
+                  <AppIcon name="eye" :size="14" color="#64748B" />
+                  <text class="sheet-preview-t">调试 · 查看并核验 API 请求报文</text>
+                </view>
+              </view>
+            </view>
+            <view v-else class="more-note"><text class="more-t">当前模型没有可调参数</text></view>
+            <view style="height: 20px" />
+          </template>
         </scroll-view>
       </view>
     </view>
 
-    <ai-task-pill />
+    <!-- 素材选择器（从云端素材库/本地相册选取） -->
+    <view v-if="pickerVisible" class="sheet-mask" @click="pickerVisible = false">
+      <view class="sheet picker" @click.stop>
+        <view class="sheet-head">
+          <text class="sheet-title">选参考图</text>
+          <view class="sheet-close" @click="pickerVisible = false">
+            <AppIcon name="close" :size="16" color="#64748B" />
+          </view>
+        </view>
+        <view class="picker-search">
+          <input class="picker-input" v-model="pickerKeyword" placeholder-class="input-ph" placeholder="搜索素材（文件名 / 标签）" confirm-type="search" @confirm="reloadPicker" />
+          <view class="picker-btn" @click="reloadPicker"><text class="picker-btn-t">搜索</text></view>
+        </view>
+        <scroll-view scroll-y class="picker-grid" :enhanced="true">
+          <view class="picker-grid-inner">
+            <view v-for="item in pickerItems" :key="item.fid" class="picker-card" @click="mountLibraryRef(item)" hover-class="picker-card-hover">
+              <image :src="grid(item.fid)" class="picker-img" mode="aspectFill" lazy-load />
+              <text class="picker-name" number-of-lines="1">{{ item.fileName || item.fid }}</text>
+            </view>
+            <view v-if="pickerLoading" class="picker-status"><text class="picker-status-t">加载中…</text></view>
+            <view v-else-if="!pickerItems.length" class="picker-status"><text class="picker-status-t">没有找到素材</text></view>
+            <view v-else-if="pickerHasMore" class="picker-more" @click="loadMorePicker"><text class="picker-more-t">加载更多</text></view>
+          </view>
+        </scroll-view>
+        <view class="picker-foot">
+          <view class="picker-action" @click="chooseLocalImage"><text class="picker-action-t">从手机相册上传</text></view>
+          <view class="picker-action ghost" @click="pickerVisible = false"><text class="picker-action-t">完成</text></view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 家具单品选择（3D 朝向参考） -->
+    <view v-if="productPickerVisible" class="sheet-mask" @click="productPickerVisible = false">
+      <view class="sheet picker" @click.stop>
+        <view class="sheet-head">
+          <text class="sheet-title">选择带 3D 的家具单品</text>
+          <view class="sheet-close" @click="productPickerVisible = false">
+            <AppIcon name="close" :size="16" color="#64748B" />
+          </view>
+        </view>
+        <scroll-view scroll-y class="product-list" :enhanced="true">
+          <view
+            v-for="p in products3d"
+            :key="p.id"
+            class="product-row"
+            :class="{ active: selectedProduct && selectedProduct.id === p.id }"
+            @click="selectProduct(p)"
+            hover-class="product-row-hover"
+          >
+            <image :src="productPreview(p)" class="product-img" mode="aspectFill" />
+            <view class="product-meta">
+              <text class="product-name" number-of-lines="1">{{ p.name }}</text>
+              <text v-if="p.tags && p.tags.length" class="product-tags" number-of-lines="1">{{ p.tags.join(' · ') }}</text>
+              <text class="product-3d">含 GLB · 可调朝向</text>
+            </view>
+            <AppIcon v-if="selectedProduct && selectedProduct.id === p.id" name="check" :size="16" color="#007AFF" />
+          </view>
+          <view v-if="products3dLoading" class="picker-status"><text class="picker-status-t">加载单品中…</text></view>
+          <view v-else-if="!products3d.length" class="picker-status"><text class="picker-status-t">没有可用的 3D 单品</text></view>
+        </scroll-view>
+        <view class="picker-foot">
+          <view class="picker-action ghost" @click="productPickerVisible = false"><text class="picker-action-t">取消</text></view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 历史会话抽屉 (与 Web 端 100% 互通) -->
+    <SessionDrawer
+      :show="drawerOpen"
+      :sessions="sessions"
+      :current-id="currentSessionId"
+      :loading="sessionsLoading"
+      :default-filter="domain"
+      @close="drawerOpen = false"
+      @select="onSelectSession"
+      @new="newSession"
+      @delete="onDeleteSession"
+    />
+
+    <!-- 右上角创作库抽屉 (复用过去作品与创作配方) -->
+    <CreationLibraryDrawer
+      :show="libraryOpen"
+      :history-items="historyCreations"
+      @close="libraryOpen = false"
+      @reuse-prompt="onReusePrompt"
+      @use-as-ref="onUseAsRefFromLibrary"
+      @preview="onPreviewLibraryItem"
+    />
+
+    <!-- 请求预览抽屉 -->
+    <RequestPreviewSheet
+      :show="previewVisible"
+      :kind="previewKind"
+      :payload="previewPayload"
+      :extra-notes="previewExtraNotes"
+      @close="previewVisible = false"
+      @confirm="confirmAndSend"
+    />
+
+    <!-- 参考图全屏 -->
+    <RefLightbox
+      :show="refLightbox.show"
+      :url="refLightbox.url"
+      :kind="refLightbox.kind"
+      :label="refLightbox.label"
+      @close="refLightbox.show = false"
+      @download="saveLightboxToAlbum"
+    />
+
+    <!-- AI 任务浮窗 -->
+    <AiTaskPill />
   </view>
 </template>
 
 <script>
+import RefLightbox from '../../components/RefLightbox.vue'
+import RequestPreviewSheet from '../../components/RequestPreviewSheet.vue'
+import SessionDrawer from '../../components/SessionDrawer.vue'
+import AiTaskPill from '../../components/AiTaskPill.vue'
+import CreationLibraryDrawer from '../../components/CreationLibraryDrawer.vue'
+import AppIcon from '../../components/AppIcon.vue'
 import {
   fetchLabCapabilities,
-  submitLabRun,
-  pollLabRun,
+  fetchAssets,
   fetchChatSessions,
   createChatSession,
   deleteChatSession,
@@ -999,38 +737,28 @@ import {
   clearChatMessages,
   uploadRefImages,
   optimizePrompt,
-  sessionValid,
-  fetchAssets,
+  aiEdit,
+  fetchProductPresets,
   mediaUrl,
   gridUrl,
-  fetchPortraitLibrary,
-  acceptPortraitConsent,
-  createPortraitGroup,
-  deletePortraitAsset,
-  deletePortraitGroup,
-  uploadPortraitAsset,
+  downloadAndSaveToAlbum,
+  saveBase64ImageToAlbum,
+  postGenRoute,
 } from '../../service/ViewerApi'
 import { store } from '../../service/SyncStateStore'
+import { aiTaskManager } from '../../service/AiTaskManager'
 import { consumeTabParams } from '../../common/nav'
-import HomeLibrary from '../../components/HomeLibrary.vue'
-import AiTaskPill from '../../components/AiTaskPill.vue'
-import MODEL_CATALOG, { mergeStudioCatalog } from '../../service/ModelCatalog'
-import { convertAtRefs, refStyleFor } from '../../service/PromptStudio'
 import { schemaFor, optionLabel, slotLimit } from '../../service/ModelSchemas'
-import { evaluateClientModelRules } from '../../utils/model-protocol'
+import {
+  evaluateClientModelRules,
+  schemaDefaults,
+  fieldByKey,
+  clampParamsToSchema,
+  resolveSchemaMode,
+} from '../../service/ModelProtocol'
+import MODEL_CATALOG, { mergeStudioCatalog } from '../../service/ModelCatalog'
 
-function goLogin() {
-  uni.reLaunch({
-    url: '/pages/login/login?tip=' + encodeURIComponent('请先登录服务器'),
-  })
-}
-
-function mediaKindOf(mode) {
-  const m = String(mode || '')
-  if (m === 'text_to_song' || m === 'text_to_bgm' || m.indexOf('music') >= 0) return 'audio'
-  if (m.indexOf('video') >= 0 || m === 'first_last_frame') return 'video'
-  return 'image'
-}
+const RATIO_FALLBACK = ['1:1', '3:4', '4:3', '9:16', '16:9']
 
 function absMediaUrl(file, result) {
   const rel = (file && file.previewUrl) || (result && result.previewUrl) || ''
@@ -1039,938 +767,592 @@ function absMediaUrl(file, result) {
   return store.getServerUrl() + rel
 }
 
+function isImageKindOf(kind) {
+  const k = String(kind || '')
+  return k === 'image' || k === 'portrait'
+}
+
+let seedId = 0
+const newId = (prefix) => `${prefix}_${Date.now()}_${++seedId}`
+
 export default {
-  components: { HomeLibrary, AiTaskPill },
+  name: 'Home',
+  components: { RefLightbox, RequestPreviewSheet, SessionDrawer, CreationLibraryDrawer, AiTaskPill, AppIcon },
   data() {
     return {
       statusBarHeight: 20,
-      mainView: 'library',
-      drawerOpen: false,
-
-      // 工作台状态（图 6~10 千问模式）
-      inStudioDesk: false,
-      showDomainDropdown: false,
-      paramSheetOpen: false,
-      quickPickerOpen: false,
-      currentQuickItem: null,
-      recentLibraryImages: [],
-      loadingRecentImages: false,
-      pickerActiveCategory: 'all',
-      pickerSearchKeyword: '',
-      pickerPage: 1,
-      pickerHasMore: true,
-      pickerCategories: [
-        { id: 'all', label: '全部' },
-        { id: 'space', label: '场景空间' },
-        { id: 'furniture', label: '家具单品' },
-        { id: 'portrait', label: '人物模特' },
-      ],
-      // 高级超参数控制
-      showAdvancedParams: false,
-      genParams: {},
-      advancedParams: {
-        cfgScale: 7.0,
-        steps: 25,
-        seed: -1,
-        negativePrompt: '',
-        thinking: 'minimal',
-      },
-      currentDeskRun: null,
-
-      // 操作域
-      domain: 'chat',
-      domains: [
-        { id: 'chat', label: '对话', icon: '💬', tint: '#64748B', soft: '#F1F5F9' },
-        { id: 'image', label: '生图', icon: '🖼️', tint: '#2563EB', soft: '#EFF6FF' },
-        { id: 'video', label: '生视频', icon: '🎬', tint: '#7C3AED', soft: '#F5F3FF' },
-        { id: 'music', label: '生音乐', icon: '🎵', tint: '#0D9488', soft: '#F0FDFA' },
-        { id: 'portrait', label: '生人像', icon: '👤', tint: '#DB2777', soft: '#FDF2F8' },
-      ],
-      sessionFilter: 'all',
-      showSessionTypeMenu: false,
-      sessionFilters: [
-        { id: 'all', label: '全部类型' },
-        { id: 'chat', label: '对话' },
-        { id: 'image', label: '生图' },
-        { id: 'video', label: '生视频' },
-        { id: 'music', label: '生音乐' },
-        { id: 'portrait', label: '生人像' },
-      ],
-
       sessions: [],
+      sessionsLoading: false,
       currentSessionId: '',
-      _sessionPersisted: false,
-      _sessionInited: false,
       chatList: [],
       scrollIntoId: '',
-      inputPrompt: '',
-      sending: false,
-      expanded: false,
-
-      // 生成模态（域内）——默认对齐千问/豆包：图=图生图，视频=全能参考
-      imageMode: 'image_to_image',
-      videoMode: 'omni_reference',
+      drawerOpen: false,
+      libraryOpen: false,
+      bigImageMode: true,
+      domain: 'image',
+      imageSub: 'standard',
       musicMode: 'text_to_bgm',
-      portraitMode: 'text_to_portrait',
-      portraitLibraryGroups: [],
-      portraitConsented: false,
-      portraitGroupName: '',
-      selectedPortraitAssets: [],
-      songInputKind: 'prompt',
-
-      slotImages: [],
-      promptDrawerOpen: false,
-      lastSentPrompt: '',
-
       capabilities: null,
       studioCatalog: null,
-      currentChatModelId: 'agnes-2.5-flash',
+      currentChatModelId: '',
       currentImageModelId: '',
       currentVideoModelId: '',
       currentMusicModelId: '',
       currentPortraitModelId: '',
-
-      chatPresets: [
-        '帮我看看适合做封面的素材该怎么选',
-        '如何用四点定位给客厅换一款沙发',
-        '给这套空间写一段短视频分镜',
-      ],
-      imagePresets: [
-        '现代轻奢极简客厅，全景落地窗，柔和自然采光',
-        '法式奶油风主卧，弧形吊顶与隐形灯带',
-        '日式侘寂茶室，微水泥墙面，庭院竹影',
-      ],
-      videoPresets: [
-        '镜头缓慢向前推进，光影自然位移，晨间微尘丁达尔效应',
-        '环绕空间漫游，从玄关到客厅一镜到底',
-      ],
-      musicPresets: [
-        '安静的室内空间背景配乐，钢琴与轻微弦乐',
-        '轻快明亮的产品展示配乐',
-      ],
-      portraitPresets: [
-        '自然光下的空间人像，坐姿，看向窗外',
-        '商务精英站在落地窗前，侧光轮廓',
-      ],
-
-      expandedQuickId: '',
-      quickGroups: [
-        {
-          id: 'video',
-          title: '视频制作',
-          icon: '🎬',
-          tint: '#F5F3FF',
-          hint: '点选后选择成片方式',
-          items: [
-            { id: 'roam', label: '室内空间漫游', sub: '一镜到底空间成片', icon: '🎬', mode: 'roam', tint: '#F5F3FF' },
-          ],
-        },
-        {
-          id: 'image',
-          title: '图片处理',
-          icon: '🖼️',
-          tint: '#EFF6FF',
-          hint: '点选后选择精修方式',
-          items: [
-            { id: 'expand', label: '扩图', sub: '向外延展画幅', icon: '📐', mode: 'expand', tint: '#EFF6FF' },
-            { id: 'watermark', label: '去水印', sub: '先选区再擦除水印', icon: '✨', mode: 'watermark', tint: '#FDF4FF' },
-            { id: 'enhance', label: '清晰度', sub: '本地 4 倍或云端重绘', icon: '🔍', mode: 'enhance', tint: '#ECFEFF' },
-            { id: 'insert', label: '精准操作 · 增', sub: '软装置入', icon: '🛋️', mode: 'insert', tint: '#ECFDF5' },
-            { id: 'remove', label: '精准操作 · 删', sub: '消除瑕疵', icon: '🧹', mode: 'remove', tint: '#FEF2F2' },
-            { id: 'replace', label: '精准操作 · 改', sub: '原位替换', icon: '🔄', mode: 'replace', tint: '#F5F3FF' },
-          ],
-        },
-        {
-          id: 'music',
-          title: '音乐制作',
-          icon: '🎵',
-          tint: '#F0FDFA',
-          hint: '点选后选择生成方式',
-          items: [
-            { id: 'music_song', label: '文生歌曲', sub: '豆包歌曲 v5', icon: '🎤', desk: 'music', mode: 'text_to_song', tint: '#F0FDFA' },
-            { id: 'music_bgm', label: '文生纯音乐', sub: '豆包纯音乐 v5', icon: '🎵', desk: 'music', mode: 'text_to_bgm', tint: '#ECFDF5' },
-          ],
-        },
-        {
-          id: 'portrait',
-          title: '人像制作',
-          icon: '👤',
-          tint: '#FDF2F8',
-          hint: '点选后选择生成方式',
-          items: [
-            { id: 'portrait_text', label: '文生人像', sub: '描述人物生成人像', icon: '👤', desk: 'portrait', mode: 'text_to_portrait', tint: '#FDF2F8' },
-            { id: 'portrait_img', label: '图生人像', sub: '参考图生成人像', icon: '🖼️', desk: 'portrait', mode: 'image_to_portrait', tint: '#FCE7F3' },
-            { id: 'portrait_lib', label: '虚拟人像库', sub: '入库后给 Seedance 做参考', icon: '🗂️', desk: 'portrait', mode: 'virtual_library', tint: '#FDF2F8' },
-          ],
-        },
-      ],
-      quickActions: [],
-      pendingQuickMode: '',
-      showAtPicker: false,
+      capabilitiesLoaded: false,
+      // 动态参数：唯一真相源是当前模型 schema，客户端不再写死 ratio/duration
+      schemaParams: {},
+      activeParamKey: '',
+      refsOpen: true,
+      historyOpen: true,
+      canvasPinnedId: '',
+      refs: [],
+      refLightbox: { show: false, url: '', kind: 'image', label: '' },
+      pickerVisible: false,
+      pickerItems: [],
+      pickerLoading: false,
+      pickerKeyword: '',
+      pickerPage: 1,
+      pickerHasMore: true,
+      pickerPageSize: 24,
+      inputPrompt: '',
       isEditingPrompt: false,
-      promptCursorPos: 0,
-      promptBeforeOptimize: '',
       optimizingPrompt: false,
+      promptBeforeOptimize: '',
+      lastSentPrompt: '',
+      showAtPicker: false,
+      sending: false,
+      pendingEdit: null,
+      // 3D 朝向截图（替换 / 新增）：没有截图前禁止发送
+      products3d: [],
+      products3dLoading: false,
+      productPickerVisible: false,
+      selectedProduct: null,
+      modelYaw: 0,
+      modelPitch: 0,
+      modelSnapshotUrl: '',
+      modelSnapshotError: '',
+      previewVisible: false,
+      previewKind: 'gen',
+      previewPayload: {},
+      previewExtraNotes: [],
+      sheetMode: '',
+      chatHistorySynced: false,
     }
   },
   computed: {
-    userName() {
-      return store.getUsername ? store.getUsername() : ''
-    },
-    userInitial() {
-      const n = this.userName || 'U'
-      return n.slice(0, 1).toUpperCase()
-    },
-    welcomeTitle() {
-      const map = {
-        chat: '有什么我能帮你的？',
-        image: '图片生成',
-        video: '视频生成',
-        music: '音乐生成',
-        portrait: '人像生成',
-      }
-      return map[this.domain] || 'AI 工坊'
-    },
-    welcomeDesc() {
-      const map = {
-        chat: '通用助手：素材整理建议、创作灵感。选上方生成域可直接出图/出片。',
-        image: '描述空间与光影生成效果图，支持图生图与参考合成。',
-        video: '描述镜头运动生成漫游视频，支持图生视频与首尾帧。',
-        music: '文生歌曲或文生纯音乐。歌曲可以写提示词，也可以直接给歌词。',
-        portrait: '文生人像、图生人像，以及私域虚拟人像库。生成的人像不会自动入库。',
-      }
-      return map[this.domain] || ''
-    },
-    domainPresets() {
-      if (this.domain === 'image') return this.imagePresets
-      if (this.domain === 'video') return this.videoPresets
-      if (this.domain === 'music') return this.musicPresets
-      if (this.domain === 'portrait') return this.portraitPresets
-      return this.chatPresets
-    },
-    currentSchema() {
-      return schemaFor(this.currentModelInfo)
-    },
-    // 规则引擎求值：与 web-pro 走同一份 evaluateClientModelRules
-    ruleEval() {
-      return evaluateClientModelRules(this.currentSchema, this.currentMode, this.genParams, this.refCounts)
-    },
-    refCounts() {
-      return { images: (this.slotImages || []).length, videos: 0, audios: 0 }
-    },
-    schemaCommonFields() {
-      const schema = this.currentSchema
-      if (!schema) return []
-      const suppressed = new Set(this.ruleEval.suppressedKeys || [])
-      const fields = [...(schema.common || [])].filter((f) => !suppressed.has(f.key))
-      if (this.currentMode === 'image_edit') {
-        for (const key of ['bbox', 'point']) {
-          const field = (schema.advanced || []).find((item) => item.key === key)
-          if (field && !fields.some((item) => item.key === key)) fields.push(field)
-        }
-      }
-      return fields
-    },
-    schemaAdvancedFields() {
-      const schema = this.currentSchema
-      if (!schema) return []
-      const suppressed = new Set(this.ruleEval.suppressedKeys || [])
-      return (schema.advanced || []).filter(
-        (field) =>
-          !suppressed.has(field.key) &&
-          !(this.currentMode === 'image_edit' && (field.key === 'bbox' || field.key === 'point')),
-      )
-    },
-    slotMaxImages() {
-      // null = 服务端没声明这一档，按「不封顶」处理（与 web-pro 的 refCap() 语义一致）
-      return slotLimit(this.currentSchema, 'images', this.currentMode)
-    },
-    slotPickMax() {
-      return this.slotMaxImages == null ? 9 : this.slotMaxImages
-    },
-    fieldLocks() {
-      return this.ruleEval.lockedKeys || []
-    },
-    domainSubModes() {
-      if (this.domain === 'music') {
-        return [
-          { id: 'text_to_song', label: '文生歌曲' },
-          { id: 'text_to_bgm', label: '文生纯音乐' },
-        ]
-      }
-      let modes = []
-      if (this.currentSchema && this.currentSchema.modes && this.currentSchema.modes.length) {
-        modes = this.currentSchema.modes.slice()
-      } else {
-        const map = {
-          image: [
-            { id: 'image_to_image', label: '图生图' },
-            { id: 'text_to_image', label: '文生图' },
-          ],
-          video: [
-            { id: 'text_to_video', label: '文生视频' },
-            { id: 'image_to_video', label: '图生视频' },
-          ],
-          portrait: [
-            { id: 'text_to_portrait', label: '文生人像' },
-            { id: 'image_to_portrait', label: '图生人像' },
-          ],
-        }
-        modes = map[this.domain] || []
-      }
-      if (this.domain === 'portrait' && !modes.some((m) => m.id === 'virtual_library')) {
-        modes = modes.concat([{ id: 'virtual_library', label: '虚拟人像库' }])
-      }
-      return modes
-    },
-    deskTitle() {
-      const map = {
-        video: 'AI 生视频',
-        image: 'AI 生图',
-        music: 'AI 生音乐',
-        portrait: 'AI 生人像',
-      }
-      return map[this.domain] || 'AI 创作'
-    },
-    deskModes() {
+    visibleDomains() {
       return [
-        { id: 'video', label: 'AI 生视频', icon: '🎬' },
-        { id: 'image', label: 'AI 生图', icon: '🖼️' },
-        { id: 'music', label: 'AI 生音乐', icon: '🎵' },
-        { id: 'portrait', label: 'AI 生人像', icon: '👤' },
+        { id: 'chat', label: '对话' },
+        { id: 'image', label: '图片' },
+        { id: 'video', label: '视频' },
+        { id: 'music', label: '音乐' },
       ]
     },
-    currentModeLabel() {
-      const hit = this.domainSubModes.find((m) => m.id === this.currentMode)
-      return hit ? hit.label : (this.domain === 'video' ? '全能参考' : '默认模式')
-    },
-    isTextOnlyMode() {
-      const m = this.currentMode
-      return (
-        m === 'text_to_portrait' ||
-        m === 'text_to_image' ||
-        m === 'text_to_video' ||
-        m === 'text_to_music' ||
-        m === 'text_to_song' ||
-        m === 'text_to_bgm'
-      )
-    },
-    isLibraryMode() {
-      return this.domain === 'portrait' && this.portraitMode === 'virtual_library'
-    },
-    activePortraitAssets() {
-      const out = []
-      ;(this.portraitLibraryGroups || []).forEach((g) => {
-        ;(g.assets || []).forEach((a) => {
-          if (a.status === 'Active') out.push({ ...a, groupName: g.name })
-        })
-      })
-      return out
-    },
-    portraitCaption() {
-      if (this.domain !== 'video' || !this.selectedPortraitAssets.length) return ''
-      let n = 1
-      const bits = []
-      if (this.videoMode === 'image_to_video' || this.videoMode === 'first_last_frame') {
-        bits.push(`图片${n}是首帧`)
-        n += 1
-      }
-      this.selectedPortraitAssets.forEach((p) => {
-        bits.push(`图片${n}是${p.groupName || p.name || '角色'}的形象`)
-        n += 1
-      })
-      return `【图片说明】${bits.join('。')}。`
-    },
-    currentPromptSegments() {
-      return this.promptSegments(this.inputPrompt, this.slotImages)
-    },
-    hasPromptReferences() {
-      return this.currentPromptSegments.some((s) => s.type === 'ref')
-    },
-    referencedTags() {
-      if (!this.inputPrompt || !this.slotImages || !this.slotImages.length) return []
-      const list = []
-      this.slotImages.forEach((img, idx) => {
-        const label = this.getSlotTagLabel(idx)
-        const tag = `@${label}`
-        if (this.inputPrompt.indexOf(tag) >= 0) {
-          list.push({ idx, label, tag, img })
-        }
-      })
-      return list
-    },
-    deskRunProgressText() {
-      const run = this.currentDeskRun
-      const name = (this.currentModelInfo && this.currentModelInfo.name) || '模型'
-      if (!run) return ''
-      const p = Number(run.progress || 0)
-      if (run.status === 'running' && p <= 10) return `生成中 · 模型 ${name}`
-      return `已完成 ${p}% · 模型 ${name}`
-    },
-    deskPlaceholder() {
-      if (this.isTextOnlyMode) {
-        if (this.domain === 'portrait') return '描述人物长相、着装、姿态、表情与光影氛围…'
-        if (this.domain === 'video') return '描述视频运镜、主体动作、场景变幻与光影位移…'
-        if (this.domain === 'music' && this.musicMode === 'text_to_song' && this.songInputKind === 'lyrics') {
-          return '写歌词。可用 [verse] [chorus] 分段。和提示词二选一。'
-        }
-        if (this.domain === 'music' && this.musicMode === 'text_to_song') return '用中文、英文或粤语描述想要的歌曲…'
-        if (this.domain === 'music') return '用中文描述纯音乐的场景、乐器和情绪…'
-        return '描述画面构图、主体、色彩与风格质感…'
-      }
-      if (this.slotImages.length) {
-        return '点击上方引用素材，如：使用 @图片1 的人物，保持空间光影推进…'
-      }
-      return '添加图片、视频、音频或描述你想生成的画面…'
-    },
-    activeQuickPrompts() {
-      if (!this.slotImages || !this.slotImages.length) return []
-      const list = []
-      const len = this.slotImages.length
-      const isVideo = this.domain === 'video'
-      const tag1 = '@' + this.getSlotTagLabel(0)
-
-      if (isVideo) {
-        list.push({ text: `使用 ${tag1} 人物主体`, template: `使用 ${tag1} 的人物主体，保持外貌与动作连贯，` })
-        list.push({ text: `保持 ${tag1} 空间光影`, template: `保持 ${tag1} 的空间光影与构图，镜头向前缓慢推进，` })
-        list.push({ text: `以 ${tag1} 为起始帧推进`, template: `以 ${tag1} 为镜头起点，由远及近平滑推镜，` })
-        list.push({ text: `让 ${tag1} 画面微风动感`, template: `让 ${tag1} 中的主体自然活动，微风吹拂，光影位移，` })
-      } else {
-        list.push({ text: `使用 ${tag1} 人物主体`, template: `使用 ${tag1} 的人物主体与面部特征，置于新场景中，` })
-        list.push({ text: `保持 ${tag1} 风格与色调`, template: `保持 ${tag1} 的艺术质感与冷暖色调风格，` })
-        list.push({ text: `参考 ${tag1} 构图布局`, template: `参考 ${tag1} 的空间比例与景深构图，` })
-      }
-
-      if (len >= 2) {
-        const tag2 = '@' + this.getSlotTagLabel(1)
-        list.unshift({
-          text: `融合 ${tag1} 场景 + ${tag2} 主体`,
-          template: `将 ${tag2} 的主体置入 ${tag1} 的空间场景中，统一光影色调，`,
-        })
-        if (isVideo) {
-          list.push({
-            text: `从 ${tag1} 转场到 ${tag2}`,
-            template: `镜头由 ${tag1} 顺畅运镜过渡到 ${tag2}，光影自然位移，`,
-          })
-        }
-      }
-
-      return list
-    },
-    meaningfulSessions() {
-      return (this.sessions || []).filter((s) => {
-        if (!s || !s.sessionId) return false
-        if (s._draft) return false
-        const title = (s.title || '').trim()
-        const preview = (s.preview || '').trim()
-        if (!preview && (!title || title === '有什么我能帮你的？' || title === 'AI 工坊' || title === '你好')) {
-          return false
-        }
-        if (this.sessionFilter !== 'all' && s.type !== this.sessionFilter) {
-          return false
-        }
-        return true
-      })
-    },
-    sessionGroups() {
-      const list = this.meaningfulSessions
-      const now = new Date()
-      const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-      const startYest = startToday - 86400000
-      const today = []
-      const yesterday = []
-      const earlier = []
-      list.forEach((s) => {
-        const time = s.updatedAt || 0
-        if (time >= startToday) today.push(s)
-        else if (time >= startYest) yesterday.push(s)
-        else earlier.push(s)
-      })
-      const groups = []
-      if (today.length) groups.push({ label: '今天', list: today })
-      if (yesterday.length) groups.push({ label: '昨天', list: yesterday })
-      if (earlier.length) groups.push({ label: '更早', list: earlier })
-      return groups
-    },
-    filteredSessions() {
-      return this.meaningfulSessions
-    },
-    sessionFilterLabel() {
-      const hit = this.sessionFilters.find((f) => f.id === this.sessionFilter)
-      return hit ? hit.label : '全部类型'
-    },
-    currentDomainInfo() {
-      return this.domains.find((d) => d.id === this.domain) || this.domains[0]
-    },
-    domainSoftBg() {
-      return this.currentDomainInfo.soft || '#F8FAFC'
-    },
-    isGenDomain() {
-      return this.domain !== 'chat'
-    },
-    hasGenParams() {
-      return this.isGenDomain
-    },
-    showModel() {
+    hasMusicDomain() {
       return true
     },
     domainModels() {
       const cat = this.studioCatalog || {}
-      if (this.domain === 'video') {
-        const models = cat.video?.models || []
-        if (this.selectedPortraitAssets.length) {
-          return models.filter((m) => /seedance/i.test(`${m.id} ${m.model_code || ''} ${m.name || ''}`))
-        }
-        return models
+      if (this.domain === 'image') {
+        return this.imageSub === 'portrait' ? (cat.portrait?.models || []) : (cat.image?.models || [])
       }
-      if (this.domain === 'music') {
-        return (cat.music?.models || []).filter((m) => m.id === 'doubao_song_v5' || m.id === 'doubao_bgm_v5')
-      }
-      if (this.domain === 'portrait') return cat.portrait?.models || []
-      if (this.domain === 'image') return cat.image?.models || []
+      if (this.domain === 'video') return cat.video?.models || []
+      if (this.domain === 'music') return cat.music?.models || []
       return cat.chat?.models || []
     },
     currentModelId() {
+      if (this.domain === 'image') return this.imageSub === 'portrait' ? this.currentPortraitModelId : this.currentImageModelId
       if (this.domain === 'video') return this.currentVideoModelId
       if (this.domain === 'music') return this.currentMusicModelId
-      if (this.domain === 'portrait') return this.currentPortraitModelId
-      if (this.domain === 'image') return this.currentImageModelId
       return this.currentChatModelId
     },
     currentModelInfo() {
-      const hit = this.domainModels.find((m) => m.id === this.currentModelId)
-      if (hit) return hit
-      return this.domainModels[0] || { id: this.currentModelId || '', name: '默认', providerName: '-' }
+      const list = this.domainModels
+      const hit = list.find((m) => m.id === this.currentModelId)
+      return hit || list[0] || { id: this.currentModelId || '', name: '默认', providerName: '' }
+    },
+    currentSchema() {
+      return schemaFor(this.currentModelInfo)
     },
     currentMode() {
-      if (this.domain === 'video') return this.videoMode
+      if (this.domain === 'image') return this.imageSub === 'portrait' ? (this.refs.length ? 'image_to_portrait' : 'text_to_portrait') : (this.refs.length ? 'image_to_image' : 'text_to_image')
+      if (this.domain === 'video') return this.refs.length ? 'image_to_video' : 'text_to_video'
       if (this.domain === 'music') return this.musicMode
-      if (this.domain === 'portrait') return this.portraitMode
-      if (this.domain === 'image') return this.imageMode
       return 'chat'
     },
-    requiresSlots() {
-      const m = this.currentMode
-      return (
-        m === 'image_to_image' ||
-        m === 'image_to_video' ||
-        m === 'first_last_frame' ||
-        m === 'video_to_music' ||
-        m === 'image_to_portrait' ||
-        m === 'omni_reference' ||
-        m === 'image_reference'
-      )
-    },
-    isMultiSlot() {
-      const m = this.currentMode
-      return m === 'omni_reference' || m === 'image_reference'
-    },
-    slotHint() {
-      if (this.currentMode === 'video_to_music') return '选视频'
-      if (this.currentMode === 'image_to_video') return '首帧'
-      return '参考图'
-    },
-    inputPlaceholder() {
-      const map = {
-        chat: '发消息，或输入创作想法…',
-        image: '描述你想要生成的图片…',
-        video: '描述你想要创作的视频…',
-        music: '描述你想要的配乐氛围…',
-        portrait: '描述你想要的人像…',
+    refCounts() {
+      const out = { images: 0, videos: 0, audios: 0 }
+      for (const r of this.refs || []) {
+        const kind = (r && r.kind) || 'image'
+        if (kind === 'image') out.images += 1
+        else if (kind === 'video') out.videos += 1
+        else if (kind === 'audio') out.audios += 1
       }
-      return map[this.domain] || '描述…'
+      return out
+    },
+    effectiveParams() {
+      const schema = this.currentSchema
+      if (!schema) return { ...(this.schemaParams || {}) }
+      return clampParamsToSchema(schema, { ...schemaDefaults(schema), ...(this.schemaParams || {}) })
+    },
+    ruleEval() {
+      return evaluateClientModelRules(this.currentSchema, this.activeMode, this.effectiveParams, this.refCounts)
+    },
+    ruleWarnings() {
+      return Array.isArray(this.ruleEval.warnings) ? this.ruleEval.warnings : []
+    },
+    lockedKeysSet() {
+      return new Set(this.ruleEval.lockedKeys || [])
+    },
+    activeMode() {
+      return resolveSchemaMode(this.currentSchema, this.currentMode, this.refCounts)
+    },
+    activeModeLabel() {
+      const modes = (this.currentSchema && this.currentSchema.modes) || []
+      const hit = modes.find((m) => m.id === this.activeMode)
+      if (hit && hit.label) return hit.label
+      const map = {
+        chat: '对话', text_to_image: '文生图', image_to_image: '图生图',
+        image_reference: '图片参考', image_edit: '图片编辑', text_to_video: '文生视频',
+        image_to_video: '图生视频', omni_reference: '全能参考', first_last_frame: '首尾帧',
+        video_edit: '视频编辑', video_extend: '视频延长', text_to_bgm: '文生音乐', text_to_song: '文生歌',
+      }
+      return map[this.activeMode] || this.currentModeBadge
+    },
+    modeSummary() {
+      return (this.currentModeBadge || '创作') + ' · ' + ((this.currentModelInfo && this.currentModelInfo.name) || '默认模型')
+    },
+    currentModeBadge() {
+      if (this.domain === 'image') return this.imageSub === 'portrait' ? '人像' : '图片'
+      if (this.domain === 'video') return '视频'
+      if (this.domain === 'music') return '音频'
+      return '对话'
+    },
+    primaryParams() {
+      const schema = this.currentSchema
+      if (!schema) return []
+      const suppressed = new Set(this.ruleEval.suppressedKeys || [])
+      const all = [...(schema.common || [])].filter((f) => {
+        if (!f || !f.key) return false
+        if (suppressed.has(f.key)) return false
+        if (f.key === 'mode') return false
+        if (f.location === 'none') return false
+        if (f.visibility && f.visibility !== 'public') return false
+        return true
+      })
+      // 常用参数排布：生图优先放画幅比(ratio/aspect_ratio)与分辨率/清晰度(resolution/size/dimension)
+      // 视频优先放画幅比与时长(duration)
+      const ratioField = all.find((f) => ['aspect_ratio', 'ratio', 'ar'].includes(f.key))
+      const secondaryField = all.find((f) => ['resolution', 'size', 'dimension', 'duration', 'quality', 'scale'].includes(f.key) && f !== ratioField)
+      const res = []
+      if (ratioField) res.push(ratioField)
+      if (secondaryField) res.push(secondaryField)
+      if (res.length) return res
+      return all.slice(0, 2)
+    },
+    advancedCustomCount() {
+      // 统计高级参数里有非默认值的个数
+      const adv = this.schemaParamSections.find((s) => s.key === 'advanced')
+      if (!adv || !adv.fields) return 0
+      let count = 0
+      for (const f of adv.fields) {
+        const val = this.schemaParams[f.key]
+        if (val !== undefined && val !== null && val !== '' && val !== f.default) {
+          count++
+        }
+      }
+      return count
+    },
+    historyCreations() {
+      const out = []
+      const seen = new Set()
+      const msgs = this.chatList || []
+      for (const m of msgs) {
+        if (m && m.role === 'assistant' && m.result && m.result.url) {
+          const u = m.result.url
+          if (!seen.has(u)) {
+            seen.add(u)
+            out.push({
+              id: m.id || String(m.createdAt),
+              url: u,
+              kind: m.result.kind || (this.domain === 'video' ? 'video' : 'image'),
+              kindLabel: m.result.label || (m.result.kind === 'video' ? '视频' : '图片'),
+              prompt: m.prompt || (m.outbound && m.outbound.prompt) || '',
+              createdAt: m.createdAt || Date.now()
+            })
+          }
+        }
+      }
+      try {
+        const saved = uni.getStorageSync('chat_library_creations') || []
+        if (Array.isArray(saved)) {
+          for (const s of saved) {
+            if (s && s.url && !seen.has(s.url)) {
+              seen.add(s.url)
+              out.push(s)
+            }
+          }
+        }
+      } catch (e) {}
+      return out.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+    },
+    composerParams() {
+      const schema = this.currentSchema
+      if (!schema) return []
+      const suppressed = new Set(this.ruleEval.suppressedKeys || [])
+      const list = (schema.common || []).filter((f) => {
+        if (!f || !f.key) return false
+        if (suppressed.has(f.key)) return false
+        if (f.key === 'mode') return false
+        if (f.location === 'none') return false
+        if (f.visibility && f.visibility !== 'public') return false
+        return true
+      })
+      return list.slice(0, 4)
+    },
+    schemaParamSections() {
+      const schema = this.currentSchema
+      if (!schema) return []
+      const suppressed = new Set(this.ruleEval.suppressedKeys || [])
+      const pick = (list) => (list || []).filter((f) => {
+        if (!f || !f.key) return false
+        if (suppressed.has(f.key)) return false
+        if (f.key === 'mode') return false
+        if (f.location === 'none') return false
+        return true
+      })
+      const sections = []
+      const common = pick(schema.common)
+      const advanced = pick(schema.advanced)
+      if (common.length) sections.push({ key: 'common', title: '基础参数', fields: common })
+      if (advanced.length) sections.push({ key: 'advanced', title: '高级参数', fields: advanced })
+      return sections
+    },
+    advancedCount() {
+      const advanced = this.schemaParamSections.find((s) => s.key === 'advanced')
+      return advanced ? advanced.fields.length : 0
+    },
+    paramSheetField() {
+      return fieldByKey(this.currentSchema, this.activeParamKey)
+    },
+    refCap() {
+      const schema = this.currentSchema
+      if (!schema || !schema.slots) return null
+      const audios = Number(schema.slots.audios || 0)
+      const images = Number(schema.slots.images || 0)
+      if (audios > 0 && images === 0) return audios
+      return slotLimit(schema, 'images', this.activeMode)
+    },
+    refCapText() {
+      return this.refCap != null ? ' / ' + this.refCap : ''
+    },
+    canAddRef() {
+      if (this.refCap == null) return true
+      return this.refs.length < this.refCap
+    },
+    refError() {
+      const schema = this.currentSchema
+      if (!schema || !schema.slots) return ''
+      const audios = Number(schema.slots.audios || 0)
+      const images = Number(schema.slots.images || 0)
+      if (audios > 0 && images === 0) {
+        if (this.refCounts.audios < 1) return '这个模型需要至少一段参考音频'
+        if (this.refCounts.audios > audios) return '参考音频最多 ' + audios + ' 段'
+        return ''
+      }
+      const cap = this.refCap
+      const count = this.refs.length
+      if (cap != null && count > cap) return '当前模型最多 ' + cap + ' 张参考图'
+      const mode = this.activeMode
+      if (mode === 'first_last_frame' && count !== 2) return '首尾帧需要两张图：第一张首帧，第二张尾帧'
+      if (mode === 'expand_fill' && count !== 1) return '扩边填白需要一张底图'
+      if (mode === 'image_edit' && count < 1) return '局部编辑需要至少一张底图'
+      if (['image_to_image', 'image_reference', 'image_to_video', 'omni_reference'].includes(mode) && count < 1) {
+        return '这个模式需要至少一张参考图'
+      }
+      return ''
+    },
+    canvasMessage() {
+      const list = (this.chatList || []).filter((m) => m && m.role === 'assistant')
+      if (this.canvasPinnedId) {
+        const hit = list.find((m) => m.id === this.canvasPinnedId)
+        if (hit) return hit
+      }
+      return list.length ? list[list.length - 1] : null
+    },
+    canvasMsg() {
+      return this.canvasMessage
+    },
+    canvasRunning() {
+      const msg = this.canvasMessage
+      return msg && msg.status === 'running' ? msg : null
+    },
+    canvasFailed() {
+      const msg = this.canvasMessage
+      return msg && msg.status === 'failed' ? msg : null
+    },
+    canvasResult() {
+      const msg = this.canvasMessage
+      return msg && msg.status !== 'running' && msg.result ? msg.result : null
+    },
+    canvasVisualResult() {
+      const msg = this.canvasMessage
+      // 必须有媒体文件 URL (图片、视频、音频) 才是视觉产物！纯文本问答不属于视觉产物，不遮挡视觉工作台
+      if (msg && msg.status !== 'running' && msg.result && msg.result.url) {
+        return msg.result
+      }
+      return null
+    },
+    canvasItems() {
+      return (this.chatList || []).filter((m) => m && m.role === 'assistant' && m.result && (m.result.url || m.result.text))
+    },
+    canvasStateText() {
+      if (this.canvasRunning) return '生成中'
+      if (this.canvasFailed) return '失败'
+      if (this.canvasResult) return '已完成'
+      if (this.refs.length) return '参考图'
+      return '待创作'
+    },
+    canvasStateClass() {
+      if (this.canvasRunning) return 'is-running'
+      if (this.canvasFailed) return 'is-failed'
+      if (this.canvasResult) return 'is-done'
+      if (this.refs.length) return 'is-ref'
+      return 'is-idle'
+    },
+    sessionTitle() {
+      const cur = this.sessions.find((s) => s.sessionId === this.currentSessionId)
+      return (cur && cur.title) || '新对话'
+    },
+    emptySub() {
+      if (this.pendingEdit) return '精准编辑已就位：写一句编辑要求，或点「预览请求」看清将发送的内容'
+      return '支持对话、图片、视频' + (this.hasMusicDomain ? '、音频' : '') + '生成；从素材详情 / 精准编辑带入内容，均可作为参考'
+    },
+    currentPresets() {
+      if (this.domain === 'image') {
+        return this.imageSub === 'portrait'
+          ? ['自然光下的空间人像，坐姿，看向窗外', '商务精英站在落地窗前，侧光轮廓']
+          : ['现代轻奢极简客厅，全景落地窗，柔和自然采光', '法式奶油风主卧，弧形吊顶与隐形灯带', '日式侘寂茶室，微水泥墙面，庭院竹影']
+      }
+      if (this.domain === 'video') {
+        return ['镜头缓慢向前推进，光影自然位移，晨间微尘丁达尔效应', '一镜到底运镜，从玄关缓缓推到客厅中央']
+      }
+      if (this.domain === 'music') {
+        return ['安静的室内空间背景配乐，钢琴与轻微弦乐', '轻快明亮的产品展示配乐']
+      }
+      return ['帮我看看适合做封面的素材该怎么选', '给这套空间写一段短视频分镜', '帮我分析这张照片的构图与光影']
+    },
+    needs3dModel() {
+      const p = this.pendingEdit
+      if (!p || p.kind === 'global') return false
+      return p.op === 'replace' || p.op === 'add'
+    },
+    selectedProductPreview() {
+      const p = this.selectedProduct
+      if (!p) return ''
+      const u = p.preview_url || ''
+      if (!u) return ''
+      if (/^https?:\/\//i.test(u)) return u
+      return store.getServerUrl() + (u.startsWith('/') ? u : '/' + u)
     },
     canSend() {
-      if (this.isLibraryMode) return false
-      if (!this.inputPrompt || !this.inputPrompt.trim()) {
-        if (this.domain === 'video' && this.selectedPortraitAssets.length && this.videoMode === 'text_to_video') return true
-        // 全能参考允许仅传图发送（对齐豆包：有素材即可生成）
-        if (this.isMultiSlot && this.slotImages.length) return true
-        if (this.domain === 'chat' && this.slotImages.length) return true
-        return false
-      }
-      if (this.currentMode === 'first_last_frame') {
-        return Boolean(this.slotImages[0] && this.slotImages[1])
-      }
-      if (
-        this.currentMode === 'image_to_image' ||
-        this.currentMode === 'image_to_video' ||
-        this.currentMode === 'image_to_portrait'
-      ) {
-        return Boolean(this.slotImages[0])
-      }
-      if (this.currentMode === 'video_to_music') {
-        return Boolean(this.slotImages[0])
-      }
-      if (this.isMultiSlot) return this.slotImages.length > 0
+      if (this.sending || !this.inputPrompt.trim()) return false
+      if (this.needs3dModel && !this.modelSnapshotUrl) return false
+      if (this.refError) return false
       return true
     },
-    collapseSummary() {
-      const parts = [this.currentModelInfo.name || '模型']
-      // 摘要直接铺服务端 schema 里已生效的常用档位，不再维护本地一套 ratio/duration 状态
-      for (const f of this.schemaCommonFields) {
-        const v = this.genParams[f.key]
-        if (v === undefined || v === '' || v === null || v === false) continue
-        parts.push(v === true ? f.label : `${f.label} ${optionLabel(f, v)}`)
+    sheetTitle() {
+      if (this.sheetMode === 'model') return '选择模型'
+      if (this.sheetMode === 'param') {
+        const f = this.paramSheetField
+        return (f && (f.label || f.key)) || '参数'
       }
-      return parts.join(' · ')
+      if (this.sheetMode === 'more') return '全部参数'
+      return ''
     },
-    domainModelsGrouped() {
-      const list = this.domainModels || []
-      const groups = [
-        { name: '火山方舟 (ByteDance)', provider: '火山方舟', icon: '🌋', items: [] },
-        { name: 'Agnes AI', provider: 'Agnes AI', icon: '⚡', items: [] },
-        { name: 'Google (Gemini / Veo / Gemma)', provider: 'Google', icon: '🌐', items: [] },
-      ]
-      list.forEach((m) => {
-        const p = m.providerName || ''
-        const g = groups.find((grp) => p === grp.provider || p.includes(grp.provider))
-        if (g) g.items.push(m)
-        else {
-          let other = groups.find((grp) => grp.provider === '其他')
-          if (!other) {
-            other = { name: '其他', provider: '其他', icon: '📦', items: [] }
-            groups.push(other)
-          }
-          other.items.push(m)
-        }
-      })
-      return groups.filter((g) => g.items.length > 0)
+    pendingEditLabel() {
+      const op = (this.pendingEdit && this.pendingEdit.op) || ''
+      const map = {
+        replace: '替换', add: '增加', insert: '安装', install: '安装',
+        space: '留白', remove: '去除', expand: '扩图',
+        style_transfer: '风格转换', clarity: '画质超清', watermark: '去水印',
+      }
+      return map[op] || op || '编辑'
+    },
+    pendingEditDetail() {
+      const p = this.pendingEdit || {}
+      if (p.productName) return `对象：${p.productName}`
+      if (p.recipeHint) return p.recipeHint
+      if (p.sourceName) return `来源：${p.sourceName}`
+      return '以原图为底，框选区域将被修改'
+    },
+    placeholderText() {
+      if (this.pendingEdit) return '写一句编辑要求，例如：把图1替换为图2的沙发'
+      if (this.domain === 'image') return this.imageSub === 'portrait' ? '描述你想要的人像…' : '描述你想要生成的图片…'
+      if (this.domain === 'video') return '描述你想要创作的视频…'
+      if (this.domain === 'music') return '描述你想要的配乐氛围…'
+      return '发消息，或输入创作想法…'
     },
   },
-  onLoad(query) {
-    const sys = uni.getSystemInfoSync()
-    this.statusBarHeight = sys.statusBarHeight || 20
-    if (!sessionValid()) {
-      goLogin()
-      return
-    }
-    const view = query && query.view
-    if (view === 'operate') this.mainView = 'operate'
-    const dom = query && query.domain
-    if (dom && this.domains.some((d) => d.id === dom)) this.domain = dom
 
-    this.loadCapabilities()
-    this.initSessions()
+  onLoad() {
+    this.statusBarHeight = (uni.getSystemInfoSync && uni.getSystemInfoSync().statusBarHeight) || 20
   },
   onShow() {
-    const pending = uni.getStorageSync('studio_pending_image')
-    if (pending) {
-      uni.removeStorageSync('studio_pending_image')
-      this.mainView = 'operate'
-      this.domain = 'video'
-      this.videoMode = 'image_to_video'
-      this.slotImages = [pending]
-      this.expanded = false
-    }
-    const tabParams = consumeTabParams('/pages/home/home')
-    if (tabParams) {
-      if (tabParams.view === 'operate') this.mainView = 'operate'
-      if (tabParams.domain && this.domains.some((d) => d.id === tabParams.domain)) this.domain = tabParams.domain
-    }
-  },
-  onUnload() {
-    this.stopPortraitRefresh()
+    // 消费编辑页交接的一次性 payload（switchTabTo 中转）
+    const payload = consumeTabParams('/pages/home/home')
+    if (payload) this.applyPendingPayload(payload)
+    // 消费 3D 朝向页回传的截图
+    this.applyModel3dResult()
+    this.ensureSessionAndHistory()
+    this.loadCapabilities(false)
   },
   methods: {
-    switchMain(v) {
-      this.mainView = v
-      if (v === 'operate') {
-        this.loadCapabilities()
-        this.loadChatHistory()
-      }
+    // ─────────── 初始化 ───────────
+    async ensureSessionAndHistory() {
+      if (this._booting) return
+      this._booting = true
+      await this.loadChatSessions()
+      this.bindSession(false)
+      await this.loadChatHistory()
+      this._booting = false
     },
-    openDrawer() {
-      this.drawerOpen = true
-      this.loadSessions()
-    },
-    openSettings() {
-      this.drawerOpen = false
-      uni.switchTab({ url: '/pages/settings/settings' })
-    },
-    applyPreset(p) {
-      this.inputPrompt = p
-    },
-    previewMedia(url) {
-      if (!url) return
-      uni.previewImage({ urls: [url] })
-    },
-
-    typeIcon(type) {
-      const map = {
-        chat: '💬',
-        image: '🖼️',
-        video: '🎬',
-        music: '🎵',
-        portrait: '👤',
-        quick: '⚡',
-      }
-      return map[type] || '💬'
-    },
-    typeTint(type) {
-      const map = {
-        chat: '#F1F5F9',
-        image: '#EFF6FF',
-        video: '#F5F3FF',
-        music: '#F0FDFA',
-        portrait: '#FDF2F8',
-      }
-      return map[type] || '#F1F5F9'
-    },
-    selectSessionFilter(id) {
-      this.sessionFilter = id
-      this.showSessionTypeMenu = false
-    },
-    typeLabel(type) {
-      const map = {
-        chat: '对话',
-        image: '生图',
-        video: '生视频',
-        music: '生音乐',
-        portrait: '生人像',
-        quick: '快捷',
-      }
-      return map[type] || '对话'
-    },
-    domainLabelOf(mode) {
-      const m = String(mode || '')
-      if (m.includes('video')) return '生视频'
-      if (m.includes('music')) return '生音乐'
-      if (m.includes('portrait')) return '生人像'
-      if (m.includes('image')) return '生图'
-      if (m === 'chat') return '对话'
-      return '创作'
-    },
-    defaultTitle(s) {
-      return this.typeLabel(s.type) + '会话'
-    },
-    formatTime(ts) {
-      if (!ts) return ''
-      const d = new Date(ts)
-      const mm = String(d.getMonth() + 1).padStart(2, '0')
-      const dd = String(d.getDate()).padStart(2, '0')
-      const hh = String(d.getHours()).padStart(2, '0')
-      const mi = String(d.getMinutes()).padStart(2, '0')
-      return `${mm}-${dd} ${hh}:${mi}`
-    },
-
     async loadCapabilities(showTip) {
       try {
         const data = await fetchLabCapabilities()
         this.capabilities = data
-        this.studioCatalog = mergeStudioCatalog(data && data.studio, this.getDefaultStudioCatalog())
+        this.studioCatalog = mergeStudioCatalog(data && data.studio, JSON.parse(JSON.stringify(MODEL_CATALOG)))
         this.applyDefaultModels()
+        this.resetParamsForModel()
         if (showTip) uni.showToast({ title: '能力已刷新', icon: 'none' })
       } catch (e) {
-        this.studioCatalog = mergeStudioCatalog(null, this.getDefaultStudioCatalog())
+        this.studioCatalog = mergeStudioCatalog(null, JSON.parse(JSON.stringify(MODEL_CATALOG)))
         this.applyDefaultModels()
+        this.resetParamsForModel()
         if (showTip) uni.showToast({ title: '已就绪内置能力矩阵', icon: 'none' })
       }
     },
-    getDefaultStudioCatalog() {
-      return JSON.parse(JSON.stringify(MODEL_CATALOG))
-    },
     applyDefaultModels() {
       const cat = this.studioCatalog || {}
-      const pick = (list, currentSetter, currentId, defaultId) => {
+      const pick = (list, setter, currentId, defaultId) => {
         if (!list || !list.length) return
         if (currentId && list.some((m) => m.id === currentId)) return
-        const hitDefault = defaultId ? list.find((m) => m.id === defaultId) : null
-        const def = hitDefault || list.find((m) => m.default) || list[0]
-        currentSetter(def.id)
+        const def = (defaultId && list.find((m) => m.id === defaultId)) || list.find((m) => m.default) || list[0]
+        setter(def.id)
       }
       pick(cat.image?.models, (id) => (this.currentImageModelId = id), this.currentImageModelId, cat.image?.defaultModel)
       pick(cat.video?.models, (id) => (this.currentVideoModelId = id), this.currentVideoModelId, cat.video?.defaultModel)
       pick(cat.music?.models, (id) => (this.currentMusicModelId = id), this.currentMusicModelId, cat.music?.defaultModel)
-      pick(
-        cat.portrait?.models,
-        (id) => (this.currentPortraitModelId = id),
-        this.currentPortraitModelId,
-        cat.portrait?.defaultModel
-      )
+      pick(cat.portrait?.models, (id) => (this.currentPortraitModelId = id), this.currentPortraitModelId, cat.portrait?.defaultModel)
       pick(cat.chat?.models, (id) => (this.currentChatModelId = id), this.currentChatModelId, cat.chat?.defaultModel)
-      this.applySchemaDefaults(this.currentModelInfo)
     },
-    optionLabel,
-    paramTagText(key, val) {
-      if (val === undefined || val === null || val === '' || val === false) return ''
-      if (typeof val === 'object') return ''
-      return val === true ? key : `${key}=${val}`
-    },
-    isFieldLocked(key) {
-      return (this.fieldLocks || []).indexOf(key) >= 0
-    },
-    /** 规则引擎给出的档位覆盖（如图层拆分把 size 换成 1K/1.5K/2K/auto）。 */
-    fieldOptions(f) {
-      const ov = this.ruleEval.fieldOverrides && this.ruleEval.fieldOverrides[f.key]
-      if (ov && Array.isArray(ov.options)) return ov.options
-      return (f && f.options) || []
-    },
-    lockReason(key) {
-      return (this.ruleEval.lockReasons || {})[key] || ''
-    },
-    applyLiveConstraints() {
-      const r = evaluateClientModelRules(this.currentSchema, this.currentMode, this.genParams, this.refCounts)
-      this.genParams = r.params
-    },
-    onRangeChange(f, ev) {
-      const v = ev && ev.detail ? ev.detail.value : ev
-      this.setGenParam(f.key, Number(v))
-    },
-    setGenParam(key, val) {
-      if (this.isFieldLocked(key)) return
-      this.$set ? this.$set(this.genParams, key, val) : (this.genParams = { ...this.genParams, [key]: val })
-      this.applyLiveConstraints()
-    },
-    applySchemaDefaults(model) {
-      const sch = schemaFor(model)
-      const next = {}
-      if (sch) {
-        // common + advanced 都要铺默认值：透明底 / 图层拆分这类联动规则读的就是 advanced 里的键
-        const fill = (f) => {
-          if (f && f.key) next[f.key] = f.default
-        }
-        ;(sch.common || []).forEach(fill)
-        ;(sch.advanced || []).forEach(fill)
-        const modes = sch.modes || []
-        if (modes.length) {
-          const cur = this.currentMode
-          if (!modes.some((x) => x.id === cur)) this.switchSubMode(modes[0].id)
-        }
-      }
-      this.genParams = next
-      this.applyLiveConstraints()
-    },
-    selectDomainModel(m) {
-      if (!m || !m.id) return
-      if (this.domain === 'video') this.currentVideoModelId = m.id
-      else if (this.domain === 'music') this.currentMusicModelId = m.id
-      else if (this.domain === 'portrait') this.currentPortraitModelId = m.id
-      else if (this.domain === 'image') this.currentImageModelId = m.id
-      else this.currentChatModelId = m.id
-      this.applySchemaDefaults(m)
-      uni.showToast({ title: `已选: ${m.name}`, icon: 'none' })
-    },
-
-    switchDomain(id) {
-      if (this.domain === id) return
-      this.domain = id
-      this.slotImages = []
-      this.expanded = false
-      // 默认模态：图=图生图（等选参考图），视频=全能参考；其余文生
-      if (id === 'image') this.imageMode = 'image_to_image'
-      if (id === 'video') this.videoMode = 'text_to_video'
-      if (id === 'music') {
-        this.musicMode = 'text_to_bgm'
-        this.currentMusicModelId = 'doubao_bgm_v5'
-      }
-      if (id === 'portrait') this.portraitMode = 'text_to_portrait'
-      if (id === 'video' || id === 'portrait') this.loadPortraitLibrary()
-      this.$nextTick(() => this.applySchemaDefaults(this.currentModelInfo))
-      this.sessionFilter = id
-      this.bindSession(false)
-      this.loadChatHistory()
-    },
-    switchSubMode(modeId) {
-      if (this.domain === 'image') this.imageMode = modeId
-      else if (this.domain === 'video') this.videoMode = modeId
-      else if (this.domain === 'music') this.musicMode = modeId
-      else if (this.domain === 'portrait') this.portraitMode = modeId
-      const multi = modeId === 'omni_reference' || modeId === 'image_reference'
-      const max = this.slotPickMax
-      if (modeId === 'first_last_frame') this.slotImages = this.slotImages.slice(0, Math.min(2, max))
-      else if (multi) this.slotImages = this.slotImages.slice(0, max)
-      else if (
-        modeId === 'image_to_image' ||
-        modeId === 'image_to_video' ||
-        modeId === 'image_to_portrait' ||
-        modeId === 'video_to_music'
-      ) {
-        this.slotImages = this.slotImages.slice(0, 1)
-      } else {
-        this.slotImages = []
-      }
-      this.applyLiveConstraints()
-    },
-
-    sessionTypeOfDomain() {
-      return this.domain === 'chat' ? 'chat' : this.domain
-    },
-    bindSession(forceNew) {
-      const type = this.sessionTypeOfDomain()
-      if (
-        !forceNew &&
-        this.currentSessionId &&
-        this.sessions.some((s) => s.sessionId === this.currentSessionId)
-      ) {
-        const cur = this.sessions.find((s) => s.sessionId === this.currentSessionId)
-        if (cur && cur.type === type) return
-      }
-      if (!forceNew) {
-        const existing = this.sessions.find((s) => s.type === type)
-        if (existing) {
-          this.currentSessionId = existing.sessionId
-          return
-        }
-      }
-      // 草稿会话：仅本地 id，首次真正发消息时才 POST 到服务端
-      this.currentSessionId = `session_${type}_${Date.now()}`
-      this.chatList = []
-      this._sessionPersisted = false
-    },
-    persistCurrentSession(title) {
-      if (this._sessionPersisted) {
-        createChatSession({
-          sessionId: this.currentSessionId,
-          type: this.sessionTypeOfDomain(),
-          title: title || '',
-        }).catch(() => {})
+    resetParamsForModel() {
+      const sch = this.currentSchema
+      if (!sch) {
+        this.schemaParams = {}
         return
       }
-      const meta = {
-        sessionId: this.currentSessionId,
-        type: this.sessionTypeOfDomain(),
-        title: title || this.typeLabel(this.sessionTypeOfDomain()),
-        updatedAt: Date.now(),
+      const mode = resolveSchemaMode(sch, this.currentMode, this.refCounts)
+      const evaluated = evaluateClientModelRules(sch, mode, schemaDefaults(sch), this.refCounts)
+      this.schemaParams = clampParamsToSchema(sch, evaluated.params)
+      this.activeParamKey = ''
+      this.sheetMode = this.sheetMode === 'param' ? '' : this.sheetMode
+    },
+
+    // ─────────── 编辑交接（精准编辑 → 对话创作） ───────────
+    applyPendingPayload(payload) {
+      // 浏览页批量：带若干 fid 进入创作作为参考图
+      if (payload && Array.isArray(payload.fids) && payload.fids.length) {
+        this.pendingEdit = null
+        this.domain = payload.domain === 'video' ? 'video' : 'image'
+        this.canvasPinnedId = ''
+        this.mountLibraryFids(payload.fids)
+        this.resetParamsForModel()
+        if (payload.recipe) {
+          this.inputPrompt = payload.recipe
+          this.lastSentPrompt = payload.recipe
+        }
+        return
       }
-      this._sessionPersisted = true
-      const rest = this.sessions.filter((s) => s.sessionId !== meta.sessionId)
-      this.sessions = this.dedupeSessions([meta, ...rest])
-      this.persistSessionsLocal()
-      createChatSession(meta).catch(() => {})
-    },
-    async initSessions() {
-      await this.loadSessions()
-      // 只绑定已有会话，绝不因启动而新建
-      this.bindSession(false)
-    },
-    dedupeSessions(list) {
-      const map = {}
-      const out = []
-      ;(list || []).forEach((s) => {
-        const id = s.sessionId || s.id
-        if (!id) return
-        const type = s.type || 'chat'
-        const key = id
-        if (map[key]) return
-        map[key] = true
-        out.push({
-          sessionId: id,
-          type,
-          title: s.title || '',
-          updatedAt: s.updatedAt || s.updated_at || s.createdAt || 0,
-          preview: s.preview || '',
+      // 精准编辑：op + region + 主图 fid
+      this.pendingEdit = payload || null
+      if (!payload) return
+      this.resetModel3d()
+      this.domain = 'image'
+      this.imageSub = payload.op === 'replace' || payload.op === 'add' ? 'standard' : this.imageSub
+      const refs = []
+      if (payload.sourceFid) {
+        refs.push({
+          id: newId('ref'),
+          url: mediaUrl(payload.sourceFid),
+          fid: payload.sourceFid,
+          label: payload.sourceName || '原图',
+          source: 'stage',
+          kind: 'image',
         })
-      })
-      out.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
-      return out
+      }
+      const extraRefs = Array.isArray(payload.refs) ? payload.refs : []
+      for (const r of extraRefs) {
+        if (!r || !r.url) continue
+        refs.push({
+          id: newId('ref'),
+          url: r.url,
+          label: r.name || r.label || '参考图',
+          source: r.source || 'ref',
+          kind: r.kind || 'image',
+        })
+      }
+      this.refs = refs
+      this.canvasPinnedId = ''
+      this.resetParamsForModel()
+      if (payload.recipe) {
+        this.inputPrompt = payload.recipe
+        this.lastSentPrompt = payload.recipe
+      } else {
+        this.inputPrompt = ''
+      }
+      this.drawerOpen = false
+      this.scrollToBottom()
+      uni.showToast({ title: '已带入精准编辑内容', icon: 'none' })
     },
-    async loadSessions() {
+
+    async mountLibraryFids(fids) {
+      const refs = fids.slice(0, 8).map((fid) => ({
+        id: newId('ref'),
+        url: gridUrl(fid),
+        fid,
+        label: String(fid).slice(0, 12),
+        source: 'stage',
+        kind: 'image',
+      }))
+      this.refs = refs
+      this.domain = this.domain || 'image'
+      this.drawerOpen = false
+      uni.showToast({ title: `已挂上 ${refs.length} 张参考图`, icon: 'none' })
+    },
+
+    // ─────────── 会话 ───────────
+    getSessionModality(s) {
+      if (!s) return 'image'
+      const m = String(s.last_mode || s.lastMode || s.type || '').toLowerCase()
+      if (m === 'chat') return 'chat'
+      if (m.includes('video')) return 'video'
+      if (m.includes('music') || m.includes('audio') || m.includes('song') || m.includes('bgm')) return 'music'
+      if (m.includes('portrait')) return 'image'
+      if (m.includes('image')) return 'image'
+      const title = String(s.title || '').toLowerCase()
+      if (title.includes('视频') || title.includes('运镜') || title.includes('动画')) return 'video'
+      if (title.includes('音乐') || title.includes('音频') || title.includes('歌')) return 'music'
+      if (title.includes('生图') || title.includes('图') || title.includes('画') || title.includes('扩图') || title.includes('精修') || title.includes('人像')) return 'image'
+      return 'chat'
+    },
+    async loadChatSessions() {
+      this.sessionsLoading = true
       let remote = []
       try {
         const data = await fetchChatSessions()
-        const list = Array.isArray(data) ? data : (data && data.sessions) || []
-        remote = list
+        remote = Array.isArray(data) ? data : (data && data.sessions) || []
       } catch (e) {
         remote = []
       }
@@ -1979,66 +1361,85 @@ export default {
         const raw = uni.getStorageSync('chat_session_list')
         if (Array.isArray(raw)) local = raw
       } catch (e) {}
-      // 本地空壳会话（无消息预览且标题为欢迎语）不合并展示
-      const cleanedLocal = local.filter((s) => {
-        if (!s || !s.sessionId) return false
-        if (s._draft) return false
-        return true
-      })
-      this.sessions = this.dedupeSessions([...remote, ...cleanedLocal])
+      this.sessions = this.dedupeSessions([...remote, ...local])
       this.persistSessionsLocal()
+      this.sessionsLoading = false
+    },
+    typeFromMode(mode) {
+      return this.getSessionModality({ last_mode: mode })
+    },
+    dedupeSessions(list) {
+      const seen = {}
+      const out = []
+      ;(list || []).forEach((s) => {
+        if (!s) return
+        const id = s.id || s.sessionId
+        if (!id || seen[id]) return
+        seen[id] = true
+        out.push({
+          sessionId: id,
+          id,
+          type: this.getSessionModality(s),
+          title: s.title || '',
+          productCount: s.product_count || s.productCount || 0,
+          updatedAt: s.updated_at || s.updatedAt || s.created_at || s.createdAt || Date.now(),
+          preview: s.preview || '',
+        })
+      })
+      out.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+      return out
     },
     persistSessionsLocal() {
       try {
         uni.setStorageSync('chat_session_list', this.sessions)
       } catch (e) {}
     },
-    newSession() {
-      this.drawerOpen = false
-      this.mainView = 'operate'
-      this.inStudioDesk = false
-      this.domain = 'chat'
-      this.bindSession(true)
-      this.chatList = []
-      this.inputPrompt = ''
-      this.slotImages = []
-      this.currentDeskRun = null
+    sessionTypeOfDomain() {
+      return this.domain
     },
-    openSession(s) {
-      this.drawerOpen = false
-      this.mainView = 'operate'
-      this.currentSessionId = s.sessionId
-      if (s.type && s.type !== 'quick' && s.type !== 'chat') {
-        this.domain = s.type
-        this.inStudioDesk = true
-      } else {
-        this.domain = 'chat'
-        this.inStudioDesk = false
+    defaultTitle(type) {
+      const map = { chat: '对话会话', image: '生图会话', video: '视频会话', music: '音乐会话' }
+      return map[type] || '创作会话'
+    },
+    bindSession(forceNew) {
+      const type = this.sessionTypeOfDomain()
+      const inMemory = this.sessions.find((s) => s.sessionId === this.currentSessionId)
+      if (!forceNew && inMemory && inMemory.type === type) return
+      if (!forceNew) {
+        const existing = this.sessions.find((s) => s.type === type)
+        if (existing) {
+          this.currentSessionId = existing.sessionId
+          return
+        }
       }
-      this.sessionFilter = s.type || 'all'
-      this.loadChatHistory()
+      // 草稿会话
+      this.currentSessionId = `session_${type}_${Date.now()}`
+      this.chatList = []
+      this._sessionPersisted = false
     },
-    confirmDeleteSession(s) {
-      uni.showModal({
-        title: '删除会话',
-        content: '确定删除该历史对话？',
-        confirmColor: '#DC2626',
-        success: async (res) => {
-          if (!res.confirm) return
-          this.sessions = this.sessions.filter((x) => x.sessionId !== s.sessionId)
-          this.persistSessionsLocal()
-          try {
-            await deleteChatSession(s.sessionId)
-          } catch (e) {}
-          if (this.currentSessionId === s.sessionId) {
-            this.currentSessionId = ''
-            this.chatList = []
-            this.bindSession(true)
-          }
-        },
-      })
+    persistCurrentSession(title) {
+      if (!this.currentSessionId) return
+      const type = this.sessionTypeOfDomain()
+      const meta = {
+        sessionId: this.currentSessionId,
+        type,
+        title: (title || this.defaultTitle(type)).slice(0, 50),
+        updatedAt: Date.now(),
+      }
+      this.sessions = this.dedupeSessions([meta, ...this.sessions.filter((s) => s.sessionId !== meta.sessionId)])
+      this.persistSessionsLocal()
+      if (this._sessionPersisted) {
+        createChatSession({ id: meta.sessionId, title: meta.title }).catch(() => {})
+        return
+      }
+      this._sessionPersisted = true
+      createChatSession({ id: meta.sessionId, title: meta.title }).catch(() => {})
     },
-
+    formatNow() {
+      const d = new Date()
+      const pad = (n) => String(n).padStart(2, '0')
+      return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+    },
     async loadChatHistory() {
       if (!this.currentSessionId) return
       try {
@@ -2057,6 +1458,130 @@ export default {
         }
       } catch (e) {}
     },
+    async onSelectSession(s) {
+      if (!s || !s.sessionId) return
+      this.currentSessionId = s.sessionId
+      const t = s.type || 'chat'
+      if (t === 'chat') this.domain = 'chat'
+      else if (t === 'image') { this.domain = 'image'; this.imageSub = 'standard' }
+      else if (t === 'portrait') { this.domain = 'image'; this.imageSub = 'portrait' }
+      else if (t === 'video') this.domain = 'video'
+      else if (t === 'music') this.domain = 'music'
+      this.drawerOpen = false
+      this.pendingEdit = null
+      this.canvasPinnedId = ''
+      this.resetParamsForModel()
+      await this.loadChatHistory()
+    },
+    async newSession() {
+      this.drawerOpen = false
+      this.chatList = []
+      this.refs = []
+      this.pendingEdit = null
+      this.canvasPinnedId = ''
+      this.bigImageMode = true
+      this.resetParamsForModel()
+      this.bindSession(true)
+    },
+    paramDisplayShort(f) {
+      const v = this.paramValueOf(f)
+      if (v === undefined || v === null || v === '') return f.label || f.key
+      const raw = String(this.paramDisplay(f))
+      return raw.includes('·') ? raw.split('·')[1].trim() : raw
+    },
+    paramPrefix(f) {
+      if (!f) return ''
+      const key = (f.key || '').toLowerCase()
+      if (['aspect_ratio', 'ratio', 'ar'].includes(key)) return '画幅'
+      if (['resolution', 'size', 'dimension', 'quality', 'scale'].includes(key)) return '画质'
+      if (['duration'].includes(key)) return '时长'
+      if (['style'].includes(key)) return '风格'
+      if (f.label) {
+        const l = f.label.replace(/[:：]/g, '').trim()
+        return l.length > 3 ? l.slice(0, 3) : l
+      }
+      return key
+    },
+    paramFieldIcon(f) {
+      if (!f) return 'sliders'
+      const key = (f.key || '').toLowerCase()
+      if (['aspect_ratio', 'ratio', 'ar'].includes(key)) return 'ratio'
+      if (['resolution', 'size', 'dimension', 'quality'].includes(key)) return 'hd'
+      if (['duration'].includes(key)) return 'history'
+      return 'sliders'
+    },
+    openRefAddOptions() {
+      uni.showActionSheet({
+        itemList: ['从素材库选择素材', '从手机相册/拍照上传'],
+        success: (res) => {
+          if (res.tapIndex === 0) {
+            this.openPicker()
+          } else if (res.tapIndex === 1) {
+            this.chooseLocalImage()
+          }
+        }
+      })
+    },
+    itemKindIconName(msg) {
+      const k = (msg.result && msg.result.kind) || 'chat'
+      if (k === 'video') return 'video'
+      if (k === 'audio') return 'audio'
+      if (k === 'portrait') return 'portrait'
+      if (k === 'image') return 'image'
+      return 'chat'
+    },
+    onReusePrompt(prompt) {
+      if (!prompt) return
+      this.inputPrompt = prompt
+      this.libraryOpen = false
+      uni.showToast({ title: '已填入配方提示词', icon: 'none' })
+    },
+    onUseAsRefFromLibrary(item) {
+      if (!item || !item.url) return
+      this.addRef({
+        url: item.url,
+        label: (item.prompt || '创作产物').slice(0, 10),
+        source: 'library',
+        kind: item.kind || 'image'
+      })
+      this.libraryOpen = false
+      this.bigImageMode = true
+      uni.showToast({ title: '已挂载为参考图', icon: 'none' })
+    },
+    onPreviewLibraryItem(item) {
+      if (!item || !item.url) return
+      this.openLightbox(item.url, item.kind || 'image', item.prompt || '创作作品')
+    },
+    async onDeleteSession(s) {
+      if (!s || !s.sessionId) return
+      try {
+        await deleteChatSession(s.sessionId)
+      } catch (e) {}
+      this.sessions = this.sessions.filter((x) => x.sessionId !== s.sessionId)
+      this.persistSessionsLocal()
+      try { uni.removeStorageSync('chat_messages_' + s.sessionId) } catch (e) {}
+      if (this.currentSessionId === s.sessionId) {
+        this.chatList = []
+        this.currentSessionId = ''
+        this.bindSession(true)
+      }
+      uni.showToast({ title: '已删除', icon: 'none' })
+    },
+    confirmClearChat() {
+      if (!this.chatList.length) return
+      uni.showModal({
+        title: '清空会话',
+        content: '清空当前会话的消息记录？',
+        confirmColor: '#DC2626',
+        success: async (res) => {
+          if (!res.confirm) return
+          this.chatList = []
+          try { uni.removeStorageSync('chat_messages_' + this.currentSessionId) } catch (e) {}
+          try { await clearChatMessages(this.currentSessionId) } catch (e) {}
+          uni.showToast({ title: '已清空', icon: 'none' })
+        },
+      })
+    },
     scrollToBottom() {
       this.$nextTick(() => {
         if (this.chatList.length) {
@@ -2065,3755 +1590,2411 @@ export default {
         }
       })
     },
-    confirmClearChat() {
-      uni.showModal({
-        title: '清空会话',
-        content: '确定清空当前对话记录？',
-        confirmColor: '#DC2626',
-        success: async (res) => {
-          if (!res.confirm) return
-          this.chatList = []
-          uni.removeStorageSync('chat_messages_' + this.currentSessionId)
-          try {
-            await clearChatMessages(this.currentSessionId)
-          } catch (e) {}
-          uni.showToast({ title: '已清空', icon: 'none' })
-        },
-      })
+
+    // ─────────── 域 / 子模式 ───────────
+    async switchDomain(id) {
+      if (this.domain === id) return
+      this.domain = id
+      this.showAtPicker = false
+      this.canvasPinnedId = ''
+      this.historyOpen = true
+      this.refsOpen = true
+      this.bigImageMode = true
+      // 默认模态继承：图→图生图；视频→文生视频；切换音频时给一个默认
+      if (id === 'image' && !this.currentImageModelId && !this.currentPortraitModelId) this.applyDefaultModels()
+      this.resetParamsForModel()
+      this.bindSession(false)
+      await this.loadChatHistory()
+    },
+    setImageSub(sub) {
+      if (this.imageSub === sub) return
+      this.imageSub = sub
+      this.canvasPinnedId = ''
+      this.resetParamsForModel()
+      this.bindSession(false)
+      this.loadChatHistory()
+    },
+    setMusicMode(mode) {
+      if (this.musicMode === mode) return
+      this.musicMode = mode
+      this.canvasPinnedId = ''
+      this.resetParamsForModel()
     },
 
-    pickSlotImage(idx) {
-      const isVideo = this.currentMode === 'video_to_music'
-      if (isVideo) {
-        uni.chooseVideo({
-          sourceType: ['album', 'camera'],
-          compressed: true,
-          success: (res) => {
-            if (res.tempFilePath) {
-              const copy = [...this.slotImages]
-              copy[idx] = res.tempFilePath
-              this.slotImages = copy
-            }
-          },
+    // ─────────── 参考图管理 ───────────
+    addRef(ref) {
+      if (!ref || !ref.url) return
+      this.refs = [...this.refs, { id: newId('ref'), ...ref }]
+    },
+    removeRef(i) {
+      const list = [...this.refs]
+      const removed = list.splice(i, 1)[0]
+      this.refs = list
+      // 提示词里的 @图N 顺序前移（保留用户文字本意）
+      const removedNo = i + 1
+      if (this.inputPrompt) {
+        let text = this.inputPrompt
+        text = text.replace(new RegExp('@图' + removedNo + '(?!\\d)', 'g'), '')
+        text = text.replace(/@图(\d+)/g, (m, d) => {
+          const n = Number(d)
+          return n > removedNo ? `@图${n - 1}` : m
         })
+        this.inputPrompt = text
+      }
+      if (removed) uni.showToast({ title: `已移除 ${removed.label || '参考图'}`, icon: 'none' })
+    },
+    openRefLightbox(i) {
+      const r = this.refs[i]
+      if (!r) return
+      this.refLightbox = { show: true, url: r.url, kind: r.kind || 'image', label: `图${i + 1} · ${r.label || ''}` }
+    },
+    async saveLightboxToAlbum() {
+      const u = this.refLightbox.url
+      if (!u) return
+      try {
+        await downloadAndSaveToAlbum({ url: u, fileName: 'ML_REF_' + Date.now() + '.jpg', isVideo: this.refLightbox.kind === 'video' })
+      } catch (e) {
+        uni.showToast({ title: e.message || '保存失败', icon: 'none' })
+      }
+    },
+    openRefLightboxByUrl(url, label) {
+      if (!url) return
+      this.refLightbox = { show: true, url, kind: 'image', label: label || '参考图' }
+    },
+
+    // ─────────── 3D 朝向截图（替换 / 新增） ───────────
+    resetModel3d() {
+      this.products3d = []
+      this.products3dLoading = false
+      this.productPickerVisible = false
+      this.selectedProduct = null
+      this.modelYaw = 0
+      this.modelPitch = 0
+      this.modelSnapshotUrl = ''
+      this.modelSnapshotError = ''
+      try { uni.removeStorageSync('model3d_result') } catch (e) {}
+    },
+    productPreview(p) {
+      if (!p) return ''
+      const u = p.preview_url || ''
+      if (!u) return ''
+      if (/^https?:\/\//i.test(u)) return u
+      return store.getServerUrl() + (u.startsWith('/') ? u : '/' + u)
+    },
+    async openProductPicker() {
+      this.productPickerVisible = true
+      if (this.products3d.length || this.products3dLoading) return
+      this.products3dLoading = true
+      try {
+        const data = await fetchProductPresets()
+        const list = Array.isArray(data) ? data : (data && (data.data || data.items)) || []
+        this.products3d = list.filter((p) => p && p.model_url)
+      } catch (e) {
+        uni.showToast({ title: (e && e.message) || '单品加载失败', icon: 'none' })
+      } finally {
+        this.products3dLoading = false
+      }
+    },
+    selectProduct(p) {
+      if (!p || !p.model_url) {
+        uni.showToast({ title: '该单品没有 3D 模型', icon: 'none' })
         return
       }
-      uni.chooseImage({
-        count: 1,
-        sizeType: ['compressed'],
-        sourceType: ['album', 'camera'],
-        success: (res) => {
-          if (res.tempFilePaths && res.tempFilePaths[0]) {
-            const copy = [...this.slotImages]
-            copy[idx] = res.tempFilePaths[0]
-            this.slotImages = copy
+      if (!this.selectedProduct || this.selectedProduct.id !== p.id) {
+        this.modelSnapshotUrl = ''
+        this.modelSnapshotError = ''
+        this.modelYaw = Number(p.facing) || 0
+        this.modelPitch = 0
+      }
+      this.selectedProduct = p
+      this.productPickerVisible = false
+    },
+    openModel3d() {
+      const p = this.selectedProduct
+      if (!p || !p.model_url) {
+        this.openProductPicker()
+        return
+      }
+      const raw = p.model_url
+      const abs = /^https?:\/\//i.test(raw) ? raw : store.getServerUrl() + (raw.startsWith('/') ? raw : '/' + raw)
+      const q = [
+        'src=' + encodeURIComponent(abs),
+        'name=' + encodeURIComponent(p.name || ''),
+        'id=' + encodeURIComponent(p.id || ''),
+        'yaw=' + encodeURIComponent(String(this.modelYaw || 0)),
+        'pitch=' + encodeURIComponent(String(this.modelPitch || 0)),
+      ]
+      uni.navigateTo({ url: '/pages/model3d/model3d?' + q.join('&') })
+    },
+    applyModel3dResult() {
+      let res = null
+      try {
+        res = uni.getStorageSync('model3d_result')
+        if (res) uni.removeStorageSync('model3d_result')
+      } catch (e) {}
+      if (!res || !res.dataUrl) return
+      const cur = this.selectedProduct
+      if (cur && res.productId && cur.id && res.productId !== cur.id) return
+      if (!cur && res.productId) {
+        const hit = this.products3d.find((p) => p && p.id === res.productId)
+        if (hit) this.selectedProduct = hit
+      }
+      this.modelSnapshotUrl = res.dataUrl
+      this.modelYaw = Number(res.yaw) || 0
+      this.modelPitch = Number(res.pitch) || 0
+      this.modelSnapshotError = ''
+      this.ensureOrientationClause()
+      const idx = this.refs.findIndex((r) => r.source === '3d_snapshot')
+      const ref = {
+        id: newId('ref'),
+        url: res.dataUrl,
+        label: (res.productName || (this.selectedProduct && this.selectedProduct.name) || '家具') + ' · 3D 朝向',
+        source: '3d_snapshot',
+        kind: 'image',
+      }
+      if (idx >= 0) {
+        const list = [...this.refs]
+        list.splice(idx, 1, ref)
+        this.refs = list
+      } else {
+        this.addRef(ref)
+      }
+      uni.showToast({ title: '3D 朝向已就位', icon: 'none' })
+    },
+    ensureOrientationClause() {
+      if (!this.needs3dModel) return
+      if (!this.inputPrompt || !this.inputPrompt.trim()) return
+      const yaw = Number(this.modelYaw) || 0
+      const pitch = Number(this.modelPitch) || 0
+      const clause = `朝向与家具参考图一致，左右${yaw}度，上下${pitch}度。`
+      const re = /朝向与家具参考图一致，左右\s*-?\d+度，上下\s*-?\d+度。/
+      let text = this.inputPrompt.trim()
+      text = re.test(text) ? text.replace(re, clause) : text + ' ' + clause
+      this.inputPrompt = text
+    },
+
+    openPicker() {
+      this.pickerVisible = true
+      if (!this.pickerItems.length) this.reloadPicker()
+    },
+    async reloadPicker() {
+      this.pickerPage = 1
+      this.pickerHasMore = true
+      this.pickerItems = []
+      await this.loadPicker(true)
+    },
+    async loadMorePicker() {
+      if (!this.pickerHasMore || this.pickerLoading) return
+      this.pickerPage += 1
+      await this.loadPicker(false)
+    },
+    async loadPicker(reset) {
+      this.pickerLoading = true
+      try {
+        const data = await fetchAssets({ page: this.pickerPage, pageSize: this.pickerPageSize, keyword: this.pickerKeyword, tab: 'image' })
+        const items = (data && data.items) || []
+        this.pickerItems = reset ? items : [...this.pickerItems, ...items]
+        this.pickerHasMore = items.length >= this.pickerPageSize
+      } catch (e) {
+        uni.showToast({ title: (e && e.message) || '素材加载失败', icon: 'none' })
+      } finally {
+        this.pickerLoading = false
+      }
+    },
+    mountLibraryRef(item) {
+      const fid = item && item.fid
+      if (!fid) return
+      this.addRef({
+        url: gridUrl(fid),
+        fid,
+        label: item.fileName || String(fid).slice(0, 12),
+        source: 'stage',
+        kind: 'image',
+      })
+    },
+    async chooseLocalImage() {
+      try {
+        const res = await new Promise((resolve, reject) => {
+          uni.chooseImage({
+            count: 1,
+            sizeType: ['compressed'],
+            sourceType: ['album', 'camera'],
+            success: resolve,
+            fail: reject,
+          })
+        })
+        const path = res && res.tempFilePaths && res.tempFilePaths[0]
+        if (!path) return
+        uni.showLoading({ title: '上传中…', mask: true })
+        try {
+          const uploaded = await uploadRefImages([path])
+          const u = uploaded && uploaded[0]
+          if (u && u.url) {
+            this.addRef({ url: u.url, label: '本地上传', source: 'stage', kind: 'image' })
+            this.pickerVisible = false
+          } else {
+            throw new Error('上传未返回地址')
           }
-        },
-      })
-    },
-    removeSlotImage(idx) {
-      const copy = [...this.slotImages]
-      copy.splice(idx, 1)
-      this.slotImages = copy
-    },
-    addMultiSlotImage() {
-      const max = this.slotPickMax - this.slotImages.length
-      if (max <= 0) return
-      uni.chooseImage({
-        count: max,
-        sizeType: ['compressed'],
-        sourceType: ['album', 'camera'],
-        success: (res) => {
-          const paths = (res.tempFilePaths || []).slice(0, max)
-          this.slotImages = [...this.slotImages, ...paths]
-        },
-      })
+        } finally {
+          uni.hideLoading()
+        }
+      } catch (e) {
+        uni.hideLoading()
+        const msg = (e && e.errMsg) || (e && e.message) || '选择失败'
+        if (!/cancel/i.test(msg)) uni.showToast({ title: msg, icon: 'none' })
+      }
     },
 
-    enterDesk(dom) {
-      // 独立交付模式：所有 AI 能力跳转到独立页面（对话页 / 精准编辑页），
-      // 不再走工作台内联逻辑（共用层裁剪后该路径不可用）。
-      const target = dom === 'chat' || !dom ? '/pages/chat/chat' : '/pages/edit/edit?domain=' + encodeURIComponent(dom || 'image')
-      uni.navigateTo({ url: target })
+    // ─────────── @ 联想 ───────────
+    toggleAtPicker() {
+      if (!this.refs.length) {
+        uni.showToast({ title: '先挂图，再用 @ 引用它', icon: 'none' })
+        return
+      }
+      this.showAtPicker = !this.showAtPicker
     },
-    // 元素标签对话独立入口
-    openChatPage() {
-      uni.navigateTo({ url: '/pages/chat/chat' })
-    },
-    exitStudioDesk() {
-      this.inStudioDesk = false
-      this.domain = 'chat'
-      this.bindSession(false)
-    },
-    switchDeskDomain(dom) {
-      this.domain = dom
-      this.showDomainDropdown = false
-      this.bindSession(false)
-      this.loadCapabilities()
-      this.currentDeskRun = null
-    },
-    resetDeskState() {
-      this.slotImages = []
-      this.inputPrompt = ''
-      this.currentDeskRun = null
-      this.showAtPicker = false
-    },
-    openParamSheet() {
-      this.paramSheetOpen = true
-    },
-    switchSubMode(id) {
-      if (this.domain === 'video') this.videoMode = id
-      else if (this.domain === 'music') {
-        const next = id === 'text_to_music' ? 'text_to_bgm' : id
-        this.musicMode = next
-        this.currentMusicModelId = next === 'text_to_song' ? 'doubao_song_v5' : 'doubao_bgm_v5'
-        this.applySchemaDefaults(this.currentModelInfo)
-      } else if (this.domain === 'portrait') {
-        this.portraitMode = id
-        if (id === 'virtual_library') this.loadPortraitLibrary()
-      } else if (this.domain === 'image') this.imageMode = id
-
-      // 如果切到了纯文生模式，清空参考素材与@提示，杜绝逻辑冲突
-      if (this.isTextOnlyMode || this.isLibraryMode) {
-        this.slotImages = []
+    onPromptInput(e) {
+      const val = String((e && e.detail && e.detail.value) || this.inputPrompt || '')
+      this.inputPrompt = val
+      if (/@$|@$/.test(val)) {
+        this.showAtPicker = this.refs.length > 0
+      } else if (this.showAtPicker && !val.includes('@')) {
         this.showAtPicker = false
       }
     },
-    switchToImageMode() {
-      if (this.domain === 'portrait') this.portraitMode = 'image_to_portrait'
-      else if (this.domain === 'image') this.imageMode = 'image_to_image'
-      else if (this.domain === 'video') this.videoMode = 'image_to_video'
-      else if (this.domain === 'music') return
-      this.chooseSlotMedia()
+    onPromptBlur() {
+      setTimeout(() => { this.showAtPicker = false }, 200)
     },
-    ensureImageModeOnMediaAdded() {
-      if (this.isTextOnlyMode) {
-        if (this.domain === 'music') return
-        if (this.domain === 'portrait') this.portraitMode = 'image_to_portrait'
-        else if (this.domain === 'image') this.imageMode = 'image_to_image'
-        else if (this.domain === 'video') this.videoMode = 'image_to_video'
-        uni.showToast({ title: '已自动切换为图生/参考模式', icon: 'none' })
-      }
+    insertAtRef(i) {
+      const tag = `@图${i + 1} `
+      const text = this.inputPrompt || ''
+      const idx = text.lastIndexOf('@')
+      this.inputPrompt = idx >= 0 ? text.slice(0, idx) + tag : text + tag
+      this.showAtPicker = false
     },
-    portraitStatusText(status) {
-      if (status === 'Active') return '可用'
-      if (status === 'Failed') return '失败'
-      return '处理中'
-    },
-    portraitChipLabel(asset) {
-      const group = (asset && asset.groupName) || '角色'
-      const name = asset && asset.name ? String(asset.name) : ''
-      if (!name || name === group) return group
-      return group + ' · ' + name
-    },
-    stopPortraitRefresh() {
-      if (this._portraitTimer) {
-        clearTimeout(this._portraitTimer)
-        this._portraitTimer = 0
-      }
-    },
-    schedulePortraitRefresh() {
-      this.stopPortraitRefresh()
-      const pending = (this.portraitLibraryGroups || []).some((g) =>
-        (g.assets || []).some((a) => a.status === 'Processing')
-      )
-      if (!pending) return
-      if (this.domain !== 'portrait' && this.domain !== 'video') return
-      this._portraitTimer = setTimeout(() => {
-        this.loadPortraitLibrary()
-      }, 8000)
-    },
-    async loadPortraitLibrary() {
+
+    // ─────────── 提示词优化 ───────────
+    async optimizePromptAction() {
+      const raw = this.inputPrompt.trim()
+      if (!raw || this.optimizingPrompt) return
+      this.optimizingPrompt = true
+      this.promptBeforeOptimize = raw
       try {
-        const data = await fetchPortraitLibrary()
-        this.portraitConsented = !!(data && data.consented)
-        this.portraitLibraryGroups = (data && data.groups) || []
-        const alive = new Set(this.activePortraitAssets.map((a) => a.id))
-        this.selectedPortraitAssets = this.selectedPortraitAssets.filter((a) => alive.has(a.id))
-        this.schedulePortraitRefresh()
+        const data = await optimizePrompt({ prompt: raw, modelId: this.currentModelInfo.model_code || this.currentModelInfo.id, mode: this.currentMode })
+        const out = (data && (data.optimized_prompt || data.optimizedPrompt || data.prompt || data.result)) || ''
+        if (out) this.inputPrompt = String(out).trim()
+        else uni.showToast({ title: '未返回优化结果', icon: 'none' })
       } catch (e) {
-        uni.showToast({ title: (e && e.message) || '人像库加载失败', icon: 'none' })
+        uni.showToast({ title: (e && e.message) || '优化失败', icon: 'none' })
+        this.inputPrompt = raw
+      } finally {
+        this.optimizingPrompt = false
       }
     },
-    async confirmPortraitConsent() {
-      try {
-        await acceptPortraitConsent()
-        this.portraitConsented = true
-      } catch (e) {
-        uni.showToast({ title: (e && e.message) || '确认失败', icon: 'none' })
-      }
+
+    // ─────────── 预览 / 发送 ───────────
+    /** 当前生效参数：schema 默认值 + 用户改动 + 规则引擎约束，去掉空值。 */
+    resolvedParams() {
+      const raw = this.ruleEval && this.ruleEval.params ? { ...this.ruleEval.params } : { ...(this.schemaParams || {}) }
+      Object.keys(raw).forEach((k) => {
+        if (raw[k] === undefined || raw[k] === null || raw[k] === '') delete raw[k]
+      })
+      return raw
     },
-    async createPortraitGroupLocal() {
-      const name = String(this.portraitGroupName || '').trim()
-      if (!name) {
-        uni.showToast({ title: '请填写角色名称', icon: 'none' })
+    buildGenBody() {
+      const recipe = this.inputPrompt.trim()
+      const imageUrls = this.refs.filter((r) => (r.kind || 'image') === 'image').map((r) => r.url).filter(Boolean)
+      const videoUrls = this.refs.filter((r) => r.kind === 'video').map((r) => r.url).filter(Boolean)
+      const audioUrls = this.refs.filter((r) => r.kind === 'audio').map((r) => r.url).filter(Boolean)
+      const params = this.resolvedParams()
+      const extras = { ...params, mode: this.activeMode, genMode: this.activeMode }
+      const base = {
+        prompt: recipe,
+        model: this.currentModelInfo.model_code || this.currentModelInfo.id || undefined,
+        genMode: this.activeMode,
+        mode: this.activeMode,
+        params,
+        extras,
+      }
+      // 兼容旧顶层字段：仍以契约参数为准，不再写死任何默认
+      if (params.ratio != null) base.ratio = params.ratio
+      if (params.size != null) base.size = params.size
+      if (params.duration != null) base.duration = Number(params.duration)
+      if (params.aspect_ratio != null) base.aspect_ratio = params.aspect_ratio
+      if (imageUrls.length) base.imageUrls = imageUrls
+      if (videoUrls.length) base.videoUrls = videoUrls
+      if (audioUrls.length) base.audioUrls = audioUrls
+      const p = this.pendingEdit
+      if (p && p.kind === 'global') {
+        base.globalOp = p.op
+        if (p.style) base.style = p.style
+        if (p.scale) base.scale = Number(p.scale)
+        if (p.intensity != null) base.strengthLevel = p.intensity
+        if (p.globalParams && typeof p.globalParams === 'object') Object.assign(base, p.globalParams)
+      }
+      return base
+    },
+    genRoute() {
+      if (this.domain === 'chat') return '/gen/chat'
+      if (this.domain === 'image') return '/gen/images'
+      if (this.domain === 'video') return '/gen/videos'
+      return '/gen/audio'
+    },
+    buildEditBody() {
+      const p = this.pendingEdit || {}
+      const params = this.resolvedParams()
+      const body = {
+        op: p.op,
+        region: p.region,
+        prompt: this.inputPrompt.trim(),
+        productName: p.productName,
+        model: p.model || (this.currentModelInfo && this.currentModelInfo.model_code) || undefined,
+        assetFid: p.sourceFid || undefined,
+        params,
+        extras: { ...params },
+      }
+      // 精修链只认这些出图参数；其余 schema 参数随 extras 一起上车，避免客户端另写一份
+      if (params.ratio != null) body.ratio = params.ratio
+      if (params.size != null) body.size = params.size
+      if (params.light_mode != null) body.light_mode = params.light_mode
+      if (params.kelvin != null) body.kelvin = Number(params.kelvin)
+      if (params.target_style != null) body.targetStyle = params.target_style
+      if (params.clarity != null) body.targetClarity = params.clarity
+      if (params.remove_watermark != null) body.removeWatermark = !!params.remove_watermark
+      if (p.op === 'insert' && p.productImageUrl) body.productImage = p.productImageUrl
+      if (p.op === 'replace' || p.op === 'add') {
+        const refImage = this.modelSnapshotUrl || p.refImageUrl
+        if (refImage) body.refImage = refImage
+        if (this.selectedProduct) body.productName = this.selectedProduct.name
+      }
+      if (p.op === 'expand') {
+        if (p.expandRatios) body.expandRatios = p.expandRatios
+        if (p.expandRatio) body.expandRatio = p.expandRatio
+      }
+      if (this.needs3dModel && this.selectedProduct) {
+        const raw = this.selectedProduct.model_url || ''
+        const abs = /^https?:\/\//i.test(raw) ? raw : store.getServerUrl() + (raw.startsWith('/') ? raw : '/' + raw)
+        body.glb = { yaw: this.modelYaw, pitch: this.modelPitch, modelUrl: abs }
+      } else if (typeof p.yaw === 'number') {
+        body.glb = { yaw: p.yaw, pitch: p.pitch || 0 }
+      }
+      if (p.gapPct != null) body.gapPct = p.gapPct
+      if (p.intensity != null) body.strengthLevel = p.intensity
+      if (p.style) body.style = p.style
+      if (p.targetClarity) body.targetClarity = p.targetClarity
+      return body
+    },
+    openRequestPreview() {
+      if (!this.inputPrompt.trim()) {
+        uni.showToast({ title: '请先写一句话', icon: 'none' })
         return
       }
-      try {
-        await createPortraitGroup(name)
-        this.portraitGroupName = ''
-        await this.loadPortraitLibrary()
-      } catch (e) {
-        uni.showToast({ title: (e && e.message) || '创建失败', icon: 'none' })
-      }
-    },
-    removePortraitGroup(group) {
-      if (!group) return
-      uni.showModal({
-        title: '删除角色组',
-        content: '删除后火山侧素材组也会去掉，且不能恢复。',
-        success: async (res) => {
-          if (!res.confirm) return
-          try {
-            await deletePortraitGroup(group.id)
-            this.selectedPortraitAssets = this.selectedPortraitAssets.filter((a) => a.groupId !== group.id)
-            await this.loadPortraitLibrary()
-          } catch (e) {
-            uni.showToast({ title: (e && e.message) || '删除失败', icon: 'none' })
-          }
-        },
-      })
-    },
-    removePortraitAsset(asset) {
-      if (!asset) return
-      uni.showModal({
-        title: '删除素材',
-        content: '删除后不能恢复。',
-        success: async (res) => {
-          if (!res.confirm) return
-          try {
-            await deletePortraitAsset(asset.id)
-            this.selectedPortraitAssets = this.selectedPortraitAssets.filter((a) => a.id !== asset.id)
-            await this.loadPortraitLibrary()
-          } catch (e) {
-            uni.showToast({ title: (e && e.message) || '删除失败', icon: 'none' })
-          }
-        },
-      })
-    },
-    pickPortraitFile(group) {
-      if (!group) return
-      uni.chooseImage({
-        count: 1,
-        sizeType: ['original'],
-        sourceType: ['album', 'camera'],
-        success: async (res) => {
-          const filePath = (res.tempFilePaths || [])[0]
-          if (!filePath) return
-          uni.showLoading({ title: '上传中', mask: true })
-          try {
-            await uploadPortraitAsset(group.id, filePath, 'portrait.jpg')
-            await this.loadPortraitLibrary()
-            uni.showToast({ title: '已提交，等待入库', icon: 'none' })
-          } catch (e) {
-            uni.showToast({ title: (e && e.message) || '上传失败', icon: 'none' })
-          } finally {
-            uni.hideLoading()
-          }
-        },
-      })
-    },
-    isPortraitSelected(id) {
-      return this.selectedPortraitAssets.some((a) => a.id === id)
-    },
-    togglePortraitChip(asset) {
-      if (!asset) return
-      const idx = this.selectedPortraitAssets.findIndex((a) => a.id === asset.id)
-      if (idx >= 0) this.selectedPortraitAssets.splice(idx, 1)
-      else this.selectedPortraitAssets.push(asset)
-      if (this.selectedPortraitAssets.length) this.ensureSeedanceModel()
-    },
-    ensureSeedanceModel() {
-      const models = (((this.studioCatalog || {}).video || {}).models) || []
-      const seedance = models.filter((m) => /seedance/i.test(`${m.id} ${m.model_code || ''} ${m.name || ''}`))
-      if (!seedance.length) {
-        uni.showToast({ title: '没有可用的 Seedance 模型', icon: 'none' })
+      if (this.refError) {
+        uni.showToast({ title: this.refError, icon: 'none' })
         return
       }
-      if (!seedance.some((m) => m.id === this.currentVideoModelId)) {
-        this.currentVideoModelId = seedance[0].id
-        this.applySchemaDefaults(seedance[0])
+      if (this.needs3dModel && !this.modelSnapshotUrl) {
+        uni.showToast({ title: '请先选择家具单品并完成 3D 朝向截图', icon: 'none' })
+        return
+      }
+      this.ensureOrientationClause()
+      if (this.pendingEdit && this.pendingEdit.kind !== 'global') {
+        this.previewKind = 'edit'
+        this.previewPayload = this.buildEditBody()
+        this.previewExtraNotes = this.refs.map((r, i) => `图${i + 1} · ${r.label}（来源：${this.refSourceLabel(r.source)}）`)
+      } else {
+        this.previewKind = this.domain === 'chat' ? 'chat' : 'gen'
+        this.previewPayload = this.buildGenBody()
+        if (this.domain === 'chat') this.previewPayload.modality = 'chat'
+        else if (this.domain === 'music') this.previewPayload.modality = 'audio'
+        else this.previewPayload.modality = this.domain
+        this.previewExtraNotes = this.refs.map((r, i) => `图${i + 1} · ${r.label}（来源：${this.refSourceLabel(r.source)}）`)
+      }
+      this.previewVisible = true
+    },
+    refSourceLabel(source) {
+      if (source === 'stage') return '参考图收纳条'
+      if (source === '3d_snapshot') return '3D 朝向截图'
+      if (source === 'product') return '产品参考图'
+      return '参考图'
+    },
+    async confirmAndSend() {
+      this.previewVisible = false
+      await this.sendMessage({ force: true })
+    },
+    async sendMessage(opts) {
+      if (this.sending) return
+      const recipe = this.inputPrompt.trim()
+      if (!recipe) {
+        uni.showToast({ title: '请先描述你的创作想法', icon: 'none' })
+        return
+      }
+      if (this.needs3dModel && !this.modelSnapshotUrl) {
+        uni.showToast({ title: '请先选择家具单品并完成 3D 朝向截图', icon: 'none' })
+        return
+      }
+      this.ensureOrientationClause()
+      const isPreciseEdit = !!(this.pendingEdit && this.pendingEdit.kind !== 'global')
+      this.sending = true
+      try {
+        if (isPreciseEdit) {
+          await this.sendEditRun(recipe)
+        } else {
+          await this.sendGen(recipe)
+        }
+      } catch (e) {
+        uni.showToast({ title: (e && e.message) || '发送失败', icon: 'none' })
+      } finally {
+        this.sending = false
       }
     },
-    removeRefFromPrompt(tag) {
-      if (!this.inputPrompt || !tag) return
-      this.inputPrompt = this.inputPrompt.split(tag).join('').replace(/，\s*，/g, '，').trim()
+    buildUserMsg(recipe) {
+      const modelInfo = this.currentModelInfo
+      return {
+        id: newId('user'),
+        role: 'user',
+        prompt: recipe,
+        mode: this.currentMode,
+        modelName: modelInfo.name || '',
+        images: this.refs.map((r) => ({ url: r.url, label: r.label, source: r.source, kind: r.kind })),
+        createdAt: Date.now(),
+      }
     },
+    buildAiMsg(recipe) {
+      const precise = !!(this.pendingEdit && this.pendingEdit.kind !== 'global')
+      return {
+        id: newId('ai'),
+        role: 'assistant',
+        status: 'running',
+        progress: 12,
+        engineTitle: precise ? '精准编辑生成中…' : `${(this.currentModelInfo && this.currentModelInfo.name) || '模型'} 生成中…`,
+        prompt: '',
+        modelName: this.currentModelInfo.name || '',
+        createdAt: Date.now(),
+      }
+    },
+    persistMessage(msg) {
+      const slim = { ...msg }
+      delete slim.__b64
+      saveChatMessage(slim).catch(() => {})
+      try {
+        const cached = uni.getStorageSync('chat_messages_' + this.currentSessionId) || []
+        const arr = Array.isArray(cached) ? cached : []
+        uni.setStorageSync('chat_messages_' + this.currentSessionId, [...arr, slim].slice(-80))
+      } catch (e) {}
+    },
+
+    taskTitle(kind) {
+      if (kind === 'edit') return '精准编辑生成'
+      if (kind === 'global') return '全局编辑生成'
+      if (this.domain === 'video') return '视频生成'
+      if (this.domain === 'music') return '音频生成'
+      if (this.domain === 'image') return this.imageSub === 'portrait' ? '人像生成' : '图片生成'
+      return '对话生成'
+    },
+    trackGeneration(kind) {
+      try {
+        return aiTaskManager.trackTask({
+          title: this.taskTitle(kind),
+          type: kind || this.domain,
+          sessionId: this.currentSessionId,
+        })
+      } catch (e) {
+        return null
+      }
+    },
+    async sendGen(recipe) {
+      const body = this.buildGenBody()
+      const task = this.trackGeneration('gen')
+      this.persistCurrentSession(recipe.slice(0, 24))
+      const userMsg = { ...this.buildUserMsg(recipe), outbound: body }
+      const aiMsg = this.buildAiMsg(recipe)
+      this.chatList.push(userMsg)
+      this.chatList.push(aiMsg)
+      this.inputPrompt = ''
+      this.lastSentPrompt = recipe
+      this.scrollToBottom()
+      this.persistMessage(userMsg)
+
+      const route = this.genRoute()
+      // 音频：按 musicMode 传递
+      if (this.domain === 'music') body.mode = this.musicMode
+      const t0 = Date.now()
+      try {
+        const payload = await postGenRoute(route, body, this.domain === 'video' ? 600000 : 180000)
+        const kind = this.domain === 'music' ? 'audio' : this.domain === 'video' ? 'video' : (this.domain === 'image' ? (this.imageSub === 'portrait' ? 'portrait' : 'image') : 'text')
+        const out = this.unwrapGenResult(payload, kind)
+        aiMsg.status = 'done'
+        aiMsg.progress = 100
+        aiMsg.result = out
+        aiMsg.outbound = body
+        if (out.fid) aiMsg.derivativeFid = null
+        this.lastSentPrompt = recipe
+        if (task) aiTaskManager.finishTask(task.taskId, { outputFid: out.fid || null, outputKind: kind })
+        if (out && out.url) {
+          try {
+            const saved = uni.getStorageSync('chat_library_creations') || []
+            const item = {
+              id: aiMsg.id,
+              url: out.url,
+              kind: kind,
+              kindLabel: out.label || (kind === 'video' ? '视频' : '图片'),
+              prompt: recipe,
+              createdAt: Date.now()
+            }
+            uni.setStorageSync('chat_library_creations', [item, ...(Array.isArray(saved) ? saved : [])].slice(0, 60))
+          } catch (e) {}
+        }
+      } catch (e) {
+        aiMsg.status = 'failed'
+        aiMsg.error = (e && e.message) || '生成失败'
+        if (task) aiTaskManager.failTask(task.taskId, aiMsg.error)
+      }
+      this.chatList = [...this.chatList]
+      this.persistMessage(aiMsg)
+      this.scrollToBottom()
+    },
+    unwrapGenResult(payload, kind) {
+      const p = payload || {}
+      if (kind === 'text') {
+        const data = (p && p.data) || p
+        const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || data.text || data.content || data.reply || ''
+        return { kind: 'text', text: String(text || '（空回复）').trim() }
+      }
+      const files = Array.isArray(p.files) ? p.files : (Array.isArray(p.data && p.data.files) ? p.data.files : [])
+      const file = files[0]
+      const url = file ? (file.previewUrl ? absMediaUrl(file, null) : (file.url || file.path || '')) : ''
+      return {
+        kind,
+        url,
+        width: file && file.width,
+        height: file && file.height,
+        mime: file && file.mime,
+        label: kind === 'video' ? '生成视频' : kind === 'audio' ? '生成音频' : kind === 'portrait' ? '生成人像' : '生成图片',
+      }
+    },
+
+    async sendEditRun(recipe) {
+      const body = this.buildEditBody()
+      const task = this.trackGeneration(this.pendingEdit && this.pendingEdit.kind === 'global' ? 'global' : 'edit')
+      this.persistCurrentSession(recipe.slice(0, 24))
+      const userMsg = { ...this.buildUserMsg(recipe), outbound: { kind: 'edit', ...body } }
+      const aiMsg = this.buildAiMsg(recipe)
+      this.chatList.push(userMsg)
+      this.chatList.push(aiMsg)
+      this.inputPrompt = ''
+      this.lastSentPrompt = recipe
+      this.scrollToBottom()
+      this.persistMessage(userMsg)
+      try {
+        const res = await aiEdit(body)
+        const b64 = res && res.image && res.image.b64
+        const dataUrl = b64 ? `data:image/jpeg;base64,${b64}` : (res && res.url) || ''
+        aiMsg.status = 'done'
+        aiMsg.progress = 100
+        aiMsg.result = {
+          kind: 'image',
+          url: dataUrl,
+          label: '编辑结果',
+          width: res && res.outSize && res.outSize.outW,
+          height: res && res.outSize && res.outSize.outH,
+        }
+        aiMsg.outbound = { kind: 'edit', ...body }
+        aiMsg.derivativeFid = (res && res.derivativeId) || null
+        if (res && res.regionNote) aiMsg.regionNote = res.regionNote
+        this.pendingEdit = { ...this.pendingEdit } // 保留交接现场
+        if (task) aiTaskManager.finishTask(task.taskId, { outputKind: 'image' })
+      } catch (e) {
+        aiMsg.status = 'failed'
+        aiMsg.error = (e && e.message) || '编辑失败'
+        if (task) aiTaskManager.failTask(task.taskId, aiMsg.error)
+      }
+      this.chatList = [...this.chatList]
+      this.persistMessage(aiMsg)
+      this.scrollToBottom()
+    },
+
+    // ─────────── 消息操作 ───────────
+    isImageResult(msg) {
+      return !!(msg.result && isImageKindOf(msg.result.kind) && msg.result.url)
+    },
+    canRegen(msg) {
+      return !!(msg.result && msg.result.url) || (msg.result && msg.result.kind === 'text')
+    },
+    async retryMessage(msg) {
+      // 简化：把该 AI 消息对应的上一条用户消息重放
+      const idx = this.chatList.findIndex((m) => m.id === msg.id)
+      if (idx <= 0) return
+      const userMsg = [...this.chatList].slice(0, idx).reverse().find((m) => m.role === 'user')
+      if (!userMsg) return
+      this.inputPrompt = userMsg.prompt || ''
+      await this.sendMessage({ force: true })
+    },
+    async copyMessage(msg) {
+      const text = (msg.result && (msg.result.text || msg.result.url)) || msg.prompt || ''
+      uni.setClipboardData({ data: String(text), success: () => uni.showToast({ title: '已复制', icon: 'none' }) })
+    },
+    async mountResultAsRef(msg, targetMode) {
+      const url = msg.result && msg.result.url
+      if (!url) return
+      const wantVideo = targetMode === 'image_to_video'
+      this.domain = wantVideo ? 'video' : 'image'
+      if (!wantVideo) this.imageSub = 'standard'
+      this.canvasPinnedId = ''
+      this.addRef({ url, fid: '', label: '生成结果', source: 'stage', kind: 'image' })
+      this.resetParamsForModel()
+      await this.bindSession(false)
+      uni.showToast({ title: wantVideo ? '已挂上转视频参考图' : '已挂上图生图参考图', icon: 'none' })
+    },
+    openResultDetail(msg) {
+      if (msg.derivativeFid) {
+        // derivativeFid 是 derivatives.id；详情页按 derivative= 定位主衍生图
+        const fid = this.pendingEdit && this.pendingEdit.sourceFid
+        if (fid) uni.navigateTo({ url: `/pages/detail/detail?fid=${encodeURIComponent(fid)}&derivId=${msg.derivativeFid}` })
+        return
+      }
+      uni.showToast({ title: '暂无详情入口', icon: 'none' })
+    },
+    async saveResultToAlbum(msg) {
+      const r = msg.result
+      if (!r || !r.url) return
+      try {
+        if (r.url.startsWith('data:image')) {
+          const b64 = String(r.url).split(',')[1] || ''
+          await saveBase64ImageToAlbum(b64, `ML_GEN_${Date.now()}.jpg`)
+          return
+        }
+        await downloadAndSaveToAlbum({
+          url: r.url,
+          fileName: `ML_GEN_${Date.now()}${r.kind === 'video' ? '.mp4' : '.jpg'}`,
+          isVideo: r.kind === 'video',
+          isAudio: r.kind === 'audio',
+        })
+      } catch (e) {
+        uni.showToast({ title: (e && e.message) || '保存失败', icon: 'none' })
+      }
+    },
+    openOutbound(msg) {
+      const o = msg.outbound || {}
+      this.previewKind = o.kind === 'edit' ? 'edit' : (o.modality === 'chat' || this.domain === 'chat' ? 'chat' : 'gen')
+      this.previewPayload = { ...o }
+      if (this.previewKind === 'gen') this.previewPayload.modality = this.previewPayload.modality || this.domain
+      if (this.previewKind === 'chat') this.previewPayload.modality = 'chat'
+      this.previewExtraNotes = msg.regionNote ? [`选区说明：${msg.regionNote}`] : []
+      this.previewVisible = true
+    },
+    openLightbox(url, kind, label) {
+      this.refLightbox = { show: true, url, kind: kind || 'image', label: label || '查看大图' }
+    },
+
+    // ─────────── 提示词片段（@图N 高亮） ───────────
     promptSegments(prompt, images) {
       const text = String(prompt || '')
       if (!text) return []
       const imgByTag = {}
       ;(images || []).forEach((im, i) => {
-        const url = im && (im.url || im.img || im)
-        const label = (im && im.label) || `图片${i + 1}`
+        const url = im && (im.url || im)
+        const label = (im && im.label) || `图${i + 1}`
         imgByTag['@' + label] = url
-        imgByTag['@图片' + (i + 1)] = url
+        imgByTag['@图' + (i + 1)] = url
       })
-      if (this.slotImages && this.slotImages.length) {
-        this.slotImages.forEach((img, i) => {
-          const label = this.getSlotTagLabel(i)
-          if (!imgByTag['@' + label]) imgByTag['@' + label] = img
-          if (!imgByTag['@图片' + (i + 1)]) imgByTag['@图片' + (i + 1)] = img
-        })
-      }
-      const re = /@(图片\d+|视频\d+|音频\d+|首帧|尾帧)/g
+      const re = /@(图\d+|图片\d+|视频\d+|首帧|尾帧)/g
       const segs = []
       let last = 0
       let m = re.exec(text)
       while (m) {
         if (m.index > last) segs.push({ type: 'text', value: text.slice(last, m.index) })
         const tag = m[0]
-        segs.push({
-          type: 'ref',
-          tag,
-          label: tag.slice(1),
-          img: imgByTag[tag] || '',
-        })
+        segs.push({ type: 'ref', tag, label: tag.slice(1), img: imgByTag[tag] || '' })
         last = m.index + tag.length
         m = re.exec(text)
       }
       if (last < text.length) segs.push({ type: 'text', value: text.slice(last) })
       return segs.length ? segs : [{ type: 'text', value: text }]
     },
-    isVideoPath(p) {
-      return /\.(mp4|mov|webm|mkv|m4v)(\?|$)/i.test(String(p || ''))
-    },
-    getSlotTagLabel(sIdx) {
-      if (this.currentMode === 'first_last_frame') {
-        return sIdx === 0 ? '首帧' : '尾帧'
-      }
-      if (this.currentMode === 'video_to_music') {
-        return '视频1'
-      }
-      const path = this.slotImages[sIdx]
-      if (this.isVideoPath(path)) {
-        const n = this.slotImages.slice(0, sIdx + 1).filter((x) => this.isVideoPath(x)).length
-        return `视频${n}`
-      }
-      const n = this.slotImages.slice(0, sIdx + 1).filter((x) => !this.isVideoPath(x)).length
-      return `图片${n}`
-    },
-    onRefChipClick(sIdx) {
-      const label = this.getSlotTagLabel(sIdx)
-      const tag = `@${label}`
-      const isVideo = this.domain === 'video'
-      const itemList = isVideo
-        ? [
-            `仅插入 ${tag}`,
-            `使用 ${tag} 的人物主体`,
-            `保持 ${tag} 的空间光影与构图`,
-            `以 ${tag} 为起始帧推进漫游`,
-            `让 ${tag} 画面呈现微风动感`,
-          ]
-        : [
-            `仅插入 ${tag}`,
-            `使用 ${tag} 的人物主体`,
-            `保持 ${tag} 的艺术风格与冷暖色调`,
-            `参考 ${tag} 的空间景深与构图`,
-          ]
-      uni.showActionSheet({
-        itemList,
-        success: (res) => {
-          if (res.tapIndex === 0) {
-            this.appendPromptWord(`${tag} `)
-          } else if (res.tapIndex === 1) {
-            this.appendPromptWord(`使用 ${tag} 的人物主体，`)
-          } else if (res.tapIndex === 2) {
-            this.appendPromptWord(isVideo ? `保持 ${tag} 的空间光影与构图，镜头向前推进，` : `保持 ${tag} 的艺术风格与冷暖色调，`)
-          } else if (res.tapIndex === 3) {
-            this.appendPromptWord(isVideo ? `以 ${tag} 为镜头起始帧，平滑推进漫游，` : `参考 ${tag} 的空间景深与构图，`)
-          } else if (res.tapIndex === 4 && isVideo) {
-            this.appendPromptWord(`让 ${tag} 中的主体自然活动，微风吹拂，光影位移，`)
-          }
-        },
-      })
-    },
-    appendPromptWord(phrase) {
-      if (!this.inputPrompt) {
-        this.inputPrompt = phrase
-      } else {
-        const cur = this.inputPrompt.trimEnd()
-        if (cur.endsWith(',') || cur.endsWith('，') || cur.endsWith('。') || cur.endsWith(' ') || cur.endsWith('@')) {
-          this.inputPrompt = cur + phrase
-        } else {
-          this.inputPrompt = cur + '，' + phrase
-        }
-      }
-    },
-    applyRefPromptTemplate(qp) {
-      if (qp && qp.template) {
-        this.appendPromptWord(qp.template)
-      }
-    },
-    startEditPrompt() {
+
+    applyPreset(p) {
+      this.inputPrompt = p
       this.isEditingPrompt = true
     },
-    onPromptBlur(e) {
-      if (e && e.detail && typeof e.detail.cursor === 'number') {
-        this.promptCursorPos = e.detail.cursor
-      }
-      setTimeout(() => {
-        if (!this.showAtPicker) {
-          this.isEditingPrompt = false
+
+    // ─────────── 动态参数（全部由当前模型 schema 驱动） ───────────
+    setSchemaParam(key, value) {
+      if (!key) return
+      if (this.isFieldLocked(key)) return
+      const field = fieldByKey(this.currentSchema, key)
+      let next = value
+      if (field && ['number', 'range', 'duration'].includes(field.type)) {
+        const n = Number(value)
+        next = Number.isFinite(n) ? n : field.default
+        if (next !== -1) {
+          if (field.min != null) next = Math.max(Number(field.min), next)
+          if (field.max != null) next = Math.min(Number(field.max), next)
         }
-      }, 250)
-    },
-    toggleAtPicker() {
-      if (this.isTextOnlyMode || !this.slotImages.length) {
-        uni.showToast({ title: '当前无可用参考素材', icon: 'none' })
-        return
+      } else if (field && field.type === 'bool') {
+        next = !!value
       }
-      this.showAtPicker = !this.showAtPicker
-      if (this.showAtPicker) {
-        this.isEditingPrompt = true
+      this.schemaParams = { ...(this.schemaParams || {}), [key]: next }
+    },
+    paramValueOf(field) {
+      if (!field || !field.key) return undefined
+      const params = (this.ruleEval && this.ruleEval.params) || {}
+      if (params[field.key] !== undefined) return params[field.key]
+      if ((this.schemaParams || {})[field.key] !== undefined) return this.schemaParams[field.key]
+      return field.default
+    },
+    paramOptionsOf(field) {
+      if (!field || field.type !== 'enum') return []
+      const override = this.ruleEval && this.ruleEval.fieldOverrides && this.ruleEval.fieldOverrides[field.key]
+      const options = (override && override.options) || field.options || []
+      return Array.isArray(options) ? options : []
+    },
+    optionText(field, opt) {
+      return optionLabel(field, opt)
+    },
+    paramUnit(field) {
+      if (!field) return ''
+      const t = field.type
+      if (t === 'duration') return ' s'
+      if (field.unit) return ' ' + field.unit
+      return ''
+    },
+    numericStepOf(field) {
+      const n = field && field.step != null ? Number(field.step) : 1
+      return Number.isFinite(n) && n > 0 ? n : 1
+    },
+    hasSmartStop(field) {
+      if (!field) return false
+      if (field.type === 'duration') return true
+      return field.allow_smart === true || !!field.smart
+    },
+    paramRangeHint(field) {
+      if (!field) return ''
+      if (['number', 'range', 'duration'].includes(field.type)) {
+        const unit = this.paramUnit(field)
+        const min = field.min != null ? field.min : 0
+        const max = field.max != null ? field.max : '—'
+        return `范围 ${min}–${max}${unit}`
       }
+      return ''
     },
-    completeAtReference(sIdx) {
-      const label = this.getSlotTagLabel(sIdx)
-      const tag = `@${label} `
-      const curText = this.inputPrompt || ''
-      const pos = (this.promptCursorPos != null && this.promptCursorPos >= 0) ? this.promptCursorPos : curText.length
-      const before = curText.slice(0, pos)
-      const after = curText.slice(pos)
-      if (before.endsWith('@')) {
-        this.inputPrompt = before.slice(0, -1) + tag + after
-        this.promptCursorPos = pos - 1 + tag.length
-      } else {
-        this.inputPrompt = before + (before.length && !before.endsWith(' ') ? ' ' : '') + tag + after
-        this.promptCursorPos = this.inputPrompt.length - after.length
+    isFieldLocked(key) {
+      if (!key) return false
+      const locked = this.ruleEval && this.ruleEval.lockedKeys
+      return Array.isArray(locked) && locked.includes(key)
+    },
+    lockReasonOf(key) {
+      const reasons = (this.ruleEval && this.ruleEval.lockReasons) || {}
+      return reasons[key] || '已由模型契约锁定'
+    },
+    sameValue(a, b) {
+      return String(a) === String(b)
+    },
+    paramDisplay(field) {
+      if (!field) return ''
+      const value = this.paramValueOf(field)
+      if (field.type === 'enum') return this.optionText(field, value)
+      if (field.type === 'bool') return value ? '开启' : '关闭'
+      if (['number', 'range', 'duration'].includes(field.type)) {
+        if (value === -1 || value === '-1') return '智能'
+        return `${value}${this.paramUnit(field)}`
       }
-      this.showAtPicker = false
+      return String(value == null ? '' : value)
     },
-    onPromptInput(e) {
-      const val = (e && e.detail && e.detail.value) != null ? e.detail.value : (this.inputPrompt || '')
-      const cursor = (e && e.detail && typeof e.detail.cursor === 'number') ? e.detail.cursor : val.length
-      this.promptCursorPos = cursor
-      const textBeforeCursor = val.slice(0, cursor)
-      if (textBeforeCursor.endsWith('@') && this.slotImages.length > 0 && !this.isTextOnlyMode) {
-        this.showAtPicker = true
-      } else if (this.showAtPicker && !val.includes('@')) {
-        this.showAtPicker = false
-      }
+    stepParam(field, dir) {
+      if (!field || this.isFieldLocked(field.key)) return
+      if (!['number', 'range', 'duration'].includes(field.type)) return
+      const step = this.numericStepOf(field)
+      const current = Number(this.paramValueOf(field))
+      const baseVal = Number.isFinite(current) && current !== -1
+        ? current
+        : Number(field.min != null ? field.min : 0)
+      let next = baseVal + step * dir
+      if (field.min != null) next = Math.max(Number(field.min), next)
+      if (field.max != null) next = Math.min(Number(field.max), next)
+      this.setSchemaParam(field.key, next)
     },
-    insertCombinePrompt() {
-      if (this.slotImages.length >= 2) {
-        const t1 = '@' + this.getSlotTagLabel(0)
-        const t2 = '@' + this.getSlotTagLabel(1)
-        this.appendPromptWord(`将 ${t2} 的主体/人物自然置入 ${t1} 的场景空间中，保持光影和谐，`)
-      }
+    onParamPill(field) {
+      if (!field || !field.key) return
+      this.activeParamKey = field.key
+      this.sheetMode = 'param'
     },
-    chooseChatMedia() {
-      uni.showActionSheet({
-        itemList: ['从手机相册选图', '拍照', '从手机相册选视频', '从素材库选择'],
-        success: (res) => {
-          if (res.tapIndex === 0) this.pickImageLocal('album')
-          else if (res.tapIndex === 1) this.pickImageLocal('camera')
-          else if (res.tapIndex === 2) this.pickVideoLocal('album')
-          else if (res.tapIndex === 3) this.openSlotAssetPicker()
-        },
-      })
+    openMoreParams() {
+      this.activeParamKey = ''
+      this.sheetMode = 'more'
     },
-    chooseSlotMedia() {
-      if (this.domain === 'chat') {
-        this.chooseChatMedia()
-        return
-      }
-      const isVideo = this.domain === 'music' && this.currentMode === 'video_to_music'
-      const itemList = isVideo
-        ? ['从手机相册选视频', '拍摄录像']
-        : ['从手机相册选图', '拍照拍摄', '从素材库选择']
-      uni.showActionSheet({
-        itemList,
-        success: (res) => {
-          if (res.tapIndex === 0) {
-            if (isVideo) this.pickVideoLocal('album')
-            else this.pickImageLocal('album')
-          } else if (res.tapIndex === 1) {
-            if (isVideo) this.pickVideoLocal('camera')
-            else this.pickImageLocal('camera')
-          } else if (res.tapIndex === 2) {
-            this.openSlotAssetPicker()
-          }
-        },
-      })
-    },
-    pickImageLocal(sourceType) {
-      const max = this.slotPickMax - this.slotImages.length
-      if (max <= 0) return
-      uni.chooseImage({
-        count: max,
-        sizeType: ['compressed'],
-        sourceType: [sourceType],
-        success: (res) => {
-          if (res.tempFilePaths && res.tempFilePaths.length) {
-            this.slotImages = [...this.slotImages, ...res.tempFilePaths.slice(0, max)]
-            this.ensureImageModeOnMediaAdded()
-          }
-        },
-      })
-    },
-    pickVideoLocal(sourceType) {
-      uni.chooseVideo({
-        sourceType: [sourceType],
-        compressed: true,
-        success: (res) => {
-          if (res.tempFilePath) {
-            this.slotImages = [res.tempFilePath]
-            this.ensureImageModeOnMediaAdded()
-          }
-        },
-      })
-    },
-    openSlotAssetPicker() {
-      this.currentQuickItem = { mode: 'slot_picker', label: '选择参考素材' }
-      this.quickPickerOpen = true
-      this.loadRecentLibraryImages()
-    },
-    onHomeLibraryQuick(key) {
-      if (key === 'chat') {
-        this.enterDesk('chat')
-        return
-      }
-      if (key === 'edit') {
-        this.enterDesk('image')
-        return
-      }
-      if (key === 'pick') {
-        this.openSlotAssetPicker()
-        return
-      }
-      if (key === 'roam') {
-        this.currentQuickItem = { mode: 'roam', label: '室内空间漫游' }
-        this.quickPickerOpen = true
-        this.loadRecentLibraryImages()
-      }
-    },
-    onHomeLibraryUse(item) {
-      if (!item || !item.imgUrl) return
-      this.currentQuickItem = { mode: 'slot_picker', label: '选择参考素材' }
-      this.slotImages = [...this.slotImages, item.imgUrl].slice(0, this.slotPickMax)
-      this.ensureImageModeOnMediaAdded()
-      this.mainView = 'operate'
+    selectModel(m) {
+      if (!m || !m.id) return
+      if (this.domain === 'image') {
+        if (this.imageSub === 'portrait') this.currentPortraitModelId = m.id
+        else this.currentImageModelId = m.id
+      } else if (this.domain === 'video') this.currentVideoModelId = m.id
+      else if (this.domain === 'music') this.currentMusicModelId = m.id
+      else this.currentChatModelId = m.id
+      this.sheetMode = ''
+      this.canvasPinnedId = ''
+      this.resetParamsForModel()
+      uni.showToast({ title: `已选: ${m.name}`, icon: 'none' })
     },
 
-    copyToDomain(target, url) {
-      if (!url) return
-      this.mainView = 'operate'
-      this.domain = target
-      this.inStudioDesk = true
-      if (target === 'video') {
-        this.videoMode = 'image_to_video'
-        this.slotImages = [url]
-      } else {
-        this.imageMode = 'image_to_image'
-        this.slotImages = [url]
-      }
-      this.sessionFilter = target
-      this.bindSession(false)
-      uni.showToast({ title: target === 'video' ? '已装入生视频首帧' : '已装入生图参考', icon: 'none' })
+    // ─────────── 画布 / 历史列表辅助 ───────────
+    focusCanvasItem(msg) {
+      if (!msg) return
+      this.canvasPinnedId = msg.id || ''
     },
-
-    toggleQuickGroup(g) {
-      if (!g) return
-      this.expandedQuickId = this.expandedQuickId === g.id ? '' : g.id
+    focusHistoryMessage(msg) {
+      if (!msg) return
+      this.canvasPinnedId = msg.id || ''
+      // 历史列表里点 AI 结果：结果直接接管画布，无需滚动画布区
     },
-    launchQuick(q) {
-      this.currentQuickItem = q
-      this.drawerOpen = false
-      if (q && q.desk) {
-        this.enterDesk(q.desk)
-        if (q.mode) this.switchSubMode(q.mode)
-        return
-      }
-      this.quickPickerOpen = true
-      this.loadRecentLibraryImages()
+    itemThumb(msg) {
+      if (!msg || !msg.result) return ''
+      const r = msg.result
+      if (r.kind === 'video') return r.posterUrl || r.coverUrl || ''
+      if (r.kind === 'audio') return ''
+      if (r.url) return r.url
+      return ''
     },
-    async loadRecentLibraryImages(category = null, keyword = null, append = false) {
-      if (this.loadingRecentImages && !append) return
-      this.loadingRecentImages = true
-      if (category !== null) this.pickerActiveCategory = category
-      if (keyword !== null) this.pickerSearchKeyword = keyword
-      if (!append) {
-        this.pickerPage = 1
-        this.pickerHasMore = true
-      }
-      try {
-        const opts = {
-          page: this.pickerPage,
-          pageSize: 36,
-          sort: 'latest',
-        }
-        if (this.pickerSearchKeyword && this.pickerSearchKeyword.trim()) {
-          opts.keyword = this.pickerSearchKeyword.trim()
-        }
-        if (this.pickerActiveCategory === 'furniture') {
-          opts.mediaType = 'furniture'
-        } else if (this.pickerActiveCategory === 'portrait') {
-          opts.mediaType = 'portrait'
-        } else if (this.pickerActiveCategory === 'space') {
-          opts.mediaType = 'image'
-        } else {
-          // 'all': 全量图片类素材（不排斥家具单品与模特人像）
-          // 注意：all=1 在服务端已是空操作且要求 admin，viewer 会收到 403，故不下发
-          opts.mediaType = 'image'
-        }
-        const res = await fetchAssets(opts)
-        const list = Array.isArray(res) ? res : ((res && (res.items || res.data || res.assets)) || [])
-        const formatted = list.map((a) => {
-          const cat = (a.category === 'furniture' || a.furniture_item) ? '单品' : ((a.category === 'portrait' || a.character) ? '人像' : '场景')
-          const tags = [a.space, a.style, a.furniture_item, a.material].filter(Boolean).slice(0, 2).join(' · ')
-          return {
-            fid: a.fid,
-            // 服务端返回的 thumb_url 是无鉴权的裸路径，必须用带 token 的 grid 档地址
-            imgUrl: gridUrl(a.fid),
-            fileName: a.file_name || a.fileName || a.fid,
-            category: cat,
-            tagsText: tags,
-            width: a.width,
-            height: a.height,
-          }
-        })
-        if (append) {
-          this.recentLibraryImages = [...this.recentLibraryImages, ...formatted]
-        } else {
-          this.recentLibraryImages = formatted
-        }
-        if (formatted.length < opts.pageSize) {
-          this.pickerHasMore = false
-        }
-      } catch (e) {
-        if (!append) this.recentLibraryImages = []
-        this.pickerHasMore = false
-      } finally {
-        this.loadingRecentImages = false
-      }
+    itemLabel(msg) {
+      if (!msg || !msg.result) return '记录'
+      const r = msg.result
+      if (r.kind === 'text') return (r.text || '文字').slice(0, 12)
+      return r.label || (r.kind === 'video' ? '视频' : r.kind === 'audio' ? '音频' : '图片')
     },
-    switchPickerCategory(catId) {
-      this.pickerActiveCategory = catId
-      this.loadRecentLibraryImages(catId, this.pickerSearchKeyword, false)
+    itemKindIcon(msg) {
+      const k = msg && msg.result && msg.result.kind
+      if (k === 'video') return '🎬'
+      if (k === 'audio') return '🎵'
+      if (k === 'text') return '💬'
+      return '🖼'
     },
-    clearPickerSearch() {
-      this.pickerSearchKeyword = ''
-      this.loadRecentLibraryImages(this.pickerActiveCategory, '', false)
+    historySummary(msg) {
+      if (!msg) return ''
+      if (msg.status === 'running') return msg.prompt || '正在生成…'
+      if (msg.status === 'failed') return msg.error || '生成失败'
+      if (msg.result && msg.result.kind === 'text') return msg.result.text || ''
+      if (msg.result && msg.result.label) return msg.result.label
+      return msg.prompt || '已完成'
     },
-    onPickerScrollToLower() {
-      if (this.loadingRecentImages || !this.pickerHasMore) return
-      this.pickerPage += 1
-      this.loadRecentLibraryImages(this.pickerActiveCategory, this.pickerSearchKeyword, true)
+    historyStatusText(msg) {
+      const s = (msg && msg.status) || 'done'
+      if (s === 'running') return '生成中'
+      if (s === 'failed') return '失败'
+      return '完成'
     },
-    pickImageFromLocal(sourceType) {
-      uni.chooseImage({
-        count: 1,
-        sourceType: [sourceType],
-        sizeType: ['compressed'],
-        success: (res) => {
-          if (res.tempFilePaths && res.tempFilePaths[0]) {
-            if (this.currentQuickItem && this.currentQuickItem.mode === 'slot_picker') {
-              this.quickPickerOpen = false
-              this.slotImages = [...this.slotImages, res.tempFilePaths[0]].slice(0, this.slotPickMax)
-              this.ensureImageModeOnMediaAdded()
-            } else {
-              this.goToEditorWithImage(res.tempFilePaths[0], '')
-            }
-          }
-        },
-      })
+    mediaKindOf(mode) {
+      const m = String(mode || '')
+      if (m === 'text_to_song' || m === 'text_to_bgm' || m.includes('music')) return 'audio'
+      if (m.includes('video') || m === 'first_last_frame') return 'video'
+      return 'image'
     },
-    confirmQuickWithAsset(item) {
-      if (this.currentQuickItem && this.currentQuickItem.mode === 'slot_picker') {
-        this.quickPickerOpen = false
-        this.slotImages = [...this.slotImages, item.imgUrl].slice(0, this.slotPickMax)
-        this.ensureImageModeOnMediaAdded()
-      } else {
-        this.goToEditorWithImage(item.imgUrl, item.fid)
-      }
+    media(fid) {
+      return mediaUrl(fid)
     },
-    goToEditorWithImage(imgUrl, fid) {
-      this.quickPickerOpen = false
-      const mode = this.currentQuickItem ? this.currentQuickItem.mode : 'expand'
-      if (mode === 'roam' || mode === 'spatial_walkthrough') {
-        const fidsParam = encodeURIComponent(JSON.stringify(fid ? [fid] : []))
-        uni.navigateTo({ url: `/pages/quick/walkthrough?fids=${fidsParam}` })
-        return
-      }
-
-      const pageMap = {
-        expand: '/pages/quick/expand',
-        enhance: '/pages/quick/enhance',
-        watermark: '/pages/quick/watermark',
-        remove: '/pages/quick/remove',
-        insert: '/pages/quick/insert',
-        replace: '/pages/quick/replace',
-      }
-
-      const targetPage = pageMap[mode] || '/pages/quick/expand'
-      let url = `${targetPage}?imgUrl=${encodeURIComponent(imgUrl)}`
-      if (fid) url += `&fid=${encodeURIComponent(fid)}`
-      uni.navigateTo({ url })
+    grid(fid) {
+      return gridUrl(fid)
     },
-
-    async handleOptimizePrompt() {
-      const p = (this.inputPrompt || '').trim()
-      if (!p) {
-        uni.showToast({ title: '请先输入描述', icon: 'none' })
-        return
-      }
-      if (this.optimizingPrompt) return
-      const modelId = this.currentModelInfo && this.currentModelInfo.id
-      if (!modelId) {
-        uni.showToast({ title: '请先选择生成模型', icon: 'none' })
-        return
-      }
-      this.optimizingPrompt = true
-      try {
-        const res = await optimizePrompt(p, {
-          modelId,
-          mode: this.currentMode,
-          slots: { images: this.slotImages.length },
-          imageUrls: this.slotImages,
-          locked: this.genParams,
-        })
-        const optimized = res && (res.optimized || (res.data && res.data.optimized))
-        if (!optimized) throw new Error('优化器未返回内容')
-        if (!this.promptBeforeOptimize) this.promptBeforeOptimize = p
-        this.inputPrompt = optimized
-        this.isEditingPrompt = false
-        uni.showToast({ title: '已写成最终提示词', icon: 'none' })
-      } catch (e) {
-        let msg = e.message || '优化失败，原文未改'
-        if (/OPENAI_API_KEY|AuthenticationError|对话网关未配上游 Key/i.test(msg)) {
-          msg = '对话网关未配上游 Key'
-        } else if (/timeout|超时/i.test(msg)) {
-          msg = '提示词优化超时，请重试'
-        }
-        uni.showToast({ title: msg, icon: 'none' })
-      } finally {
-        this.optimizingPrompt = false
-      }
-    },
-    undoOptimize() {
-      if (!this.promptBeforeOptimize) return
-      this.inputPrompt = this.promptBeforeOptimize
-      this.promptBeforeOptimize = ''
-    },
-    copyInputPrompt() {
-      if (!this.inputPrompt) return
-      uni.setClipboardData({
-        data: this.inputPrompt,
-        success: () => uni.showToast({ title: '已复制完整提示词', icon: 'none' })
-      })
-    },
-    handleRetry() {
-      if (!this.inputPrompt || !this.inputPrompt.trim()) {
-        if (this.lastSentPrompt) {
-          this.inputPrompt = this.lastSentPrompt
-        }
-      }
-      this.handleSend()
-    },
-    async handleSend() {
-      if (!this.canSend || this.sending) return
-      if (!sessionValid()) {
-        goLogin()
-        return
-      }
-      this.sending = true
-      const promptText = this.inputPrompt.trim()
-      this.lastSentPrompt = promptText
-      const mode = this.currentMode
-      const userMsgId = 'u_' + Date.now()
-      const aiMsgId = 'a_' + (Date.now() + 1)
-      const params = { ...(this.genParams || {}) }
-      const attachedImages = this.slotImages.map((u, i) => ({
-        url: u,
-        label:
-          mode === 'first_last_frame'
-            ? i === 0
-              ? '首帧'
-              : '尾帧'
-            : mode === 'video_to_music'
-              ? '视频'
-              : `图片${i + 1}`,
-      }))
-
-      const userMsg = {
-        id: userMsgId,
-        sessionId: this.currentSessionId,
-        role: 'user',
-        mode,
-        prompt: promptText,
-        params,
-        images: attachedImages,
-        status: 'done',
-        createdAt: Date.now(),
-      }
-      const aiMsg = {
-        id: aiMsgId,
-        sessionId: this.currentSessionId,
-        role: 'assistant',
-        mode,
-        prompt: promptText,
-        status: 'running',
-        progress: 10,
-        engineTitle:
-          this.domain === 'chat'
-            ? `${this.currentModelInfo.name || '对话模型'} 思考中…`
-            : `${this.currentModelInfo.name || '模型'} 生成中…`,
-        createdAt: Date.now() + 1,
-      }
-      if (this.inStudioDesk) {
-        this.currentDeskRun = {
-          id: aiMsgId,
-          status: 'running',
-          progress: 10,
-          result: null,
-          error: '',
-        }
-      }
-      this.chatList.push(userMsg)
-      this.chatList.push(aiMsg)
+    clearPendingEdit() {
+      this.pendingEdit = null
       this.inputPrompt = ''
-      this.promptBeforeOptimize = ''
-      this.scrollToBottom()
-      saveChatMessage(userMsg).catch(() => {})
-
-      try {
-        if (this.domain === 'chat') {
-          let imageUrls = []
-          let videoUrls = []
-          if (this.slotImages.length) {
-            uni.showLoading({ title: '上传引用…', mask: true })
-            try {
-              const imgs = this.slotImages.filter((p) => !this.isVideoPath(p))
-              const vids = this.slotImages.filter((p) => this.isVideoPath(p))
-              if (imgs.length) {
-                const uploaded = await uploadRefImages(imgs)
-                imageUrls = uploaded.map((u) => u.url).filter(Boolean)
-              }
-              if (vids.length) {
-                const uploaded = await uploadRefImages(vids)
-                videoUrls = uploaded.map((u) => u.url).filter(Boolean)
-              }
-            } finally {
-              uni.hideLoading()
-            }
-          }
-          const run = await submitLabRun({
-            entryId: 'chat.assistant',
-            params: {
-              prompt: promptText || '请结合引用素材回答。',
-              model: this.currentChatModelId || undefined,
-              mode: 'chat',
-              sessionId: this.currentSessionId,
-              imageUrls,
-              videoUrls,
-            },
-          })
-          this.finishChatRun(run, aiMsg, 'text')
-        } else {
-          let imageUrls = []
-          let firstFrame = null
-          let lastFrame = null
-          let videoUrlRef = null
-          if (this.requiresSlots && this.slotImages.length) {
-            uni.showLoading({ title: '上传参考…', mask: true })
-            try {
-              if (mode === 'video_to_music') {
-                // 视频暂用 uploadAiFile 路径：若为本地文件则走 uploadRefImage 同类通道
-                const uploaded = await uploadRefImages(this.slotImages)
-                videoUrlRef = uploaded[0] && uploaded[0].url
-              } else {
-                const uploaded = await uploadRefImages(this.slotImages)
-                if (mode === 'first_last_frame') {
-                  firstFrame = uploaded[0] && uploaded[0].url
-                  lastFrame = uploaded[1] && uploaded[1].url
-                  imageUrls = uploaded.map((u) => u.url).filter(Boolean)
-                } else {
-                  imageUrls = uploaded.map((u) => u.url).filter(Boolean)
-                }
-              }
-            } finally {
-              uni.hideLoading()
-            }
-          }
-
-          let entryId = 'gen.image'
-          if (this.domain === 'video') entryId = 'gen.video'
-          else if (this.domain === 'music') {
-            entryId = this.musicMode === 'text_to_song' ? 'music.song' : 'music.bgm'
-          } else if (this.domain === 'portrait') {
-            entryId =
-              mode === 'image_to_portrait' ? 'gen.portrait.from_image' : 'gen.portrait'
-          }
-
-          const modelInfo = this.currentModelInfo
-          const gp = this.genParams || {}
-          // 参考图上限来自服务端 schema.slots（slotLimit 已按 free.maxRefs 与模式收紧）
-          const refCount = (imageUrls && imageUrls.length) || this.slotImages.length || 0
-          if (this.slotMaxImages != null && refCount > this.slotMaxImages) {
-            throw new Error(`当前 ${refCount} 张参考图，这个模型最多 ${this.slotMaxImages} 张`)
-          }
-          let finalPrompt = convertAtRefs(promptText, refStyleFor(modelInfo.id))
-          const sch = schemaFor(modelInfo)
-          const runParams = {
-            prompt: finalPrompt,
-            model: modelInfo.model_code || modelInfo.id || undefined,
-            adapterId: modelInfo.adapterId || undefined,
-            mode,
-            sessionId: this.currentSessionId,
-          }
-          Object.keys(gp).forEach((k) => {
-            if (gp[k] === '' || gp[k] === undefined) return
-            runParams[k] = gp[k]
-          })
-          if (sch && sch.submitMap) {
-            if (sch.submitMap.duration && gp.duration != null) runParams[sch.submitMap.duration] = gp.duration
-            if (sch.submitMap.size) runParams[sch.submitMap.size] = gp.size || gp.resolution
-          }
-          if (imageUrls.length) runParams.imageUrls = imageUrls
-          if (firstFrame) runParams.firstFrame = firstFrame
-          if (lastFrame) runParams.lastFrame = lastFrame
-          if (videoUrlRef) runParams.videoUrl = videoUrlRef
-          if (this.domain === 'video' && this.selectedPortraitAssets.length) {
-            runParams.portraitAssetIds = this.selectedPortraitAssets.map((a) => a.id)
-          }
-          if (this.domain === 'music' && this.musicMode === 'text_to_song') {
-            runParams.mode = 'text_to_song'
-            runParams.songInputKind = this.songInputKind
-            if (this.songInputKind === 'lyrics') {
-              runParams.lyrics = promptText
-              runParams.prompt = ''
-            } else {
-              runParams.lyrics = ''
-              runParams.prompt = promptText
-            }
-          } else if (this.domain === 'music') {
-            runParams.mode = 'text_to_bgm'
-            runParams.lyrics = ''
-            runParams.prompt = promptText
-          }
-
-          const run = await submitLabRun({ entryId, params: runParams })
-          this.promptBeforeOptimize = ''
-          this.finishGenRun(run, aiMsg, mode)
-        }
-      } catch (err) {
-        aiMsg.status = 'failed'
-        aiMsg.error = err.message || '发送失败'
-        if (this.currentDeskRun && this.currentDeskRun.id === aiMsg.id) {
-          this.currentDeskRun.status = 'failed'
-          this.currentDeskRun.error = aiMsg.error
-        }
-      } finally {
-        this.sending = false
-        saveChatMessage(aiMsg).catch(() => {})
-        try {
-          uni.setStorageSync('chat_messages_' + this.currentSessionId, this.chatList)
-        } catch (e) {}
-        this.scrollToBottom()
-        this.touchSessionTitle(promptText)
-      }
-    },
-
-    touchSessionTitle(prompt) {
-      const title = String(prompt || '').slice(0, 16) || this.typeLabel(this.sessionTypeOfDomain())
-      const s = this.sessions.find((x) => x.sessionId === this.currentSessionId)
-      if (s) {
-        if (!s.title || s.title === this.welcomeTitle || s.title === '新会话') {
-          s.title = title
-        }
-        s.updatedAt = Date.now()
-        s.preview = String(prompt || '').slice(0, 40)
-        this.persistSessionsLocal()
-        if (this._sessionPersisted) {
-          createChatSession({
-            sessionId: this.currentSessionId,
-            type: s.type,
-            title: s.title,
-          }).catch(() => {})
-        } else {
-          this.persistCurrentSession(title)
-        }
-      } else {
-        this.persistCurrentSession(title)
-      }
-    },
-
-    finishChatRun(run, aiMsg) {
-      const text =
-        run?.result?.text ||
-        run?.text ||
-        run?.result?.content ||
-        (run?.status === 'done' ? '（服务端未返回文本）' : '')
-      if (run && run.status === 'failed') {
-        aiMsg.status = 'failed'
-        aiMsg.error = run.error || (run.result && run.result.error) || '对话失败'
-        return
-      }
-      if (run && run.runId && run.status !== 'done') {
-        this.pollRunTask(run.engine, run.runId, aiMsg, 'chat')
-        return
-      }
-      aiMsg.status = 'done'
-      aiMsg.progress = 100
-      aiMsg.result = { kind: 'text', text: text || '完成' }
-    },
-
-    finishGenRun(run, aiMsg, mode) {
-      const kind = mediaKindOf(mode)
-
-      const updateDeskRun = () => {
-        if (this.currentDeskRun && this.currentDeskRun.id === aiMsg.id) {
-          this.currentDeskRun.status = aiMsg.status
-          this.currentDeskRun.progress = aiMsg.progress
-          this.currentDeskRun.result = aiMsg.result
-          this.currentDeskRun.error = aiMsg.error
-        }
-      }
-
-      if (run && run.status === 'done') {
-        const file = run.result?.files?.[0]
-        const url = absMediaUrl(file, run.result)
-        aiMsg.status = 'done'
-        aiMsg.progress = 100
-        aiMsg.result = {
-          url,
-          kind: file?.kind || kind,
-        }
-        updateDeskRun()
-        return
-      }
-      if (run && run.status === 'failed') {
-        aiMsg.status = 'failed'
-        aiMsg.error = (run.result && run.result.error) || run.error || '生成失败'
-        updateDeskRun()
-        return
-      }
-      if (run && run.runId) {
-        this.pollRunTask(run.engine, run.runId, aiMsg, mode)
-        return
-      }
-      if (run && run.result && run.result.previewUrl) {
-        aiMsg.status = 'done'
-        aiMsg.progress = 100
-        aiMsg.result = {
-          url: absMediaUrl(null, run.result),
-          kind,
-        }
-        updateDeskRun()
-        return
-      }
-      aiMsg.status = 'failed'
-      aiMsg.error =
-        this.domain === 'music' || this.domain === 'portrait'
-          ? '该生成能力服务端尚未就绪，请先按 API_CONTRACT.md 实现'
-          : '服务端未返回生成结果'
-      updateDeskRun()
-    },
-
-    async pollRunTask(engine, runId, aiMsg, mode) {
-      const updateDeskRun = () => {
-        if (this.currentDeskRun && this.currentDeskRun.id === aiMsg.id) {
-          this.currentDeskRun.status = aiMsg.status
-          this.currentDeskRun.progress = aiMsg.progress
-          this.currentDeskRun.result = aiMsg.result
-          this.currentDeskRun.error = aiMsg.error
-        }
-      }
-      const kind = mode === 'chat' ? 'text' : mediaKindOf(mode)
-      const maxTries = kind === 'video' || kind === 'audio' ? 120 : 60
-      const intervalMs = kind === 'video' || kind === 'audio' ? 5000 : 3000
-      for (let i = 0; i < maxTries; i++) {
-        await new Promise((r) => setTimeout(r, intervalMs))
-        try {
-          const st = await pollLabRun(engine, runId)
-          if (st && st.progress != null) {
-            aiMsg.progress = st.progress
-            updateDeskRun()
-          }
-          if (st && (st.status === 'done' || st.status === 'success')) {
-            if (kind === 'text') {
-              aiMsg.status = 'done'
-              aiMsg.result = {
-                kind: 'text',
-                text: st.result?.text || st.text || '完成',
-              }
-            } else {
-              const file = st.result?.files?.[0]
-              aiMsg.status = 'done'
-              aiMsg.result = {
-                url: absMediaUrl(file, st.result),
-                kind: file?.kind || kind,
-              }
-            }
-            updateDeskRun()
-            return
-          }
-          if (st && st.status === 'failed') {
-            aiMsg.status = 'failed'
-            aiMsg.error = st.error || '生成失败'
-            updateDeskRun()
-            return
-          }
-        } catch (e) {}
-      }
-      aiMsg.status = 'failed'
-      aiMsg.error = '生成任务轮询超时'
-      updateDeskRun()
+      this.resetModel3d()
+      this.refs = this.refs.filter((r) => r.source !== '3d_snapshot')
+      uni.showToast({ title: '已退出精准编辑模式', icon: 'none' })
     },
   },
 }
 </script>
 
+
 <style scoped>
+/* ── 全局页面基础 ─────────────────────── */
 .page {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: #f8fafc;
   overflow: hidden;
+  background: #F6F7F9;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "PingFang SC", "Segoe UI", sans-serif;
 }
+
 .status-bar {
-  flex-shrink: 0;
-}
-.nav-bar {
-  flex-shrink: 0;
-  height: 88rpx;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 24rpx;
-  background: #ffffff;
-  border-bottom: 1rpx solid #e2e8f0;
-  box-sizing: border-box;
-}
-.nav-left,
-.nav-right {
-  width: 96rpx;
-  min-width: 96rpx;
-  height: 88rpx;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  flex-shrink: 0;
-}
-.nav-right {
-  justify-content: flex-end;
-}
-.desk-back {
-  width: 72rpx;
-  height: 72rpx;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-}
-.desk-back-arrow {
-  font-size: 52rpx;
-  color: #0f172a;
-  font-weight: 300;
-  line-height: 72rpx;
-}
-.desk-mode-header {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 8rpx;
-  padding: 10rpx 24rpx;
-  background: #f1f5f9;
-  border-radius: 999rpx;
-}
-.desk-mode-title {
-  font-size: 28rpx;
-  font-weight: 700;
-  color: #0f172a;
-}
-.desk-mode-arrow {
-  font-size: 22rpx;
-  color: #64748b;
-}
-.desk-menu-mask {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 998;
-  background: rgba(15, 23, 42, 0.25);
-}
-.desk-menu-popover {
-  position: absolute;
-  top: 140rpx;
-  left: 50%;
-  transform: translateX(-50%);
-  background: #ffffff;
-  border-radius: 20rpx;
-  box-shadow: 0 16rpx 48rpx rgba(15, 23, 42, 0.16);
-  border: 1rpx solid #e2e8f0;
-  padding: 12rpx;
-  min-width: 320rpx;
-  z-index: 999;
-}
-.desk-menu-item {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 16rpx;
-  padding: 18rpx 24rpx;
-  border-radius: 14rpx;
-}
-.desk-menu-item:active {
-  background: #f1f5f9;
-}
-.desk-menu-item.active {
-  background: #eff6ff;
-}
-.desk-menu-icon {
-  font-size: 28rpx;
-}
-.desk-menu-label {
-  flex: 1;
-  font-size: 26rpx;
-  font-weight: 600;
-  color: #334155;
-}
-.desk-menu-item.active .desk-menu-label {
-  color: #2563eb;
-  font-weight: 700;
-}
-.desk-menu-check {
-  font-size: 24rpx;
-  color: #2563eb;
-  font-weight: bold;
+  background: #F6F7F9;
 }
 
-.hamburger {
-  width: 44rpx;
+/* ── 顶栏与 4 模式 Segmented Control ── */
+.topbar {
   display: flex;
-  flex-direction: column;
-  gap: 8rpx;
-  padding: 12rpx 0;
-}
-.ham-line {
-  height: 4rpx;
-  background: #0f172a;
-  border-radius: 2rpx;
-}
-.ham-line.short {
-  width: 28rpx;
-}
-.segment-pill {
-  width: 320rpx;
-  height: 64rpx;
-  display: flex;
-  flex-direction: row;
   align-items: center;
-  background: #f1f5f9;
-  border-radius: 999rpx;
-  padding: 4rpx;
-  box-sizing: border-box;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: #F6F7F9;
+  gap: 10px;
+  z-index: 20;
 }
-.seg-item {
-  flex: 1;
-  height: 56rpx;
-  border-radius: 999rpx;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  box-sizing: border-box;
-  transition: all 0.2s ease;
-}
-.seg-item.active {
-  background: #ffffff;
-  box-shadow: 0 2rpx 8rpx rgba(15, 23, 42, 0.08);
-}
-.seg-text {
-  font-size: 26rpx;
-  line-height: 56rpx;
-  color: #64748b;
-  text-align: center;
-  display: block;
-}
-.seg-item.active .seg-text {
-  color: #0f172a;
-  font-weight: 700;
-}
+
 .icon-btn {
-  padding: 8rpx;
-}
-.icon-btn.placeholder {
-  opacity: 0;
-}
-.action-icon {
-  font-size: 24rpx;
-  color: #64748b;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #FFFFFF;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
 }
 
-.operate {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-.chat-scroll {
-  flex: 1;
-  min-height: 0;
-}
-.welcome {
-  padding: 80rpx 48rpx 40rpx;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-.welcome-badge {
-  font-size: 22rpx;
-  color: #2563eb;
-  background: #eff6ff;
-  padding: 8rpx 20rpx;
-  border-radius: 999rpx;
-  margin-bottom: 24rpx;
-}
-.welcome-title {
-  font-size: 40rpx;
-  font-weight: 600;
-  color: #0f172a;
-  margin-bottom: 16rpx;
-  text-align: center;
-}
-.welcome-desc {
-  font-size: 26rpx;
-  color: #64748b;
-  text-align: center;
-  line-height: 1.6;
-  margin-bottom: 36rpx;
-}
-.preset-list {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 16rpx;
-}
-.preset-pill {
-  background: #ffffff;
-  border: 1rpx solid #e2e8f0;
-  border-radius: 20rpx;
-  padding: 22rpx 28rpx;
-}
-.preset-t {
-  font-size: 26rpx;
-  color: #334155;
-  line-height: 1.5;
-}
-.chat-group {
-  padding: 8rpx 24rpx;
-}
-.bubble-row.user {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 20rpx;
-}
-.bubble-row.ai {
-  display: flex;
-  flex-direction: row;
-  margin-bottom: 20rpx;
-}
-.bubble.user {
-  max-width: 85%;
-  background: #2563eb;
-  border-radius: 24rpx 8rpx 24rpx 24rpx;
-  padding: 18rpx 22rpx;
-}
-.bubble.ai {
-  flex: 1;
-  max-width: 90%;
-  background: #ffffff;
-  border: 1rpx solid #e2e8f0;
-  border-radius: 8rpx 24rpx 24rpx 24rpx;
-  padding: 18rpx;
-}
-.ai-avatar {
-  width: 56rpx;
-  height: 56rpx;
-  border-radius: 50%;
-  background: #eff6ff;
-  align-items: center;
-  justify-content: center;
-  margin-right: 12rpx;
-  font-size: 28rpx;
-}
-.user-meta {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 8rpx;
-  margin-bottom: 8rpx;
-}
-.mode-tag,
-.param-tag {
-  font-size: 18rpx;
-  color: #dbeafe;
-  background: rgba(255, 255, 255, 0.18);
-  padding: 2rpx 10rpx;
-  border-radius: 6rpx;
-}
-.user-prompt {
-  font-size: 28rpx;
-  color: #ffffff;
-  line-height: 1.5;
-}
-.user-prompt-rich {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8rpx;
-}
-.inline-ref-chip {
-  display: inline-flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 6rpx;
-  background: #ffffff;
-  border-radius: 999rpx;
-  padding: 4rpx 12rpx 4rpx 4rpx;
-}
-.inline-ref-thumb {
-  width: 36rpx;
-  height: 36rpx;
-  border-radius: 8rpx;
-  background: #e2e8f0;
-}
-.inline-ref-label {
-  font-size: 22rpx;
-  color: #1d4ed8;
-  font-weight: 700;
-}
-.inline-ref-x {
-  font-size: 20rpx;
-  color: #dbeafe;
-  margin-left: 2rpx;
-}
-.ref-tray {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 8rpx;
-  margin-top: 12rpx;
-}
-.ref-thumb {
-  width: 96rpx;
-  height: 96rpx;
-  border-radius: 10rpx;
-  overflow: hidden;
-  position: relative;
-}
-.ref-img {
-  width: 100%;
-  height: 100%;
-}
-.ref-label {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  font-size: 16rpx;
-  color: #fff;
-  background: rgba(0, 0, 0, 0.4);
-  text-align: center;
-}
-.status-running {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-}
-.spinner {
-  width: 36rpx;
-  height: 36rpx;
-  border-radius: 50%;
-  border: 4rpx solid #e2e8f0;
-  border-top-color: #2563eb;
-  margin-right: 16rpx;
-}
-.run-title {
-  font-size: 26rpx;
-  color: #0f172a;
-}
-.run-sub {
-  font-size: 22rpx;
-  color: #64748b;
-  margin-top: 4rpx;
-}
-.failed-t {
-  font-size: 26rpx;
-  color: #dc2626;
-  min-width: 0;
-  word-break: break-all;
-  overflow-wrap: anywhere;
-  line-height: 1.5;
-}
-.text-body {
-  font-size: 28rpx;
-  color: #0f172a;
-  line-height: 1.6;
-}
-.result-image {
-  width: 100%;
-  border-radius: 12rpx;
-}
-.result-video {
-  width: 100%;
-  height: 360rpx;
-  border-radius: 12rpx;
-  background: #000;
-}
-.result-audio {
-  width: 100%;
-}
-.result-actions {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 12rpx;
-  margin-top: 12rpx;
-}
-.act-btn {
-  padding: 10rpx 20rpx;
-  background: #eff6ff;
-  border-radius: 999rpx;
-}
-.act-t {
-  font-size: 22rpx;
-  color: #2563eb;
-}
-.chat-pad {
-  height: 24rpx;
+.icon-btn-hover {
+  background: #E5E7EB;
 }
 
-.composer {
-  flex-shrink: 0;
-  background: #ffffff;
-  border-top: 1rpx solid #e2e8f0;
-  padding: 12rpx 20rpx 0;
-}
-.params-panel {
-  background: #f8fafc;
-  border: 1rpx solid #e2e8f0;
-  border-radius: 20rpx;
-  padding: 16rpx;
-  margin-bottom: 12rpx;
-}
-.params-title {
-  font-size: 22rpx;
-  color: #64748b;
-  margin-bottom: 12rpx;
-}
-.params-body {
-  display: flex;
-  flex-direction: column;
-  gap: 14rpx;
-}
-.param-block {
-  display: flex;
-  flex-direction: column;
-}
-.param-label {
-  font-size: 22rpx;
-  color: #94a3b8;
-  margin-bottom: 8rpx;
-}
-.param-chips {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 10rpx;
-}
-.p-chip {
-  padding: 10rpx 20rpx;
-  border-radius: 999rpx;
-  background: #ffffff;
-  border: 1rpx solid #e2e8f0;
-}
-.p-chip.active {
-  background: #eff6ff;
-  border-color: #2563eb;
-}
-.p-chip-t {
-  font-size: 22rpx;
-  color: #334155;
-}
-.p-chip.active .p-chip-t {
-  color: #2563eb;
-}
-.param-empty {
-  font-size: 22rpx;
-  color: #94a3b8;
-}
-.collapsed-params {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  background: #f8fafc;
-  border: 1rpx solid #e2e8f0;
-  border-radius: 999rpx;
-  padding: 12rpx 22rpx;
-  margin-bottom: 12rpx;
-}
-.collapse-t {
-  flex: 1;
-  font-size: 22rpx;
-  color: #475569;
-}
-.collapse-arrow {
-  font-size: 20rpx;
-  color: #94a3b8;
-  margin-left: 8rpx;
-}
-.domain-scroll {
-  white-space: nowrap;
-  margin-bottom: 10rpx;
-}
-.domain-row {
-  display: inline-flex;
-  flex-direction: row;
-  gap: 10rpx;
-}
-.domain-chip {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  padding: 10rpx 20rpx;
-  border-radius: 999rpx;
-  background: #f1f5f9;
-  border: 1rpx solid transparent;
-}
-.domain-chip.active {
-  background: #eff6ff;
-  border-color: #2563eb;
-}
-.domain-chip.sub {
-  background: #ffffff;
-  border: 1rpx solid #e2e8f0;
-}
-.domain-chip.sub.active {
-  background: #0f172a;
-  border-color: #0f172a;
-}
-.domain-chip.sub.active .domain-label {
-  color: #ffffff;
-}
-.domain-icon {
-  font-size: 22rpx;
-  margin-right: 6rpx;
-}
-.domain-label {
-  font-size: 22rpx;
-  color: #334155;
-}
-.domain-chip.active .domain-label {
-  color: #2563eb;
-  font-weight: 600;
-}
-.slots {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12rpx;
-  margin-bottom: 10rpx;
-}
-.slot {
-  width: 120rpx;
-  height: 120rpx;
-  border-radius: 14rpx;
-  border: 2rpx dashed #cbd5e1;
-  background: #f8fafc;
-  position: relative;
-  overflow: hidden;
-  align-items: center;
-  justify-content: center;
-}
-.slot.multi {
-  width: 112rpx;
-  height: 112rpx;
-  border-style: solid;
-  border-color: #e2e8f0;
-}
-.slot.multi.add {
-  border-style: dashed;
-  background: #ffffff;
-}
-.slot.single {
-  width: 140rpx;
-  height: 140rpx;
-}
-.slot-badge {
-  position: absolute;
-  left: 6rpx;
-  top: 6rpx;
-  font-size: 16rpx;
-  padding: 2rpx 8rpx;
-  border-radius: 6rpx;
-  background: rgba(15, 23, 42, 0.55);
-  color: #fff;
-}
-.slot-img {
-  width: 100%;
-  height: 100%;
-}
-.slot-empty {
-  align-items: center;
-  justify-content: center;
-}
-.plus {
-  font-size: 36rpx;
-  color: #94a3b8;
-  line-height: 1;
-}
-.slot-label {
-  font-size: 18rpx;
-  color: #94a3b8;
-  margin-top: 4rpx;
-}
-.slot-del {
-  position: absolute;
-  right: 4rpx;
-  top: 4rpx;
-  width: 32rpx;
-  height: 32rpx;
-  border-radius: 50%;
-  background: rgba(15, 23, 42, 0.55);
-  color: #fff;
-  font-size: 18rpx;
-  text-align: center;
-  line-height: 32rpx;
-}
-.slot-arrow {
-  color: #94a3b8;
-  font-size: 24rpx;
-}
-.input-row {
-  display: flex;
-  flex-direction: row;
-  align-items: flex-end;
-  gap: 12rpx;
-}
-.fab {
-  height: 72rpx;
-  padding: 0 18rpx;
-  border-radius: 999rpx;
-  background: #0f172a;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.fab-t {
-  color: #ffffff;
-  font-size: 22rpx;
-}
-.input-wrap {
-  flex: 1;
-  background: #f8fafc;
-  border: 1rpx solid #e2e8f0;
-  border-radius: 24rpx;
-  padding: 16rpx 20rpx;
-  min-height: 72rpx;
-  max-height: 200rpx;
-}
-.main-input {
-  width: 100%;
-  font-size: 28rpx;
-  color: #0f172a;
-  min-height: 40rpx;
-}
-.send-btn {
-  width: 72rpx;
-  height: 72rpx;
-  border-radius: 50%;
-  background: #2563eb;
-  color: #ffffff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  margin: 0;
-  flex-shrink: 0;
-  line-height: 72rpx;
-}
-.send-btn[disabled] {
-  background: #93c5fd;
-  color: #ffffff;
-}
-.send-t {
-  font-size: 32rpx;
-  color: #ffffff;
-  font-weight: 600;
-}
-.safe-bottom {
-  height: env(safe-area-inset-bottom);
-  min-height: 12rpx;
+.icon-btn.clear {
+  width: auto;
+  padding: 0 10px;
 }
 
-.drawer-mask {
-  position: fixed;
-  left: 0;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(15, 23, 42, 0.45);
-  z-index: 1000;
-  display: flex;
-  flex-direction: row;
-  justify-content: flex-start;
-  align-items: stretch;
-}
-.drawer {
-  width: 560rpx;
-  max-width: 82vw;
-  height: 100%;
-  background: #ffffff;
-  display: flex;
-  flex-direction: column;
-  padding-left: env(safe-area-inset-left);
-  box-sizing: border-box;
-  box-shadow: 8rpx 0 32rpx rgba(15, 23, 42, 0.18);
-}
-.quick-group {
-  margin-bottom: 4rpx;
-}
-.quick-cat-row {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  padding: 14rpx 8rpx;
-  border-radius: 16rpx;
-}
-.quick-cat-row:active {
-  background: #f8fafc;
-}
-.quick-coming {
-  padding: 8rpx 16rpx 16rpx 96rpx;
-}
-.quick-coming-t {
-  font-size: 22rpx;
-  color: #94a3b8;
-}
-.quick-group-title {
-  font-size: 22rpx;
-  font-weight: 700;
-  color: #64748b;
-  letter-spacing: 1rpx;
-  margin: 8rpx 4rpx 10rpx;
-}
-.drawer-safe {
-  flex-shrink: 0;
-}
-.drawer-sec {
-  padding: 16rpx 24rpx;
-  flex-shrink: 0;
-}
-.drawer-sec.quick-sec {
-  max-height: 52%;
-  overflow-y: auto;
-}
-.drawer-sec.grow {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-.drawer-sec-head {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12rpx;
-}
-.drawer-sec-title {
-  font-size: 24rpx;
-  color: #94a3b8;
-  font-weight: 600;
-}
-.new-session {
-  padding: 6rpx 16rpx;
-  background: #eff6ff;
-  border-radius: 999rpx;
-}
-.new-t {
-  font-size: 22rpx;
-  color: #2563eb;
-}
-.quick-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2rpx;
-  padding-left: 12rpx;
-}
-.quick-row-v {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  padding: 12rpx 8rpx;
-  border-radius: 16rpx;
-}
-.quick-row-v.nested {
-  padding-left: 16rpx;
-}
-.quick-row-v:active {
-  background: #f8fafc;
-}
-.quick-ico-box {
-  width: 72rpx;
-  height: 72rpx;
-  border-radius: 18rpx;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
-  margin-right: 16rpx;
-  flex-shrink: 0;
-}
-.quick-ico-box.sm {
-  width: 56rpx;
-  height: 56rpx;
-  border-radius: 14rpx;
-}
-.quick-ico {
-  font-size: 32rpx;
-  line-height: 1;
-}
-.quick-text {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-.quick-name {
-  font-size: 28rpx;
-  color: #0f172a;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.quick-sub {
-  font-size: 22rpx;
-  color: #94a3b8;
-  margin-top: 4rpx;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.quick-arrow {
-  font-size: 32rpx;
-  color: #cbd5e1;
-  padding: 8rpx;
-}
-.type-filter-trigger {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  padding: 10rpx 18rpx;
-  background: #f1f5f9;
-  border-radius: 999rpx;
-}
-.type-filter-t {
-  font-size: 24rpx;
-  color: #334155;
-  font-weight: 600;
-  margin-right: 8rpx;
-}
-.type-filter-arrow {
-  font-size: 18rpx;
-  color: #64748b;
-}
-.type-menu {
-  background: #ffffff;
-  border: 1rpx solid #e2e8f0;
-  border-radius: 16rpx;
-  margin-bottom: 12rpx;
-  overflow: hidden;
-}
-.type-menu-item {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  padding: 18rpx 22rpx;
-  border-bottom: 1rpx solid #f1f5f9;
-}
-.type-menu-item:last-child {
-  border-bottom: none;
-}
-.type-menu-item.active {
-  background: #eff6ff;
-}
-.type-menu-t {
-  font-size: 26rpx;
-  color: #0f172a;
-}
-.type-menu-check {
-  font-size: 24rpx;
-  color: #2563eb;
-}
-.drawer-divider {
-  height: 1rpx;
-  background: #e2e8f0;
-  margin: 4rpx 24rpx;
-}
-.filter-scroll {
-  white-space: nowrap;
-  margin-bottom: 8rpx;
-}
-.filter-row {
-  display: inline-flex;
-  flex-direction: row;
-  gap: 8rpx;
-}
-.filter-chip {
-  padding: 8rpx 16rpx;
-  border-radius: 999rpx;
-  background: #f1f5f9;
-}
-.filter-chip.active {
-  background: #eff6ff;
-}
-.filter-t {
-  font-size: 20rpx;
-  color: #475569;
-}
-.filter-chip.active .filter-t {
-  color: #2563eb;
-}
-.session-scroll {
-  flex: 1;
-  min-height: 0;
-}
-.session-empty {
-  padding: 48rpx 16rpx;
-  align-items: center;
-}
-.session-empty-t {
-  font-size: 26rpx;
-  color: #64748b;
-}
-.session-empty-s {
-  font-size: 22rpx;
-  color: #94a3b8;
-  margin-top: 8rpx;
-}
-.session-row {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  padding: 16rpx 12rpx;
-  border-radius: 14rpx;
-  margin-bottom: 4rpx;
-  border-left: 8rpx solid #cbd5e1;
-}
-.session-row-chat { background: #f8fafc; border-left-color: #64748b; }
-.session-row-image { background: #eff6ff; border-left-color: #2563eb; }
-.session-row-video { background: #f5f3ff; border-left-color: #7c3aed; }
-.session-row-music { background: #f0fdfa; border-left-color: #0d9488; }
-.session-row-portrait { background: #fdf2f8; border-left-color: #db2777; }
-.session-row-quick { background: #fff7ed; border-left-color: #ea580c; }
-.session-row.active {
-  box-shadow: inset 0 0 0 2rpx #93c5fd;
-}
-.session-icon-wrap {
-  width: 64rpx;
-  height: 64rpx;
-  border-radius: 50%;
-  background: #f1f5f9;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
-  margin-right: 14rpx;
-  flex-shrink: 0;
-}
-.session-icon {
-  font-size: 28rpx;
-}
-.session-main {
-  flex: 1;
-  min-width: 0;
-}
-.session-title {
-  font-size: 26rpx;
-  color: #0f172a;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.session-meta {
-  font-size: 20rpx;
-  color: #94a3b8;
-  margin-top: 4rpx;
-}
-.session-del {
-  padding: 12rpx;
-  color: #94a3b8;
-  font-size: 22rpx;
-}
-.drawer-footer {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  padding: 20rpx 24rpx;
-  padding-bottom: calc(20rpx + env(safe-area-inset-bottom));
-  border-top: 1rpx solid #e2e8f0;
-  background: #f8fafc;
-}
-.user-avatar {
-  width: 72rpx;
-  height: 72rpx;
-  border-radius: 50%;
-  background: #2563eb;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
-  margin-right: 14rpx;
-  flex-shrink: 0;
-}
-.user-initial {
-  color: #ffffff;
-  font-size: 28rpx;
-  font-weight: 600;
-  line-height: 1;
-}
-.user-meta-col {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-.user-name {
-  font-size: 26rpx;
-  color: #0f172a;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.user-sub {
-  font-size: 20rpx;
-  color: #94a3b8;
-  margin-top: 2rpx;
-}
-.user-arrow {
-  font-size: 32rpx;
-  color: #94a3b8;
-}
-
-/* ==================== 态一：工坊首页与底栏 (图 6 风格) ==================== */
-.home-desk-view {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-.studio-feature-cards {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 16rpx;
-  margin-bottom: 32rpx;
-}
-.feature-card {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  padding: 24rpx 28rpx;
-  background: #ffffff;
-  border-radius: 24rpx;
-  border: 1rpx solid #e2e8f0;
-  box-shadow: 0 4rpx 16rpx rgba(15, 23, 42, 0.04);
-}
-.feature-card.banner {
-  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-  border: 1rpx solid #334155;
-}
-.feature-card.banner .feat-title {
-  color: #f8fafc;
-}
-.feature-card.banner .feat-sub {
-  color: #94a3b8;
-}
-.feature-card.banner .feat-go {
-  color: #60a5fa;
-}
-.feat-badge {
-  font-size: 20rpx;
-  font-weight: 700;
-  color: #f59e0b;
-  background: rgba(245, 158, 11, 0.15);
-  padding: 6rpx 14rpx;
-  border-radius: 999rpx;
-  margin-right: 18rpx;
-  flex-shrink: 0;
-}
-.feat-badge.img {
-  color: #2563eb;
-  background: #eff6ff;
-}
-.feat-info {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-.feat-title {
-  font-size: 28rpx;
-  font-weight: 700;
-  color: #0f172a;
-}
-.feat-sub {
-  font-size: 22rpx;
-  color: #64748b;
-  margin-top: 4rpx;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.feat-go {
-  font-size: 24rpx;
-  font-weight: 600;
-  color: #2563eb;
-  margin-left: 12rpx;
-  flex-shrink: 0;
-}
-
-/* 首页底栏：快捷胶囊 + 输入框 */
-.home-composer {
-  flex-shrink: 0;
-  background: #ffffff;
-  border-top: 1rpx solid #e2e8f0;
-  padding: 16rpx 24rpx 0;
-}
-.quick-pill-row {
-  display: flex;
-  flex-direction: row;
-  gap: 12rpx;
-  margin-bottom: 16rpx;
-  overflow-x: auto;
-}
-.quick-desk-pill {
-  flex: 1;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
-  gap: 8rpx;
-  padding: 12rpx 10rpx;
-  border-radius: 999rpx;
-  background: #f8fafc;
-  border: 1rpx solid #e2e8f0;
-  white-space: nowrap;
-  box-sizing: border-box;
-}
-.quick-desk-pill:active {
-  background: #eff6ff;
-  border-color: #bfdbfe;
-}
-.q-icon {
-  font-size: 24rpx;
-}
-.q-label {
-  font-size: 22rpx;
-  font-weight: 600;
-  color: #334155;
-}
-.home-ref-row {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 10rpx;
-  margin-bottom: 12rpx;
-}
-.home-attach {
-  width: 72rpx;
-  height: 72rpx;
-  border-radius: 50%;
-  background: #f1f5f9;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.home-attach-t {
-  font-size: 40rpx;
-  color: #334155;
-  line-height: 1;
-}
-.home-input-bar {
-  display: flex;
-  flex-direction: row;
-  align-items: flex-end;
-  gap: 14rpx;
-  margin-bottom: 12rpx;
-}
-.home-input-wrap {
-  flex: 1;
-  background: #f8fafc;
-  border: 1rpx solid #e2e8f0;
-  border-radius: 28rpx;
-  padding: 16rpx 24rpx;
-  min-height: 72rpx;
-  max-height: 200rpx;
-  box-sizing: border-box;
-}
-.home-main-input {
-  width: 100%;
-  font-size: 28rpx;
-  color: #0f172a;
-  min-height: 40rpx;
-}
-.home-send-btn {
-  width: 72rpx;
-  height: 72rpx;
-  border-radius: 50%;
-  background: #0f172a;
-  color: #ffffff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  margin: 0;
-  flex-shrink: 0;
-  line-height: 72rpx;
-}
-.home-send-btn[disabled] {
-  background: #cbd5e1;
-}
-.home-send-t {
-  font-size: 34rpx;
-  color: #ffffff;
-  font-weight: bold;
-}
-
-/* ==================== 态二：沉浸式创作工作台 (图 7~10 规范) ==================== */
-.studio-desk-view {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  background: #f8fafc;
-}
-.desk-scroll {
-  flex: 1;
-  min-height: 0;
-}
-.desk-canvas-stage {
-  padding: 24rpx;
-}
-/* 纯文生展台 */
-.desk-text-stage {
-  padding: 12rpx 0;
-}
-.text-stage-card {
-  background: #ffffff;
-  border-radius: 28rpx;
-  border: 1rpx solid #e2e8f0;
-  box-shadow: 0 4rpx 16rpx rgba(15, 23, 42, 0.04);
-  padding: 48rpx 36rpx;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-}
-.stage-icon-box {
-  width: 96rpx;
-  height: 96rpx;
-  border-radius: 50%;
-  background: #eff6ff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 20rpx;
-}
-.stage-icon {
-  font-size: 44rpx;
-}
-.stage-title {
-  font-size: 32rpx;
-  font-weight: 700;
-  color: #0f172a;
-  margin-bottom: 10rpx;
-}
-.stage-desc {
-  font-size: 24rpx;
-  color: #64748b;
-  line-height: 1.5;
-  margin-bottom: 24rpx;
-  max-width: 520rpx;
-}
-.stage-switch-btn {
-  padding: 12rpx 28rpx;
-  border-radius: 999rpx;
-  background: #f1f5f9;
-  border: 1rpx solid #cbd5e1;
-}
-.stage-switch-btn:active {
-  background: #eff6ff;
-  border-color: #93c5fd;
-}
-.stage-btn-t {
-  font-size: 22rpx;
-  font-weight: 600;
-  color: #2563eb;
-}
-
-.desk-big-slot {
-  height: 380rpx;
-  border-radius: 28rpx;
-  border: 3rpx dashed #cbd5e1;
-  background: #ffffff;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 32rpx;
-  box-sizing: border-box;
-}
-.desk-big-slot:active {
-  border-color: #2563eb;
-  background: #f0f7ff;
-}
-.big-plus-box {
-  width: 96rpx;
-  height: 96rpx;
-  border-radius: 50%;
-  background: #f1f5f9;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 20rpx;
-}
-.big-plus-icon {
-  font-size: 48rpx;
-  color: #64748b;
-  font-weight: 300;
-  line-height: 1;
-}
-.big-slot-hint {
-  font-size: 30rpx;
-  font-weight: 700;
-  color: #0f172a;
-  margin-bottom: 8rpx;
-}
-.big-slot-sub {
-  font-size: 22rpx;
-  color: #94a3b8;
-}
-
-/* 横向大卡片轮播 (图 9, 10 风格) */
-.desk-slider {
-  width: 100%;
-  white-space: nowrap;
-}
-.slider-track {
-  display: inline-flex;
-  flex-direction: row;
-  gap: 16rpx;
-  padding: 8rpx 0;
-}
-.desk-card {
-  width: 280rpx;
-  height: 380rpx;
-  border-radius: 24rpx;
-  background: #ffffff;
-  position: relative;
-  overflow: hidden;
-  box-shadow: 0 4rpx 16rpx rgba(15, 23, 42, 0.08);
-  border: 1rpx solid #e2e8f0;
-  flex-shrink: 0;
-}
-.desk-card-img {
-  width: 100%;
-  height: 100%;
-}
-.desk-card-tag {
-  position: absolute;
-  left: 12rpx;
-  top: 12rpx;
-  background: rgba(15, 23, 42, 0.65);
-  padding: 4rpx 14rpx;
-  border-radius: 10rpx;
-}
-.desk-card-tag-t {
-  font-size: 20rpx;
-  color: #ffffff;
-  font-weight: 600;
-}
-.desk-card-del {
-  position: absolute;
-  right: 12rpx;
-  top: 12rpx;
-  width: 40rpx;
-  height: 40rpx;
-  border-radius: 50%;
-  background: rgba(15, 23, 42, 0.65);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.del-x {
-  font-size: 20rpx;
-  color: #ffffff;
-  line-height: 40rpx;
-  text-align: center;
-}
-.desk-card-add {
-  width: 200rpx;
-  height: 380rpx;
-  border-radius: 24rpx;
-  border: 2rpx dashed #cbd5e1;
-  background: #ffffff;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.desk-card-add:active {
-  border-color: #2563eb;
-}
-.add-circle {
-  width: 72rpx;
-  height: 72rpx;
-  border-radius: 50%;
-  background: #f1f5f9;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 14rpx;
-}
-.add-plus {
-  font-size: 36rpx;
-  color: #64748b;
-  line-height: 1;
-}
-.add-t {
-  font-size: 22rpx;
-  color: #64748b;
-  font-weight: 600;
-}
-
-/* 结果卡片 */
-.desk-result-tray {
-  padding: 0 24rpx 24rpx;
-}
-.desk-run-card {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  background: #ffffff;
-  padding: 24rpx 28rpx;
-  border-radius: 20rpx;
-  border: 1rpx solid #bfdbfe;
-  box-shadow: 0 4rpx 14rpx rgba(37, 99, 235, 0.08);
-}
-.desk-spinner {
-  width: 44rpx;
-  height: 44rpx;
-  border-radius: 50%;
-  border: 5rpx solid #dbeafe;
-  border-top-color: #2563eb;
-  margin-right: 20rpx;
-  animation: spin 1s linear infinite;
-  flex-shrink: 0;
-}
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-.run-text-col {
-  display: flex;
-  flex-direction: column;
-}
-.run-h1 {
-  font-size: 28rpx;
-  font-weight: 700;
-  color: #0f172a;
-}
-.run-h2 {
-  font-size: 22rpx;
-  color: #64748b;
-  margin-top: 4rpx;
-}
-.desk-fail-card {
-  background: #fef2f2;
-  border: 1rpx solid #fecaca;
-  padding: 24rpx 28rpx;
-  border-radius: 20rpx;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-}
-.fail-t {
-  font-size: 26rpx;
-  color: #dc2626;
-  flex: 1;
-  min-width: 0;
-  word-break: break-all;
-  overflow-wrap: anywhere;
-  line-height: 1.5;
-}
-.retry-pill {
-  padding: 8rpx 20rpx;
-  background: #dc2626;
-  border-radius: 999rpx;
-  flex-shrink: 0;
-  margin-left: 16rpx;
-}
-.retry-t {
-  font-size: 22rpx;
-  color: #ffffff;
-  font-weight: 600;
-}
-.desk-success-card {
-  background: #ffffff;
-  border-radius: 24rpx;
-  padding: 18rpx;
-  border: 1rpx solid #e2e8f0;
-  box-shadow: 0 8rpx 24rpx rgba(15, 23, 42, 0.08);
-}
-.desk-result-image {
-  width: 100%;
-  border-radius: 16rpx;
-}
-.desk-result-video {
-  width: 100%;
-  height: 440rpx;
-  border-radius: 16rpx;
-  background: #000;
-}
-.desk-result-audio {
-  width: 100%;
-}
-.desk-actions-bar {
-  display: flex;
-  flex-direction: row;
-  gap: 16rpx;
-  margin-top: 16rpx;
-}
-.desk-act-btn {
-  flex: 1;
-  padding: 14rpx 0;
-  background: #eff6ff;
-  border-radius: 14rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.act-btn-t {
-  font-size: 24rpx;
-  font-weight: 600;
-  color: #2563eb;
-}
-.desk-scroll-pad {
-  height: 32rpx;
-}
-
-/* 一体化输入坞 (图 7~10 规范) */
-.desk-composer {
-  flex-shrink: 0;
-  background: #ffffff;
-  border-top: 1rpx solid #e2e8f0;
-  padding: 18rpx 24rpx 0;
-  box-shadow: 0 -4rpx 16rpx rgba(15, 23, 42, 0.04);
-}
-.desk-ref-section {
-  display: flex;
-  flex-direction: column;
-  gap: 10rpx;
-  margin-bottom: 12rpx;
-}
-.desk-ref-tags {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10rpx;
-}
-.desk-ref-chip {
-  display: inline-flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 4rpx;
-  background: #eff6ff;
-  border: 1rpx solid #bfdbfe;
-  padding: 6rpx 14rpx;
-  border-radius: 12rpx;
-}
-.desk-ref-chip:active {
-  background: #dbeafe;
-}
-.desk-ref-chip.multi {
-  background: #fdf4ff;
-  border-color: #f0abfc;
-}
-.desk-ref-chip.multi .chip-name {
-  color: #c026d3;
-}
-.chip-at {
-  font-size: 22rpx;
-  font-weight: 700;
-  color: #2563eb;
-}
-.chip-name {
-  font-size: 22rpx;
-  font-weight: 600;
-  color: #1d4ed8;
-}
-.chip-plus {
-  font-size: 18rpx;
-  color: #3b82f6;
-  background: rgba(37, 99, 235, 0.1);
-  padding: 2rpx 8rpx;
-  border-radius: 6rpx;
-  margin-left: 4rpx;
-}
-.quick-prompt-scroll {
-  width: 100%;
-  white-space: nowrap;
-}
-.quick-prompt-row {
-  display: inline-flex;
-  flex-direction: row;
-  gap: 10rpx;
-  padding: 2rpx 0;
-}
-.quick-p-item {
-  display: inline-flex;
-  align-items: center;
-  padding: 8rpx 18rpx;
-  background: #f8fafc;
-  border: 1rpx solid #e2e8f0;
-  border-radius: 999rpx;
-}
-.quick-p-item:active {
-  background: #eff6ff;
-  border-color: #93c5fd;
-}
-.quick-p-text {
-  font-size: 20rpx;
-  color: #475569;
+.topbar-clear {
+  font-size: 12px;
+  color: #64748B;
   font-weight: 500;
 }
-.quick-p-item:active .quick-p-text {
-  color: #2563eb;
+
+/* 苹果原生 Segmented Control (分段胶囊) */
+.segment-wrap {
+  display: flex;
+  background: #E8EBF0;
+  padding: 3px;
+  border-radius: 999px;
+  gap: 2px;
 }
 
-.desk-input-box {
-  width: 100%;
-  background: #f8fafc;
-  border: 1rpx solid #e2e8f0;
-  border-radius: 16rpx;
-  padding: 12rpx 16rpx;
-  margin-bottom: 14rpx;
-  box-sizing: border-box;
-  min-height: 140rpx;
-  cursor: text;
-}
-.composer-inline-flow {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  align-items: center;
-  align-content: flex-start;
-  min-height: 120rpx;
-  max-height: 220rpx;
-  overflow-y: auto;
-  line-height: 1.6;
-  padding: 2rpx 0;
-  box-sizing: border-box;
-}
-.flow-text {
-  font-size: 26rpx;
-  color: #1e293b;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-.flow-chip {
-  background: #2563eb !important;
-  padding: 2rpx 10rpx 2rpx 4rpx !important;
-  margin: 2rpx 6rpx !important;
-  border-radius: 999rpx !important;
-  display: inline-flex !important;
-  flex-direction: row !important;
-  align-items: center !important;
-  gap: 6rpx !important;
-  vertical-align: middle !important;
-}
-.flow-chip .inline-ref-thumb {
-  width: 32rpx !important;
-  height: 32rpx !important;
-  border-radius: 6rpx !important;
-}
-.flow-chip .inline-ref-label {
-  font-size: 20rpx !important;
-  color: #ffffff !important;
-  font-weight: 600 !important;
-}
-.flow-chip .inline-ref-x {
-  font-size: 20rpx !important;
-  color: #bfdbfe !important;
-  padding-left: 4rpx !important;
-}
-.flow-edit-hint {
-  font-size: 22rpx;
-  color: #94a3b8;
-  margin-left: 8rpx;
+.segment-item {
+  padding: 5px 14px;
+  border-radius: 999px;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* @ 联想补全弹层 */
-.at-suggest-popup {
-  background: #ffffff;
-  border: 1rpx solid #cbd5e1;
-  border-radius: 18rpx;
-  padding: 14rpx 18rpx;
-  margin-bottom: 12rpx;
-  box-shadow: 0 10rpx 28rpx rgba(15, 23, 42, 0.12);
+.segment-hover {
+  opacity: 0.8;
 }
-.at-suggest-popup.in-drawer {
-  margin-bottom: 16rpx;
-  border-color: #93c5fd;
-  background: #f8fafc;
+
+.segment-item.active {
+  background: #FFFFFF;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
 }
-.at-suggest-head {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10rpx;
+
+.segment-t {
+  font-size: 13px;
+  font-weight: 500;
+  color: #64748B;
 }
-.at-suggest-title {
-  font-size: 22rpx;
+
+.segment-item.active .segment-t {
   font-weight: 700;
-  color: #64748b;
-}
-.at-suggest-close {
-  font-size: 24rpx;
-  color: #94a3b8;
-  padding: 4rpx 8rpx;
-}
-.at-suggest-list {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 12rpx;
-}
-.at-suggest-item {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 8rpx;
-  padding: 8rpx 16rpx;
-  background: #eff6ff;
-  border: 1rpx solid #bfdbfe;
-  border-radius: 12rpx;
-}
-.at-suggest-item:active {
-  background: #dbeafe;
-}
-.at-suggest-thumb {
-  width: 36rpx;
-  height: 36rpx;
-  border-radius: 8rpx;
-}
-.at-suggest-name {
-  font-size: 22rpx;
-  font-weight: 600;
-  color: #2563eb;
+  color: #0F172A;
 }
 
-/* 抽屉中的行内混排卡片 */
-.drawer-flow-card {
-  background: #f8fafc;
-  border: 1rpx solid #e2e8f0;
-  border-radius: 16rpx;
-  padding: 14rpx 18rpx;
-  margin-bottom: 16rpx;
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 右上角创作库入口 */
+.top-lib-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #FFFFFF;
+  border: 1px solid rgba(0, 122, 255, 0.15);
+  box-shadow: 0 1px 4px rgba(0, 122, 255, 0.06);
+  padding: 6px 11px;
+  border-radius: 999px;
+}
+
+.top-lib-hover {
+  background: #EFF6FF;
+}
+
+.top-lib-t {
+  font-size: 12px;
+  font-weight: 600;
+  color: #007AFF;
+}
+
+/* 次级分类条 (标准生图/人像；纯音乐/文生歌) */
+.sub-mode-bar {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 2px 14px 6px;
+  background: #F6F7F9;
+}
+
+.sub-chip {
+  padding: 4px 14px;
+  border-radius: 999px;
+  background: #FFFFFF;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.sub-chip.active {
+  background: #007AFF;
+  border-color: #007AFF;
+}
+
+.sub-chip-t {
+  font-size: 11px;
+  font-weight: 500;
+  color: #64748B;
+}
+
+.sub-chip.active .sub-chip-t {
+  color: #FFFFFF;
+  font-weight: 600;
+}
+
+/* ── 精准编辑横幅 ─────────────────── */
+.edit-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 14px 0;
+  padding: 8px 12px;
+  background: #EFF6FF;
+  border: 1px solid #BFDBFE;
+  border-radius: 14px;
+}
+
+.edit-banner-img {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: #DBEAFE;
   flex-shrink: 0;
 }
-.drawer-flow-header {
+
+.edit-banner-meta {
+  flex: 1;
   display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 8rpx;
-  margin-bottom: 8rpx;
-}
-.drawer-flow-title {
-  font-size: 22rpx;
-  font-weight: 700;
-  color: #475569;
-}
-.drawer-flow-tip {
-  font-size: 20rpx;
-  color: #94a3b8;
-}
-.drawer-flow-body {
-  max-height: 180rpx;
-  min-height: 60rpx;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.opt-row {
+.edit-banner-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1D4ED8;
+}
+
+.edit-banner-sub {
+  font-size: 11px;
+  color: #64748B;
+}
+
+.edit-banner-close {
+  width: 28px;
+  height: 28px;
+  border-radius: 14px;
   display: flex;
-  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 122, 255, 0.1);
+}
+
+.edit-banner-close-hover {
+  background: rgba(0, 122, 255, 0.2);
+}
+
+.edit-banner-close-t {
+  font-size: 13px;
+  color: #1D4ED8;
+}
+
+/* ── 家具参考 · 3D 朝向 ─────────────── */
+.model3d-card {
+  margin: 6px 14px 0;
+  padding: 10px 12px;
+  background: #FFFFFF;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  border-radius: 16px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03);
+}
+
+.model3d-head {
+  display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12rpx;
 }
-.opt-left-btns {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 12rpx;
-}
-.opt-btn {
-  padding: 8rpx 18rpx;
-  border-radius: 999rpx;
-  background: #eff6ff;
-}
-.opt-btn.at-btn {
-  background: #dbeafe;
-  border: 1rpx solid #bfdbfe;
-}
-.opt-btn.at-btn .opt-btn-t {
-  color: #1d4ed8;
-}
-.opt-btn.undo { background: #f1f5f9; }
-.opt-btn.done-edit {
-  background: #2563eb;
-}
-.opt-btn.done-edit .opt-btn-t {
-  color: #ffffff;
-}
-.opt-btn.busy { opacity: 0.5; }
-.opt-btn-t { font-size: 22rpx; color: #1d4ed8; font-weight: 600; }
 
-.expand-trigger {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 6rpx;
-  padding: 6rpx 16rpx;
-  border-radius: 999rpx;
-  background: #f1f5f9;
-  border: 1rpx solid #e2e8f0;
-}
-.expand-trigger:active {
-  background: #e2e8f0;
-}
-.expand-trigger-icon {
-  font-size: 24rpx;
-  color: #64748b;
+.model3d-title {
+  font-size: 12px;
   font-weight: 700;
-  line-height: 1;
-}
-.expand-trigger-t {
-  font-size: 20rpx;
-  color: #64748b;
-  font-weight: 600;
+  color: #0F172A;
 }
 
-.range-row { display: flex; flex-direction: row; align-items: center; gap: 12rpx; }
-.range-slider { flex: 1; }
-.range-val { font-size: 22rpx; color: #64748b; min-width: 64rpx; }
-.sheet-chip.locked { opacity: 0.45; }
-.lock-tag { font-size: 20rpx; color: #f59e0b; margin-left: 10rpx; }
-.rule-warn { margin: 16rpx 0 0; padding: 16rpx 20rpx; border-radius: 14rpx; background: #fef3c7; }
-.rule-warn-t { display: block; font-size: 22rpx; color: #92400e; line-height: 1.5; }
-.desk-input {
-  width: 100%;
-  height: 160rpx;
-  min-height: 120rpx;
-  max-height: 220rpx;
-  font-size: 28rpx;
-  color: #0f172a;
+.model3d-status {
+  font-size: 10px;
+  font-weight: 700;
+  color: #B45309;
+  background: #FEF3C7;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.model3d-status.ok {
+  color: #15803D;
+  background: #DCFCE7;
+}
+
+.model3d-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.model3d-empty-t {
+  font-size: 11px;
+  color: #64748B;
   line-height: 1.5;
-  margin-bottom: 0;
-  background: transparent;
-  box-sizing: border-box;
-  overflow-y: auto;
 }
 
-/* 3/4 屏抽屉面板 */
-.prompt-drawer-mask {
-  position: fixed;
-  left: 0;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  background: rgba(15, 23, 42, 0.65);
-  z-index: 999;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
+.model3d-pick {
+  align-self: flex-start;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: #EFF6FF;
+  border: 1px solid #BFDBFE;
 }
-.prompt-drawer-sheet {
-  width: 100%;
-  height: 75vh;
-  background: #ffffff;
-  border-top-left-radius: 32rpx;
-  border-top-right-radius: 32rpx;
-  display: flex;
-  flex-direction: column;
-  padding: 24rpx 28rpx calc(24rpx + env(safe-area-inset-bottom));
-  box-sizing: border-box;
-  box-shadow: 0 -12rpx 40rpx rgba(0, 0, 0, 0.2);
+
+.model3d-pick-hover {
+  background: #DBEAFE;
 }
-.prompt-drawer-head {
+
+.model3d-pick-t {
+  font-size: 11px;
+  font-weight: 700;
+  color: #007AFF;
+}
+
+.model3d-body {
   display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  padding-bottom: 20rpx;
-  border-bottom: 1rpx solid #e2e8f0;
-  margin-bottom: 20rpx;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.model3d-thumb {
+  width: 60px;
+  height: 60px;
+  border-radius: 10px;
+  background: #F1F5F9;
   flex-shrink: 0;
-}
-.prompt-drawer-title-col {
-  display: flex;
-  flex-direction: column;
-  gap: 4rpx;
-}
-.prompt-drawer-title {
-  font-size: 30rpx;
-  font-weight: 700;
-  color: #0f172a;
-}
-.prompt-drawer-count {
-  font-size: 22rpx;
-  color: #94a3b8;
-}
-.prompt-drawer-actions {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 16rpx;
-}
-.drawer-act-pill {
-  padding: 10rpx 24rpx;
-  border-radius: 999rpx;
-  background: #f1f5f9;
-  border: 1rpx solid #e2e8f0;
-}
-.drawer-act-pill.at-btn {
-  background: #dbeafe;
-  border-color: #bfdbfe;
-}
-.drawer-act-pill.at-btn .drawer-act-t {
-  color: #1d4ed8;
-}
-.drawer-act-pill.done {
-  background: #2563eb;
-  border-color: #2563eb;
-}
-.drawer-act-t {
-  font-size: 24rpx;
-  color: #475569;
-  font-weight: 600;
-}
-.drawer-act-t.done {
-  color: #ffffff;
-}
-.prompt-drawer-scroll {
-  flex: 1;
-  width: 100%;
-  height: 100%;
-  overflow-y: auto;
-}
-.prompt-drawer-textarea {
-  width: 100%;
-  height: 100%;
-  min-height: 50vh;
-  font-size: 30rpx;
-  line-height: 1.6;
-  color: #0f172a;
-  background: transparent;
-  box-sizing: border-box;
-}
-.desk-bottom-row {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12rpx;
-}
-.desk-left-capsules {
-  display: flex;
-  flex-direction: row;
-  gap: 12rpx;
-}
-.desk-capsule {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 8rpx;
-  padding: 10rpx 20rpx;
-  border-radius: 999rpx;
-  background: #f1f5f9;
-  border: 1rpx solid #e2e8f0;
-}
-.cap-name {
-  font-size: 22rpx;
-  font-weight: 600;
-  color: #334155;
-}
-.cap-arrow {
-  font-size: 20rpx;
-  color: #64748b;
-}
-.desk-send-btn {
-  padding: 14rpx 36rpx;
-  border-radius: 999rpx;
-  background: #0f172a;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 4rpx 12rpx rgba(15, 23, 42, 0.2);
-}
-.desk-send-btn.disabled {
-  background: #cbd5e1;
-  box-shadow: none;
-}
-.desk-send-t {
-  font-size: 26rpx;
-  font-weight: 700;
-  color: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.05);
 }
 
-/* ==================== 底部参数半屏配置抽屉 (图 7, 8 规范) ==================== */
-.param-sheet-mask {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(15, 23, 42, 0.45);
-  z-index: 1001;
+.model3d-meta {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
+  gap: 3px;
 }
-.param-sheet {
-  background: #ffffff;
-  border-radius: 36rpx 36rpx 0 0;
-  max-height: 75vh;
-  display: flex;
-  flex-direction: column;
-  padding: 24rpx 28rpx;
-  box-sizing: border-box;
-}
-.sheet-head {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  padding-bottom: 20rpx;
-  border-bottom: 1rpx solid #f1f5f9;
-}
-.sheet-title {
-  font-size: 30rpx;
+
+.model3d-name {
+  font-size: 12px;
   font-weight: 700;
-  color: #0f172a;
+  color: #0F172A;
 }
-.sheet-close-btn {
-  font-size: 28rpx;
+
+.model3d-sub {
+  font-size: 10px;
+  color: #64748B;
+}
+
+.model3d-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.model3d-btn {
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: #007AFF;
+}
+
+.model3d-btn.ghost {
+  background: #F1F5F9;
+}
+
+.model3d-btn-hover {
+  opacity: 0.85;
+}
+
+.model3d-btn-t {
+  font-size: 10px;
   font-weight: 700;
-  color: #2563eb;
-  padding: 8rpx 16rpx;
+  color: #FFFFFF;
 }
-.sheet-scroll {
+
+.model3d-btn.ghost .model3d-btn-t {
+  color: #475569;
+}
+
+.model3d-warn {
+  font-size: 10px;
+  color: #B45309;
+}
+
+.model3d-error {
+  font-size: 10px;
+  color: #EF4444;
+}
+
+/* ========================================================================= */
+/* 创作主工作区：参考大图工作台 (默认展开，参考图 0 / 图 1) VS 历史记录 */
+/* ========================================================================= */
+.workspace {
   flex: 1;
   min-height: 0;
-  padding: 16rpx 0;
-}
-.sheet-sec {
-  margin-bottom: 28rpx;
-}
-.sec-label {
-  font-size: 24rpx;
-  font-weight: 700;
-  color: #64748b;
-  margin-bottom: 14rpx;
-  display: block;
-}
-.model-grid-2x2 {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14rpx;
-}
-.model-card-item {
-  background: #f8fafc;
-  border: 2rpx solid #e2e8f0;
-  border-radius: 18rpx;
-  padding: 16rpx;
   display: flex;
   flex-direction: column;
-  box-sizing: border-box;
-}
-.model-card-item.active {
-  background: #eff6ff;
-  border-color: #2563eb;
-}
-.m-card-head {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8rpx;
-}
-.m-card-name {
-  font-size: 26rpx;
-  font-weight: 700;
-  color: #0f172a;
-}
-.model-card-item.active .m-card-name {
-  color: #2563eb;
-}
-.m-card-badge {
-  font-size: 18rpx;
-  font-weight: 700;
-  color: #f59e0b;
-  background: rgba(245, 158, 11, 0.15);
-  padding: 2rpx 8rpx;
-  border-radius: 6rpx;
-}
-.m-card-desc {
-  font-size: 20rpx;
-  color: #94a3b8;
-  line-height: 1.4;
-}
-.polish-hint {
-  display: block;
-  font-size: 24rpx;
-  color: #334155;
-  line-height: 1.45;
-  margin-top: 8rpx;
-}
-.polish-at {
-  display: block;
-  font-size: 20rpx;
-  color: #64748b;
-  margin-top: 8rpx;
-  line-height: 1.4;
-}
-.mode-seg-row {
-  display: flex;
-  flex-direction: row;
-  background: #f1f5f9;
-  border-radius: 16rpx;
-  padding: 6rpx;
-  gap: 8rpx;
-}
-.mode-seg-item {
-  flex: 1;
-  padding: 14rpx 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 12rpx;
-}
-.mode-seg-item.active {
-  background: #ffffff;
-  box-shadow: 0 2rpx 8rpx rgba(15, 23, 42, 0.08);
-}
-.mode-seg-t {
-  font-size: 24rpx;
-  font-weight: 600;
-  color: #64748b;
-}
-.mode-seg-item.active .mode-seg-t {
-  color: #0f172a;
-  font-weight: 700;
-}
-.chip-row {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 12rpx;
-}
-.sheet-chip {
-  padding: 12rpx 28rpx;
-  border-radius: 999rpx;
-  background: #f8fafc;
-  border: 1rpx solid #e2e8f0;
-}
-.sheet-chip.active {
-  background: #eff6ff;
-  border-color: #2563eb;
-}
-.chip-t {
-  font-size: 24rpx;
-  color: #475569;
-}
-.sheet-chip.active .chip-t {
-  color: #2563eb;
-  font-weight: 600;
-}
-.sheet-pad {
-  height: 48rpx;
+  padding: 6px 14px 4px;
 }
 
-/* ==================== 抽屉时间分组 ==================== */
-.session-group-block {
-  margin-bottom: 18rpx;
-}
-.group-header-label {
-  font-size: 22rpx;
-  font-weight: 700;
-  color: #94a3b8;
-  padding: 8rpx 12rpx;
-  display: block;
-}
-
-/* ==================== 高级超参数面板 ==================== */
-.advanced-sec {
-  background: #f8fafc;
-  border: 1rpx solid #e2e8f0;
-  border-radius: 20rpx;
-  padding: 18rpx 20rpx;
-  margin-top: 10rpx;
-}
-.advanced-toggle {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-}
-.adv-left {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 10rpx;
-}
-.adv-icon {
-  font-size: 26rpx;
-}
-.adv-title {
-  margin-bottom: 0 !important;
-  color: #1e293b !important;
-}
-.adv-arrow {
-  font-size: 22rpx;
-  color: #2563eb;
-  font-weight: 600;
-}
-.advanced-body {
-  margin-top: 20rpx;
-  padding-top: 18rpx;
-  border-top: 1rpx solid #e2e8f0;
-  display: flex;
-  flex-direction: column;
-  gap: 22rpx;
-}
-.adv-field {
-  display: flex;
-  flex-direction: column;
-  gap: 8rpx;
-}
-.adv-label-row {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-}
-.adv-field-label {
-  font-size: 22rpx;
-  font-weight: 600;
-  color: #475569;
-}
-.adv-field-val {
-  font-size: 22rpx;
-  font-weight: 700;
-  color: #2563eb;
-}
-.adv-reset-btn {
-  font-size: 20rpx;
-  color: #64748b;
-  text-decoration: underline;
-}
-.adv-input {
-  height: 64rpx;
-  background: #ffffff;
-  border: 1rpx solid #cbd5e1;
-  border-radius: 12rpx;
-  padding: 0 16rpx;
-  font-size: 24rpx;
-  color: #0f172a;
-}
-.adv-textarea {
-  width: 100%;
-  height: 120rpx;
-  background: #ffffff;
-  border: 1rpx solid #cbd5e1;
-  border-radius: 12rpx;
-  padding: 12rpx 16rpx;
-  font-size: 22rpx;
-  color: #0f172a;
-  box-sizing: border-box;
-}
-
-/* ==================== 快捷选图 88vh 高视野抽屉 ==================== */
-.quick-picker-mask {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(15, 23, 42, 0.55);
-  z-index: 1002;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-}
-.quick-picker-sheet {
-  background: #ffffff;
-  border-radius: 40rpx 40rpx 0 0;
-  height: 88vh;
-  max-height: 88vh;
-  display: flex;
-  flex-direction: column;
-  padding: 24rpx 28rpx 0 28rpx;
-  box-sizing: border-box;
-}
-.picker-head {
-  display: flex;
-  flex-direction: row;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding-bottom: 16rpx;
-  border-bottom: 1rpx solid #f1f5f9;
-}
-.picker-head-left {
-  display: flex;
-  flex-direction: column;
-  gap: 4rpx;
-}
-.picker-title {
-  font-size: 32rpx;
-  font-weight: 800;
-  color: #0f172a;
-}
-.picker-subtitle {
-  font-size: 22rpx;
-  color: #94a3b8;
-}
-.picker-close {
-  font-size: 36rpx;
-  color: #94a3b8;
-  padding: 6rpx 12rpx;
-}
-.picker-actions-row {
-  display: flex;
-  flex-direction: row;
-  gap: 16rpx;
-  padding: 16rpx 0 12rpx 0;
-}
-.picker-btn {
+/* 模式 A：大图工作台容器 */
+.big-stage-container {
   flex: 1;
   display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
-  gap: 12rpx;
-  padding: 18rpx 0;
-  border-radius: 18rpx;
-  background: #f8fafc;
-  border: 1rpx solid #e2e8f0;
-}
-.picker-btn:active {
-  background: #eff6ff;
-  border-color: #bfdbfe;
-}
-.p-btn-icon {
-  font-size: 30rpx;
-}
-.p-btn-text {
-  font-size: 24rpx;
-  font-weight: 700;
-  color: #1e293b;
-}
-
-/* 搜索栏与分类胶囊 */
-.picker-search-bar {
-  padding: 8rpx 0;
-}
-.p-search-box {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  background: #f1f5f9;
-  border-radius: 999rpx;
-  height: 64rpx;
-  padding: 0 20rpx;
-  gap: 12rpx;
-}
-.p-search-icon {
-  font-size: 26rpx;
-  color: #94a3b8;
-}
-.p-search-input {
-  flex: 1;
-  font-size: 24rpx;
-  color: #0f172a;
-}
-.p-search-clear {
-  font-size: 24rpx;
-  color: #94a3b8;
-  padding: 6rpx;
-}
-.picker-category-row {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 12rpx;
-  padding: 12rpx 0 16rpx 0;
-}
-.p-cat-chip {
-  padding: 10rpx 24rpx;
-  border-radius: 999rpx;
-  background: #f8fafc;
-  border: 1rpx solid #e2e8f0;
-}
-.p-cat-chip.active {
-  background: #eff6ff;
-  border-color: #2563eb;
-}
-.p-cat-t {
-  font-size: 22rpx;
-  color: #64748b;
-  font-weight: 600;
-}
-.p-cat-chip.active .p-cat-t {
-  color: #2563eb;
-  font-weight: 700;
-}
-.picker-reload-pill {
-  width: 56rpx;
-  height: 56rpx;
-  border-radius: 999rpx;
-  background: #f8fafc;
-  border: 1rpx solid #e2e8f0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-left: auto;
-}
-.p-reload-icon {
-  font-size: 28rpx;
-  color: #64748b;
-}
-.p-reload-icon.spinning {
-  animation: spin 0.8s linear infinite;
-}
-
-/* 素材网格与卡片 */
-.picker-images-scroll {
-  flex: 1;
+  flex-direction: column;
   min-height: 0;
+  gap: 8px;
 }
-.picker-loading-box,
-.picker-empty {
-  padding: 80rpx 20rpx;
+
+.stage-toggle-bar {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 2px 4px;
+}
+
+.session-crumb {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.04);
+  padding: 3px 10px;
+  border-radius: 999px;
+  max-width: 60%;
+}
+
+.session-crumb-t {
+  font-size: 11px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.stage-toggle-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 8px;
+}
+
+.stage-toggle-hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.stage-toggle-t {
+  font-size: 11px;
+  color: #64748B;
+  font-weight: 500;
+}
+
+/* 无参考图时的居中优雅大卡片 (参考图 0，支持素材库与相册双板块) */
+.big-empty-wrap {
+  flex: 1;
+  display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12rpx;
+  padding: 8px 16px 20px;
 }
-.p-empty-ico {
-  font-size: 64rpx;
-}
-.p-empty-t {
-  font-size: 26rpx;
-  font-weight: 600;
-  color: #64748b;
-}
-.p-empty-sub {
-  font-size: 22rpx;
-  color: #94a3b8;
-}
-.picker-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16rpx;
-  padding: 8rpx 0;
-}
-.picker-card {
-  background: #ffffff;
-  border-radius: 18rpx;
+
+.big-stage-card {
+  width: 100%;
+  max-width: 320px;
+  background: #FFFFFF;
+  border-radius: 24px;
+  box-shadow: 0 16px 36px -12px rgba(15, 23, 42, 0.08), 0 2px 8px rgba(0, 0, 0, 0.03);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
-  border: 1rpx solid #e2e8f0;
+}
+
+.big-stage-hero {
   display: flex;
   flex-direction: column;
-  box-shadow: 0 2rpx 8rpx rgba(15, 23, 42, 0.04);
+  align-items: center;
+  justify-content: center;
+  padding: 32px 20px 24px;
+  gap: 12px;
+  background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%);
+  transition: transform 0.16s ease;
 }
-.picker-card:active {
-  border-color: #2563eb;
-  transform: scale(0.98);
+
+.big-stage-hero-hover {
+  background: #F1F5F9;
 }
-.picker-img-wrapper {
-  position: relative;
+
+.big-stage-plus-circle {
+  width: 56px;
+  height: 56px;
+  border-radius: 28px;
+  background: #FFFFFF;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.big-stage-label {
+  font-size: 17px;
+  font-weight: 700;
+  color: #0F172A;
+  letter-spacing: -0.3px;
+}
+
+.big-stage-hint {
+  font-size: 12px;
+  color: #94A3B8;
+  font-weight: 400;
+}
+
+/* 两个核心导入板块 */
+.big-stage-plates {
+  display: flex;
+  flex-direction: column;
+  background: #FFFFFF;
+  border-top: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+.stage-plate-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  transition: background 0.16s ease;
+}
+
+.stage-plate-hover {
+  background: #F8FAFC;
+}
+
+.stage-plate-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stage-plate-icon.blue {
+  background: rgba(0, 122, 255, 0.08);
+}
+
+.stage-plate-icon.green {
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.stage-plate-texts {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stage-plate-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1E293B;
+}
+
+.stage-plate-sub {
+  font-size: 11px;
+  color: #94A3B8;
+}
+
+.stage-plate-divider {
+  height: 1px;
+  background: rgba(0, 0, 0, 0.04);
+  margin: 0 16px;
+}
+
+/* 有参考图时的横向大卡片流 (参考图 1) */
+.big-refs-section {
+  flex-shrink: 0;
   width: 100%;
-  aspect-ratio: 1;
-  background: #f1f5f9;
 }
-.picker-thumb {
+
+.big-refs-scroll {
+  width: 100%;
+  white-space: nowrap;
+}
+
+.big-refs-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 2px 8px;
+}
+
+.big-ref-card {
+  position: relative;
+  width: 200px;
+  height: 260px;
+  border-radius: 20px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: #FFFFFF;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+.big-ref-img {
   width: 100%;
   height: 100%;
+  object-fit: cover;
 }
-.picker-cat-tag {
+
+.big-ref-close {
   position: absolute;
-  top: 8rpx;
-  left: 8rpx;
-  background: rgba(15, 23, 42, 0.65);
-  color: #ffffff;
-  font-size: 18rpx;
-  font-weight: 600;
-  padding: 2rpx 8rpx;
-  border-radius: 6rpx;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.big-ref-close-hover {
+  background: rgba(0, 0, 0, 0.8);
+}
+
+.big-ref-tag {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(4px);
 }
-.picker-card-info {
-  padding: 8rpx 10rpx;
+
+.big-ref-tag-t {
+  font-size: 10px;
+  font-weight: 700;
+  color: #FFFFFF;
+}
+
+/* 尾随的添加小卡片 */
+.big-ref-add-card {
+  width: 64px;
+  height: 260px;
+  border-radius: 20px;
+  background: #FFFFFF;
+  border: 1.5px dashed rgba(0, 0, 0, 0.12);
   display: flex;
   flex-direction: column;
-  gap: 2rpx;
-}
-.picker-card-name {
-  font-size: 20rpx;
-  font-weight: 600;
-  color: #0f172a;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.picker-card-tag {
-  font-size: 18rpx;
-  color: #94a3b8;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.picker-scroll-pad {
-  height: 60rpx;
-}
-.portrait-lib {
-  padding: 8rpx 8rpx 24rpx;
-}
-.portrait-consent {
-  margin-top: 20rpx;
-  padding: 24rpx;
-  background: #fff7ed;
-  border: 1rpx solid #fed7aa;
-  border-radius: 16rpx;
-}
-.portrait-warn {
-  display: block;
-  font-size: 26rpx;
-  line-height: 1.6;
-  color: #9a3412;
-  margin-bottom: 16rpx;
-}
-.portrait-new-row,
-.portrait-group-head,
-.portrait-asset,
-.portrait-pick-row {
-  display: flex;
-  flex-direction: row;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 12rpx;
+  justify-content: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
-.portrait-new-row {
-  margin: 20rpx 0;
+
+.big-ref-add-hover {
+  background: #EFF6FF;
+  border-color: #007AFF;
 }
-.portrait-name-input {
+
+.big-ref-add-t {
+  font-size: 11px;
+  color: #64748B;
+  font-weight: 500;
+}
+
+/* 最新产物展示区 (卡片化) */
+.big-result-card {
   flex: 1;
-  height: 72rpx;
-  background: #ffffff;
-  border: 1rpx solid #e2e8f0;
-  border-radius: 12rpx;
-  padding: 0 20rpx;
-  font-size: 28rpx;
+  background: #FFFFFF;
+  border-radius: 20px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
-.portrait-group {
-  background: #ffffff;
-  border: 1rpx solid #e2e8f0;
-  border-radius: 16rpx;
-  padding: 20rpx;
-  margin-bottom: 16rpx;
-}
-.portrait-group-name {
+
+.result-running {
   flex: 1;
-  font-size: 30rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  gap: 12px;
+}
+
+.result-pulse-ring {
+  width: 44px;
+  height: 44px;
+  border-radius: 22px;
+  border: 3px solid #BFDBFE;
+  border-top-color: #007AFF;
+  animation: ml-spin 0.9s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.result-running-t {
+  font-size: 13px;
+  font-weight: 700;
+  color: #007AFF;
+}
+
+.result-prog-bar {
+  width: 68%;
+  height: 5px;
+  border-radius: 999px;
+  background: #E2E8F0;
+  overflow: hidden;
+}
+
+.result-prog-fill {
+  height: 100%;
+  background: #007AFF;
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+
+.result-running-sub {
+  font-size: 11px;
+  color: #94A3B8;
+  text-align: center;
+  max-width: 80%;
+}
+
+.result-failed {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  gap: 10px;
+}
+
+.result-failed-t {
+  font-size: 12px;
+  color: #EF4444;
+}
+
+.canvas-mini-btn {
+  background: #FEF2F2;
+  border: 1px solid #FECACA;
+  border-radius: 999px;
+  padding: 6px 14px;
+}
+
+.canvas-mini-btn-t {
+  font-size: 11px;
+  color: #EF4444;
   font-weight: 600;
-  color: #0f172a;
 }
-.portrait-link {
-  font-size: 24rpx;
-  color: #dc2626;
+
+.result-media-wrap {
+  flex: 1;
+  min-height: 180px;
+  background: #0F172A;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.portrait-asset-row {
-  margin-top: 12rpx;
+
+.result-media-img {
+  width: 100%;
+  height: 100%;
 }
-.portrait-asset {
-  background: #f8fafc;
-  border-radius: 12rpx;
-  padding: 12rpx 16rpx;
-  margin-bottom: 12rpx;
+
+.result-media-video {
+  width: 100%;
+  height: 100%;
 }
-.portrait-asset-name,
-.portrait-status,
-.portrait-err,
-.portrait-pick-label,
-.portrait-caption,
-.portrait-chip-t {
-  font-size: 24rpx;
+
+.result-text-box {
+  flex: 1;
+  padding: 14px;
+  box-sizing: border-box;
+}
+
+.result-text-content {
+  font-size: 13px;
+  color: #0F172A;
+  line-height: 1.7;
+}
+
+.result-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  background: #FFFFFF;
+  border-top: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+.result-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: #F8FAFC;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  border-radius: 8px;
+  padding: 5px 9px;
+}
+
+.result-act.accent {
+  background: #EFF6FF;
+  border-color: #BFDBFE;
+}
+
+.result-act-hover {
+  background: #E2E8F0;
+}
+
+.result-act-t {
+  font-size: 11px;
+  font-weight: 500;
+  color: #0F172A;
+}
+
+.result-act.accent .result-act-t {
+  color: #007AFF;
+  font-weight: 600;
+}
+
+/* 模式 B：过程记录模式容器 */
+.compact-history-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #FFFFFF;
+  border-radius: 20px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+}
+
+.compact-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: #F8FAFC;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+.compact-top-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.compact-top-t {
+  font-size: 12px;
+  font-weight: 600;
+  color: #007AFF;
+}
+
+.compact-refs-strip {
+  display: flex;
+  gap: 4px;
+}
+
+.compact-thumb {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.history-scroll {
+  flex: 1;
+  min-height: 0;
+  padding: 12px 14px;
+  box-sizing: border-box;
+}
+
+.history-empty {
+  padding: 48px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.history-empty-t {
+  font-size: 12px;
+  color: #94A3B8;
+}
+
+.h-row {
+  margin-bottom: 12px;
+}
+
+.h-user {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.h-user-bubble {
+  max-width: 82%;
+  background: #007AFF;
+  border-radius: 18px 18px 4px 18px;
+  padding: 10px 14px;
+  color: #FFFFFF;
+}
+
+.h-user-t {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #FFFFFF;
+}
+
+.h-user-refs {
+  margin-top: 4px;
+}
+
+.h-user-refs-t {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.h-ai-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.h-ai-thumb {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: #EFF6FF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.h-ai-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.h-ai-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.h-ai-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.h-ai-model {
+  font-size: 11px;
+  font-weight: 700;
+  color: #475569;
+}
+
+.h-ai-status {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #F1F5F9;
+  color: #64748B;
+}
+
+.h-ai-status.st-running {
+  background: #EFF6FF;
+  color: #007AFF;
+}
+
+.h-ai-status.st-done {
+  background: #DCFCE7;
+  color: #15803D;
+}
+
+.h-ai-text {
+  font-size: 12px;
   color: #334155;
+  line-height: 1.55;
 }
-.portrait-status.Active {
-  color: #059669;
+
+.msg-tail {
+  height: 12px;
 }
-.portrait-status.Failed,
-.portrait-err {
-  color: #dc2626;
+
+/* ========================================================================= */
+/* 底部输入坞：极简苹果卡片式 (参考图 0 / 图 1) */
+/* ========================================================================= */
+.composer-card {
+  margin: 0 14px calc(6px + env(safe-area-inset-bottom));
+  background: #FFFFFF;
+  border-radius: 22px;
+  box-shadow: 0 4px 24px rgba(15, 23, 42, 0.06);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  padding: 12px 14px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 30;
 }
-.portrait-status.Processing {
-  color: #d97706;
-}
-.portrait-err {
+
+.composer-input-row {
   width: 100%;
 }
-.portrait-pick {
-  padding: 4rpx 8rpx 12rpx;
-}
-.portrait-caption,
-.portrait-pick-label {
-  display: block;
+
+.composer-textarea {
+  width: 100%;
+  min-height: 38px;
+  max-height: 120px;
+  font-size: 14px;
   line-height: 1.5;
-  color: #64748b;
+  color: #0F172A;
 }
-.portrait-chip {
-  padding: 8rpx 18rpx;
-  border-radius: 999rpx;
-  background: #f1f5f9;
-  border: 1rpx solid transparent;
+
+.composer-ph {
+  color: #94A3B8;
+  font-size: 14px;
 }
-.portrait-chip.on {
-  background: #eff6ff;
-  border-color: #bfdbfe;
+
+.composer-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.composer-warn-t {
+  font-size: 11px;
+  color: #D97706;
+}
+
+.composer-controls-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.composer-pills-scroll {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.composer-pills-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 4px;
+}
+
+.composer-pills-left::-webkit-scrollbar {
+  display: none;
+}
+
+/* 常用配置胶囊排布 */
+.capsule-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #F1F5F9;
+  border-radius: 12px;
+  padding: 6px 9px;
+  flex-shrink: 0;
+  transition: all 0.16s ease;
+}
+
+.capsule-hover {
+  background: #E2E8F0;
+}
+
+.capsule-pill.model-pill {
+  background: #F1F5F9;
+}
+
+.capsule-pill.more-pill {
+  background: #F8FAFC;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.capsule-t {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #334155;
+}
+
+.capsule-prefix {
+  font-size: 11px;
+  color: #64748B;
+  font-weight: 400;
+}
+
+.capsule-sep {
+  font-size: 10px;
+  color: #94A3B8;
+  margin: 0 1px;
+}
+
+.capsule-val {
+  font-size: 12px;
+  font-weight: 600;
+  color: #0F172A;
+}
+
+.capsule-t.strong {
+  font-weight: 600;
+  color: #0F172A;
+}
+
+.capsule-badge {
+  font-size: 9px;
+  background: #007AFF;
+  color: #FFFFFF;
+  border-radius: 999px;
+  padding: 0 4px;
+  font-weight: 700;
+}
+
+.composer-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.composer-opt-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 17px;
+  background: #F8FAFC;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.composer-opt-btn.disabled {
+  opacity: 0.35;
+}
+
+.opt-hover {
+  background: #EFF6FF;
+}
+
+/* 圆形发送按钮 */
+.composer-send-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 18px;
+  background: #CBD5E1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.composer-send-btn.active {
+  background: #007AFF;
+  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.3);
+}
+
+.send-hover {
+  transform: scale(0.92);
+}
+
+.composer-foot-note {
+  text-align: center;
+  padding-top: 2px;
+}
+
+.foot-note-t {
+  font-size: 10px;
+  color: #94A3B8;
+  letter-spacing: 0.02em;
+}
+
+/* ── @ 联想 ─────────────────────────── */
+.at-popup {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 160px;
+  z-index: 50;
+  background: #FFFFFF;
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  overflow: hidden;
+}
+
+.at-list {
+  max-height: 200px;
+}
+
+.at-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+}
+
+.at-thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: #F1F5F9;
+}
+
+.at-meta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.at-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: #007AFF;
+}
+
+.at-sub {
+  font-size: 10px;
+  color: #64748B;
+}
+
+/* ── 参数 Sheet ──────────────────────── */
+.sheet-mask {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 990;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.sheet {
+  background: #FFFFFF;
+  border-radius: 24px 24px 0 0;
+  max-height: 76vh;
+  padding-bottom: env(safe-area-inset-bottom);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.08);
+  animation: slideUp 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+.sheet-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0F172A;
+}
+
+.sheet-close {
+  width: 28px;
+  height: 28px;
+  border-radius: 14px;
+  background: #F1F5F9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sheet-body {
+  padding: 14px 18px;
+  box-sizing: border-box;
+}
+
+.model-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  margin-bottom: 8px;
+  background: #FFFFFF;
+}
+
+.model-item.active {
+  background: #EFF6FF;
+  border-color: #BFDBFE;
+}
+
+.model-hover {
+  background: #F8FAFC;
+}
+
+.model-item-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.model-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0F172A;
+}
+
+.model-desc {
+  font-size: 11px;
+  color: #64748B;
+  line-height: 1.45;
+}
+
+.option-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 0 12px;
+}
+
+.option {
+  width: calc(33.33% - 6px);
+  height: 44px;
+  border-radius: 12px;
+  border: 1px solid #E2E8F0;
+  align-items: center;
+  justify-content: center;
+  display: flex;
+  background: #FFFFFF;
+}
+
+.option.active {
+  background: #007AFF;
+  border-color: #007AFF;
+}
+
+.option-t {
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.option.active .option-t {
+  color: #FFFFFF;
+}
+
+.param-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 4px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+.param-field-t {
+  font-size: 13px;
+  color: #0F172A;
+  font-weight: 500;
+}
+
+.sheet-preview-wrap {
+  margin-top: 16px;
+  padding: 8px 0;
+  display: flex;
+  justify-content: center;
+}
+
+.sheet-preview-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: #F8FAFC;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.sheet-preview-hover {
+  background: #F1F5F9;
+}
+
+.sheet-preview-t {
+  font-size: 12px;
+  color: #64748B;
+  font-weight: 500;
+}
+
+/* ── 素材选择器 ─────────────────────── */
+.sheet.picker {
+  max-height: 82vh;
+}
+
+.picker-search {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px 4px;
+}
+
+.picker-input {
+  flex: 1;
+  height: 38px;
+  background: #F1F5F9;
+  border-radius: 10px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.picker-btn {
+  background: #007AFF;
+  border-radius: 10px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+}
+
+.picker-btn-t {
+  color: #FFFFFF;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.picker-grid {
+  max-height: 52vh;
+  padding: 8px 12px;
+}
+
+.picker-grid-inner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.picker-card {
+  width: calc(33.33% - 6px);
+}
+
+.picker-img {
+  width: 100%;
+  height: 104px;
+  border-radius: 12px;
+  background: #EFF4FA;
+}
+
+.picker-name {
+  font-size: 10px;
+  color: #64748B;
+  margin-top: 3px;
+}
+
+.picker-status {
+  width: 100%;
+  padding: 20px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.picker-status-t {
+  font-size: 12px;
+  color: #94A3B8;
+}
+
+.picker-more {
+  width: 100%;
+  padding: 12px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.picker-more-t {
+  font-size: 12px;
+  color: #007AFF;
+  font-weight: 600;
+}
+
+.picker-foot {
+  display: flex;
+  gap: 8px;
+  padding: 10px 16px calc(12px + env(safe-area-inset-bottom));
+  border-top: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.picker-action {
+  flex: 1;
+  height: 44px;
+  border-radius: 12px;
+  background: #007AFF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.picker-action.ghost {
+  background: #F1F5F9;
+}
+
+.picker-action-t {
+  font-size: 13px;
+  font-weight: 600;
+  color: #FFFFFF;
+}
+
+.picker-action.ghost .picker-action-t {
+  color: #64748B;
+}
+
+@keyframes ml-spin {
+  to { transform: rotate(360deg); }
 }
 </style>
-

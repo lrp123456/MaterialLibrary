@@ -34,7 +34,7 @@
 
 <script>
 import TouchSelector from '../../components/TouchSelector.vue'
-import { aiTaskManager } from '../../service/AiTaskManager'
+import { handoffPreciseEdit } from '../../common/handoff'
 
 export default {
   components: { TouchSelector },
@@ -70,114 +70,31 @@ export default {
     async submitTask() {
       if (!this.hasSelection || this.submitting) return
       this.submitting = true
-      try {
-        const payload = {
-          mode: 'remove',
-          sub_mode: 'watermark',
-          pasteback: this.pasteback,
-          image: this.imgUrl,
-        }
-        if (this.selectionData.mode === 'rect' && this.selectionData.pixelRect) {
-          payload.coord_unit = 'px'
-          payload.x1 = this.selectionData.pixelRect.x1
-          payload.y1 = this.selectionData.pixelRect.y1
-          payload.x2 = this.selectionData.pixelRect.x2
-          payload.y2 = this.selectionData.pixelRect.y2
-        } else if (this.selectionData.mode === 'quad') {
-          payload.coord_unit = 'percent'
-          payload.points = this.selectionData.points
-        }
-
-        await aiTaskManager.createTask({
-          fid: this.fid,
-          type: 'watermark',
-          title: '去水印',
-          payload,
-        })
-        uni.showToast({ title: '已提交去水印任务', icon: 'success' })
-        setTimeout(() => this.goBack(), 1200)
-      } catch (e) {
-        uni.showToast({ title: e.message || '提交失败', icon: 'none' })
-      } finally {
-        this.submitting = false
-      }
+      handoffPreciseEdit({
+        fid: this.fid,
+        imgUrl: this.imgUrl,
+        op: 'watermark',
+        recipe: '请去除选区内的水印，并按周围材质与纹理自然补全。',
+        recipeHint: '去除选区内的水印',
+        selection: this.selectionData,
+      })
+      this.submitting = false
     }
   }
 }
 </script>
 
 <style scoped>
-.quick-page {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  background-color: #0F172A;
-}
-
-.nav-bar {
-  display: flex;
-  align-items: center;
-  padding: 10px 16px;
-  background: #1E293B;
-}
-
-.nav-left {
-  display: flex;
-  align-items: center;
-}
-
-.back-icon {
-  font-size: 28px;
-  color: #FFFFFF;
-  margin-right: 8px;
-  line-height: 1;
-}
-
-.nav-title {
-  font-size: 17px;
-  font-weight: 600;
-  color: #FFFFFF;
-}
-
-.selector-wrap {
-  flex: 1;
-  width: 100%;
-}
-
-.bottom-panel {
-  background: #1E293B;
-  padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
-  border-radius: 20px 20px 0 0;
-}
-
-.options-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
-
-.option-label {
-  font-size: 14px;
-  color: #E2E8F0;
-}
-
-.submit-btn {
-  background: #2563EB;
-  border-radius: 24px;
-  padding: 14px 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.submit-btn.disabled {
-  opacity: 0.5;
-}
-
-.submit-text {
-  font-size: 16px;
-  font-weight: 600;
-  color: #FFFFFF;
-}
+.quick-page { display: flex; flex-direction: column; height: 100vh; background: #F8FAFC; }
+.nav-bar { display: flex; align-items: center; padding: 10px 16px; background: #FFFFFF; border-bottom: 1rpx solid #E7ECF3; }
+.nav-left { display: flex; align-items: center; }
+.back-icon { font-size: 28px; color: #0F172A; margin-right: 8px; line-height: 1; }
+.nav-title { font-size: 17px; font-weight: 600; color: #0F172A; }
+.selector-wrap { flex: 1; min-height: 0; padding: 12px; }
+.bottom-panel { background: #FFFFFF; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); border-radius: 20px 20px 0 0; border-top: 1rpx solid #E7ECF3; }
+.options-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.option-label { font-size: 13px; color: #334155; }
+.submit-btn { background: linear-gradient(135deg, #3B82F6, #6366F1); border-radius: 24px; padding: 14px 0; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 20px rgba(59,130,246,.25); }
+.submit-btn.disabled { opacity: 0.5; }
+.submit-text { font-size: 15px; font-weight: 600; color: #FFFFFF; }
 </style>

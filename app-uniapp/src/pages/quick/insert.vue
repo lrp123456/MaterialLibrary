@@ -27,7 +27,7 @@
 
 <script>
 import TouchSelector from '../../components/TouchSelector.vue'
-import { aiTaskManager } from '../../service/AiTaskManager'
+import { handoffPreciseEdit } from '../../common/handoff'
 
 export default {
   components: { TouchSelector },
@@ -53,42 +53,33 @@ export default {
     async submitTask() {
       if (!this.hasSelection || !this.prompt || this.submitting) return
       this.submitting = true
-      try {
-        const payload = {
-          mode: 'insert', sub_mode: 'insert', pasteback: this.pasteback,
-          prompt: this.prompt, image: this.imgUrl,
-        }
-        if (this.selectionData && this.selectionData.pixelRect) {
-          const r = this.selectionData.pixelRect
-          payload.coord_unit = 'px'
-          payload.x1 = r.x; payload.y1 = r.y
-          payload.x2 = r.x + r.w; payload.y2 = r.y + r.h
-        }
-        await aiTaskManager.createTask({
-          fid: this.fid, type: 'insert', title: '软装置入', payload,
-        })
-        uni.showToast({ title: '已提交任务', icon: 'success' })
-        setTimeout(() => this.goBack(), 1200)
-      } catch (e) {
-        uni.showToast({ title: e.message || '提交失败', icon: 'none' })
-      } finally { this.submitting = false }
+      handoffPreciseEdit({
+        fid: this.fid,
+        imgUrl: this.imgUrl,
+        op: 'insert',
+        recipe: `在选区内置入：${this.prompt}。请按原图视角、光照与遮挡关系自然合成。`,
+        recipeHint: `置入：${this.prompt}`,
+        productName: this.prompt,
+        selection: this.selectionData,
+      })
+      this.submitting = false
     },
   },
 }
 </script>
 
 <style scoped>
-.quick-page { display: flex; flex-direction: column; height: 100vh; background: #0F172A; }
-.nav-bar { display: flex; align-items: center; padding: 10px 16px; background: #1E293B; }
+.quick-page { display: flex; flex-direction: column; height: 100vh; background: #F8FAFC; }
+.nav-bar { display: flex; align-items: center; padding: 10px 16px; background: #FFFFFF; border-bottom: 1rpx solid #E7ECF3; }
 .nav-left { display: flex; align-items: center; }
-.back-icon { font-size: 28px; color: #FFF; margin-right: 8px; line-height: 1; }
-.nav-title { font-size: 17px; font-weight: 600; color: #FFF; }
-.selector-wrap { flex: 1; width: 100%; }
-.bottom-panel { background: #1E293B; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); border-radius: 20px 20px 0 0; }
+.back-icon { font-size: 28px; color: #0F172A; margin-right: 8px; line-height: 1; }
+.nav-title { font-size: 17px; font-weight: 600; color: #0F172A; }
+.selector-wrap { flex: 1; min-height: 0; padding: 12px; }
+.bottom-panel { background: #FFFFFF; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); border-radius: 20px 20px 0 0; border-top: 1rpx solid #E7ECF3; }
 .options-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; gap: 12px; }
-.option-label { font-size: 14px; color: #E2E8F0; flex-shrink: 0; }
-.text-input { flex: 1; height: 36px; background: #334155; border-radius: 10px; padding: 0 12px; color: #F8FAFC; font-size: 13px; }
-.submit-btn { background: #2563EB; border-radius: 24px; padding: 14px 0; display: flex; align-items: center; justify-content: center; }
+.option-label { font-size: 13px; color: #334155; flex-shrink: 0; }
+.text-input { flex: 1; height: 36px; background: #F8FAFC; border: 1rpx solid #E7ECF3; border-radius: 10px; padding: 0 12px; color: #0F172A; font-size: 13px; }
+.submit-btn { background: linear-gradient(135deg, #3B82F6, #6366F1); border-radius: 24px; padding: 14px 0; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 20px rgba(59,130,246,.25); }
 .submit-btn.disabled { opacity: .5; }
-.submit-text { font-size: 16px; font-weight: 600; color: #FFF; }
+.submit-text { font-size: 15px; font-weight: 600; color: #FFFFFF; }
 </style>

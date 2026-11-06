@@ -44,6 +44,7 @@ const E2E_MS = 420000;
 
 const MANIFEST = [
   // ---------- unit：纯函数/纯数据契约，不开库不起服务 ----------
+  ['unit', 'edit-preview.test.js'],
   ['unit', 'classify-parse.test.js'],
   ['unit', 'classify-part.test.js'],
   ['unit', 'crop-selection-interior.test.js'],
@@ -53,6 +54,7 @@ const MANIFEST = [
   ['unit', 'catalog-distill.test.js'],
   ['unit', 'curated-paints.test.js'],
   ['unit', 'frame-relay.test.js'],
+  ['unit', 'media-tools-frame.test.js'],
   ['unit', 'gap-closure.test.js'],
   ['unit', 'gate-route.test.js'],
   ['unit', 'guide-sentence.test.js'],
@@ -61,6 +63,8 @@ const MANIFEST = [
   ['unit', 'pretint.test.js'],
   ['unit', 'product-cover.test.js'],
   ['unit', 'qwenimage-local.test.js'],
+  ['unit', 'runtime-log.test.js'],
+  ['unit', 'batch-ab-regression.test.js'],
 
   // ---------- security：鉴权/凭据隔离/对抗输入 ----------
   ['security', 'auth-audit.test.js'],

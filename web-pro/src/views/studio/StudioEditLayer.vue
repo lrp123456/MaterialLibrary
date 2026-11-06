@@ -11,8 +11,11 @@
     <!-- 1. 顶栏 (高度 52px) -->
     <header class="h-13 px-5 border-b border-studio-700/80 bg-studio-900/95 flex items-center justify-between shrink-0">
       <div class="flex items-center gap-3">
-        <span class="px-2.5 py-0.5 rounded-full bg-studio-cyan/15 text-studio-cyan font-mono text-xs font-bold">
+        <span v-if="!isAssetReplace" class="px-2.5 py-0.5 rounded-full bg-studio-cyan/15 text-studio-cyan font-mono text-xs font-bold">
           {{ targetTag || '@图1' }}
+        </span>
+        <span v-else class="px-2.5 py-0.5 rounded-full bg-amber-400/15 text-amber-300 font-mono text-xs font-bold">
+          替换原图
         </span>
         <span class="text-sm font-bold text-white truncate max-w-md">
           {{ image?.name || image?.filename || '空间参考原图' }}
@@ -84,6 +87,29 @@
 
         <div class="h-4 w-px bg-studio-750 mx-1"></div>
 
+        <!-- 素材替换模式：90° 旋转（真实改写底图，不破坏绘制坐标系） -->
+        <template v-if="isAssetReplace">
+          <button
+            type="button"
+            @click="rotateAssetImage('left')"
+            class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-studio-800 hover:bg-studio-750 text-slate-200 text-xs font-bold border border-studio-700 cursor-pointer transition-colors"
+            title="向左旋转 90°"
+          >
+            <StudioIcon name="rotateLeft" :size="13" />
+            <span>左转</span>
+          </button>
+          <button
+            type="button"
+            @click="rotateAssetImage('right')"
+            class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-studio-800 hover:bg-studio-750 text-slate-200 text-xs font-bold border border-studio-700 cursor-pointer transition-colors"
+            title="向右旋转 90°"
+          >
+            <StudioIcon name="rotateRight" :size="13" />
+            <span>右转</span>
+          </button>
+          <div class="h-4 w-px bg-studio-750 mx-1"></div>
+        </template>
+
         <button
           v-if="!cropOnly"
           type="button"
@@ -116,10 +142,11 @@
 
         <div class="w-8 h-px bg-studio-800 my-1.5"></div>
 
-        <!-- 分组 1：选区绘制工具 (用于写回配方) -->
-        <div class="text-[10px] font-mono font-bold text-slate-500 uppercase mb-0.5">选区</div>
+        <!-- 分组 1：选区绘制工具 (用于写回配方，替换原图模式隐藏) -->
+        <div v-if="!isAssetReplace" class="text-[10px] font-mono font-bold text-slate-500 uppercase mb-0.5">选区</div>
 
         <button
+          v-if="!isAssetReplace"
           type="button"
           @click="setTool('rect')"
           :class="[
@@ -133,6 +160,7 @@
         </button>
 
         <button
+          v-if="!isAssetReplace"
           type="button"
           @click="setTool('polygon')"
           :class="[
@@ -220,11 +248,11 @@
           <span class="text-[9px]">裁剪</span>
         </button>
 
-        <div v-if="!cropOnly" class="w-8 h-px bg-studio-800 my-1.5"></div>
+        <div v-if="!cropOnly && !isAssetReplace" class="w-8 h-px bg-studio-800 my-1.5"></div>
 
         <!-- 分组 3：专有扩图 -->
         <button
-          v-if="!cropOnly"
+          v-if="!cropOnly && !isAssetReplace"
           type="button"
           @click="setTool('outpaint')"
           :class="[
@@ -1028,9 +1056,9 @@
         </div>
       </main>
 
-      <!-- 2.3 右侧配置面板 (物理绝对硬锁定 380px，彻底防撑爆) -->
+      <!-- 2.3 右侧配置面板 (替换原图模式隐藏配方/提示词相关 UI) -->
       <aside
-        v-if="!cropOnly"
+        v-if="!cropOnly && !isAssetReplace"
         class="w-[380px] min-w-[380px] max-w-[380px] bg-studio-900 border-l border-studio-700 flex flex-col shrink-0 overflow-hidden select-none"
         style="width: 380px; min-width: 380px; max-width: 380px;"
       >
@@ -1277,34 +1305,64 @@
       </aside>
     </div>
 
-    <!-- 3. 底栏 (高度 64px)：多行配方汇总只读预览 + 取消 + 完成并应用 -->
+    <!-- 3. 底栏 (高度 64px)：generation 为配方汇总 + 完成并应用；替换原图为取消 + 替换原图 -->
     <footer v-if="!cropOnly" class="h-16 px-6 border-t border-studio-700/80 bg-studio-900/95 flex items-center justify-between shrink-0">
-      <div class="flex-1 min-w-0 mr-6">
-        <div class="text-[10px] font-mono text-slate-500 uppercase tracking-wider">配方句实时汇总预览</div>
-        <div class="text-xs text-slate-200 truncate font-medium mt-0.5">
-          {{ activeTool === 'crop' ? '裁剪只替换当前参考图，不改配方句' : (formattedRecipeSummary || '未配置空间操作，纯即时标绘将生成视觉参考图交付') }}
+      <template v-if="!isAssetReplace">
+        <div class="flex-1 min-w-0 mr-6">
+          <div class="text-[10px] font-mono text-slate-500 uppercase tracking-wider">配方句实时汇总预览</div>
+          <div class="text-xs text-slate-200 truncate font-medium mt-0.5">
+            {{ activeTool === 'crop' ? '裁剪只替换当前参考图，不改配方句' : (formattedRecipeSummary || '未配置空间操作，纯即时标绘将生成视觉参考图交付') }}
+          </div>
         </div>
-      </div>
 
-      <div class="flex items-center gap-3 shrink-0">
-        <button
-          type="button"
-          @click="handleCancel"
-          class="px-4 py-2 rounded-xl bg-studio-800 hover:bg-studio-750 text-slate-300 text-xs font-bold border border-studio-700 cursor-pointer transition-colors"
-        >
-          取消退出
-        </button>
+        <div class="flex items-center gap-3 shrink-0">
+          <button
+            type="button"
+            @click="handleCancel"
+            class="px-4 py-2 rounded-xl bg-studio-800 hover:bg-studio-750 text-slate-300 text-xs font-bold border border-studio-700 cursor-pointer transition-colors"
+          >
+            取消退出
+          </button>
 
-        <button
-          type="button"
-          @click="openConfirmModal"
-          :disabled="activeTool === 'crop' && !cropBox"
-          class="px-6 py-2 rounded-xl bg-studio-accent hover:bg-studio-accent/90 text-white text-xs font-bold shadow-lg shadow-studio-accent/20 cursor-pointer transition-all flex items-center gap-2 disabled:opacity-40"
-        >
-          <StudioIcon name="check" :size="15" />
-          <span>{{ activeTool === 'crop' ? '确认裁剪' : '完成并应用' }}</span>
-        </button>
-      </div>
+          <button
+            type="button"
+            @click="openConfirmModal"
+            :disabled="activeTool === 'crop' && !cropBox"
+            class="px-6 py-2 rounded-xl bg-studio-accent hover:bg-studio-accent/90 text-white text-xs font-bold shadow-lg shadow-studio-accent/20 cursor-pointer transition-all flex items-center gap-2 disabled:opacity-40"
+          >
+            <StudioIcon name="check" :size="15" />
+            <span>{{ activeTool === 'crop' ? '确认裁剪' : '完成并应用' }}</span>
+          </button>
+        </div>
+      </template>
+
+      <template v-else>
+        <div class="flex-1 min-w-0 mr-6">
+          <div class="text-[10px] font-mono text-slate-500 uppercase tracking-wider">直接替换原图</div>
+          <div class="text-xs text-slate-200 truncate font-medium mt-0.5">
+            马赛克 / 画笔 / 箭头 / 文字将真实写入图片像素，可先裁剪或 90° 旋转；替换会保留历史版本。
+          </div>
+        </div>
+
+        <div class="flex items-center gap-3 shrink-0">
+          <button
+            type="button"
+            @click="handleCancel"
+            class="px-4 py-2 rounded-xl bg-studio-800 hover:bg-studio-750 text-slate-300 text-xs font-bold border border-studio-700 cursor-pointer transition-colors"
+          >
+            取消
+          </button>
+
+          <button
+            type="button"
+            @click="handleReplaceOriginal"
+            class="px-6 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold shadow-lg shadow-amber-500/20 cursor-pointer transition-all flex items-center gap-2"
+          >
+            <StudioIcon name="check" :size="15" />
+            <span>替换原图</span>
+          </button>
+        </div>
+      </template>
     </footer>
 
     <!-- 4. 极简确认浮层 (Confirmation Modal) -->
@@ -1447,6 +1505,7 @@
 import { ref, computed, reactive, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import StudioIcon from '../../components/StudioIcon.vue';
 import { computeOutpaintNorm } from '../../../../src/outpaint-layout.mjs';
+import { bindOverlays } from '../../service/overlay-stack.js';
 import ResurfaceDrawer from '../../components/studio/ResurfaceDrawer.vue';
 import BaseAttrPicker from '../../components/BaseAttrPicker.vue';
 import { authFetch, getToken } from '../../api';
@@ -1479,7 +1538,12 @@ const props = defineProps({
   targetTag: { type: String, default: '@图1' },
   totalReferenceCount: { type: Number, default: 1 },
   cropOnly: { type: Boolean, default: false },
-  selectedRatio: { type: String, default: '' }
+  selectedRatio: { type: String, default: '' },
+  // 素材库「直接替换原图」模式：隐藏生成/配方 UI，只保留像素编辑工具栏与替换按钮。
+  // generation 为默认值，现有 ChatStudio.vue / CatalogIngestPanel.vue 调用方行为完全不变。
+  mode: { type: String, default: 'generation' },
+  assetImageUrl: { type: String, default: '' },
+  assetFid: { type: String, default: '' }
 });
 
 const emit = defineEmits([
@@ -1487,7 +1551,8 @@ const emit = defineEmits([
   'apply-recipe-with-refs',
   'apply-regions-to-image',
   'apply-outpainted-image',
-  'apply-custom-image'
+  'apply-custom-image',
+  'replace'
 ]);
 
 // 元素引用
@@ -1504,8 +1569,17 @@ function registerModelViewer(id, el) {
   else modelViewerMap.delete(id);
 }
 
-// 原图与天然尺寸
-const imageSrc = computed(() => props.image?.url || props.image?.src || '');
+// 模式判定：asset-replace 下隐藏一切生成/配方相关 UI，底图来自素材库原图
+const isAssetReplace = computed(() => props.mode === 'asset-replace');
+
+// 素材替换模式的底图：初始取 props.assetImageUrl，90° 旋转后会换成本地 data URL
+const assetBaseUrl = ref(props.assetImageUrl || '');
+watch(() => props.assetImageUrl, (v) => { assetBaseUrl.value = v || ''; });
+
+// 原图与天然尺寸（generation 模式来源保持不变）
+const imageSrc = computed(() => isAssetReplace.value
+  ? (assetBaseUrl.value || '')
+  : (props.image?.url || props.image?.src || ''));
 const imgNaturalSize = reactive({ w: 0, h: 0 });
 const canvasDisplaySize = reactive({ w: 800, h: 600 });
 
@@ -2352,7 +2426,7 @@ function getCropNorm() {
   return { x: norm.x, y: norm.y, w: norm.w, h: norm.h, poly: null };
 }
 
-defineExpose({ getCropNorm });
+defineExpose({ getCropNorm, exportComposedImage });
 
 async function triggerRegionClassification(reg) {
   if (props.cropOnly || !reg) return;
@@ -3648,7 +3722,9 @@ async function executeOutpainting() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         op: 'expand',
+        image: imageSrc.value,
         imageUrl: imageSrc.value,
+        assetFid: props.assetFid || '',
         expandRatio: targetExpandRatio.value,
         expandRatios: {
           top: outpaintMargins.value.topPct / 100,
@@ -3659,9 +3735,14 @@ async function executeOutpainting() {
         prompt: '根据空间结构自然延伸四周光影与墙面地面纹理'
       })
     });
-    if (!res.ok) throw new Error(`扩图服务响应失败: ${res.status}`);
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      throw new Error(errJson.error || `扩图服务响应失败: ${res.status}`);
+    }
     const data = await res.json();
-    const newUrl = data.url || data.outputUrl || data.imageUrl;
+    const newUrl = data.url || data.outputUrl || data.imageUrl || data.previewUrl
+      || (data.data?.image?.b64 ? `data:image/jpeg;base64,${data.data.image.b64}` : '')
+      || (data.image?.b64 ? `data:image/jpeg;base64,${data.image.b64}` : '');
     if (!newUrl) throw new Error('未获取到扩图结果图片');
 
     emit('apply-outpainted-image', {
@@ -3680,6 +3761,10 @@ async function executeOutpainting() {
 // 配方实时汇总、3D快照截取、极简确认浮层与交付
 // -------------------------------------------------------------
 const showConfirmModal = ref(false);
+bindOverlays({
+  slice: showSliceModal,
+  confirm: { ref: showConfirmModal, priority: 20 }
+}, { prefix: 'studio-edit:' });
 const pendingNewRefs = ref([]);
 
 const formattedRecipeSummary = computed(() => formatGuideRecipe(regions.value));
@@ -3991,6 +4076,184 @@ async function applyCrop() {
   }
 }
 
+// -------------------------------------------------------------
+// 素材库「直接替换原图」：把底图 + 真实像素标绘（马赛克/笔刷/箭头/文字）
+// 合成到输出位图，返回 PNG data URL。
+// 与 captureWireframeSnapshot() 的区别：后者是喂给生成模型的「指示图」，
+// 带选区线框 / 3D 模型预览；这里只写用户真正想落进图片的像素效果，
+// 不含任何线框、配方元素。crop 与之叠加：先按裁切框出图，再在其坐标系里画标注。
+// -------------------------------------------------------------
+const lastComposedSize = reactive({ width: 0, height: 0 });
+
+// 判断用户是否设置了有效裁切框（全画幅视为未裁切）
+function getEffectiveCropBox() {
+  const dw = canvasDisplaySize.w || 800;
+  const dh = canvasDisplaySize.h || 600;
+  const b = cropBox.value;
+  if (!b || !dw || !dh) return null;
+  const isFull = Math.abs(b.x) < 2 && Math.abs(b.y) < 2
+    && Math.abs(b.w - dw) < 2 && Math.abs(b.h - dh) < 2;
+  if (isFull) return null;
+  return {
+    x: Math.max(0, Math.min(dw - 1, b.x)),
+    y: Math.max(0, Math.min(dh - 1, b.y)),
+    w: Math.max(1, Math.min(dw, b.w)),
+    h: Math.max(1, Math.min(dh, b.h))
+  };
+}
+
+function composePixelOutput() {
+  const img = baseImageRef.value;
+  if (!img || !img.naturalWidth) return '';
+  const natW = img.naturalWidth;
+  const natH = img.naturalHeight;
+  // 标注坐标基于图片显示尺寸，scale 把它换算到原图像素
+  const dw = canvasDisplaySize.w || img.clientWidth || 1;
+  const dh = canvasDisplaySize.h || img.clientHeight || 1;
+  const scaleX = natW / dw;
+  const scaleY = natH / dh;
+  const avgScale = (scaleX + scaleY) / 2;
+
+  // 先裁切再画标注：无有效裁切时等价于整图输出
+  const crop = getEffectiveCropBox() || { x: 0, y: 0, w: dw, h: dh };
+  const outW = Math.max(1, Math.round(crop.w * scaleX));
+  const outH = Math.max(1, Math.round(crop.h * scaleY));
+  const ox = crop.x * scaleX;
+  const oy = crop.y * scaleY;
+  const mapX = (px) => px * scaleX - ox;
+  const mapY = (py) => py * scaleY - oy;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = outW;
+  canvas.height = outH;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, ox, oy, outW, outH, 0, 0, outW, outH);
+
+  // 1. 马赛克：把输出位图对应区域缩小再放大，得到真实像素化效果（非色块）
+  for (const m of mosaicAnnotations.value) {
+    const sx = Math.max(0, Math.round(mapX(m.x)));
+    const sy = Math.max(0, Math.round(mapY(m.y)));
+    const sw = Math.min(outW - sx, Math.round(m.w * scaleX));
+    const sh = Math.min(outH - sy, Math.round(m.h * scaleY));
+    if (sw <= 0 || sh <= 0 || sx >= outW || sy >= outH) continue;
+    const blockSize = 12;
+    const tinyW = Math.max(1, Math.round(sw / blockSize));
+    const tinyH = Math.max(1, Math.round(sh / blockSize));
+    const tc = document.createElement('canvas');
+    tc.width = tinyW;
+    tc.height = tinyH;
+    tc.getContext('2d').drawImage(canvas, sx, sy, sw, sh, 0, 0, tinyW, tinyH);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(tc, 0, 0, tinyW, tinyH, sx, sy, sw, sh);
+    ctx.imageSmoothingEnabled = true;
+  }
+
+  // 2. 画笔笔触：regions 中 type==='brush' 的 points 折线，青色半透明粗描边
+  ctx.strokeStyle = 'rgba(6, 182, 212, 0.5)';
+  ctx.lineWidth = Math.max(1, 24 * avgScale);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  for (const reg of regions.value) {
+    if (reg.type !== 'brush' || !Array.isArray(reg.points) || reg.points.length < 2) continue;
+    ctx.beginPath();
+    ctx.moveTo(mapX(reg.points[0].x), mapY(reg.points[0].y));
+    for (let i = 1; i < reg.points.length; i++) {
+      ctx.lineTo(mapX(reg.points[i].x), mapY(reg.points[i].y));
+    }
+    ctx.stroke();
+  }
+
+  // 3. 指向红箭头（线身 + 实心箭头头部）
+  ctx.strokeStyle = '#EF4444';
+  ctx.fillStyle = '#EF4444';
+  ctx.lineWidth = Math.max(1, 4 * avgScale);
+  for (const ann of arrowAnnotations.value) {
+    const x1 = mapX(ann.x1);
+    const y1 = mapY(ann.y1);
+    const x2 = mapX(ann.x2);
+    const y2 = mapY(ann.y2);
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+    const angle = Math.atan2(y2 - y1, x2 - x1);
+    const headLen = 16 * avgScale;
+    ctx.beginPath();
+    ctx.moveTo(x2, y2);
+    ctx.lineTo(x2 - headLen * Math.cos(angle - Math.PI / 6), y2 - headLen * Math.sin(angle - Math.PI / 6));
+    ctx.lineTo(x2 - headLen * Math.cos(angle + Math.PI / 6), y2 - headLen * Math.sin(angle + Math.PI / 6));
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // 4. 文字批注（带深色底衬，字号随分辨率缩放）
+  for (const ann of textAnnotations.value) {
+    const tx = mapX(ann.x);
+    const ty = mapY(ann.y);
+    const fs = Math.max(10, Math.round((ann.fontSize || 13) * scaleX));
+    ctx.font = `bold ${fs}px sans-serif`;
+    const textW = Math.max(40, ctx.measureText(ann.text).width + 12);
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+    ctx.fillRect(tx - 4, ty - fs, textW, fs + 8);
+    ctx.fillStyle = '#F87171';
+    ctx.fillText(ann.text, tx, ty);
+  }
+
+  lastComposedSize.width = outW;
+  lastComposedSize.height = outH;
+  // 外链图片无 CORS 头时会污染 canvas，toDataURL 抛 SecurityError，由调用方兜底提示
+  return canvas.toDataURL('image/png');
+}
+
+function exportComposedImage() {
+  try {
+    const dataUrl = composePixelOutput();
+    if (!dataUrl) {
+      alert('图片尚未加载完成，请稍后再试。');
+      return { dataUrl: '', width: 0, height: 0 };
+    }
+    return { dataUrl, width: lastComposedSize.width, height: lastComposedSize.height };
+  } catch (e) {
+    alert('无法导出该图片：图片源不允许本地像素读取（跨域限制）。请使用素材库同源图片。');
+    return { dataUrl: '', width: 0, height: 0 };
+  }
+}
+
+// 「直接替换原图」按钮：带着合成结果 emit
+function handleReplaceOriginal() {
+  const result = exportComposedImage();
+  if (!result.dataUrl) return;
+  emit('replace', result);
+}
+
+// 90° 旋转：把当前底图重绘为旋转后的 data URL，作为新的编辑底图。
+// 这样交互坐标体系天然基于新图，不破坏绘制；已有标绘旋转后语义失效，一并清空。
+function rotateAssetImage(dir) {
+  const img = baseImageRef.value;
+  if (!img || !img.naturalWidth) return;
+  const c = document.createElement('canvas');
+  c.width = img.naturalHeight;
+  c.height = img.naturalWidth;
+  const ctx = c.getContext('2d');
+  if (dir === 'right') {
+    ctx.translate(c.width, 0);
+    ctx.rotate(Math.PI / 2);
+  } else {
+    ctx.translate(0, c.height);
+    ctx.rotate(-Math.PI / 2);
+  }
+  ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight);
+  try {
+    assetBaseUrl.value = c.toDataURL('image/png');
+    annotations.value = [];
+    regions.value = [];
+    redoStack.value = [];
+    nextTick(renderMosaicCanvas);
+  } catch (e) {
+    alert('无法旋转该图片：图片源不允许本地像素读取（跨域限制）。');
+  }
+}
+
 async function openConfirmModal() {
   if (activeTool.value === 'outpaint') {
     await executeOutpainting();
@@ -4231,6 +4494,9 @@ function onImageLoad(e) {
   imgNaturalSize.w = e.target.naturalWidth || 0;
   imgNaturalSize.h = e.target.naturalHeight || 0;
   syncDisplaySize();
+  // 素材替换模式：底图（含旋转后的新图）加载后把裁切框重置为全画幅，
+  // 保证 composePixelOutput 里「是否裁切」的判断不会把默认 800x600 误判成裁切。
+  if (isAssetReplace.value) initCropBox();
   const dw = canvasDisplaySize.w;
   const dh = canvasDisplaySize.h;
   if (dw > 0 && dh > 0) {

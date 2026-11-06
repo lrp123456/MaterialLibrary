@@ -12,6 +12,7 @@ const http = require('http');
 const { openDb } = require('./src/db');
 const { resolveQuarkCli } = require('./src/quark');
 const { handleApi } = require('./src/api');
+const httpTimeouts = require('./src/http-timeouts');
 const { WorkflowInterpreter } = require('./src/interpreter');
 
 const PORT = process.env.ML_PORT || 30001;
@@ -79,8 +80,23 @@ if (!DISABLE_WORKERS) {
   const aiTaskWorker = new AiTaskWorker(services);
   aiTaskWorker.start(2000);
   console.log('[ai-tasks] AI 任务 worker 已启动');
+  // 生成任务队列 worker（独立 gen_jobs 队列，CONCURRENCY=2；不复用 ai_tasks 的串行 worker）
+  try {
+    require('./src/gen-jobs-worker').createGenJobsWorker(services).start();
+    console.log('[gen-jobs] 生成任务队列 worker 已启动');
+  } catch (e) {
+    console.warn('[gen-jobs] worker 启动失败:', e.message);
+  }
 } else {
   console.log(`[workers] 后台 worker 已停用（channel=${APP_CHANNEL}）：灰测实例只做读写 API，不消费任务队列`);
+}
+
+// 本地临时生成产物：data/cache/temp 顶层 30 天清扫（6h 定时器）
+try {
+  require('./src/temp-sweeper').startTempSweeper(services);
+  console.log('[temp-sweeper] 本地临时文件 30 天清扫已启动');
+} catch (e) {
+  console.warn('[temp-sweeper] 启动失败:', e.message);
 }
 
 if (!DISABLE_WORKERS) {
@@ -247,6 +263,10 @@ function resolveStaticWithin(rootDir, urlPath) {
 const server = http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://127.0.0.1');
   const p = u.pathname;
+  // 上传与长时间大文件处理单独放宽超时到 10 分钟
+  if (p.includes('/upload') || p.includes('/video-proxy') || p.includes('/gen-video') || p.includes('/pack') || p.includes('/export')) {
+    if (req.setTimeout) req.setTimeout(600000);
+  }
 
   try {
     // 0. 剪辑接口（LOGIC-001）：/editor-api 原本只挂在 30002 内嵌服务上，
@@ -370,6 +390,18 @@ if (String(process.env.ML_WATCH_RESTART || '1') !== '0' && !IS_GRAY) {
   if (watcher.unref) watcher.unref();
 }
 
+server.on('error', (err) => {
+  console.error(`[server] 监听端口 ${PORT} 失败: ${err.code || ''} ${err.message}`);
+  console.error('[server] 启动失败，进程退出。watchdog 会记下这段原因并停止自动拉起。');
+  try { db.close(); } catch (_) {}
+  process.exit(1);
+});
+// 传输层超时。headersTimeout 必须大于 keepAliveTimeout。
+// requestTimeout 用 5 分钟，避免把大文件上传收成 408。
+// 上传路径上的 req.setTimeout 只是套接字空闲时间，不延长收包。
+server.headersTimeout = httpTimeouts.headersTimeout;
+server.requestTimeout = httpTimeouts.requestTimeout;
+server.keepAliveTimeout = httpTimeouts.keepAliveTimeout;
 server.listen(PORT, () => {
   console.log(`[material-library] 室内设计素材库服务已就绪: http://127.0.0.1:${PORT} (数据目录: ${dataDir})`);  try {
     const { nasAvailable, nasMaterialDir } = require('./src/nasstore');

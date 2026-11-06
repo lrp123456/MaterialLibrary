@@ -352,30 +352,22 @@ async function executeGate(services, nodeConfig = {}, asset = {}, runCtx = {}) {
     }
   } catch (_) {}
 
-  // 预置防御 2：拦截截图/UI与调试文件（宽容入库后由工作流判定移入垃圾站）
+  // 预置防御 2：检测截图/UI与调试文件（仅打标预警，绝不移入垃圾站，确保全量直存且立即可见）
   const fn = String(asset.file_name || '');
   if (/^(screen[_-]|current_screen|install_ui|ml_debug|screencap_test)/i.test(fn) || /^Screenshot_/i.test(fn) || /_emu\.png$/i.test(fn)) {
-    logger?.info?.(`[gate] 资产判定为截图/UI，移入垃圾站: fid=${asset.fid} name=${fn}`);
+    logger?.info?.(`[gate] 资产检测为截图/UI，保留在库并打标预警: fid=${asset.fid} name=${fn}`);
     if (!isSandbox) {
       try {
-        const gw = require('../gateway');
-        gw.markRejected(services, asset.fid, {
-          reason: 'non_interior_ui',
-          fileName: asset.file_name,
-          detail: { message: '截图/UI素材，自动移入垃圾站', model: 'gate_screenshot' }
-        });
-      } catch (_) {
-        db.prepare("UPDATE assets SET status='rejected', reject_reason='non_interior_ui', error_note=?, rejected_at=?, updated_at=? WHERE fid=?")
-          .run('截图/UI素材(自动排除)', Date.now(), Date.now(), asset.fid);
-      }
+        db.prepare("UPDATE assets SET status='ready', category='interior', error_note='检测为截图/UI素材(保留在库)', updated_at=? WHERE fid=?")
+          .run(Date.now(), asset.fid);
+      } catch (_) {}
     }
     return {
       success: true,
-      excluded: true,
-      category: 'none',
-      reason: '截图/UI素材',
-      rejectReason: 'non_interior_ui',
-      output: { excluded: true, category: 'none', reason: '截图/UI素材，自动移入垃圾站', rejectReason: 'non_interior_ui' }
+      excluded: false,
+      category: 'interior',
+      flags: ['screenshot_ui'],
+      output: { passed: true, category: 'interior', is_screenshot: true }
     };
   }
 
@@ -458,36 +450,23 @@ async function executeGate(services, nodeConfig = {}, asset = {}, runCtx = {}) {
   const { routeGate } = require('../gate-route');
   const decision = routeGate(gate);
   if (!decision.keep) {
-    // 拒收分类：生活照/人像 → life_photo；其余 → non_interior
-    // AI 可能只给 is_material=false 而不给 reason/category（实测有过 39 条）。
-    // 直接 `reasonText || gate.category` 会拼出字面量 "undefined" 并落库，
-    // 用户在回收站看到的就是「闸门判定非素材: undefined」。这里兜底成可读文案。
+    // 宽容直存：AI 判定非素材时，仅打上建议标记，绝不自动移入垃圾站、绝不置为 rejected！
     const reasonText = decision.reason;
     const categoryText = decision.category;
-    const verdictText = reasonText || categoryText || 'AI 闸门判定该图不是可用素材（模型未给出具体理由）';
-    const isLife = /自拍|生活照|人像|人物|美食|表情包|聊天|宠物/.test(verdictText) && !/室内|空间|设计|服装|穿搭/.test(verdictText);
-    const rejectReason = isLife ? 'life_photo' : 'non_interior';
+    const verdictText = reasonText || categoryText || 'AI 闸门判定该图非典型室内素材（已保留在「室内外设计」）';
+    logger?.info?.(`[gate] 资产建议非核心素材，保留在「室内外设计」: fid=${asset.fid} reason=${verdictText}`);
     if (!isSandbox) {
       try {
-        const gw = require('../gateway');
-        // 传 services 而非 db：这样拒收时才能真正把文件移入 trash 目录（可恢复）
-        gw.markRejected(services, asset.fid, {
-          reason: rejectReason,
-          fileName: asset.file_name,
-          detail: { message: verdictText, category: categoryText || 'unspecified', model: 'gate' },
-        });
-      } catch (e) {
-        db.prepare("UPDATE assets SET status='rejected', reject_reason=?, error_note=?, rejected_at=?, updated_at=? WHERE fid=?")
-          .run(rejectReason, `闸门判定非素材: ${verdictText}`, Date.now(), Date.now(), asset.fid);
-      }
+        db.prepare("UPDATE assets SET status='ready', category=COALESCE(NULLIF(category, ''), 'interior'), error_note=?, updated_at=? WHERE fid=?")
+          .run(verdictText, Date.now(), asset.fid);
+      } catch (_) {}
     }
     return {
       success: true,
-      excluded: true,
-      category: categoryText,
-      reason: verdictText,
-      rejectReason,
-      output: { excluded: true, category: categoryText, reason: verdictText, rejectReason }
+      excluded: false,
+      category: 'interior',
+      flags: ['gate_suggest_non_material'],
+      output: { passed: true, category: 'interior', reason: verdictText, non_material_suggested: true }
     };
   }
 
@@ -501,11 +480,12 @@ async function executeGate(services, nodeConfig = {}, asset = {}, runCtx = {}) {
     categoryLocked = !!db.prepare('SELECT category_locked FROM assets WHERE fid=?').get(asset.fid)?.category_locked;
   } catch (_) {}
   if (!isSandbox) {
+    const finalCategory = (validCategory && validCategory !== 'none') ? validCategory : 'interior';
     if (categoryLocked) {
-      db.prepare("UPDATE assets SET status=CASE WHEN status='ready' THEN 'ready' ELSE 'processing' END, updated_at=? WHERE fid=?").run(Date.now(), asset.fid);
+      db.prepare("UPDATE assets SET status='ready', updated_at=? WHERE fid=?").run(Date.now(), asset.fid);
     } else {
-      db.prepare("UPDATE assets SET status=CASE WHEN status='ready' THEN 'ready' ELSE 'processing' END, category=?, updated_at=? WHERE fid=?")
-        .run(validCategory, Date.now(), asset.fid);
+      db.prepare("UPDATE assets SET status='ready', category=?, updated_at=? WHERE fid=?")
+        .run(finalCategory, Date.now(), asset.fid);
     }
   }
 
@@ -1832,37 +1812,36 @@ async function executeRestageDual(services, nodeConfig, asset, runCtx) {
   // 1. CONFLICT-002：重复组退役——原「组员切片跳过生图、共享代表图成果」逻辑已移除，
   //    每个素材独立判断是否需要画幅重构（P2 去重工作台将另行提供批量去重生图）。
 
-  // 2. 检查适配器 —— 构造「主通道 + 降级通道」级联多组候选链
-  const adapterId = nodeConfig.adapterId || 'agnes_image';
+  // 2. 检查适配器 —— 区分「批量自动化免费重构」与「用户手动付费重构 (seedream5.0flash)」
   const imageAdapters = db.prepare("SELECT * FROM gen_adapters WHERE kind='image' AND enabled=1").all();
-  const primary = imageAdapters.find(a => a.id === adapterId) || db.prepare('SELECT * FROM gen_adapters WHERE id=? AND enabled=1').get(adapterId);
-  const fallback = imageAdapters.find(a => a.id === 'qwenimage_local') || db.prepare("SELECT * FROM gen_adapters WHERE id=? AND enabled=1").get('qwenimage_local');
-
-  // ★ 级联多组模型挂载：挂载点里勾选的模型链优先（每条自带自己的模型 + 适配器），
-  //   用户没勾（或模型反查不到适配器）时才回落到既有的「主通道 → 本地 Qwen」链。
-  const modelChain = buildModelChain(nodeModelIds(nodeConfig), imageAdapters);
+  const isManualRun = Boolean(
+    runCtx?.isManual ||
+    runCtx?.trigger?.includes('manual') ||
+    runCtx?.trigger?.includes('retry') ||
+    runCtx?.prevError ||
+    nodeConfig?.isManual
+  );
 
   const chain = [];
-  if (modelChain.length) {
-    chain.push(...modelChain);
-    // 显式挂载后仍保留本机 Qwen 作为最后兜底（除非已经在链里）
-    if (fallback && !chain.some((c) => c.adapter.id === fallback.id)) chain.push({ adapter: fallback, model: cfgDefaultModel(fallback) });
-  } else {
-    // 降级顺序：主通道 → 本地 QwenImage。批量灌入时可配 fallbackFirst 让本机先消化。
-    if (nodeConfig.fallbackFirst && fallback) chain.push({ adapter: fallback, model: cfgDefaultModel(fallback) });
-    if (primary && !chain.some(c => c.adapter.id === primary.id)) chain.push({ adapter: primary, model: cfgDefaultModel(primary) });
-    if (!nodeConfig.fallbackFirst && fallback && !chain.some(c => c.adapter.id === fallback.id)) chain.push({ adapter: fallback, model: cfgDefaultModel(fallback) });
-    if (!chain.length) {
-      const anyAdapter = db.prepare("SELECT * FROM gen_adapters WHERE kind='image' AND enabled=1 ORDER BY builtin DESC LIMIT 1").get();
-      if (anyAdapter) chain.push({ adapter: anyAdapter, model: cfgDefaultModel(anyAdapter) });
-    }
+  const arkSeedream = imageAdapters.find(a => a.id === 'ark_seedream');
+  const agnes = imageAdapters.find(a => a.id === 'agnes_image');
+  const ms = imageAdapters.find(a => a.id === 'qwenimage_modelscope' || a.id === 'modelscope_image');
+  const local = imageAdapters.find(a => a.id === 'qwenimage_local');
+
+  if (isManualRun && arkSeedream) {
+    // ★ 手动模式：用户在 AI 治理中心重试或手动点击重构，启用高质付费模型 Seedream 5.0 Flash
+    logger?.info?.(`[restage_dual] 资产 ${asset.fid} 手动重构模式，优先启用付费高质 Seedream 5.0 Flash`);
+    chain.push({ adapter: arkSeedream, model: 'doubao-seedream-5-0-flash-260915' });
   }
 
-  // ★ 级联多组模型回退：将所有启用的生图适配器全量追加到链末尾作为多级兜底
-  for (const a of imageAdapters) {
-    if (!chain.some(c => c.adapter.id === a.id)) {
-      chain.push({ adapter: a, model: cfgDefaultModel(a) });
-    }
+  // ★ 批量/自动入库模式：坚决不接入 NewAPI 高成本模型，严格走免费通道链
+  if (agnes) chain.push({ adapter: agnes, model: cfgDefaultModel(agnes) });
+  if (ms) chain.push({ adapter: ms, model: cfgDefaultModel(ms) });
+  if (local) chain.push({ adapter: local, model: cfgDefaultModel(local) });
+
+  // 若手动模式且尚未追加 Ark，则保底追加
+  if (isManualRun && arkSeedream && !chain.some(c => c.adapter.id === arkSeedream.id)) {
+    chain.push({ adapter: arkSeedream, model: 'doubao-seedream-5-0-flash-260915' });
   }
   const adapter = chain.find(Boolean) ? chain[0].adapter : null;
   if (!adapter) {
@@ -2120,6 +2099,16 @@ async function executeRestageDual(services, nodeConfig, asset, runCtx) {
   const produced = Object.values(results).filter(r => !r.reused);
   if (!produced.length && !skipped.length) {
     const detail = genErrors.length ? `; ${genErrors.slice(0, 4).join(' | ')}` : '';
+    if (!isManualRun) {
+      // 批量自动化入库时，免费通道若暂时限流或故障，不阻断入库、不报红异常，平滑回退原图待手动重构
+      logger?.warn?.(`[restage_dual] 资产 ${asset.fid} 批量免费通道暂时未出图，平滑回退原图待手动重构: ${detail}`);
+      return {
+        success: true,
+        nonFatal: true,
+        flags: ['restage_free_exhausted'],
+        output: { restaged: false, fallback: 'origin', free_tier_exhausted: true, genErrors }
+      };
+    }
     return {
       success: false,
       error: `未能生成任何画幅${detail}`.slice(0, 500),

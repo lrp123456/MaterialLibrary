@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="eye-care senior-mode">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>STYLEKIT MOTION LAB · MATERIAL STUDIO PRO 设计 Demo</title>
+  <link rel="stylesheet" href="./fonts.css" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <!-- ============ 全局壳 L0 ============ -->
+  <header class="top-bar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">MATERIAL STUDIO PRO</span>
+      <span class="mono brand-tag">STYLEKIT MOTION LAB // DEMO</span>
+    </div>
+
+    <div class="top-controls">
+      <div class="seg" role="radiogroup" aria-label="主题">
+        <button type="button" class="seg-btn" data-theme="eye-care" role="radio" aria-checked="true">护眼</button>
+        <button type="button" class="seg-btn" data-theme="light" role="radio" aria-checked="false">明亮</button>
+        <button type="button" class="seg-btn" data-theme="dark" role="radio" aria-checked="false">暗黑</button>
+      </div>
+      <button type="button" class="kc-btn" id="btn-senior" aria-pressed="true">适老 ON</button>
+      <button type="button" class="kc-btn" id="btn-motion" aria-pressed="false">全部暂停</button>
+      <span class="mono status-chip" id="rm-status" title="系统减少动态效果偏好">REDUCED: —</span>
+    </div>
+  </header>
+
+  <div class="shell">
+    <!-- ============ 左侧目录 L1 ============ -->
+    <nav class="side-nav" aria-label="Demo 章节目录">
+      <p class="mono side-title">CONTENTS / 目录</p>
+      <a href="#s00" class="side-link is-on"><span class="mono">00</span> 宣言</a>
+      <a href="#s01" class="side-link"><span class="mono">01</span> 三态主题</a>
+      <a href="#s02" class="side-link"><span class="mono">02</span> 双声部排印</a>
+      <a href="#s03" class="side-link"><span class="mono">03</span> 构成主义动效</a>
+      <a href="#s04" class="side-link"><span class="mono">04</span> 图标形变</a>
+      <a href="#s05" class="side-link"><span class="mono">05</span> 功能分区</a>
+      <a href="#s06" class="side-link"><span class="mono">06</span> 动效落点地图</a>
+      <a href="#s07" class="side-link"><span class="mono">07</span> 灵感板与技能</a>
+      <a href="#s08" class="side-link"><span class="mono">08</span> 本地资源</a>
+      <div class="side-foot mono">
+        <p>ALL ASSETS LOCAL</p>
+        <p>NO CDN · NO EXTERNAL URL</p>
+        <p>PORT 30004 · DEMO ONLY</p>
+      </div>
+    </nav>
+
+    <!-- ============ 主视口 ============ -->
+    <main class="stage" id="stage">
+
+      <!-- 00 HERO -->
+      <section class="sec hero" id="s00">
+        <div class="sec-head">
+          <span class="mono">00 / MANIFESTO</span>
+          <span class="mono">KINETIC OVERSIZED CONSTRUCTIVISM</span>
+        </div>
+        <div class="hero-body">
+          <h1 class="display reveal-line"><span>MOTION</span></h1>
+          <h1 class="display display-outline reveal-line" aria-hidden="true"><span>WITH A JOB</span></h1>
+          <p class="hero-sub">动效不是装饰，是状态的说明书。<br />把「能加在哪、加到什么程度、如何降级」摆上台面。</p>
+          <div class="hero-actions">
+            <button type="button" class="kc-btn kc-btn-primary" id="btn-tour">播放入场编排</button>
+            <a class="kc-btn" href="#s06">查看 35 个真实落点</a>
+          </div>
+        </div>
+        <div class="hero-strip mono">
+          <span>01 三态主题</span><span>02 双声部排印</span><span>03 机械图元</span>
+          <span>04 本地图标形变</span><span>05 功能分布</span><span>06 落点审计</span>
+        </div>
+      </section>
+
+      <!-- 01 三态主题 -->
+      <section class="sec" id="s01">
+        <div class="sec-head"><span class="mono">01 / THREE STAGES</span><span class="mono">85 : 10 : 4 : 1</span></div>
+        <h2 class="h2">三态舞台</h2>
+        <p class="lede">点击任一色板即可切换全站主题。色值只写在 CSS 变量里，主题切换只改 <span class="mono">html</span> 上一个 class，不用 JS 遍历 DOM。</p>
+        <div class="theme-grid" id="theme-grid"></div>
+        <div class="note">
+          <span class="mono">NOTE</span>
+          <p>项目线上默认主题是「暗黑」，此 demo 默认「护眼」只为展示米白印刷纸的构成感；正式改造沿用用户已有的 <span class="mono">material_theme</span> 偏好，不做默认值迁移。</p>
+        </div>
+      </section>
+
+      <!-- 02 排印 -->
+      <section class="sec" id="s02">
+        <div class="sec-head"><span class="mono">02 / TYPOGRAPHY</span><span class="mono">ANYBODY · ARCHIVO · SPACE MONO</span></div>
+        <h2 class="h2">双声部排印</h2>
+        <p class="lede">声部一负责视口级巨字锚点，声部二负责精密机械标注。<strong>中文不套 uppercase、不压缩字距、行高不低于 1.05</strong>——原方案 11px / 0.2em / leading 0.88 在适老化下不达标。</p>
+        <div class="type-demo">
+          <div class="type-row"><span class="mono type-label">DISPLAY / 巨字</span><div class="display-sm">NOV.04</div></div>
+          <div class="type-row"><span class="mono type-label">SECTION / 章节</span><div class="h2-sample">空间创作 STUDIO</div></div>
+          <div class="type-row"><span class="mono type-label">BODY / 正文中文</span><div class="body-sample">素材已送入剪辑轨道，衍生版本保留原始引用关系。文字放大后依然保持完整行高，不挤压、不截断。</div></div>
+          <div class="type-row"><span class="mono type-label">ANNOTATION / 机械标注</span><div class="mono mono-sample">88 ASSETS // 3713 FRAMES · CTX: 0 // MAX: 29K</div></div>
+        </div>
+        <div class="type-scale" id="type-scale"></div>
+      </section>
+
+      <!-- 03 动效 -->
+      <section class="sec" id="s03">
+        <div class="sec-head"><span class="mono">03 / KINETIC PRIMITIVES</span><span class="mono">ONE PROTAGONIST PER ZONE</span></div>
+        <h2 class="h2">构成主义动效</h2>
+        <p class="lede">全部只用 <span class="mono">transform / opacity</span>，零圆角、零投影、零渐变、零模糊。工作台不是海报，规则从「一屏一主角」改为「一区一主角 + 全局循环预算」。</p>
+
+        <div class="budget-bar">
+          <span class="mono">LOOP BUDGET</span>
+          <div class="budget-meter"><i id="budget-fill"></i></div>
+          <span class="mono" id="budget-text">0 / 2 运行中</span>
+          <span class="mono" id="budget-warn"></span>
+        </div>
+
+        <div class="motion-grid">
+          <article class="card motion-card" data-loop="orbit">
+            <div class="card-top"><span class="mono">KC-ORBIT</span><button type="button" class="mini-btn" data-toggle="orbit">暂停</button></div>
+            <div class="canvas-orbit">
+              <svg viewBox="0 0 160 160" class="orbit kc-loop" aria-hidden="true">
+                <circle cx="80" cy="80" r="58" fill="none" stroke="var(--border-hairline)" stroke-width="2"/>
+                <g class="orbit-ring"><circle cx="80" cy="22" r="9" fill="var(--kc-blue)"/></g>
+              </svg>
+            </div>
+            <h3>公转</h3><p>AI 推理 / 空画布。12s linear，骑在轮缘的子圆用群青蓝。</p>
+            <p class="mono meta">C 级 · 全局最多 1 个</p>
+          </article>
+
+          <article class="card motion-card" data-loop="pendulum">
+            <div class="card-top"><span class="mono">KC-PENDULUM</span><button type="button" class="mini-btn" data-toggle="pendulum">暂停</button></div>
+            <div class="canvas-pendulum">
+              <svg viewBox="0 0 160 130" aria-hidden="true">
+                <line x1="80" y1="12" x2="80" y2="118" stroke="var(--border-hairline)" stroke-width="2"/>
+                <polygon class="pendulum kc-loop" points="80,18 60,92 100,92" fill="var(--kc-red)"/>
+              </svg>
+            </div>
+            <h3>钟摆</h3><p>服务未就绪警告，±22° / 2.2s alternate。文案不暴露内部端口。</p>
+            <p class="mono meta">A 级 · 静态终态＝红色静止三角</p>
+          </article>
+
+          <article class="card motion-card" data-loop="march">
+            <div class="card-top"><span class="mono">KC-MARCH</span><button type="button" class="mini-btn" data-toggle="march">暂停</button></div>
+            <div class="canvas-march"><div class="march kc-loop"><i></i><i></i><i></i></div></div>
+            <h3>步进</h3><p>加载条 / 底部状态栏，steps(3) 机械行进，不伪造百分比。</p>
+            <p class="mono meta">A 级 · 不逐帧改 DOM 数值</p>
+          </article>
+
+          <article class="card motion-card">
+            <div class="card-top"><span class="mono">KC-SWEEP</span><button type="button" class="mini-btn" id="btn-sweep">重播</button></div>
+            <div class="canvas-sweep"><button type="button" class="sweep-target kc-btn">悬停或点击扫入</button></div>
+            <h3>对角扫入</h3><p>hover 菜单项 / 按钮，实色块 skewX(-12deg) 从 -105% 切入。</p>
+            <p class="mono meta">A 级 · 350ms cubic-bezier(.16,1,.3,1)</p>
+          </article>
+
+          <article class="card motion-card">
+            <div class="card-top"><span class="mono">MASK REVEAL</span><button type="button" class="mini-btn" id="btn-reveal">重播</button></div>
+            <div class="canvas-reveal"><div class="reveal-mask"><span id="reveal-word">STANDBY</span></div></div>
+            <h3>遮罩上升</h3><p>模块切换 / 巨字登场。translateY(110%) → 0，0.75s expo-out，stagger 上限 6 项。</p>
+            <p class="mono meta">B 级 · 只在切换瞬间，不常驻</p>
+          </article>
+
+          <article class="card motion-card">
+            <div class="card-top"><span class="mono">VARIABLE WEIGHT</span><button type="button" class="mini-btn" data-toggle="wght">播放</button></div>
+            <div class="canvas-weight"><span class="wght kc-loop">LIVE</span></div>
+            <h3>可变字重呼吸</h3><p>wght 300→900 会改字宽并触发重排，因此元素必须绝对定位 + 固定宽度 + contain。</p>
+            <p class="mono meta">B 级 · 中文词改用 opacity 呼吸</p>
+          </article>
+        </div>
+
+        <div class="note">
+          <span class="mono">REDUCED MOTION</span>
+          <p>顶栏「全部暂停」与系统 <span class="mono">prefers-reduced-motion</span> 都会把所有循环动画停在静态终态；一次性反馈动效直接跳到结果，不留中间帧。</p>
+        </div>
+      </section>
+
+      <!-- 04 图标形变 -->
+      <section class="sec" id="s04">
+        <div class="sec-head"><span class="mono">04 / MORPHICONS 2.0.2 · MIT</span><span class="mono">LOCAL ESM · ZERO CDN</span></div>
+        <h2 class="h2">图标形变</h2>
+        <p class="lede">项目里已在用 <span class="mono">morphicons/vue</span> 的 <span class="mono">MorphIcon</span>；这里把同一套 <strong>本地 dist ESM</strong> 用 <span class="mono">createMorph()</span> 在纯静态页面跑起来，图标路径来自项目 <span class="mono">StudioIcon.vue</span> 原样抽取。</p>
+
+        <div class="morph-bar" id="morph-bar"></div>
+
+        <div class="morph-verdict">
+          <div class="verdict-head mono">VERDICT / 库评估</div>
+          <div class="verdict-grid">
+            <div><span class="mono">LICENSE</span><strong>MIT</strong><p>可商用、可本地打包。</p></div>
+            <div><span class="mono">STATUS</span><strong>v2.0.2 · 活跃</strong><p>2026-10-24 发版，约 15 万周下载，单一维护者。</p></div>
+            <div><span class="mono">SIZE</span><strong>core 6.7KB / vue 10.3KB</strong><p>gzip，零运行时依赖；fill 代码首次用时才加载。</p></div>
+            <div><span class="mono">FIT</span><strong>继续用，不必换</strong><p>它只是「形变引擎」，不是图标集；图标数据必须自己本地化。</p></div>
+            <div><span class="mono">A11Y</span><strong>内置 reducedMotion</strong><p>项目 StudioIcon.vue 已设 <span class="mono">'user'</span>，会跟随系统降级。</p></div>
+            <div><span class="mono">CAVEAT</span><strong>单向对要补反向</strong><p>copy→check、edit→check、plus→check 无反向映射，做来回切换需补映射。</p></div>
+          </div>
+        </div>
+
+        <div class="icon-head"><h3 class="h3">本地图标库 <span class="mono" id="icon-count"></span></h3><p class="mono">75 PATHS · 24×24 GRID · FROM StudioIcon.vue</p></div>
+        <div class="icon-grid" id="icon-grid"></div>
+      </section>
+
+      <!-- 05 功能分区 -->
+      <section class="sec" id="s05">
+        <div class="sec-head"><span class="mono">05 / INFORMATION ARCHITECTURE</span><span class="mono">COMMON OUT · RARE IN</span></div>
+        <h2 class="h2">功能分区</h2>
+        <p class="lede">功能一个不少，只挪位置。常用的外置到全局条与主工具条；低频参数、管理项、调试项折叠；独占一屏的复杂任务进全屏工作台。</p>
+        <div class="ia-mock">
+          <div class="ia-l0"><span class="mono">L0 全局常驻（≤7）</span><div class="ia-chips"><span>板块</span><span>泳道</span><span>搜索 ⌘K</span><span>上传</span><span>语音</span><span>显示</span><span>用户</span></div></div>
+          <div class="ia-l1">
+            <div class="ia-left"><span class="mono">L1 左</span><p>泳道常驻<br />筛选</p></div>
+            <div class="ia-center"><span class="mono">L1 中 · 唯一视觉主体 ≥55%</span><div class="ia-hero">主视口</div><p class="mono">巨字 / 展示级动效只出现在这里</p></div>
+            <div class="ia-right"><span class="mono">L1 右 · ≤380px</span><p>上下文抽屉<br />当前值常显</p></div>
+          </div>
+          <div class="ia-l2"><span class="mono">L2 折叠</span><p>高级筛选 · 模型参数 · 批量管理 · 证书 / 密钥 / 白名单 · 调试</p></div>
+          <div class="ia-l3"><span class="mono">L3 全屏</span><p>Pinterest 详情 · 配方画廊 · 全屏编辑层 · 人声工坊 · 灯箱（统一 返回 / Esc / 面包屑）</p></div>
+        </div>
+        <div class="prescription" id="prescription"></div>
+      </section>
+
+      <!-- 06 落点地图 -->
+      <section class="sec" id="s06">
+        <div class="sec-head"><span class="mono">06 / MOTION AUDIT</span><span class="mono">35 REAL SPOTS · 8 NO-GO ZONES</span></div>
+        <h2 class="h2">动效落点地图</h2>
+        <p class="lede">从真实组件只读盘出来的 35 个落点。A＝一次性微反馈可铺开，B＝每区一个，C＝全局唯一循环主角。每条都写清了 reduced-motion 的静态终态。</p>
+        <div class="filters" id="spot-filters"></div>
+        <div class="table-wrap">
+          <table class="spot-table">
+            <thead><tr><th>#</th><th>落点 / 真实位置</th><th>触发</th><th>类型</th><th>形变对</th><th>预算</th><th>降级终态</th></tr></thead>
+            <tbody id="spot-body"></tbody>
+          </table>
+        </div>
+        <h3 class="h3 no-go-title">绝对不能加动效的位置</h3>
+        <div class="no-go" id="no-go"></div>
+      </section>
+
+      <!-- 07 灵感板 -->
+      <section class="sec" id="s07">
+        <div class="sec-head"><span class="mono">07 / INSPIRATION & SKILLS</span><span class="mono">PATTERNS ONLY · NO ASSET REUSE</span></div>
+        <h2 class="h2">灵感板与可用技能</h2>
+        <p class="lede">「Motion Shelf」没有检索到确切的同名动效灵感产品；同名结果指向 Live Photo 管理工具、Autodesk MotionBuilder Shelf 和视频模板库，与本项目无关。下面用可核实的来源替代，并且只借交互模式、不搬任何素材。</p>
+        <div class="inspo-list" id="inspo-list"></div>
+        <h3 class="h3">可安装的动效技能</h3>
+        <p class="lede">本轮已用只读探索能力完成落点盘点；以下技能可用于更深入的「全代码库动效审计 / 连续可中断动效评审」，需要时再安装，未擅自改动环境。</p>
+        <div class="skill-list" id="skill-list"></div>
+      </section>
+
+      <!-- 08 本地资源 -->
+      <section class="sec" id="s08">
+        <div class="sec-head"><span class="mono">08 / LOCAL ASSETS</span><span class="mono">ZERO RUNTIME CDN</span></div>
+        <h2 class="h2">本地资源清单</h2>
+        <p class="lede">字体、图标、形变运行时全部拉到本目录。中文不下载字体子集，交给系统字体栈；页面所有 <span class="mono">&lt;link&gt; / &lt;script&gt; / @font-face</span> 均为相对路径。</p>
+        <div class="asset-summary" id="asset-summary"></div>
+        <div class="asset-list" id="asset-list"></div>
+        <div class="selfcheck" id="selfcheck"></div>
+        <div class="note">
+          <span class="mono">REPRODUCE</span>
+          <p>资源由 <span class="mono">scripts/pull-assets.mjs</span> 生成，可重复执行。服务由 <span class="mono">server.mjs</span> 提供，监听 30004（仅 demo，不占用正式 30002 / 灰测 30003）。</p>
+        </div>
+      </section>
+
+      <footer class="foot mono">
+        <span>MATERIAL STUDIO PRO · STYLEKIT MOTION LAB</span>
+        <span>DEMO / 30004 · 不改动 web-pro 源码</span>
+      </footer>
+    </main>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

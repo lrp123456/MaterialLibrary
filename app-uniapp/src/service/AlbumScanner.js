@@ -7,6 +7,7 @@
 import { SNAPSHOT_SCAN_DAYS, PAGE_SIZE } from '../common/Constants'
 import { createPhotoMeta } from '../common/Types'
 import { store } from './SyncStateStore'
+import { albumCursorAction } from './album-cursor.js'
 
 /** 演示/未接原生插件时的 mock 相册（近 3 天） */
 export function mockPhotos() {
@@ -28,7 +29,12 @@ export function mockPhotos() {
  * 扫描近 N 天相册元数据。
  * @returns {Promise<Array>} PhotoMeta[]
  */
+let _scanningPromise = null
+
 export async function scanAlbum() {
+  if (_scanningPromise) return _scanningPromise
+  _scanningPromise = (async () => {
+    try {
   const cutoff = Date.now() - SNAPSHOT_SCAN_DAYS * 86400000
 
   // #ifdef APP-PLUS
@@ -47,6 +53,11 @@ export async function scanAlbum() {
   }
   return []
   // #endif
+    } finally {
+      _scanningPromise = null
+    }
+  })()
+  return _scanningPromise
 }
 
 /** Android MediaStore：图片+视频分表查询，避免 Files URI / selection 转换失败 */
@@ -106,8 +117,9 @@ function scanViaMediaStore() {
                 : `content://media/external/images/media/${id}`
             }
             if (!id) continue
-            // 近 N 天窗口在 JS 侧过滤，避免 SQL selectionArgs 桥接失败
-            if (modified > 0 && modified < cutoff) continue
+            // 近 N 天窗口在 JS 侧过滤，避免 SQL selectionArgs 桥接失败。
+            // 无修改时间的行不作为截止；正的过期时间才停，避免扫完整库。
+            if (albumCursorAction(modified, cutoff) === 'break') break
             // 过滤 App 导出的已保存素材（防重复入库）
             if (store.isExportedMedia(localPath, name)) continue
             photos.push(createPhotoMeta(id, name, size, modified, localPath, mediaKind))

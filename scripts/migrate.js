@@ -249,6 +249,19 @@ const BUILTIN_ADAPTERS = [
     })
   },
   {
+    id: 'newapi_gpt_image',
+    label: 'New API GPT 图像 (Flare / Sunburst / Web)',
+    kind: 'image',
+    builtin: 1,
+    enabled: 1,
+    protocol: 'newapi_gpt_image',
+    base_url: process.env.NEWAPI_BASE_URL || 'https://newapi.naite.cc/v1',
+    config_json: JSON.stringify({
+      defaultModel: 'gpt-image-2.5-web',
+      timeoutMs: 180000
+    })
+  },
+  {
     id: 'gemini_video',
     label: 'Google Gemini Omni 视频',
     kind: 'video',
@@ -1119,6 +1132,98 @@ function migrate(dataDir, { doBackup = true } = {}) {
   tx();
   try { require('../src/shelf-normalize').normalizeLibraryShelves(db); } catch (e) { console.warn('[migrate] normalizeLibraryShelves error:', e.message); }
   backfillAssetAliasesAndCleanup(db, dataDir);
+
+  // ===== 集中幂等增量区（用户隔离 + 模型白名单 + 生成任务队列）=====
+  // 放在 tx() 之后、return db 之前；每条 DDL/DML 单独 try/catch，重复启动幂等。
+  // 刻意不动 :506-515 users / :525-531 chat_sessions 的 CREATE 主体。
+  try { db.exec('ALTER TABLE users ADD COLUMN allow_all_models INTEGER DEFAULT 0;'); } catch (e) {}
+  try { db.exec('ALTER TABLE chat_sessions ADD COLUMN params_json TEXT;'); } catch (e) {}
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN builtin INTEGER DEFAULT 0;'); } catch (e) {}
+  try { db.exec('ALTER TABLE presets ADD COLUMN user_id INTEGER DEFAULT 0;'); } catch (e) {}
+  // studio_presets 由 src/studio-presets.js 懒创建，先兜底建表（含新列），
+  // 否则 ALTER 在首次启动时落空，懒建表后仍会缺列。
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS studio_presets (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        negative_prompt TEXT DEFAULT '',
+        aspect_ratio TEXT DEFAULT '16:9',
+        category TEXT DEFAULT 'general',
+        tags_json TEXT DEFAULT '[]',
+        model TEXT DEFAULT '',
+        user_id INTEGER DEFAULT 0,
+        builtin INTEGER DEFAULT 1,
+        created_at INTEGER,
+        updated_at INTEGER
+      );
+    `);
+  } catch (e) {}
+  try { db.exec('ALTER TABLE studio_presets ADD COLUMN user_id INTEGER DEFAULT 0;'); } catch (e) {}
+  try { db.exec('ALTER TABLE studio_presets ADD COLUMN builtin INTEGER DEFAULT 0;'); } catch (e) {}
+
+  // 内置种子配方保持全局可见（builtin=1 且 user_id=0）
+  try {
+    db.exec("UPDATE studio_presets SET builtin=1 WHERE id IN ('preset_1','preset_2','preset_3','preset_4');");
+  } catch (e) {}
+
+  let _adminId = 1;
+  try {
+    const _a = db.prepare("SELECT id FROM users WHERE role='admin' ORDER BY id ASC LIMIT 1").get();
+    if (_a && _a.id) _adminId = Number(_a.id);
+  } catch (e) {}
+  // 存量归属：user_id 为 NULL/0 的孤立数据归到 admin；builtin 行保留 user_id=0 以全局可见
+  try { db.prepare('UPDATE chat_sessions SET user_id=? WHERE user_id IS NULL OR user_id=0').run(_adminId); } catch (e) {}
+  try { db.prepare('UPDATE creation_templates SET user_id=? WHERE user_id IS NULL OR user_id=0').run(_adminId); } catch (e) {}
+  try { db.prepare('UPDATE studio_presets SET user_id=? WHERE (user_id IS NULL OR user_id=0) AND COALESCE(builtin,0)=0').run(_adminId); } catch (e) {}
+  try { db.prepare('UPDATE presets SET user_id=? WHERE (user_id IS NULL OR user_id=0) AND COALESCE(builtin,0)=0').run(_adminId); } catch (e) {}
+
+  // 会话参数快照：用最近一条 chat_messages.params_json 回填 chat_sessions.params_json
+  try {
+    db.exec(`
+      UPDATE chat_sessions
+      SET params_json = COALESCE(
+        NULLIF(params_json, ''),
+        (SELECT m.params_json FROM chat_messages m
+         WHERE m.session_id = chat_sessions.id
+           AND m.params_json IS NOT NULL AND m.params_json != ''
+         ORDER BY m.created_at DESC LIMIT 1)
+      )
+      WHERE params_json IS NULL OR params_json = '';
+    `);
+  } catch (e) {}
+
+  // 指定测试账号可见全部模型（admin 不自动全见）
+  try { db.prepare("UPDATE users SET allow_all_models=1 WHERE username='naite_test_user'").run(); } catch (e) {}
+
+  // 后台生成任务队列：不复用 ai_tasks（其 worker 单 busy + LIMIT 1 串行）
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS gen_jobs (
+        job_id TEXT PRIMARY KEY,
+        user_id INTEGER,
+        session_id TEXT,
+        modality TEXT,
+        model TEXT,
+        payload_json TEXT,
+        status TEXT,
+        progress INTEGER,
+        result_json TEXT,
+        error_json TEXT,
+        attempt INTEGER DEFAULT 0,
+        idempotency_key TEXT UNIQUE,
+        created_at INTEGER,
+        updated_at INTEGER,
+        started_at INTEGER,
+        completed_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_gen_jobs_status_created ON gen_jobs(status, created_at);
+      CREATE INDEX IF NOT EXISTS idx_gen_jobs_user_session ON gen_jobs(user_id, session_id, created_at DESC);
+    `);
+  } catch (e) {}
+  // ===== 集中幂等增量区结束 =====
+
   console.log('[migrate] 数据库迁移升级完成');
   return db;
 }

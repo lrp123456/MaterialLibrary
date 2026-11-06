@@ -409,12 +409,28 @@ async function handleSpace(services, { sceneImageBuffer, selection, prompt, side
  * @param {object} services
  * @param {object} opts
  */
+/** 统一「预览请求」返回结构：dryRun 只组装、不发任何供应商请求，不落任何衍生记录。 */
+function previewOut(o) {
+  return Object.assign({ dryRun: true, images: [], notes: [] }, o);
+}
+
+/** 预览时只读探测「本次会走哪个适配器」，任何失败都不抛错 */
+function adapterIdOrNull(services, model) {
+  try {
+    const adapter = findImageAdapter(services && services.db, model);
+    return adapter ? adapter.id : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 async function handleEditRun(services, opts) {
   let op = String(opts.op || 'replace').toLowerCase();
   op = OP_ALIAS[op] || op;
   if (!OPS.has(op)) throw new Error('不支持的操作: ' + op);
   const sceneImageBuffer = opts.sceneImageBuffer;
   if (!sceneImageBuffer) throw new Error('缺少场景图');
+  const rawPrompt = String(opts.prompt || '').trim();
   const meta = await sharp(sceneImageBuffer).metadata();
   const sw = meta.width;
   const sh = meta.height;
@@ -480,6 +496,21 @@ async function handleEditRun(services, opts) {
         baseW: sw,
         baseH: sh,
       });
+      if (opts.dryRun) {
+        return previewOut({
+          op,
+          recipe: rawPrompt,
+          prompt: expandPrompt,
+          adapterId: pickedImageModel,
+          size: expandSpec.sizeField || null,
+          ratio: expandSpec.ratioField || null,
+          outSize: publicOutSize(expandSpec, false),
+          apiBox: { x1: 0, y1: 0, x2: 999, y2: 999 },
+          images: [{ tag: '图1', source: 'stage', label: '原图' }],
+          pasteback: false,
+          notes: ['画幅外扩：原图内容不变，仅补全新增区域'],
+        });
+      }
       const generated = await runAdapter(services, [sceneImageBuffer], expandPrompt, pickedImageModel, {
         size: expandSpec.sizeField,
         ratio: expandSpec.ratioField,
@@ -504,6 +535,21 @@ async function handleEditRun(services, opts) {
     }
 
     let buffer;
+    const expandMethod = jimengReady(services) && opts.useJimeng !== false ? 'jimeng' : 'imagex';
+    if (opts.dryRun) {
+      return previewOut({
+        op,
+        recipe: rawPrompt,
+        prompt: stripCoordSyntax(opts.prompt || ''),
+        method: expandMethod,
+        ratios,
+        expandRatio: opts.expandRatio || '3:4',
+        apiBox: { x1: 0, y1: 0, x2: 999, y2: 999 },
+        images: [{ tag: '图1', source: 'stage', label: '原图' }],
+        pasteback: false,
+        notes: [expandMethod === 'jimeng' ? '即梦画幅外扩通道：正文为通道指令（非自由文本）' : 'ImageX 画幅外扩通道：正文为通道指令（非自由文本）'],
+      });
+    }
     let method = 'jimeng';
     if (jimengReady(services) && opts.useJimeng !== false) {
       const out = await expandWithJimeng(services, {
@@ -579,9 +625,19 @@ ${promptExtra ? `${promptExtra}\n` : ''}
     if (opts.light_clause || opts.lightClause) {
       finalPrompt += '\n' + (opts.light_clause || opts.lightClause);
     }
-    // ★ 用户在客户端选的模型必须透传给适配器，否则「前端能选、服务端忽略」=选了个摆设
-    if (opts.light_clause || opts.lightClause) {
-      finalPrompt += '\n' + (opts.light_clause || opts.lightClause);
+    if (opts.dryRun) {
+      return previewOut({
+        op,
+        recipe: rawPrompt,
+        prompt: finalPrompt,
+        adapterId: adapterIdOrNull(services, opts.model),
+        outSize: publicOutSize(outSpec, false),
+        apiBox: { x1: 0, y1: 0, x2: 999, y2: 999 },
+        images: [{ tag: '图1', source: 'stage', label: '原图' }],
+        regionNote: sizeNote,
+        pasteback: false,
+        notes: ['全空间风格重塑：不贴回，整幅重绘'],
+      });
     }
     const generated = await runAdapter(services, [sceneImageBuffer], finalPrompt, opts.model, {
       size: outSpec.sizeField,
@@ -645,6 +701,21 @@ ${promptExtra ? `${promptExtra}\n` : ''}
     if (!finalPrompt) {
       const { OFFICIAL_PROMPT_TEMPLATES } = require('../nodes/operator-catalog');
       finalPrompt = OFFICIAL_PROMPT_TEMPLATES.upscale_enhance.template;
+    }
+
+    if (opts.dryRun) {
+      return previewOut({
+        op,
+        recipe: rawPrompt,
+        prompt: finalPrompt,
+        adapterId: adapterIdOrNull(services, opts.model),
+        outSize: publicOutSize(outSpec, false),
+        apiBox: { x1: 0, y1: 0, x2: 999, y2: 999 },
+        images: [{ tag: '图1', source: 'stage', label: '原图' }],
+        regionNote: sizeNote,
+        pasteback: false,
+        notes: ['超分增强：全图保真，不贴回'],
+      });
     }
 
     const generated = await runAdapter(services, [sceneImageBuffer], finalPrompt, opts.model, {
@@ -760,6 +831,22 @@ ${promptExtra ? `${promptExtra}\n` : ''}
     const reconciled = reconcilePrompt(compiled.prompt, { kind: routeFor(opts.model).kind, text: located[0].locationClause });
     const finalPrompt = reconciled.prompt || compiled.prompt;
 
+    if (opts.dryRun) {
+      return previewOut({
+        op,
+        recipe: rawPrompt,
+        prompt: finalPrompt,
+        adapterId: adapterIdOrNull(services, opts.model),
+        apiBox: null,
+        images: [{ tag: '图1', source: 'stage', label: '原图' }].concat(
+          (compiled.references || []).map((_, idx) => ({ tag: `图${idx + 2}`, source: 'ref', label: `材质参考${idx + 1}` }))
+        ),
+        regionNote: sizeNote,
+        pasteback: pastebackAllowed && opts.pasteback !== false,
+        notes: ['整屋配色预览：将生成并按区域贴回'],
+      });
+    }
+
     const imageBuffers = [sceneImageBuffer];
     for (const ref of compiled.references) {
       if (!ref || !ref.rel) continue;
@@ -832,7 +919,7 @@ ${promptExtra ? `${promptExtra}\n` : ''}
   // vlm_text 出口才需要先认出「这里是什么东西」；其余出口用坐标/蒙版足够。
   // 调用方已给 vlmInfo 就跳过（省一次多模态调用）。
   let vlmInfo = opts.vlmInfo || null;
-  if (!vlmInfo && needsVlm(route.kind) && opts.describeRegion !== false) {
+  if (!vlmInfo && needsVlm(route.kind) && opts.describeRegion !== false && !opts.dryRun) {
     try {
       vlmInfo = await describeRegion(services, {
         sceneImageBuffer,
@@ -865,6 +952,42 @@ ${promptExtra ? `${promptExtra}\n` : ''}
   const rec = reconcilePrompt(opts.prompt, clause);
   const safePrompt = rec.prompt || opts.prompt;
   const combinedNote = [regionNote, rec.sanitized ? `提示词处理：${rec.note}` : '', sizeNote].filter(Boolean).join('；');
+  const generationPrompt = rawPrompt ? safePrompt : '';
+
+  if (opts.dryRun) {
+    const bounds = selectionBounds(selection, sw, sh);
+    const apiBox = apiBoxFromBounds(bounds.minX, bounds.minY, bounds.maxX, bounds.maxY, sw, sh);
+    const refs = [{ tag: '图1', source: 'stage', label: '原图' }];
+    if (op === 'insert' && opts.productImageBuffer) refs.push({ tag: '图2', source: 'ref', label: '图2（产品图）' });
+    else if ((op === 'replace' || op === 'add') && opts.refImageBuffer) refs.push({ tag: '图2', source: 'ref', label: '图2（参考图）' });
+    const notes = [];
+    if (!rawPrompt) notes.push('配方句为空：将使用服务端内置兜底模板（正文不是你写的那句）');
+    if (needsVlm(route.kind) && !vlmInfo) notes.push('预览未调用 VLM 识别；发送时会在真实管线中识别该区域物体名');
+    return previewOut({
+      op,
+      recipe: rawPrompt,
+      prompt: rawPrompt ? safePrompt : '',
+      fallbackPrompt: !rawPrompt,
+      adapterId: adapterIdOrNull(services, opts.model),
+      size: outSpec.sizeField || null,
+      ratio: outSpec.ratioField || null,
+      outSize: publicOutSize(outSpec, pastebackAllowed && opts.pasteback !== false),
+      apiBox,
+      region: {
+        exit: clause.exit,
+        selectionType: clause.selectionType,
+        fidelity: clause.fidelity,
+        degraded: clause.degraded,
+        text: clause.text,
+        maskId: clause.mask ? clause.mask.maskId : null,
+        vlmInfo: vlmInfo || null,
+      },
+      regionNote: combinedNote,
+      pasteback: pastebackAllowed && opts.pasteback !== false,
+      images: refs,
+      notes,
+    });
+  }
 
   let result;
   const wantPasteback = pastebackAllowed && opts.pasteback !== false;
@@ -883,13 +1006,14 @@ ${promptExtra ? `${promptExtra}\n` : ''}
       maskPath: clause.mask ? clause.mask.destPath : null,
       model: opts.model,
       outSpec,
+      prompt: generationPrompt,
     });
     const bounds = selectionBounds(selection, sw, sh);
     result = {
       buffer,
       apiBox: apiBoxFromBounds(bounds.minX, bounds.minY, bounds.maxX, bounds.maxY, sw, sh),
       bounds,
-      prompt: opts.prompt || 'install composite',
+      prompt: generationPrompt || 'install composite',
     };
   } else if (op === 'replace') {
     const refBuffer = opts.refImageBuffer;
@@ -907,13 +1031,14 @@ ${promptExtra ? `${promptExtra}\n` : ''}
       regionClauseText: clause.areaPhrase,
       maskPath: clause.mask ? clause.mask.destPath : null,
       outSpec,
+      prompt: generationPrompt,
     });
     const bounds = selectionBounds(selection, sw, sh);
     result = {
       buffer,
       apiBox: apiBoxFromBounds(bounds.minX, bounds.minY, bounds.maxX, bounds.maxY, sw, sh),
       bounds,
-      prompt: opts.prompt || 'replace',
+      prompt: generationPrompt || 'replace',
     };
   } else if (op === 'remove') {
     const { handleWatermarkOrRemove } = require('./quick-watermark-remove');
@@ -926,20 +1051,21 @@ ${promptExtra ? `${promptExtra}\n` : ''}
       regionClauseText: clause.areaPhrase,
       maskPath: clause.mask ? clause.mask.destPath : null,
       outSpec,
+      prompt: generationPrompt,
     });
     const bounds = selectionBounds(selection, sw, sh);
     result = {
       buffer,
       apiBox: apiBoxFromBounds(bounds.minX, bounds.minY, bounds.maxX, bounds.maxY, sw, sh),
       bounds,
-      prompt: opts.prompt || 'remove',
+      prompt: generationPrompt || 'remove',
     };
   } else if (op === 'add') {
     result = await handleAdd(services, {
       sceneImageBuffer,
       refImageBuffer: opts.refImageBuffer,
       selection,
-      prompt: safePrompt,
+      prompt: generationPrompt,
       productName: opts.productName,
       model: opts.model,
       clauseText: clause.text,
@@ -953,7 +1079,7 @@ ${promptExtra ? `${promptExtra}\n` : ''}
     result = await handleSpace(services, {
       sceneImageBuffer,
       selection,
-      prompt: safePrompt,
+      prompt: generationPrompt,
       sideDesc: opts.productName,
       model: opts.model,
       clauseText: clause.text,
@@ -966,7 +1092,7 @@ ${promptExtra ? `${promptExtra}\n` : ''}
     ? { unchangedRatio: null, note: 'space 不贴回' }
     : await untouchedDiff(sceneImageBuffer, result.buffer, selection);
 
-  await persistEditDerivative(services, opts.assetFid, 'ai_' + op, result.buffer, {
+  const derivRecord = await persistEditDerivative(services, opts.assetFid, 'ai_' + op, result.buffer, {
     op,
     model: opts.model || null,
     prompt: result.prompt || null,
@@ -994,6 +1120,8 @@ ${promptExtra ? `${promptExtra}\n` : ''}
       vlmInfo: vlmInfo || null,
     },
     regionNote: combinedNote,
+    // ★ 服务端为本次精准编辑落盘的衍生图 id（供客户端跳转查看 / 设为主衍生图）
+    derivativeFid: derivRecord && derivRecord.id ? Number(derivRecord.id) : null,
   };
 }
 

@@ -1,260 +1,156 @@
 <template>
   <view class="page">
-    <view class="status-bar" :style="{ paddingTop: statusBarHeight + 'px' }" />
-    <view class="nav">
-      <view class="nav-brand">
-        <view class="nav-logo">M</view>
-        <view class="media-type-dropdown-trigger" @click="toggleMediaTypeMenu">
-          <text class="media-type-icon">{{ currentMediaTabInfo.icon }}</text>
-          <text class="media-type-label">{{ currentMediaTabInfo.label }}</text>
-          <text class="media-type-arrow">{{ showMediaTypeMenu ? '▴' : '▾' }}</text>
-        </view>
-      </view>
-      <view class="nav-right-box">
-        <text
-          v-if="activeMediaTab === 'image'"
-          class="nav-action-btn"
-          :class="{ active: isSelectMode }"
-          @click="toggleSelectMode"
-        >{{ isSelectMode ? '完成' : '多选' }}</text>
-        <view class="refresh-pill-btn" @click="onRefresh" title="刷新">
-          <text class="refresh-icon" :class="{ spinning: refreshing }">↻</text>
-        </view>
-      </view>
-    </view>
+    <view class="header-container">
+      <view class="status-bar" :style="{ paddingTop: statusBarHeight + 'px' }" />
 
-    <!-- 素材类型精致下拉菜单 -->
-    <view v-if="showMediaTypeMenu" class="media-type-popover-mask" @click="showMediaTypeMenu = false">
-      <view class="media-type-popover" :style="{ top: (statusBarHeight + 48) + 'px' }" @click.stop>
+      <!-- 顶部主导航栏 (Apple HIG 风格) -->
+      <view class="apple-nav">
+        <!-- 左侧：筛选抽屉入口 -->
         <view
-          v-for="item in mediaTypeList"
-          :key="item.key"
-          class="popover-item"
-          :class="{ active: activeMediaTab === item.key }"
-          @click="selectMediaType(item.key)"
+          class="nav-drawer-btn"
+          :class="{ 'has-active': activeFilterCount > 0 }"
+          @click="openFilterDrawer"
         >
-          <text class="popover-item-icon">{{ item.icon }}</text>
-          <text class="popover-item-text">{{ item.label }}</text>
-          <text v-if="activeMediaTab === item.key" class="popover-item-check">✓</text>
+          <app-icon
+            name="sliders"
+            :size="18"
+            :color="activeFilterCount > 0 ? '#007AFF' : '#1C1C1E'"
+          />
+          <text class="nav-drawer-text">筛选</text>
+          <text v-if="activeFilterCount > 0" class="drawer-badge">{{ activeFilterCount }}</text>
         </view>
-      </view>
-    </view>
 
-    <view class="search-row">
-      <view class="search-box">
-        <text class="search-icon">⌕</text>
-        <input
-          class="search-input"
-          v-model="keyword"
-          :placeholder="searchPlaceholder"
-          confirm-type="search"
-          @confirm="reload"
-        />
-      </view>
-      <text class="sort-btn" @click="toggleSort">{{ sortLatest ? '最新' : '最早' }}</text>
-    </view>
-
-    <!-- 聚合下拉多选筛选条（按当前素材库 Tab 定制维度，多维聚合下拉，支持多选） -->
-    <view class="filter-bar-container">
-      <scroll-view scroll-x class="filter-bar-scroll" :show-scrollbar="false">
-        <view class="filter-bar">
-          <!-- 0. 二级子品类细分 (当选中的一级分类存在 children 时自适应展示) -->
+        <!-- 中间：Apple 原生风格分段控制器 (图片/视频/音频/回收站) -->
+        <view class="apple-segmented">
           <view
-            v-if="currentSubCategories.length > 0"
-            class="dropdown-trigger"
-            :class="{ active: activeDropdown === 'subCategory', selected: selectedSubCategory !== '' }"
-            @click="toggleDropdown('subCategory')"
+            v-for="tab in mainMediaTabs"
+            :key="tab.key"
+            class="segmented-item"
+            :class="{ active: activeMediaTab === tab.key }"
+            @click="switchMediaTab(tab.key)"
           >
-            <text class="trigger-label">{{ subCategoryLabel }}</text>
-            <text class="trigger-arrow">{{ activeDropdown === 'subCategory' ? '▴' : '▾' }}</text>
+            <app-icon
+              :name="tab.iconName"
+              :size="14"
+              :color="activeMediaTab === tab.key ? '#007AFF' : '#8E8E93'"
+            />
+            <text class="segmented-label">{{ tab.label }}</text>
           </view>
-
-          <!-- 1. 视频模式聚合下拉 -->
-          <template v-if="activeMediaTab === 'video'">
-            <view
-              class="dropdown-trigger"
-              :class="{ active: activeDropdown === 'videoSource', selected: selectedVideoSources.length > 0 }"
-              @click="toggleDropdown('videoSource')"
-            >
-              <text class="trigger-label">{{ dropdownLabel('videoSource', '视频来源', selectedVideoSources) }}</text>
-              <text class="trigger-arrow">{{ activeDropdown === 'videoSource' ? '▴' : '▾' }}</text>
-            </view>
-            <view
-              class="dropdown-trigger"
-              :class="{ active: activeDropdown === 'orientation', selected: selectedOrientations.length > 0 }"
-              @click="toggleDropdown('orientation')"
-            >
-              <text class="trigger-label">{{ dropdownLabel('orientation', '画幅', selectedOrientations) }}</text>
-              <text class="trigger-arrow">{{ activeDropdown === 'orientation' ? '▴' : '▾' }}</text>
-            </view>
-          </template>
-
-          <!-- 2. 单品家具聚合下拉 -->
-          <template v-else-if="activeMediaTab === 'furniture'">
-            <view
-              class="dropdown-trigger"
-              :class="{ active: activeDropdown === 'furniture', selected: selectedFurniture.length > 0 }"
-              @click="toggleDropdown('furniture')"
-            >
-              <text class="trigger-label">{{ dropdownLabel('furniture', '家具品类', selectedFurniture) }}</text>
-              <text class="trigger-arrow">{{ activeDropdown === 'furniture' ? '▴' : '▾' }}</text>
-            </view>
-            <view
-              class="dropdown-trigger"
-              :class="{ active: activeDropdown === 'style', selected: selectedStyles.length > 0 }"
-              @click="toggleDropdown('style')"
-            >
-              <text class="trigger-label">{{ dropdownLabel('style', '风格', selectedStyles) }}</text>
-              <text class="trigger-arrow">{{ activeDropdown === 'style' ? '▴' : '▾' }}</text>
-            </view>
-            <view
-              class="dropdown-trigger"
-              :class="{ active: activeDropdown === 'material', selected: selectedMaterials.length > 0 }"
-              @click="toggleDropdown('material')"
-            >
-              <text class="trigger-label">{{ dropdownLabel('material', '材质', selectedMaterials) }}</text>
-              <text class="trigger-arrow">{{ activeDropdown === 'material' ? '▴' : '▾' }}</text>
-            </view>
-            <view
-              class="dropdown-trigger"
-              :class="{ active: activeDropdown === 'color', selected: selectedColors.length > 0 }"
-              @click="toggleDropdown('color')"
-            >
-              <text class="trigger-label">{{ dropdownLabel('color', '主色', selectedColors) }}</text>
-              <text class="trigger-arrow">{{ activeDropdown === 'color' ? '▴' : '▾' }}</text>
-            </view>
-          </template>
-
-          <!-- 3. 音乐素材聚合下拉 -->
-          <template v-else-if="activeMediaTab === 'music'">
-            <view
-              class="dropdown-trigger"
-              :class="{ active: activeDropdown === 'mood', selected: selectedMoods.length > 0 }"
-              @click="toggleDropdown('mood')"
-            >
-              <text class="trigger-label">{{ dropdownLabel('mood', '情绪氛围', selectedMoods) }}</text>
-              <text class="trigger-arrow">{{ activeDropdown === 'mood' ? '▴' : '▾' }}</text>
-            </view>
-            <view
-              class="dropdown-trigger"
-              :class="{ active: activeDropdown === 'space', selected: selectedSpaces.length > 0 }"
-              @click="toggleDropdown('space')"
-            >
-              <text class="trigger-label">{{ dropdownLabel('space', '场景空间', selectedSpaces) }}</text>
-              <text class="trigger-arrow">{{ activeDropdown === 'space' ? '▴' : '▾' }}</text>
-            </view>
-          </template>
-
-          <!-- 4. 人像素材聚合下拉 -->
-          <template v-else-if="activeMediaTab === 'portrait'">
-            <view
-              class="dropdown-trigger"
-              :class="{ active: activeDropdown === 'pose', selected: selectedPoses.length > 0 }"
-              @click="toggleDropdown('pose')"
-            >
-              <text class="trigger-label">{{ dropdownLabel('pose', '姿态动作', selectedPoses) }}</text>
-              <text class="trigger-arrow">{{ activeDropdown === 'pose' ? '▴' : '▾' }}</text>
-            </view>
-            <view
-              class="dropdown-trigger"
-              :class="{ active: activeDropdown === 'character', selected: selectedCharacters.length > 0 }"
-              @click="toggleDropdown('character')"
-            >
-              <text class="trigger-label">{{ dropdownLabel('character', '人物角色', selectedCharacters) }}</text>
-              <text class="trigger-arrow">{{ activeDropdown === 'character' ? '▴' : '▾' }}</text>
-            </view>
-          </template>
-
-          <!-- 5. 图片模式聚合下拉（支持空间、风格、材质、主色、画幅） -->
-          <template v-else>
-            <view
-              class="dropdown-trigger"
-              :class="{ active: activeDropdown === 'space', selected: selectedSpaces.length > 0 }"
-              @click="toggleDropdown('space')"
-            >
-              <text class="trigger-label">{{ dropdownLabel('space', '空间', selectedSpaces) }}</text>
-              <text class="trigger-arrow">{{ activeDropdown === 'space' ? '▴' : '▾' }}</text>
-            </view>
-
-            <view
-              class="dropdown-trigger"
-              :class="{ active: activeDropdown === 'style', selected: selectedStyles.length > 0 }"
-              @click="toggleDropdown('style')"
-            >
-              <text class="trigger-label">{{ dropdownLabel('style', '风格', selectedStyles) }}</text>
-              <text class="trigger-arrow">{{ activeDropdown === 'style' ? '▴' : '▾' }}</text>
-            </view>
-
-            <view
-              class="dropdown-trigger"
-              :class="{ active: activeDropdown === 'material', selected: selectedMaterials.length > 0 }"
-              @click="toggleDropdown('material')"
-            >
-              <text class="trigger-label">{{ dropdownLabel('material', '材质', selectedMaterials) }}</text>
-              <text class="trigger-arrow">{{ activeDropdown === 'material' ? '▴' : '▾' }}</text>
-            </view>
-
-            <view
-              class="dropdown-trigger"
-              :class="{ active: activeDropdown === 'color', selected: selectedColors.length > 0 }"
-              @click="toggleDropdown('color')"
-            >
-              <text class="trigger-label">{{ dropdownLabel('color', '主色', selectedColors) }}</text>
-              <text class="trigger-arrow">{{ activeDropdown === 'color' ? '▴' : '▾' }}</text>
-            </view>
-
-            <view
-              class="dropdown-trigger"
-              :class="{ active: activeDropdown === 'orientation', selected: selectedOrientations.length > 0 }"
-              @click="toggleDropdown('orientation')"
-            >
-              <text class="trigger-label">{{ dropdownLabel('orientation', '画幅', selectedOrientations) }}</text>
-              <text class="trigger-arrow">{{ activeDropdown === 'orientation' ? '▴' : '▾' }}</text>
-            </view>
-          </template>
-
-          <!-- 一键清空重置按钮 -->
-          <view v-if="totalSelectedCount > 0" class="reset-chip" @click="resetAllFilters">
-            <text class="reset-text">清空筛选 ({{ totalSelectedCount }}) ✕</text>
+          <view
+            class="segmented-item trash-item"
+            :class="{ active: activeMediaTab === 'trash' }"
+            @click="switchMediaTab('trash')"
+          >
+            <app-icon
+              name="trash"
+              :size="14"
+              :color="activeMediaTab === 'trash' ? '#FF3B30' : '#8E8E93'"
+            />
+            <text class="segmented-label">回收站</text>
+            <text v-if="trashCount > 0" class="trash-badge-dot">{{ trashCount > 99 ? '99+' : trashCount }}</text>
           </view>
         </view>
-      </scroll-view>
 
-      <!-- 下拉多选弹层面板 -->
-      <view v-if="activeDropdown" class="dropdown-panel-wrapper">
-        <view class="dropdown-mask" @click="closeDropdown" />
-        <view class="dropdown-panel">
-          <view class="panel-header">
-            <text class="panel-title">{{ currentDropdownTitle }}</text>
-            <text class="panel-hint">可多选 · 点击选择或反选</text>
+        <!-- 右侧：多选与刷新 -->
+        <view class="nav-actions">
+          <view
+            class="action-text-btn"
+            :class="{ active: isSelectMode }"
+            @click="toggleSelectMode"
+          >
+            {{ isSelectMode ? '完成' : '多选' }}
           </view>
-
-          <scroll-view scroll-y class="panel-options-scroll">
-            <view class="options-grid">
-              <view
-                v-for="opt in currentDropdownOptions"
-                :key="opt.key || opt"
-                class="option-chip"
-                :class="{ checked: isOptionChecked(opt.key || opt) }"
-                @click="toggleOption(opt.key || opt)"
-              >
-                <view v-if="opt.hex" class="color-chip-dot" :style="{ backgroundColor: opt.hex }"></view>
-                <text class="opt-check" v-if="isOptionChecked(opt.key || opt)">✓</text>
-                <text class="opt-text">{{ opt.label || opt }}</text>
-              </view>
-            </view>
-          </scroll-view>
-
-          <view class="panel-footer">
-            <view class="panel-btn reset" @click="clearCurrentDropdown">清空本项</view>
-            <view class="panel-btn confirm" @click="confirmDropdown">
-              确定 {{ currentDropdownSelectedCount ? `(${currentDropdownSelectedCount})` : '' }}
-            </view>
+          <view class="refresh-circle-btn" @click="onRefresh">
+            <app-icon name="refresh" :size="15" color="#8E8E93" :class="{ spinning: refreshing }" />
           </view>
         </view>
       </view>
+
+      <!-- 二级细分品类：轻量紧凑水平滑动胶囊 -->
+      <view v-if="activeMediaTab !== 'trash'" class="section-pill-bar">
+        <scroll-view scroll-x class="section-pill-scroll" :show-scrollbar="false">
+          <view class="section-pill-inner">
+            <view
+              v-for="sec in currentSections"
+              :key="sec.key"
+              class="section-pill"
+              :class="{ active: activeSection === sec.key }"
+              @click="switchSection(sec.key)"
+            >
+              <app-icon
+                :name="sectionIconName(sec.key)"
+                :size="13"
+                :color="activeSection === sec.key ? '#FFFFFF' : '#636366'"
+              />
+              <text class="section-pill-text">{{ sec.label }}</text>
+            </view>
+          </view>
+        </scroll-view>
+      </view>
+
+      <!-- 回收站分类 -->
+      <view v-else class="section-pill-bar">
+        <scroll-view scroll-x class="section-pill-scroll" :show-scrollbar="false">
+          <view class="section-pill-inner">
+            <view
+              v-for="s in trashSourceFilters"
+              :key="'trash-src-' + (s.key || 'all')"
+              class="section-pill"
+              :class="{ active: trashSource === s.key }"
+              @click="setTrashSource(s.key)"
+            >
+              <text class="section-pill-text">{{ s.label }}</text>
+            </view>
+          </view>
+        </scroll-view>
+      </view>
+
+      <!-- 搜索栏与排序 -->
+      <view class="search-sort-bar">
+        <view class="search-field">
+          <app-icon name="search" :size="15" color="#8E8E93" />
+          <input
+            class="search-input"
+            v-model="keyword"
+            :placeholder="searchPlaceholder"
+            confirm-type="search"
+            @confirm="reload"
+          />
+          <view v-if="keyword" class="search-clear-btn" @click="keyword = ''; reload()">
+            <app-icon name="close" :size="12" color="#8E8E93" />
+          </view>
+        </view>
+        <view class="sort-chip" @click="toggleSort">
+          <app-icon name="sort" :size="13" color="#007AFF" />
+          <text class="sort-chip-text">{{ sortLatest ? '最新' : '最早' }}</text>
+        </view>
+      </view>
+
+      <!-- 生效筛选胶囊横条 (仅当抽屉里勾选了筛选时显示) -->
+      <view v-if="activeMediaTab !== 'trash' && activeFilterCount > 0" class="active-chips-bar">
+        <scroll-view scroll-x class="active-chips-scroll" :show-scrollbar="false">
+          <view class="active-chips-inner">
+            <view
+              v-for="chip in activeFilterChips"
+              :key="'chip-' + chip.dim + '-' + chip.key"
+              class="active-chip"
+              @click="toggleDimOption(chip.dim, chip.key)"
+            >
+              <text class="active-chip-text">{{ chip.title }} · {{ chip.label }}</text>
+              <app-icon name="close" :size="10" color="#007AFF" />
+            </view>
+            <view class="chips-clear-all" @click="resetAllFilters">清空</view>
+          </view>
+        </scroll-view>
+      </view>
+
+      <!-- 回收站说明 -->
+      <view v-if="activeMediaTab === 'trash'" class="trash-hint">
+        <text class="trash-hint-text">保留期内可恢复；源文件被清理的记录仍会保留，但标记为不可恢复。</text>
+      </view>
     </view>
 
+    <!-- 主瀑布流内容区 -->
     <scroll-view
       scroll-y
       class="grid-scroll"
@@ -303,10 +199,14 @@
                 <!-- 1. 音乐专属卡片渲染 -->
                 <view v-if="item.isMusic" class="music-card-body">
                   <view class="music-disc" :class="{ playing: currentlyPlayingFid === item.fid }">
-                    <text class="music-icon-note">🎵</text>
+                    <app-icon name="audio" :size="24" color="#007AFF" />
                   </view>
                   <view class="music-play-btn" @click.stop="togglePlayAudioItem(item)">
-                    <text class="music-play-icon">{{ currentlyPlayingFid === item.fid ? '❚❚' : '▶' }}</text>
+                    <app-icon
+                      :name="currentlyPlayingFid === item.fid ? 'pause' : 'play'"
+                      :size="14"
+                      color="#FFFFFF"
+                    />
                   </view>
                 </view>
 
@@ -324,32 +224,41 @@
                   <text class="placeholder-text">{{ placeholderExt(item.fileName) }}</text>
                 </view>
 
-                <!-- 多选模式下的复选框（仅图片支持空间漫游多选） -->
+                <!-- 多选模式下的复选框 -->
                 <view
-                  v-if="isSelectMode && !item.isVideo && !item.isMusic"
+                  v-if="isSelectMode && (activeMediaTab === 'trash' || (!item.isVideo && !item.isMusic))"
                   class="select-checkbox"
                   :class="{ checked: isSelected(item.fid) }"
                   @click.stop="toggleSelect(item)"
                 >
-                  <text v-if="isSelected(item.fid)" class="check-icon">✓</text>
+                  <app-icon v-if="isSelected(item.fid)" name="check" :size="12" color="#FFFFFF" />
                 </view>
 
                 <!-- 视频专属播放徽标与遮罩 -->
                 <view v-if="item.isVideo" class="video-overlay">
                   <view class="play-bubble">
-                    <text class="play-icon">▶</text>
+                    <app-icon name="play" :size="14" color="#FFFFFF" />
                   </view>
                 </view>
 
                 <!-- 来源/特性/品类角标 -->
-                <text v-if="item.isVideo" class="badge vid" :class="{ ai: item.isAiVideo }">
-                  {{ item.isAiVideo ? '✨ AI 创作' : '📱 手机实拍' }}
-                </text>
+                <view v-if="item.isVideo" class="badge vid" :class="{ ai: item.isAiVideo }">
+                  <app-icon v-if="item.isAiVideo" name="sparkle" :size="10" color="#7C3AED" />
+                  <text class="badge-text">{{ item.isAiVideo ? 'AI创作' : '实拍' }}</text>
+                </view>
                 <text v-else-if="item.isMusic" class="badge music-badge">{{ formatDuration(item.duration) }}</text>
                 <text v-else-if="item.isPortrait" class="badge portrait-badge">人像</text>
                 <text v-else-if="item.isFurniture" class="badge furn-badge">单品</text>
                 <text v-else-if="item.isRestage" class="badge">AI</text>
+                <text v-if="activeMediaTab === 'trash'" class="badge trash-badge" :class="{ soon: item.expiringSoon, missing: item.fileMissing }">{{ item.disposeLabel }}</text>
+                <text v-if="activeMediaTab === 'trash'" class="badge trash-remain" :class="{ soon: item.expiringSoon }">{{ formatRemain(item.remainingHours) }}</text>
                 <text v-if="item.hasWatermark" class="badge wm">水印</text>
+
+                <!-- 回收站记录源文件已清理 -->
+                <view v-if="activeMediaTab === 'trash' && item.fileMissing" class="missing-overlay">
+                  <text class="missing-title">文件已清理</text>
+                  <text class="missing-sub">仅保留记录 · 不可恢复</text>
+                </view>
 
                 <view class="card-caption">
                   <text class="cap-name">{{ item.fileName }}</text>
@@ -369,24 +278,90 @@
       </view>
     </scroll-view>
 
+    <!-- 左侧筛选抽屉 (Left Drawer) -->
+    <view v-if="filterDrawerOpen" class="drawer-mask" @click="closeFilterDrawer" />
+    <view v-if="filterDrawerOpen" class="drawer-panel">
+        <!-- 抽屉头部 -->
+        <view class="drawer-head">
+          <view class="drawer-head-titles">
+            <text class="drawer-main-title">高级筛选</text>
+            <text class="drawer-sub-title">{{ currentSectionInfo.label }} · 共 {{ totalCount }} 项素材</text>
+          </view>
+          <view class="drawer-close-btn" @click="closeFilterDrawer">
+            <app-icon name="close" :size="18" color="#8E8E93" />
+          </view>
+        </view>
+
+        <!-- 抽屉滚动内容区：全展开自适应流式网格 -->
+        <scroll-view scroll-y class="drawer-scroll-body">
+          <view v-for="g in filterGroups" :key="'drawer-group-' + g.dim" class="drawer-group">
+            <view class="drawer-group-header">
+              <text class="drawer-group-title">{{ g.title }}</text>
+              <text
+                v-if="selectedCountOf(g.dim)"
+                class="drawer-group-clear"
+                @click="clearDim(g.dim)"
+              >清空 ({{ selectedCountOf(g.dim) }})</text>
+            </view>
+            <view v-if="g.options.length" class="drawer-chips-wrap">
+              <view
+                v-for="opt in g.options"
+                :key="g.dim + '-' + (opt.key || opt)"
+                class="drawer-chip"
+                :class="{ active: isDimChecked(g.dim, opt.key || opt) }"
+                @click="toggleDimOption(g.dim, opt.key || opt)"
+              >
+                <view v-if="opt.hex" class="drawer-chip-dot" :style="{ backgroundColor: opt.hex }"></view>
+                <text class="drawer-chip-text">{{ opt.label || opt }}</text>
+                <app-icon
+                  v-if="isDimChecked(g.dim, opt.key || opt)"
+                  name="check"
+                  :size="12"
+                  color="#007AFF"
+                />
+              </view>
+            </view>
+            <text v-else class="drawer-empty-hint">暂无可用选项</text>
+          </view>
+        </scroll-view>
+
+        <!-- 抽屉底部吸底栏 -->
+        <view class="drawer-footer">
+          <view class="drawer-btn reset" @click="resetAllFilters">
+            <text class="drawer-btn-text reset-text">重置全部</text>
+          </view>
+          <view class="drawer-btn confirm" @click="closeFilterDrawer">
+            <text class="drawer-btn-text confirm-text">查看结果 ({{ totalCount }})</text>
+          </view>
+        </view>
+    </view>
+
     <!-- 多选批量操作浮条 -->
     <view v-if="isSelectMode && selectedFids.length > 0" class="batch-bar">
       <view class="batch-info">
-        <text class="batch-count">已选 {{ selectedFids.length }} 个空间</text>
+        <text class="batch-count">已选 {{ selectedFids.length }}</text>
         <text class="batch-clear" @click="clearSelection">清空</text>
       </view>
-      <view class="batch-btn" @click="openWalkthroughDrawer">
-        <text class="batch-btn-text">✨ 生成空间漫游成片</text>
+      <view v-if="activeMediaTab === 'trash'" class="batch-actions">
+        <view class="batch-btn ghost" @click="batchRestore">
+          <text class="batch-btn-text">恢复</text>
+        </view>
+        <view class="batch-btn danger" @click="batchPurge">
+          <text class="batch-btn-text">彻底粉碎</text>
+        </view>
+      </view>
+      <view v-else class="batch-actions">
+        <view class="batch-btn" @click="batchCreate('image')">
+          <text class="batch-btn-text">生图创作</text>
+        </view>
+        <view class="batch-btn" @click="batchCreate('video')">
+          <text class="batch-btn-text">生视频</text>
+        </view>
+        <view class="batch-btn danger" @click="batchTrash">
+          <text class="batch-btn-text">移入回收站</text>
+        </view>
       </view>
     </view>
-
-    <!-- 空间漫游装配抽屉 -->
-    <walkthrough-drawer
-      :visible="drawerVisible"
-      :selected-assets="selectedAssetsList"
-      @close="drawerVisible = false"
-      @success="onWalkthroughSuccess"
-    />
 
     <!-- 全局后台 AI 任务状态浮窗 -->
     <ai-task-pill />
@@ -394,14 +369,27 @@
 </template>
 
 <script>
-import { fetchAssets, fetchMe, sessionValid, mediaUrl, gridUrl, videoUrl, posterUrl, deleteAsset, fetchMenuTree } from '../../service/ViewerApi'
+import {
+  fetchAssets,
+  fetchMe,
+  sessionValid,
+  mediaUrl,
+  gridUrl,
+  videoUrl,
+  posterUrl,
+  deleteAsset,
+  fetchMenuTree,
+  fetchTrashAssets,
+  restoreTrashAsset,
+  purgeTrashAsset,
+} from '../../service/ViewerApi'
 import { switchTabTo } from '../../common/nav'
 import { store } from '../../service/SyncStateStore'
 import { viewerCache } from '../../service/ViewerCache'
 import { localMediaIndex } from '../../service/LocalMediaIndex'
 import { prefetch } from '../../service/Prefetch'
-import WalkthroughDrawer from '../../components/WalkthroughDrawer.vue'
 import AiTaskPill from '../../components/AiTaskPill.vue'
+import AppIcon from '../../components/AppIcon.vue'
 
 function goLogin(tip) {
   uni.reLaunch({
@@ -411,14 +399,37 @@ function goLogin(tip) {
 
 export default {
   components: {
-    WalkthroughDrawer,
     AiTaskPill,
+    AppIcon,
   },
   data() {
     return {
       statusBarHeight: 20,
       gridH: 500,
-      activeMediaTab: 'image', // 'image' | 'video'
+      activeMediaTab: 'image', // image | video | audio | trash
+      activeSection: 'interior_exterior',
+      mainMediaTabs: [
+        { key: 'image', label: '图片', iconName: 'image', sections: [
+          { key: 'interior_exterior', label: '室内外设计', iconName: 'architecture', desc: '空间 / 建筑效果图' },
+          { key: 'portrait', label: '空间人像', iconName: 'portrait', desc: '人物与场景合成' },
+          { key: 'clothing', label: '服装服饰', iconName: 'clothing', desc: '穿搭 / 单品服饰' },
+          { key: 'furniture', label: '单品家具', iconName: 'furniture', desc: '家具白底 / 细节' },
+        ] },
+        { key: 'video', label: '视频', iconName: 'video', sections: [
+          { key: 'all', label: '全部视频', iconName: 'video', desc: '所有视频素材' },
+          { key: 'walkthrough', label: '空间漫游', iconName: 'video', desc: '空间穿梭运镜' },
+          { key: 'product', label: '单品展示', iconName: 'image', desc: '产品环绕展示' },
+          { key: 'detail', label: '细节特写', iconName: 'search', desc: '材质与工艺特写' },
+          { key: 'ad', label: '商业短片', iconName: 'video', desc: '品牌广告成片' },
+          { key: 'portrait', label: '人像动态', iconName: 'portrait', desc: '人物动态表演' },
+        ] },
+        { key: 'audio', label: '音频', iconName: 'audio', sections: [
+          { key: 'bgm', label: '背景音乐', iconName: 'audio', desc: '氛围 / 空间配乐' },
+          { key: 'vocal', label: '人声参考', iconName: 'audio', desc: '旁白 / 人声素材' },
+        ] },
+      ],
+      filterSheetOpen: false,
+      filterDrawerOpen: false,
       showMediaTypeMenu: false,
       selectedSubCategory: '',
       menuTree: [],
@@ -428,12 +439,24 @@ export default {
         { key: 'furniture', label: '单品家具', icon: '🛋️' },
         { key: 'music', label: '场景音乐', icon: '🎵' },
         { key: 'portrait', label: '空间人像', icon: '👤' },
+        { key: 'trash', label: '回收站', icon: '🗑️' },
       ],
       isSelectMode: false,
       selectedFids: [],
-      drawerVisible: false,
       keyword: '',
       sortLatest: true,
+
+      // 回收站
+      trashCount: 0,
+      trashSource: '',
+      trashSourceFilters: [
+        { key: '', label: '全部', icon: '🗂', desc: '保留期内全部记录' },
+        { key: 'user_delete', label: '主动删除', icon: '👤', desc: '手动移入回收站' },
+        { key: 'dedupe', label: '查重命中', icon: '🧬', desc: '重复素材清理' },
+        { key: 'gate_reject', label: 'AI 判定', icon: '🤖', desc: '质检未通过' },
+        { key: 'gateway_reject', label: '网关拒收', icon: '⛔', desc: '上传网关拒收' },
+        { key: 'album_removed', label: '相册已删除', icon: '📱', desc: '手机相册侧删除' },
+      ],
 
       // 当前展开的下拉面板：'' | 'space' | 'style' | 'furniture' | 'material' | 'color' | 'orientation' | 'videoSource' | 'mood' | 'pose' | 'character'
       activeDropdown: '',
@@ -472,6 +495,7 @@ export default {
       loadingMore: false,
       loaded: false,
       finished: true,
+      totalCount: 0,
       errorText: '',
       page: 1,
       userLabel: '',
@@ -483,97 +507,90 @@ export default {
       return /无法连接|连接超时|网络错误|HTTP 明文|响应异常/.test(this.errorText || '')
     },
     currentMediaTabInfo() {
-      return (
-        this.mediaTypeList.find((m) => m.key === this.activeMediaTab) || {
-          key: 'image',
-          label: '图片素材',
-          icon: '🖼️',
-          children: [],
-        }
-      )
+      return this.mainMediaTabs.find((m) => m.key === this.activeMediaTab) || {
+        key: 'image', label: '图片', icon: '🖼', sections: [],
+      }
     },
-    currentSubCategories() {
-      const cur = this.mediaTypeList.find((m) => m.key === this.activeMediaTab)
-      return (cur && cur.children) || []
+    currentSections() {
+      return (this.currentMediaTabInfo.sections || [])
     },
-    subCategoryLabel() {
-      if (!this.selectedSubCategory) return '子品类'
-      const found = this.currentSubCategories.find((c) => c.key === this.selectedSubCategory)
-      return found ? (found.label || found.key) : this.selectedSubCategory
+    currentSectionInfo() {
+      if (this.activeMediaTab === 'trash') {
+        return this.trashSourceFilters.find((s) => s.key === this.trashSource) || this.trashSourceFilters[0]
+      }
+      const list = this.currentSections
+      return list.find((s) => s.key === this.activeSection) || list[0] || { key: '', label: this.currentMediaTabInfo.label, desc: '' }
+    },
+    totalCountLabel() {
+      if (!this.loaded) return '加载中'
+      return this.totalCount > this.all.length ? `${this.all.length} / ${this.totalCount} 项` : `${this.all.length} 项`
     },
     searchPlaceholder() {
-      switch (this.activeMediaTab) {
-        case 'video': return '搜索视频名称、来源、标签…'
-        case 'furniture': return '搜索单品家具、材质、风格…'
-        case 'music': return '搜索设计配乐、情绪、场景…'
-        case 'portrait': return '搜索人像贴图、姿态、角色…'
-        default: return '搜索文件名、标签、空间…'
+      if (this.activeMediaTab === 'trash') return '搜索回收站素材、删除原因…'
+      if (this.activeMediaTab === 'video') return '搜索视频名称、来源、标签…'
+      if (this.activeMediaTab === 'audio') return '搜索配乐、情绪、场景…'
+      const sec = this.activeSection
+      if (sec === 'portrait') return '搜索人像、姿态、角色…'
+      if (sec === 'clothing') return '搜索服装品类、风格…'
+      if (sec === 'furniture') return '搜索家具单品、材质、风格…'
+      return '搜索空间、风格、材质…'
+    },
+    filterGroups() {
+      const mk = (dim, title) => ({
+        dim,
+        title,
+        options: (this.getOptionsByDim(dim) || []).filter((o) => (o.key || o) !== ''),
+      })
+      const list = []
+      if (this.activeMediaTab === 'video') {
+        list.push(mk('videoSource', '视频来源'))
+        list.push(mk('orientation', '画幅'))
+      } else if (this.activeMediaTab === 'audio') {
+        list.push(mk('mood', '情绪氛围'))
+        list.push(mk('space', '场景空间'))
+      } else {
+        const sec = this.activeSection
+        if (sec === 'furniture') list.push(mk('furniture', '家具品类'))
+        else if (sec === 'portrait') {
+          list.push(mk('pose', '姿态动作'))
+          list.push(mk('character', '人物角色'))
+        } else if (sec === 'clothing') list.push(mk('style', '穿搭风格'))
+        else list.push(mk('space', '空间场景'))
+        if (sec !== 'clothing') list.push(mk('style', '设计风格'))
+        if (sec !== 'portrait' && sec !== 'clothing') list.push(mk('material', '材质'))
+        list.push(mk('color', '主色'))
+        list.push(mk('orientation', '画幅'))
       }
+      return list.filter((g) => Array.isArray(g.options) && g.options.length)
+    },
+    quickFilterGroups() {
+      const groups = this.filterGroups
+      return this.activeMediaTab === 'video' ? groups.slice(0, 1) : groups.slice(0, 2)
+    },
+    activeFilterCount() {
+      let n = 0
+      for (const g of this.filterGroups) n += this.selectedCountOf(g.dim)
+      return n
+    },
+    activeFilterChips() {
+      const chips = []
+      for (const g of this.filterGroups) {
+        const list = this.getSelectedListByDim(g.dim) || []
+        for (const val of list) {
+          const found = g.options.find((o) => (o.key || o) === val)
+          chips.push({ dim: g.dim, key: val, title: g.title, label: (found && (found.label || found.key)) || val })
+        }
+      }
+      return chips
+    },
+    currentSubCategories() {
+      return []
+    },
+    subCategoryLabel() {
+      return ''
     },
     totalSelectedCount() {
-      const subCount = this.selectedSubCategory ? 1 : 0
-      if (this.activeMediaTab === 'video') {
-        return subCount + this.selectedVideoSources.length + this.selectedOrientations.length
-      }
-      if (this.activeMediaTab === 'furniture') {
-        return (
-          subCount +
-          this.selectedFurniture.length +
-          this.selectedStyles.length +
-          this.selectedMaterials.length +
-          this.selectedColors.length
-        )
-      }
-      if (this.activeMediaTab === 'music') {
-        return subCount + this.selectedMoods.length + this.selectedSpaces.length
-      }
-      if (this.activeMediaTab === 'portrait') {
-        return subCount + this.selectedPoses.length + this.selectedCharacters.length
-      }
-      return (
-        subCount +
-        this.selectedSpaces.length +
-        this.selectedStyles.length +
-        this.selectedMaterials.length +
-        this.selectedColors.length +
-        this.selectedOrientations.length
-      )
-    },
-    currentDropdownTitle() {
-      switch (this.activeDropdown) {
-        case 'subCategory': return '二级品类细分'
-        case 'space': return '空间区域筛选'
-        case 'style': return '设计风格筛选'
-        case 'furniture': return '家具品类筛选'
-        case 'material': return '表面材质筛选'
-        case 'color': return '色彩基调筛选'
-        case 'orientation': return '画幅比例筛选'
-        case 'videoSource': return '视频来源类型'
-        case 'mood': return '情绪氛围筛选'
-        case 'pose': return '人像姿态筛选'
-        case 'character': return '人物角色筛选'
-        default: return '多选筛选'
-      }
-    },
-    currentDropdownOptions() {
-      switch (this.activeDropdown) {
-        case 'subCategory': return this.currentSubCategories
-        case 'space': return this.spaceList
-        case 'style': return this.styleList
-        case 'furniture': return this.furnitureList
-        case 'material': return this.materialList
-        case 'color': return this.colorList
-        case 'orientation': return this.orientationList
-        case 'videoSource': return this.videoSourceList
-        case 'mood': return this.moodList
-        case 'pose': return this.poseList
-        case 'character': return this.characterList
-        default: return []
-      }
-    },
-    currentDropdownSelectedCount() {
-      const list = this.getSelectedListByDim(this.activeDropdown)
-      return list ? list.length : 0
+      return this.activeFilterCount
     },
     selectedAssetsList() {
       if (!this.selectedFids.length) return []
@@ -582,116 +599,29 @@ export default {
     },
     groups() {
       const filtered = this.all.filter((a) => {
-        // 区分多级素材分类（支持全部/图片/视频/室内/建筑/服装/人像/单品/音乐/回收站）
+        // 一级媒体类型兜底
         if (this.activeMediaTab === 'image') {
           if (a.isVideo || a.isMusic) return false
-        } else if (this.activeMediaTab === 'video' || this.activeMediaTab === 'finished') {
-          if (!a.isVideo && a.kind !== 'video') return false
-        } else if (this.activeMediaTab === 'furniture') {
-          if (!a.isFurniture && a.category !== 'furniture') return false
-        } else if (this.activeMediaTab === 'music' || this.activeMediaTab === 'audio') {
-          if (!a.isMusic && a.kind !== 'audio') return false
-        } else if (this.activeMediaTab === 'portrait') {
-          if (!a.isPortrait && a.category !== 'portrait') return false
-        } else if (this.activeMediaTab === 'clothing') {
-          if (a.category !== 'clothing' && !(a.tagsText || '').includes('服装')) return false
-        } else if (this.activeMediaTab === 'architecture') {
-          if (a.category !== 'architecture' && !(a.tagsText || '').includes('建筑')) return false
-        } else if (this.activeMediaTab === 'interior') {
-          if (a.category !== 'interior' && !(a.tagsText || '').includes('室内') && (a.isVideo || a.isMusic)) return false
+        } else if (this.activeMediaTab === 'video') {
+          if (!a.isVideo) return false
+        } else if (this.activeMediaTab === 'audio') {
+          if (!a.isMusic) return false
         } else if (this.activeMediaTab === 'trash') {
-          if (!a.is_trashed && a.status !== 'trashed') return false
+          if (!a.is_trashed) return false
         }
 
-        // 二级子品类细分过滤
-        if (this.selectedSubCategory && this.selectedSubCategory !== 'all') {
-          const subObj = this.currentSubCategories.find((s) => s.key === this.selectedSubCategory)
-          const subLabel = subObj ? subObj.label : this.selectedSubCategory
-          const tagMatch = (a.tagsText || '').includes(subLabel) || (a.rawTags || '').includes(subLabel)
-          const subMatch = a.subcategory === this.selectedSubCategory
-          if (!tagMatch && !subMatch) return false
-        }
-
-        // 视频模式下区分手机实拍 vs AI 创作（支持多选）
+        // 视频模式下区分实拍与AI创作
         if (this.activeMediaTab === 'video' && this.selectedVideoSources.length > 0) {
           const matchSync = this.selectedVideoSources.includes('sync') && !a.isAiVideo
           const matchAi = this.selectedVideoSources.includes('ai') && a.isAiVideo
           if (!matchSync && !matchAi) return false
         }
 
-        // 画幅多选
-        if (this.selectedOrientations.length > 0) {
-          if (!this.selectedOrientations.includes(a.orientation)) return false
-        }
-
-        const text = (a.tagsText || '') + ' ' + (a.mainLabel || '') + ' ' + (a.rawTags || '')
-
-        // 空间多选
-        if (this.selectedSpaces.length > 0) {
-          const hit = this.selectedSpaces.some((s) => text.includes(s) || (a.spaceTag && a.spaceTag.includes(s)))
-          if (!hit) return false
-        }
-
-        // 风格多选
-        if (this.selectedStyles.length > 0) {
-          const hit = this.selectedStyles.some((s) => text.includes(s) || (a.styleTag && a.styleTag.includes(s)))
-          if (!hit) return false
-        }
-
-        // 单品多选
-        if (this.selectedFurniture.length > 0) {
-          const hit = this.selectedFurniture.some((f) => {
-            const shortF = f.replace(/\/.*$/, '')
-            return text.includes(f) || text.includes(shortF) || (a.furnitureTag && a.furnitureTag.includes(shortF))
-          })
-          if (!hit) return false
-        }
-
-        // 材质多选
-        if (this.selectedMaterials.length > 0) {
-          const hit = this.selectedMaterials.some((m) => {
-            const shortM = m.replace(/\/.*$/, '')
-            return text.includes(m) || text.includes(shortM) || (a.materialTag && a.materialTag.includes(shortM))
-          })
-          if (!hit) return false
-        }
-
-        // 颜色多选（与打标系统 100% 统一，支持 12 色标准板 hex 与名称匹配）
-        if (this.selectedColors.length > 0) {
-          const domColor = (a.dominantColor || a.dominant_color || '').toLowerCase()
-          const hit = this.selectedColors.some((c) => {
-            const cStr = typeof c === 'string' ? c : (c.label || c.key || '')
-            const cVal = typeof c === 'object' ? (c.value || c.hex || '') : ''
-            return (cVal && domColor.includes(cVal.toLowerCase())) ||
-                   (cStr && domColor.includes(cStr.toLowerCase())) ||
-                   (cStr && text.includes(cStr))
-          })
-          if (!hit) return false
-        }
-
-        // 情绪多选（音乐）
-        if (this.selectedMoods.length > 0) {
-          const hit = this.selectedMoods.some((m) => {
-            const shortM = m.replace(/\/.*$/, '')
-            return text.includes(m) || text.includes(shortM) || (a.moodTag && a.moodTag.includes(shortM))
-          })
-          if (!hit) return false
-        }
-
-        // 姿态多选（人像）
-        if (this.selectedPoses.length > 0) {
-          const hit = this.selectedPoses.some((p) => text.includes(p) || (a.poseTag && a.poseTag.includes(p)))
-          if (!hit) return false
-        }
-
-        // 角色多选（人像）
-        if (this.selectedCharacters.length > 0) {
-          const hit = this.selectedCharacters.some((c) => text.includes(c) || (a.characterTag && a.characterTag.includes(c)))
-          if (!hit) return false
-        }
-
-        if (this.keyword && !(a.fileName || '').toLowerCase().includes(this.keyword.toLowerCase())) {
-          return false
+        // 本地关键词检索兜底
+        if (this.keyword && this.keyword.trim()) {
+          const kw = this.keyword.trim().toLowerCase()
+          const text = ((a.fileName || '') + ' ' + (a.tagsText || '') + ' ' + (a.mainLabel || '')).toLowerCase()
+          if (!text.includes(kw)) return false
         }
         return true
       })
@@ -717,6 +647,7 @@ export default {
     this.userLabel = store.getUsername()
     this.loadMenuTree()
     this.reload()
+    this.refreshTrashCount()
     this.verifySessionInBackground()
     this.maybeAskPhotoPermission()
   },
@@ -732,14 +663,21 @@ export default {
       return
     }
     this.userLabel = store.getUsername()
-    const autoSelect = uni.getStorageSync('auto_enter_select_mode')
-    if (autoSelect === '1') {
-      uni.removeStorageSync('auto_enter_select_mode')
-      this.activeMediaTab = 'image'
-      this.isSelectMode = true
-      uni.showToast({ title: '请勾选 2~6 张需要生成漫游的照片', icon: 'none' })
-    }
-    if (!this.loaded && !this.loading) {
+    // 详情页「去回收站」入口
+    try {
+      const wantedTab = uni.getStorageSync('browse_tab')
+      if (wantedTab === 'trash') {
+        uni.removeStorageSync('browse_tab')
+        if (this.activeMediaTab !== 'trash') {
+          this.switchMediaTab('trash')
+        }
+      }
+    } catch (e) {}
+    // 回收站可能在详情页被恢复/粉碎，回到列表时刷新计数与内容
+    this.refreshTrashCount()
+    if (this.activeMediaTab === 'trash' && this.loaded) {
+      this.reload({ force: true })
+    } else if (!this.loaded && !this.loading) {
       this.reload()
     }
   },
@@ -756,8 +694,23 @@ export default {
   methods: {
     onCardLongPress(item) {
       if (!item || !item.fid) return
+      if (this.activeMediaTab === 'trash') {
+        const canRestore = !item.fileMissing
+        const list = canRestore
+          ? ['恢复此素材', '彻底粉碎（不可恢复）', '取消']
+          : ['彻底粉碎（不可恢复）', '取消']
+        uni.showActionSheet({
+          itemList: list,
+          success: (res) => {
+            const idx = res.tapIndex
+            if (canRestore && idx === 0) this.confirmRestore([item.fid], [item])
+            if ((canRestore && idx === 1) || (!canRestore && idx === 0)) this.confirmPurge([item.fid], [item])
+          },
+        })
+        return
+      }
       uni.showActionSheet({
-        itemList: ['删除并拉黑（不再入库）', '取消'],
+        itemList: ['移入回收站', '取消'],
         success: (res) => {
           if (res.tapIndex === 0) this.confirmDeleteAsset(item)
         },
@@ -765,57 +718,49 @@ export default {
     },
     confirmDeleteAsset(item) {
       uni.showModal({
-        title: '删除素材',
-        content: `将删除「${item.fileName || item.fid}」并加入黑名单，下次同步不会再入库。`,
-        confirmColor: '#DC2626',
+        title: '移入回收站',
+        content: `「${item.fileName || item.fid}」将移入回收站，可在保留期内恢复；同步时也不会重复入库。`,
+        confirmText: '移入',
+        confirmColor: '#3B82F6',
         success: async (res) => {
           if (!res.confirm) return
+          uni.showLoading({ title: '移入中…', mask: true })
           try {
             await deleteAsset(item.fid)
-            this.groups = (this.groups || []).map((g) => ({
-              ...g,
-              items: (g.items || []).filter((x) => x.fid !== item.fid),
-            })).filter((g) => (g.items || []).length > 0)
+            this.all = this.all.filter((x) => x.fid !== item.fid)
+            this.selectedFids = this.selectedFids.filter((fid) => fid !== item.fid)
             try { viewerCache.clearAll?.() } catch (e) {}
-            uni.showToast({ title: '已删除并拉黑', icon: 'none' })
+            uni.showToast({ title: '已移入回收站', icon: 'none' })
+            this.refreshTrashCount()
           } catch (e) {
-            uni.showToast({ title: '删除失败: ' + (e.message || e), icon: 'none' })
+            uni.showToast({ title: '操作失败: ' + (e.message || e), icon: 'none' })
+          } finally {
+            uni.hideLoading()
           }
         },
       })
     },
-    toggleMediaTypeMenu() {
-      this.showMediaTypeMenu = !this.showMediaTypeMenu
+    refreshTrashCount() {
+      fetchTrashAssets({ page: 1, pageSize: 1 })
+        .then((data) => {
+          this.trashCount = Number((data && data.total) || 0)
+        })
+        .catch(() => {})
     },
-    selectMediaType(key) {
-      this.showMediaTypeMenu = false
-      this.switchMediaTab(key)
+    setTrashSource(key) {
+      this.trashSource = key || ''
+      this.reload({ force: true })
     },
-    measureGridHeight() {
-      const sys = uni.getSystemInfoSync()
-      const winH = sys.windowHeight || 800
-      uni.createSelectorQuery().in(this).select('.filter-bar-container').boundingClientRect((data) => {
-        if (data && data.bottom) {
-          const calculated = winH - data.bottom
-          if (calculated > 100) {
-            this.gridH = calculated
-            return
-          }
-        }
-        const topH = (sys.statusBarHeight || 20) + 180
-        this.gridH = Math.max(300, winH - topH)
-      }).exec()
-    },
-    onScrollToLower() {
-      if (this.loading || this.loadingMore || this.finished) return
-      if (this._scrollTimer) clearTimeout(this._scrollTimer)
-      this._scrollTimer = setTimeout(() => {
-        this.loadMore()
-      }, 150)
+    switchSection(key) {
+      if (this.activeSection === key) return
+      this.activeSection = key
+      this.resetAllFilters(false)
+      this.filterSheetOpen = false
+      this.reload({ force: true })
+      this.measureGridHeight()
     },
     getSelectedListByDim(dim) {
       switch (dim) {
-        case 'subCategory': return this.selectedSubCategory ? [this.selectedSubCategory] : []
         case 'space': return this.selectedSpaces
         case 'style': return this.selectedStyles
         case 'furniture': return this.selectedFurniture
@@ -826,12 +771,11 @@ export default {
         case 'mood': return this.selectedMoods
         case 'pose': return this.selectedPoses
         case 'character': return this.selectedCharacters
-        default: return null
+        default: return []
       }
     },
     getOptionsByDim(dim) {
       switch (dim) {
-        case 'subCategory': return this.currentSubCategories
         case 'space': return this.spaceList
         case 'style': return this.styleList
         case 'furniture': return this.furnitureList
@@ -845,59 +789,78 @@ export default {
         default: return []
       }
     },
-    toggleDropdown(dim) {
-      this.activeDropdown = this.activeDropdown === dim ? '' : dim
+    isDimChecked(dim, key) {
+      return (this.getSelectedListByDim(dim) || []).includes(key)
     },
-    closeDropdown() {
-      this.activeDropdown = ''
+    selectedCountOf(dim) {
+      return (this.getSelectedListByDim(dim) || []).length
     },
-    dropdownLabel(dim, defaultText, list) {
-      if (!list || !list.length) return defaultText
-      if (list.length === 1) {
-        const val = list[0]
-        const opts = this.getOptionsByDim(dim)
-        const found = opts.find((o) => (o.key || o) === val)
-        const txt = (found && (found.label || found.key)) || val
-        return txt.length > 5 ? txt.slice(0, 4) + '…' : txt
-      }
-      return `${defaultText} (${list.length})`
-    },
-    isOptionChecked(optKey) {
-      if (this.activeDropdown === 'subCategory') {
-        return this.selectedSubCategory === optKey
-      }
-      const list = this.getSelectedListByDim(this.activeDropdown)
-      return list ? list.includes(optKey) : false
-    },
-    toggleOption(optKey) {
-      if (this.activeDropdown === 'subCategory') {
-        this.selectedSubCategory = this.selectedSubCategory === optKey ? '' : optKey
-        return
-      }
-      const list = this.getSelectedListByDim(this.activeDropdown)
+    toggleDimOption(dim, key) {
+      const list = this.getSelectedListByDim(dim)
       if (!list) return
-      const idx = list.indexOf(optKey)
-      if (idx > -1) {
-        list.splice(idx, 1)
-      } else {
-        list.push(optKey)
-      }
-    },
-    clearCurrentDropdown() {
-      if (this.activeDropdown === 'subCategory') {
-        this.selectedSubCategory = ''
+      const idx = list.indexOf(key)
+      if (idx > -1) list.splice(idx, 1)
+      else list.push(key)
+      if (this._filterTimer) clearTimeout(this._filterTimer)
+      this._filterTimer = setTimeout(() => {
+        this._filterTimer = null
         this.reload()
-        return
-      }
-      const list = this.getSelectedListByDim(this.activeDropdown)
-      if (list) {
-        list.splice(0, list.length)
-      }
+      }, 220)
+    },
+    clearDim(dim) {
+      const list = this.getSelectedListByDim(dim)
+      if (list) list.splice(0, list.length)
       this.reload()
     },
-    confirmDropdown() {
-      this.activeDropdown = ''
+    openFilterDrawer() {
+      this.filterDrawerOpen = true
+      try { uni.hideTabBar({ animation: true }) } catch (e) {}
+    },
+    closeFilterDrawer() {
+      this.filterDrawerOpen = false
+      try { uni.showTabBar({ animation: true }) } catch (e) {}
       this.reload()
+    },
+    sectionIconName(key) {
+      switch (key) {
+        case 'interior_exterior': return 'architecture'
+        case 'portrait': return 'portrait'
+        case 'clothing': return 'clothing'
+        case 'furniture': return 'furniture'
+        case 'walkthrough': return 'video'
+        case 'product': return 'image'
+        case 'detail': return 'search'
+        case 'ad': return 'video'
+        case 'bgm': return 'audio'
+        case 'vocal': return 'audio'
+        default: return 'grid'
+      }
+    },
+    openFilterSheet() {
+      this.filterSheetOpen = true
+    },
+    closeFilterSheet() {
+      this.filterSheetOpen = false
+      this.reload()
+    },
+    measureGridHeight() {
+      const sys = uni.getSystemInfoSync()
+      const winH = sys.windowHeight || 800
+      const query = uni.createSelectorQuery().in(this)
+      query.select('.header-container').boundingClientRect((data) => {
+        if (data && data.bottom) {
+          this.gridH = Math.max(300, winH - data.bottom)
+        } else {
+          this.gridH = Math.max(300, winH - 130)
+        }
+      }).exec()
+    },
+    onScrollToLower() {
+      if (this.loading || this.loadingMore || this.finished) return
+      if (this._scrollTimer) clearTimeout(this._scrollTimer)
+      this._scrollTimer = setTimeout(() => {
+        this.loadMore()
+      }, 150)
     },
     resetAllFilters(shouldReload = true) {
       this.selectedSubCategory = ''
@@ -921,7 +884,7 @@ export default {
         const list = await fetchMenuTree()
         if (Array.isArray(list) && list.length > 0) {
           this.menuTree = list
-          this.mediaTypeList = list.map(item => ({
+          this.mediaTypeList = this.ensureTrashTab(list.map(item => ({
             key: item.key,
             label: item.label,
             icon: item.icon === 'grid' ? '📦' :
@@ -934,7 +897,7 @@ export default {
                   item.icon === 'trash' ? '🗑️' : '📁',
             children: item.children || [],
             facets: item.facets || []
-          }))
+          })))
 
           // 12 色标准板（菜单树下发的兜底；filterOptions 有数据时优先用它）
           const allCat = list.find(c => c.key === 'all')
@@ -951,6 +914,13 @@ export default {
       } catch (e) {
         // 弱网兜底保留现有配置
       }
+    },
+    ensureTrashTab(list) {
+      const arr = Array.isArray(list) ? list.slice() : []
+      if (!arr.some((x) => x.key === 'trash')) {
+        arr.push({ key: 'trash', label: '回收站', icon: '🗑️', children: [], facets: [] })
+      }
+      return arr
     },
     async onRefresh() {
       this.refreshing = true
@@ -1025,14 +995,18 @@ export default {
         this.currentlyPlayingFid = ''
       }
       this.activeMediaTab = tab
-      this.activeDropdown = ''
+      this.activeSection = tab === 'image' ? 'interior_exterior' : (tab === 'video' ? 'all' : 'bgm')
+      this.filterSheetOpen = false
+      this.trashSource = ''
       this.isSelectMode = false
       this.selectedFids = []
       this.all = []
+      this.totalCount = 0
       this.loading = true
       this.loaded = false
       this.resetAllFilters(false)
       this.reload({ force: true })
+      this.$nextTick(() => this.measureGridHeight())
     },
     toggleSort() {
       this.sortLatest = !this.sortLatest
@@ -1044,6 +1018,37 @@ export default {
         return
       }
       const forceRefresh = options && options.force === true
+      if (this.activeMediaTab === 'trash') {
+        this.errorText = ''
+        this.page = 1
+        this.loading = true
+        try {
+          const data = await fetchTrashAssets({
+            page: 1,
+            pageSize: 30,
+            source: this.trashSource,
+            sort: this.sortLatest ? 'latest' : 'oldest',
+            keyword: this.keyword,
+          })
+          this.all = (data.items || []).map((r) => this.mapTrash(r))
+          this.finished = this.all.length >= (Number(data.total) || 0)
+          this.totalCount = Number(data.total) || 0
+          this.trashCount = this.totalCount
+        } catch (e) {
+          const msg = e.message || '加载失败'
+          if (/会话已过期|未登录|401/.test(msg)) {
+            store.clearSession()
+            this.redirectLogin(msg)
+            return
+          }
+          this.errorText = msg
+          this.all = []
+        } finally {
+          this.loading = false
+          this.loaded = true
+        }
+        return
+      }
       const queryOpts = {
         page: 1,
         keyword: this.keyword,
@@ -1054,7 +1059,9 @@ export default {
         colors: this.selectedColors.join(','),
         orientation: this.selectedOrientations.join(','),
         sort: this.sortLatest ? 'latest' : 'earliest',
-        mediaType: this.activeMediaTab,
+        mediaType: this.activeMediaTab === 'audio' ? 'music' : this.activeMediaTab,
+        lane: this.activeMediaTab,
+        section: this.activeSection,
         videoSource: this.selectedVideoSources.join(','),
         mood: this.selectedMoods.join(','),
         pose: this.selectedPoses.join(','),
@@ -1068,6 +1075,7 @@ export default {
         const data = cached.data
         this.all = (data.items || []).map((r) => this.mapServer(r))
         this.finished = this.all.length >= (data.total || 0)
+        this.totalCount = Number(data.total) || 0
         this.applyServerFilters(data)
         this.loaded = true
         this.errorText = ''
@@ -1087,6 +1095,7 @@ export default {
         const data = await fetchAssets(queryOpts)
         this.all = (data.items || []).map((r) => this.mapServer(r))
         this.finished = this.all.length >= (data.total || 0)
+        this.totalCount = Number(data.total) || 0
         this.applyServerFilters(data)
       } catch (e) {
         const msg = e.message || '加载失败'
@@ -1325,10 +1334,97 @@ export default {
         server: true,
       }
     },
+    mapTrash(r) {
+      const isVid = r.kind === 'video' || this.isVideo(r.fileName)
+      const isMus = r.kind === 'audio' || this.isAudio(r.fileName)
+      const w = r.width || 1080
+      const h = r.height || 1440
+      let ratio = isMus ? 62 : (h / w) * 100
+      if (ratio < 75) ratio = 75
+      if (ratio > 135) ratio = 135
+      const serverUrl = mediaUrl(r.fid)
+      const gridImgUrl = isVid ? '' : gridUrl(r.fid)
+      const imgUrl = isVid ? posterUrl(r.fid) : gridImgUrl
+      return {
+        fid: r.fid,
+        fileName: r.fileName || r.fid,
+        width: w,
+        height: h,
+        mediaType: isVid ? 'video' : (isMus ? 'music' : 'image'),
+        isVideo: isVid,
+        isMusic: isMus,
+        isPortrait: false,
+        isFurniture: false,
+        is_trashed: true,
+        truncated: false,
+        duration: 0,
+        createdAt: r.deletedAt || 0,
+        tagsText: r.tagsText || '',
+        rawTags: '',
+        mainLabel: '',
+        ratio,
+        imgUrl,
+        serverUrl,
+        gridImgUrl,
+        prefetchPath: '',
+        localPath: '',
+        posterUrl: isVid ? imgUrl : '',
+        thumbUrl: r.thumbUrl || '',
+        imgFailed: false,
+        server: true,
+        disposeSource: r.disposeSource || '',
+        disposeLabel: r.disposeLabel || '主动删除',
+        disposeCriterion: r.disposeCriterion || '',
+        disposeDetail: r.disposeDetail || '',
+        deletedDerivCount: r.deletedDerivCount || 0,
+        expiresAt: r.expiresAt || 0,
+        remainingHours: r.remainingHours || 0,
+        expiringSoon: !!r.expiringSoon,
+        fileMissing: !!r.fileMissing,
+        restoreReady: r.restoreReady !== false && !r.fileMissing,
+        size: r.size || 0,
+      }
+    },
+    formatRemain(hours) {
+      const h = Number(hours) || 0
+      if (h <= 0) return '即将清理'
+      if (h < 24) return `剩 ${h} 小时`
+      return `剩 ${Math.ceil(h / 24)} 天`
+    },
     async loadMore() {
       if (this.loading || this.loadingMore || this.finished) return
       this.loadingMore = true
       const nextPage = this.page + 1
+      if (this.activeMediaTab === 'trash') {
+        try {
+          const data = await fetchTrashAssets({
+            page: nextPage,
+            pageSize: 30,
+            source: this.trashSource,
+            sort: this.sortLatest ? 'latest' : 'oldest',
+            keyword: this.keyword,
+          })
+          const newItems = (data.items || []).map((r) => this.mapTrash(r))
+          if (newItems.length > 0) {
+            const existingFids = new Set(this.all.map((a) => a.fid))
+            for (const it of newItems) {
+              if (!existingFids.has(it.fid)) {
+                this.all.push(it)
+                existingFids.add(it.fid)
+              }
+            }
+            this.page = nextPage
+            this.finished = this.all.length >= (Number(data.total) || 0) || newItems.length === 0
+          } else {
+            this.finished = true
+          }
+        } catch (e) {
+          console.warn('[browse] loadMore trash failed', e)
+        } finally {
+          this.loadingMore = false
+        }
+        return
+      }
       const queryOpts = {
         page: nextPage,
         pageSize: 30,
@@ -1340,7 +1436,9 @@ export default {
         colors: this.selectedColors.join(','),
         orientation: this.selectedOrientations.join(','),
         sort: this.sortLatest ? 'latest' : 'earliest',
-        mediaType: this.activeMediaTab,
+        mediaType: this.activeMediaTab === 'audio' ? 'music' : this.activeMediaTab,
+        lane: this.activeMediaTab,
+        section: this.activeSection,
         videoSource: this.selectedVideoSources.join(','),
         mood: this.selectedMoods.join(','),
         pose: this.selectedPoses.join(','),
@@ -1407,14 +1505,6 @@ export default {
         },
       })
     },
-    openStudio() {
-      if (this._navigating) return
-      this._navigating = true
-      switchTabTo('/pages/home/home', { view: 'operate' })
-      setTimeout(() => {
-        this._navigating = false
-      }, 500)
-    },
     toggleSelectMode() {
       this.isSelectMode = !this.isSelectMode
       if (!this.isSelectMode) {
@@ -1436,27 +1526,136 @@ export default {
       this.selectedFids = []
     },
     onCardClick(item) {
-      if (this.isSelectMode && !item.isVideo && !item.isMusic) {
+      if (this.isSelectMode && (this.activeMediaTab === 'trash' || (!item.isVideo && !item.isMusic))) {
         this.toggleSelect(item)
+        return
+      }
+      if (this.activeMediaTab === 'trash') {
+        this.openTrashDetail(item)
         return
       }
       this.openDetail(item)
     },
-    openWalkthroughDrawer() {
-      if (this.selectedFids.length < 2) {
-        uni.showToast({ title: '至少勾选 2 张空间照片以生成漫游', icon: 'none' })
-        return
-      }
-      this.drawerVisible = true
+    openTrashDetail(item) {
+      if (this._navigating) return
+      this._navigating = true
+      uni.navigateTo({
+        url: '/pages/trash-detail/trash-detail?fid=' + encodeURIComponent(item.fid),
+        complete: () => {
+          setTimeout(() => {
+            this._navigating = false
+          }, 500)
+        },
+      })
     },
-    onWalkthroughSuccess() {
+    batchCreate(domain) {
+      if (!this.selectedFids.length) return
+      const fids = this.selectedFids.slice(0, 8)
       this.isSelectMode = false
       this.selectedFids = []
-      this.switchMediaTab('video')
+      switchTabTo('/pages/home/home', { fids, domain: domain === 'video' ? 'video' : 'image' })
+    },
+    batchTrash() {
+      const fids = this.selectedFids.slice()
+      if (!fids.length) return
+      uni.showModal({
+        title: '移入回收站',
+        content: `将选中的 ${fids.length} 个素材移入回收站，可在保留期内恢复。`,
+        confirmText: '移入',
+        confirmColor: '#3B82F6',
+        success: async (res) => {
+          if (!res.confirm) return
+          uni.showLoading({ title: '移入中…', mask: true })
+          try {
+            for (const fid of fids) {
+              await deleteAsset(fid)
+            }
+            const set = new Set(fids)
+            this.all = this.all.filter((x) => !set.has(x.fid))
+            this.selectedFids = []
+            this.isSelectMode = false
+            try { viewerCache.clearAll?.() } catch (e) {}
+            uni.showToast({ title: `已移入 ${fids.length} 个`, icon: 'none' })
+            this.refreshTrashCount()
+          } catch (e) {
+            uni.showToast({ title: '操作失败: ' + (e.message || e), icon: 'none' })
+          } finally {
+            uni.hideLoading()
+          }
+        },
+      })
+    },
+    confirmRestore(fids, items) {
+      const list = Array.isArray(items) ? items : []
+      const missing = new Set(list.filter((it) => it && (it.fileMissing || it.restoreReady === false)).map((it) => it.fid))
+      const okFids = (fids || []).filter((fid) => !missing.has(fid))
+      if (!okFids.length) {
+        uni.showToast({ title: '所选记录源文件已清理，无法恢复', icon: 'none' })
+        return
+      }
+      const skipped = (fids || []).length - okFids.length
+      uni.showModal({
+        title: '恢复素材',
+        content: skipped > 0
+          ? `将恢复 ${okFids.length} 个素材；另有 ${skipped} 个源文件已清理，只能保留记录。`
+          : `将 ${okFids.length} 个素材恢复到素材库。`,
+        confirmText: '恢复',
+        confirmColor: '#3B82F6',
+        success: async (res) => {
+          if (!res.confirm) return
+          uni.showLoading({ title: '恢复中…', mask: true })
+          try {
+            await restoreTrashAsset(okFids)
+            const set = new Set(okFids)
+            this.all = this.all.filter((x) => !set.has(x.fid))
+            this.selectedFids = this.selectedFids.filter((fid) => !set.has(fid))
+            try { viewerCache.clearAll?.() } catch (e) {}
+            uni.showToast({ title: `已恢复 ${okFids.length} 个`, icon: 'none' })
+            this.refreshTrashCount()
+          } catch (e) {
+            uni.showToast({ title: '恢复失败: ' + (e.message || e), icon: 'none' })
+          } finally {
+            uni.hideLoading()
+          }
+        },
+      })
+    },
+    confirmPurge(fids) {
+      uni.showModal({
+        title: '彻底粉碎',
+        content: `将永久删除 ${fids.length} 个素材，此操作不可恢复。`,
+        confirmText: '粉碎',
+        confirmColor: '#F43F5E',
+        success: async (res) => {
+          if (!res.confirm) return
+          uni.showLoading({ title: '粉碎中…', mask: true })
+          try {
+            await purgeTrashAsset(fids)
+            const set = new Set(fids)
+            this.all = this.all.filter((x) => !set.has(x.fid))
+            this.selectedFids = this.selectedFids.filter((fid) => !set.has(fid))
+            uni.showToast({ title: `已粉碎 ${fids.length} 个`, icon: 'none' })
+            this.refreshTrashCount()
+          } catch (e) {
+            uni.showToast({ title: '粉碎失败: ' + (e.message || e), icon: 'none' })
+          } finally {
+            uni.hideLoading()
+          }
+        },
+      })
+    },
+    batchRestore() {
+      if (!this.selectedFids.length) return
+      this.confirmRestore(this.selectedFids.slice(), this.selectedAssetsList)
+    },
+    batchPurge() {
+      if (!this.selectedFids.length) return
+      this.confirmPurge(this.selectedFids.slice())
     },
   },
 }
 </script>
+
 
 <style scoped>
 .page {
@@ -1578,6 +1777,17 @@ export default {
   font-size: 24rpx;
   color: #2563eb;
   font-weight: bold;
+}
+.popover-item-badge {
+  min-width: 34rpx;
+  padding: 2rpx 10rpx;
+  border-radius: 999rpx;
+  background: #ef4444;
+  color: #ffffff;
+  font-size: 18rpx;
+  font-weight: 700;
+  text-align: center;
+  line-height: 30rpx;
 }
 .nav-title {
   font-size: 36rpx;
@@ -1969,6 +2179,27 @@ export default {
   right: 14rpx;
   background: rgba(217, 119, 6, 0.92);
 }
+.badge.trash-badge {
+  background: rgba(244, 63, 94, 0.9);
+  max-width: 60%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.badge.trash-badge.soon {
+  background: rgba(185, 28, 28, 0.95);
+}
+.badge.trash-badge.missing {
+  background: rgba(100, 116, 139, 0.92);
+}
+.badge.trash-remain {
+  left: auto;
+  right: 14rpx;
+  background: rgba(15, 23, 42, 0.82);
+}
+.badge.trash-remain.soon {
+  background: rgba(217, 119, 6, 0.95);
+}
 .badge.vid {
   position: absolute;
   top: 14rpx;
@@ -2135,19 +2366,35 @@ export default {
   color: #94a3b8;
   padding: 6rpx 10rpx;
 }
+.batch-actions {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  flex-shrink: 0;
+}
 .batch-btn {
   background: linear-gradient(135deg, #2563eb, #6366f1);
-  padding: 16rpx 32rpx;
+  padding: 14rpx 22rpx;
   border-radius: 999rpx;
   display: flex;
   align-items: center;
   justify-content: center;
   box-shadow: 0 4rpx 14rpx rgba(37, 99, 235, 0.4);
 }
+.batch-btn.ghost {
+  background: rgba(59, 130, 246, 0.16);
+  border: 1rpx solid rgba(147, 197, 253, 0.5);
+  box-shadow: none;
+}
+.batch-btn.danger {
+  background: linear-gradient(135deg, #f43f5e, #e11d48);
+  box-shadow: 0 4rpx 14rpx rgba(244, 63, 94, 0.35);
+}
 .batch-btn-text {
   color: #ffffff;
-  font-size: 26rpx;
+  font-size: 22rpx;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 /* ========== 五大素材Tab横向滚动 ========== */
@@ -2230,5 +2477,885 @@ export default {
 .badge.furn-badge {
   background: rgba(139, 92, 246, 0.88);
 }
-</style>
 
+/* ========== 一级媒体 Tab ========== */
+.nav-heading {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+}
+.nav-title {
+  font-size: 34rpx;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.5rpx;
+}
+.nav-sub {
+  font-size: 20rpx;
+  color: #94a3b8;
+  margin-top: 2rpx;
+  max-width: 360rpx;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.media-tabs {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  padding: 0 28rpx 12rpx;
+  background: #f8fafc;
+}
+.media-tab {
+  flex: 1;
+  min-width: 0;
+  height: 66rpx;
+  border-radius: 18rpx;
+  background: #ffffff;
+  border: 1rpx solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8rpx;
+  transition: all 0.18s ease;
+}
+.media-tab.active {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  box-shadow: 0 6rpx 18rpx rgba(59, 130, 246, 0.24);
+}
+.media-tab-icon {
+  font-size: 26rpx;
+}
+.media-tab-label {
+  font-size: 25rpx;
+  font-weight: 700;
+  color: #475569;
+}
+.media-tab.active .media-tab-label {
+  color: #ffffff;
+}
+.media-tab.active .media-tab-icon {
+  filter: saturate(1.1);
+}
+.media-tab.trash-tab {
+  position: relative;
+  flex: 0 0 auto;
+  padding: 0 18rpx;
+}
+.media-tab-badge {
+  position: absolute;
+  top: -10rpx;
+  right: -6rpx;
+  min-width: 30rpx;
+  height: 30rpx;
+  line-height: 30rpx;
+  padding: 0 7rpx;
+  border-radius: 999rpx;
+  background: #f43f5e;
+  color: #ffffff;
+  font-size: 17rpx;
+  font-weight: 700;
+  text-align: center;
+  box-shadow: 0 3rpx 8rpx rgba(244, 63, 94, 0.35);
+}
+
+/* ========== 二级板块 ========== */
+.section-rail-wrap {
+  background: #f8fafc;
+  padding-bottom: 10rpx;
+}
+.section-rail {
+  width: 100%;
+  white-space: nowrap;
+}
+.section-rail-inner {
+  display: inline-flex;
+  gap: 14rpx;
+  padding: 2rpx 28rpx 4rpx;
+}
+.section-card {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  padding: 14rpx 22rpx 14rpx 16rpx;
+  border-radius: 20rpx;
+  background: #ffffff;
+  border: 1rpx solid #e6ebf2;
+  box-shadow: 0 3rpx 10rpx rgba(15, 23, 42, 0.03);
+  transition: all 0.18s ease;
+}
+.section-card.active {
+  background: linear-gradient(135deg, #eff6ff, #dbeafe);
+  border-color: #93c5fd;
+  box-shadow: 0 6rpx 16rpx rgba(59, 130, 246, 0.14);
+}
+.section-icon {
+  width: 52rpx;
+  height: 52rpx;
+  border-radius: 14rpx;
+  background: #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26rpx;
+  text-align: center;
+  line-height: 52rpx;
+}
+.section-card.active .section-icon {
+  background: #ffffff;
+}
+.section-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2rpx;
+}
+.section-label {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: #0f172a;
+}
+.section-card.active .section-label {
+  color: #1d4ed8;
+}
+.section-desc {
+  font-size: 18rpx;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+.section-card.trash-source-card {
+  padding-right: 20rpx;
+}
+
+/* ========== 快捷筛选 ========== */
+.quick-filter-wrap {
+  background: #f8fafc;
+  padding-bottom: 8rpx;
+}
+.quick-filter-scroll {
+  width: 100%;
+  white-space: nowrap;
+}
+.quick-filter-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 18rpx;
+  padding: 0 28rpx;
+}
+.quick-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 10rpx;
+}
+.quick-title {
+  font-size: 20rpx;
+  font-weight: 700;
+  color: #64748b;
+  padding-right: 2rpx;
+}
+.quick-options {
+  display: inline-flex;
+  align-items: center;
+  gap: 8rpx;
+}
+.quick-chip {
+  height: 50rpx;
+  padding: 0 16rpx;
+  border-radius: 999rpx;
+  background: #ffffff;
+  border: 1rpx solid #e2e8f0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6rpx;
+  white-space: nowrap;
+}
+.quick-chip.checked {
+  background: #eff6ff;
+  border-color: #3b82f6;
+}
+.quick-chip-text {
+  font-size: 21rpx;
+  color: #475569;
+}
+.quick-chip.checked .quick-chip-text {
+  color: #1d4ed8;
+  font-weight: 600;
+}
+.filter-open-btn {
+  flex: 0 0 auto;
+  height: 54rpx;
+  padding: 0 20rpx;
+  border-radius: 999rpx;
+  background: #0f172a;
+  display: inline-flex;
+  align-items: center;
+  gap: 6rpx;
+}
+.filter-open-btn.active {
+  background: #3b82f6;
+}
+.filter-open-icon {
+  font-size: 22rpx;
+  color: #ffffff;
+}
+.filter-open-text {
+  font-size: 21rpx;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+/* ========== 已选筛选 ========== */
+.active-filter-row {
+  background: #f8fafc;
+  padding-bottom: 8rpx;
+}
+.active-filter-scroll {
+  width: 100%;
+  white-space: nowrap;
+}
+.active-filter-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 10rpx;
+  padding: 0 28rpx;
+}
+.active-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6rpx;
+  height: 46rpx;
+  padding: 0 14rpx;
+  border-radius: 999rpx;
+  background: #eff6ff;
+  border: 1rpx solid #bfdbfe;
+}
+.active-filter-text {
+  font-size: 20rpx;
+  color: #1d4ed8;
+}
+.active-filter-x {
+  font-size: 18rpx;
+  color: #64748b;
+}
+.active-filter-clear {
+  font-size: 20rpx;
+  font-weight: 700;
+  color: #3b82f6;
+  padding: 0 12rpx;
+}
+
+/* ========== 筛选抽屉 ========== */
+.filter-sheet-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.4);
+  z-index: 900;
+  display: flex;
+  align-items: flex-end;
+}
+.filter-sheet {
+  width: 100%;
+  max-height: 76vh;
+  background: #ffffff;
+  border-radius: 28rpx 28rpx 0 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.filter-sheet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 26rpx 28rpx 16rpx;
+}
+.filter-sheet-title {
+  display: block;
+  font-size: 30rpx;
+  font-weight: 800;
+  color: #0f172a;
+}
+.filter-sheet-sub {
+  display: block;
+  margin-top: 4rpx;
+  font-size: 20rpx;
+  color: #94a3b8;
+}
+.filter-sheet-close {
+  font-size: 30rpx;
+  color: #64748b;
+  padding: 0 6rpx;
+}
+.filter-sheet-body {
+  max-height: 54vh;
+  padding: 0 28rpx 16rpx;
+}
+.filter-group {
+  padding: 16rpx 0 6rpx;
+  border-bottom: 1rpx solid #f1f5f9;
+}
+.filter-group:last-child {
+  border-bottom: none;
+}
+.filter-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12rpx;
+}
+.filter-group-title {
+  font-size: 23rpx;
+  font-weight: 700;
+  color: #0f172a;
+}
+.filter-group-reset {
+  font-size: 20rpx;
+  color: #3b82f6;
+}
+.filter-options-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+}
+.filter-option {
+  padding: 10rpx 18rpx;
+  border-radius: 12rpx;
+  background: #f8fafc;
+  border: 1rpx solid #e8edf4;
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+.filter-option.checked {
+  background: #eff6ff;
+  border-color: #3b82f6;
+}
+.filter-option-text {
+  font-size: 21rpx;
+  color: #475569;
+}
+.filter-option.checked .filter-option-text {
+  color: #1d4ed8;
+  font-weight: 600;
+}
+.filter-empty {
+  font-size: 20rpx;
+  color: #cbd5e1;
+}
+.filter-sheet-foot {
+  display: flex;
+  gap: 14rpx;
+  padding: 14rpx 28rpx 22rpx;
+  border-top: 1rpx solid #f1f5f9;
+}
+.filter-foot-btn {
+  flex: 1;
+  height: 76rpx;
+  border-radius: 18rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 25rpx;
+  font-weight: 700;
+}
+.filter-foot-btn.ghost {
+  background: #f1f5f9;
+  color: #475569;
+}
+.filter-foot-btn.primary {
+  background: #3b82f6;
+  color: #ffffff;
+  box-shadow: 0 6rpx 18rpx rgba(59, 130, 246, 0.25);
+}
+
+/* ========== 回收站说明与缺失标记 ========== */
+.trash-hint {
+  margin: 0 28rpx 10rpx;
+  padding: 14rpx 18rpx;
+  border-radius: 16rpx;
+  background: #fff7ed;
+  border: 1rpx solid #fed7aa;
+}
+.trash-hint-text {
+  font-size: 20rpx;
+  color: #9a3412;
+  line-height: 1.5;
+}
+.missing-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.62);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6rpx;
+  z-index: 3;
+}
+.missing-title {
+  font-size: 24rpx;
+  font-weight: 800;
+  color: #ffffff;
+}
+.missing-sub {
+  font-size: 18rpx;
+  color: #fecdd3;
+}
+
+
+/* ===== Apple HIG Refined Styles ===== */
+.header-container {
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 0.5px solid rgba(60, 60, 67, 0.12);
+  position: relative;
+  z-index: 50;
+}
+
+.apple-nav {
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  gap: 10px;
+}
+
+.nav-drawer-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  background: #F2F2F7;
+  border-radius: 18px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.nav-drawer-btn:active {
+  transform: scale(0.95);
+  background: #E5E5EA;
+}
+.nav-drawer-btn.has-active {
+  background: rgba(0, 122, 255, 0.12);
+}
+.nav-drawer-text {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1C1C1E;
+}
+.nav-drawer-btn.has-active .nav-drawer-text {
+  color: #007AFF;
+  font-weight: 600;
+}
+.drawer-badge {
+  background: #007AFF;
+  color: #FFFFFF;
+  font-size: 10px;
+  font-weight: 700;
+  min-width: 16px;
+  height: 16px;
+  line-height: 16px;
+  text-align: center;
+  border-radius: 8px;
+  padding: 0 4px;
+}
+
+/* Apple Segmented Control */
+.apple-segmented {
+  flex: 1;
+  max-width: 250px;
+  height: 34px;
+  background: rgba(118, 118, 128, 0.12);
+  border-radius: 9px;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+}
+.segmented-item {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border-radius: 7px;
+  cursor: pointer;
+  position: relative;
+  transition: all 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.segmented-item.active {
+  background: #FFFFFF;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12), 0 0 1px rgba(0, 0, 0, 0.08);
+}
+.segmented-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #8E8E93;
+}
+.segmented-item.active .segmented-label {
+  color: #1C1C1E;
+  font-weight: 600;
+}
+.trash-badge-dot {
+  position: absolute;
+  top: 1px;
+  right: 2px;
+  background: #FF3B30;
+  color: #FFFFFF;
+  font-size: 9px;
+  font-weight: 700;
+  height: 14px;
+  min-width: 14px;
+  line-height: 14px;
+  text-align: center;
+  border-radius: 7px;
+  padding: 0 3px;
+}
+
+.nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.action-text-btn {
+  font-size: 14px;
+  color: #007AFF;
+  font-weight: 500;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+.action-text-btn.active {
+  font-weight: 600;
+}
+.refresh-circle-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 16px;
+  background: #F2F2F7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+.refresh-circle-btn:active {
+  transform: scale(0.92);
+}
+
+/* 二级板块极简滑动胶囊 */
+.section-pill-bar {
+  padding: 4px 14px 6px;
+}
+.section-pill-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.section-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  background: #F2F2F7;
+  border-radius: 16px;
+  transition: all 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+  cursor: pointer;
+}
+.section-pill:active {
+  transform: scale(0.96);
+}
+.section-pill.active {
+  background: #007AFF;
+  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.3);
+}
+.section-pill-text {
+  font-size: 12px;
+  font-weight: 500;
+  color: #3A3A3C;
+}
+.section-pill.active .section-pill-text {
+  color: #FFFFFF;
+  font-weight: 600;
+}
+
+/* 紧凑搜索栏 + 排序 */
+.search-sort-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 14px 8px;
+}
+.search-field {
+  flex: 1;
+  height: 34px;
+  background: #EFEFF4;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  gap: 7px;
+}
+.search-input {
+  flex: 1;
+  font-size: 13px;
+  color: #1C1C1E;
+  height: 100%;
+}
+.search-clear-btn {
+  width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  background: rgba(142, 142, 147, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.sort-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 10px;
+  height: 34px;
+  background: #F2F2F7;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.sort-chip:active {
+  transform: scale(0.95);
+}
+.sort-chip-text {
+  font-size: 12px;
+  font-weight: 500;
+  color: #007AFF;
+}
+
+/* 生效筛选标签栏 */
+.active-chips-bar {
+  padding: 2px 14px 8px;
+}
+.active-chips-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.active-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(0, 122, 255, 0.1);
+  border: 0.5px solid rgba(0, 122, 255, 0.3);
+  padding: 3px 8px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.active-chip-text {
+  font-size: 11px;
+  color: #007AFF;
+  font-weight: 500;
+}
+.chips-clear-all {
+  font-size: 11px;
+  color: #8E8E93;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+
+/* ===== 左侧筛选抽屉 (Left Drawer) ===== */
+.drawer-mask {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 999;
+  display: flex;
+  justify-content: flex-start;
+  animation: fadeIn 0.22s ease-out;
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.drawer-panel {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 1000;
+  width: 82vw;
+  max-width: 360px;
+  height: 100%;
+  background: #FFFFFF;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 8px 0 24px rgba(0, 0, 0, 0.15);
+  animation: slideInLeft 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+}
+@keyframes slideInLeft {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+.drawer-head {
+  padding: 44px 18px 14px;
+  border-bottom: 0.5px solid rgba(60, 60, 67, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #FAFAFA;
+}
+.drawer-main-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1C1C1E;
+}
+.drawer-sub-title {
+  font-size: 12px;
+  color: #8E8E93;
+  margin-top: 2px;
+  display: block;
+}
+.drawer-close-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 16px;
+  background: #E5E5EA;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.drawer-close-btn:active {
+  transform: scale(0.92);
+}
+
+.drawer-scroll-body {
+  flex: 1;
+  height: 0;
+  min-height: 0;
+  padding: 16px 18px;
+}
+.drawer-footer {
+  flex-shrink: 0;
+  padding: 12px 18px 24px;
+  border-top: 0.5px solid rgba(60, 60, 67, 0.12);
+  background: #FFFFFF;
+  display: flex;
+  gap: 12px;
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.06);
+}
+.drawer-group {
+  margin-bottom: 22px;
+}
+.drawer-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.drawer-group-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #8E8E93;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.drawer-group-clear {
+  font-size: 12px;
+  color: #007AFF;
+  cursor: pointer;
+}
+.drawer-chips-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.drawer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  background: #F2F2F7;
+  border-radius: 16px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.18s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.drawer-chip:active {
+  transform: scale(0.96);
+}
+.drawer-chip.active {
+  background: rgba(0, 122, 255, 0.1);
+  border-color: #007AFF;
+}
+.drawer-chip-text {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1C1C1E;
+  white-space: nowrap;
+}
+.drawer-chip.active .drawer-chip-text {
+  color: #007AFF;
+  font-weight: 600;
+}
+.drawer-chip-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 5px;
+  box-shadow: 0 0 1px rgba(0, 0, 0, 0.2);
+}
+.drawer-empty-hint {
+  font-size: 12px;
+  color: #C7C7CC;
+}
+
+.drawer-footer {
+  padding: 14px 18px 24px;
+  border-top: 0.5px solid rgba(60, 60, 67, 0.12);
+  background: #FFFFFF;
+  display: flex;
+  gap: 12px;
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.04);
+}
+.drawer-btn {
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.drawer-btn:active {
+  transform: scale(0.97);
+}
+.drawer-btn.reset {
+  width: 35%;
+  background: #F2F2F7;
+}
+.drawer-btn.confirm {
+  flex: 1;
+  background: #007AFF;
+  box-shadow: 0 3px 12px rgba(0, 122, 255, 0.35);
+}
+.drawer-btn-text {
+  font-size: 14px;
+  font-weight: 600;
+}
+.reset-text {
+  color: #636366;
+}
+.confirm-text {
+  color: #FFFFFF;
+}
+
+</style>

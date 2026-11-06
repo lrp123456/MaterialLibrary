@@ -65,6 +65,7 @@ class ViewerCacheService {
   makeListKey(opts = {}) {
     const {
       page = 1,
+      pageSize = 30,
       keyword = '',
       space = '',
       style = '',
@@ -80,7 +81,7 @@ class ViewerCacheService {
       pose = '',
       character = '',
     } = opts
-    return `list:m=${mediaType}:vs=${videoSource}:p=${page}:k=${keyword}:sp=${space}:st=${style}:mat=${material}:c=${colors}:f=${furniture_item || furniture_category}:mood=${mood}:pose=${pose}:char=${character}:o=${orientation}:s=${sort}`
+    return `list:m=${mediaType}:vs=${videoSource}:p=${page}:ps=${pageSize}:k=${keyword}:sp=${space}:st=${style}:mat=${material}:c=${colors}:f=${furniture_item || furniture_category}:mood=${mood}:pose=${pose}:char=${character}:o=${orientation}:s=${sort}`
   }
 
   /**

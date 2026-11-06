@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="eye-care senior-mode">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>素材工作台 · 资产 / 创作 / 剪辑 / 设置</title>
+  <link rel="stylesheet" href="./fonts.css" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <!-- ==================== 顶部两层常驻条 ==================== -->
+  <header class="top">
+    <div class="top-row top-row-main">
+      <div class="brand">
+        <span class="logo-slot" id="logo-slot" aria-label="当前标识"></span>
+        <span class="brand-text">
+          <strong>素材工作台</strong>
+          <small>本地部署 · 四板块一体</small>
+        </span>
+      </div>
+
+      <nav class="main-nav" id="main-nav" aria-label="一级板块"></nav>
+
+      <div class="top-right">
+        <button type="button" class="big-btn" id="btn-display">显示设置</button>
+        <button type="button" class="big-btn" id="btn-user">管理员</button>
+      </div>
+    </div>
+
+    <div class="top-row top-row-tools">
+      <label class="search-box">
+        <span class="search-icon" id="search-icon" aria-hidden="true"></span>
+        <input type="search" id="global-search" placeholder="搜索资产、会话、配方……" aria-label="全局搜索" />
+        <span class="search-hint">按回车搜索</span>
+      </label>
+      <button type="button" class="big-btn" id="btn-upload">上传素材</button>
+      <button type="button" class="big-btn" id="btn-voice">语音输入</button>
+      <span class="top-stat" id="top-stat">共 88 项资产 · 3713 帧</span>
+    </div>
+  </header>
+
+  <!-- ==================== 主体：左侧分区 + 主视口 ==================== -->
+  <div class="shell">
+    <aside class="side" id="side" aria-label="分区导航"></aside>
+
+    <main class="stage" id="stage">
+      <!-- ---------- 资产 ---------- -->
+      <section class="view is-on" data-view="assets" aria-label="资产板块">
+        <div class="view-head">
+          <div>
+            <h1>资产</h1>
+            <p class="view-desc">浏览、筛选与管理全部素材。常用操作都放在上面，高级筛选收进抽屉。</p>
+          </div>
+          <span class="count-badge" id="asset-count">共 12 项</span>
+        </div>
+
+        <div class="toolbar" role="toolbar" aria-label="资产常用操作">
+          <button type="button" class="big-btn primary" id="btn-upload-2">上传素材</button>
+          <button type="button" class="big-btn" id="btn-filter">筛选条件</button>
+          <button type="button" class="big-btn" id="btn-layout">切换视图</button>
+          <button type="button" class="big-btn" id="btn-multi">多选</button>
+          <span class="toolbar-spacer"></span>
+          <span class="toolbar-note">当前：图片 · 全部状态</span>
+        </div>
+
+        <div class="asset-grid" id="asset-grid"></div>
+
+        <div class="sel-dock" id="sel-dock" hidden>
+          <span class="sel-count" id="sel-count">已选 0 项</span>
+          <button type="button" class="big-btn" data-sel="all">全选本页</button>
+          <button type="button" class="big-btn" data-sel="invert">反选</button>
+          <button type="button" class="big-btn" data-sel="clear">清空</button>
+          <button type="button" class="big-btn" data-sel="studio">送入创作</button>
+          <button type="button" class="big-btn" data-sel="clip">送入剪辑</button>
+          <button type="button" class="big-btn danger" data-sel="delete">删除</button>
+        </div>
+      </section>
+
+      <!-- ---------- 创作 ---------- -->
+      <section class="view" data-view="studio" aria-label="创作板块" hidden>
+        <div class="view-head">
+          <div>
+            <h1>创作</h1>
+            <p class="view-desc">描述你的想法，引用资产作为参考，生成结果可直接送入剪辑。</p>
+          </div>
+          <span class="count-badge">当前模型：通用创作模型</span>
+        </div>
+
+        <div class="chat-scroll" id="chat-scroll"></div>
+
+        <div class="suggest-row" id="suggest-row">
+          <span>接着可以：</span>
+          <button type="button" class="chip">换成浅色木纹</button>
+          <button type="button" class="chip">生成傍晚光线</button>
+          <button type="button" class="chip">导出全部衍生图</button>
+        </div>
+
+        <div class="composer">
+          <div class="mode-row" id="mode-row" role="tablist" aria-label="生成模式"></div>
+          <label class="prompt-box">
+            <textarea id="prompt-input" rows="3" placeholder="描述想要的效果，例如：把墙面换成暖胡桃木饰面，保留原有采光……"></textarea>
+          </label>
+          <div class="composer-actions">
+            <button type="button" class="big-btn" id="btn-ref">引用素材</button>
+            <button type="button" class="big-btn" id="btn-attach">挂载素材</button>
+            <button type="button" class="big-btn" id="btn-voice-2">语音输入</button>
+            <button type="button" class="big-btn" id="btn-optimize">优化描述</button>
+            <button type="button" class="big-btn" id="btn-params">生成参数</button>
+            <span class="toolbar-spacer"></span>
+            <span class="ctx-note" id="ctx-note">上下文 0 / 上限 2.9 万</span>
+            <button type="button" class="big-btn primary send" id="btn-send">发送</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- 剪辑 ---------- -->
+      <section class="view" data-view="clip" aria-label="剪辑板块" hidden>
+        <div class="view-head">
+          <div>
+            <h1>剪辑</h1>
+            <p class="view-desc">多轨时间轴与媒体处理工具。服务异常时会给出明确的处理入口。</p>
+          </div>
+          <span class="count-badge">当前：多轨剪辑</span>
+        </div>
+
+        <div class="sub-nav" id="clip-subnav">
+          <button type="button" class="big-btn is-on" data-clip="timeline">多轨剪辑</button>
+          <button type="button" class="big-btn" data-clip="tools">媒体工具</button>
+        </div>
+
+        <div class="clip-panel" id="clip-timeline">
+          <div class="service-warn" id="service-warn">
+            <svg viewBox="0 0 64 64" class="warn-symbol" aria-hidden="true"><polygon class="pendulum kc-loop" points="32,6 14,56 50,56" fill="var(--kc-red)"/></svg>
+            <div><strong>剪辑服务未就绪</strong><p>请先在服务控制台启动剪辑编辑器，页面会自动重新连接。</p></div>
+            <button type="button" class="big-btn primary" id="btn-service">打开服务控制台</button>
+            <button type="button" class="big-btn" id="btn-warn-close" aria-label="收起提示">收起</button>
+          </div>
+
+          <div class="clip-workspace">
+            <div class="clip-bin">
+              <h2>素材箱</h2>
+              <div class="bin-item">客厅软装实景</div>
+              <div class="bin-item">样板间漫游短片</div>
+              <div class="bin-item">空间环境音</div>
+              <div class="bin-item">材质特写运镜</div>
+              <p class="bin-tip">从「资产」多选后点「送入剪辑」即可批量添加。</p>
+            </div>
+            <div class="clip-preview">
+              <div class="preview-screen"><span>画面预览</span><small>16 : 9 · 1920 × 1080</small></div>
+              <div class="preview-controls">
+                <button type="button" class="big-btn" id="btn-play"><span class="play-icon" id="play-icon"></span> 播放</button>
+                <span class="timecode" id="timecode">00:00:00 / 00:01:24</span>
+                <span class="toolbar-spacer"></span>
+                <span class="ctx-note">已启用硬件解码</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="timeline">
+            <div class="timeline-head"><span>时间轴</span><span>每秒 25 帧</span></div>
+            <div class="timeline-ruler" id="timeline-ruler"></div>
+            <div class="timeline-tracks" id="timeline-tracks"></div>
+          </div>
+        </div>
+
+        <div class="clip-panel" id="clip-tools" hidden>
+          <div class="tool-cards" id="tool-cards"></div>
+        </div>
+      </section>
+
+      <!-- ---------- 设置 ---------- -->
+      <section class="view" data-view="settings" aria-label="设置板块" hidden>
+        <div class="view-head">
+          <div>
+            <h1>设置</h1>
+            <p class="view-desc">按使用场景分组，一次只处理一个模块，避免长页面翻找。</p>
+          </div>
+          <span class="count-badge" id="setting-current">当前：日常</span>
+        </div>
+        <div class="setting-panel" id="setting-panel"></div>
+      </section>
+    </main>
+  </div>
+
+  <!-- ==================== 底部状态栏 ==================== -->
+  <footer class="statusbar">
+    <span class="status-dot" aria-hidden="true"></span>
+    <span>服务正常 · 已连接本机素材库</span>
+    <span class="status-sep"></span>
+    <span id="loop-status">循环动效 1 / 2</span>
+    <div class="march kc-loop" aria-hidden="true"><i></i><i></i><i></i></div>
+    <span class="toolbar-spacer"></span>
+    <span id="rm-status">减少动态效果：关</span>
+    <span class="status-sep"></span>
+    <span>资产 / 创作 / 剪辑 / 设置</span>
+  </footer>
+
+  <!-- ==================== 右侧上下文抽屉 ==================== -->
+  <div class="drawer" id="drawer" hidden>
+    <div class="drawer-head">
+      <strong id="drawer-title">显示设置</strong>
+      <button type="button" class="big-btn" id="drawer-close" aria-label="关闭抽屉">关闭</button>
+    </div>
+    <div class="drawer-body" id="drawer-body"></div>
+  </div>
+  <div class="scrim" id="scrim" hidden></div>
+
+  <!-- 轻量提示 -->
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

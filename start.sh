@@ -15,7 +15,7 @@ if [ -z "${https_proxy:-}" ] && [ -z "${HTTPS_PROXY:-}" ]; then
   export HTTPS_PROXY="$https_proxy"
   export HTTP_PROXY="$http_proxy"
 fi
-export no_proxy="${no_proxy:-localhost,127.0.0.1,::1}"
+export no_proxy="${no_proxy:-localhost,127.0.0.1,::1,newapi.naite.cc,naite.cc,aliyuncs.com,aliyun.com,volces.com,volcengine.com,modelscope.cn,agnes-ai.cn,api.agnes-ai.cn,laozhang.ai}"
 export NO_PROXY="${NO_PROXY:-$no_proxy}"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DATA_DIR="${ML_DATA_DIR:-$HOME/.dsh-material-library}"
@@ -148,6 +148,22 @@ start_server() {
     exit 0
   fi
   if [ -n "$wd_pid" ]; then
+    local asked=0
+    if [ -f "$DATA_DIR/faults/main.hold" ]; then
+      mkdir -p "$DATA_DIR/faults"
+      touch "$DATA_DIR/faults/main.retry"
+      info "已请求重试服务端（上次启动失败，自动重启已停）"
+      asked=1
+    fi
+    if [ -f "$DATA_DIR/faults/webpro.hold" ]; then
+      mkdir -p "$DATA_DIR/faults"
+      touch "$DATA_DIR/faults/webpro.retry"
+      info "已请求重试 Web（上次启动失败，自动重启已停）"
+      asked=1
+    fi
+    if [ "$asked" -eq 1 ]; then
+      exit 0
+    fi
     warn "watchdog 已在运行 (PID: $wd_pid)，但服务未就绪，查看日志: $WATCHDOG_LOG"
     exit 1
   fi
@@ -160,6 +176,9 @@ start_server() {
   info "正在启动室内设计素材库服务 (端口: $PORT，崩溃自动重启)..."
   cd "$PROJECT_DIR"
   rm -f "$STOP_FLAG" "$WATCHDOG_PID_FILE"
+  mkdir -p "$DATA_DIR/faults"
+  rm -f "$DATA_DIR/faults/main.hold" "$DATA_DIR/faults/webpro.hold" \
+        "$DATA_DIR/faults/main.retry" "$DATA_DIR/faults/webpro.retry"
 
   # 后台启动 watchdog（内含 node server.js）；PID 由脚本自写，不信任 setsid 的 $!
   nohup setsid bash "$WATCHDOG_SCRIPT" >> "$WATCHDOG_LOG" 2>&1 &
@@ -349,6 +368,14 @@ status_server() {
   else
     warn "素材库服务未运行"
   fi
+  local holdf reason
+  for holdf in "$DATA_DIR/faults/main.hold" "$DATA_DIR/faults/webpro.hold"; do
+    if [ -f "$holdf" ]; then
+      echo -e "  • 启动挂起    : ${BOLD}$(basename "$holdf")${NC}"
+      reason=$(grep '^reason=' "$holdf" | head -n 1 || true)
+      [ -n "$reason" ] && echo "    ${reason#reason=}"
+    fi
+  done
 }
 
 # 实时查看日志

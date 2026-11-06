@@ -527,8 +527,14 @@ function convertArkSeedanceVideoRequest({
 
   // 分辨率 resolution
   const rawRes = String(merged.resolution || merged.size || '720p').toLowerCase();
+  let baseRes = rawRes;
+  if (rawRes === '480p_sr2x') baseRes = '480p';
+  else if (rawRes === '720p_sr2x') baseRes = '720p';
   const validRes = isSeedance25 ? ['480p', '720p', '1080p'] : ['480p', '720p', '1080p', '4k'];
-  body.resolution = validRes.includes(rawRes) ? rawRes : '720p';
+  body.resolution = validRes.includes(baseRes) ? baseRes : '720p';
+  if (rawRes.includes('sr2x')) {
+    body.super_resolution = 'sr2x';
+  }
 
   // Draft 模式强制 480p
   if (isSeedance25 && merged.draft === true) {

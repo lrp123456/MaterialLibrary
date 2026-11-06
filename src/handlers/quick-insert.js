@@ -74,6 +74,7 @@ async function handleInsert(services, {
   maskPath = null,
   model = null,
   outSpec = null,
+  prompt: callerPrompt = null,
 }) {
   if (!productImageBuffer) {
     throw new Error('增（软装安装）必须提供二维产品图');
@@ -122,10 +123,13 @@ async function handleInsert(services, {
     : null;
   const { executeAdapter } = require('../gen');
   const cropBase64 = `data:image/jpeg;base64,${cropped.croppedBuffer.toString('base64')}`;
-  // 位置、大小、透视已由仿射合成锁死在像素里；regionClauseText 只作语义补充，
-  // 让吃语义的模型也知道「这处是什么地方」。
-  let prompt = INSERT_PROMPT.replace(/该单品/g, productName || '软装单品');
-  if (regionClauseText) prompt += `\n【安装位置】${regionClauseText}。`;
+  // 位置、大小、透视已由仿射合成锁死在像素里；用户配方句（已由调用方经
+  // reconcilePrompt 按模型能力对齐）优先；缺省才退回内置安装规范模板。
+  let prompt = String(callerPrompt || '').trim();
+  if (!prompt) {
+    prompt = INSERT_PROMPT.replace(/该单品/g, productName || '软装单品');
+    if (regionClauseText) prompt += `\n【安装位置】${regionClauseText}。`;
+  }
   const res = await executeAdapter(services, adapter, {
     imageUrls: [cropBase64],
     prompt,

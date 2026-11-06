@@ -37,8 +37,21 @@ function isLanHost(url) {
   }
 }
 
+let cachedLanAgent = null;
+function getLanAgent() {
+  if (!cachedLanAgent) {
+    const { Agent } = require('undici');
+    cachedLanAgent = new Agent({
+      keepAliveTimeout: 30000,
+      keepAliveMaxTimeout: 60000,
+      connections: 64,
+    });
+  }
+  return cachedLanAgent;
+}
+
 function lanDispatcher(url) {
-  if (isLanHost(url)) return new (require('undici').Agent)();
+  if (isLanHost(url)) return getLanAgent();
   return undefined;
 }
 

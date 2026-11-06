@@ -113,7 +113,11 @@ export async function fetchAssets(opts = {}) {
     sort = 'latest',
     mediaType = '',
     videoSource = '',
+    videoPurpose = '',
     category = '',
+    lane = '',
+    section = '',
+    shelf = '',
     furniture_item = '',
     furniture_category = '',
     mood = '',
@@ -144,7 +148,11 @@ export async function fetchAssets(opts = {}) {
     orientation ? `orientation=${encodeURIComponent(orientation)}` : '',
     resolvedSort ? `sort=${encodeURIComponent(resolvedSort)}` : '',
     mediaType ? `media_type=${encodeURIComponent(mediaType)}` : '',
+    lane ? `lane=${encodeURIComponent(lane)}` : '',
+    section ? `section=${encodeURIComponent(section)}` : '',
+    shelf ? `shelf=${encodeURIComponent(shelf)}` : '',
     videoSource ? `video_source=${encodeURIComponent(videoSource)}` : '',
+    videoPurpose ? `video_purpose=${encodeURIComponent(videoPurpose)}` : '',
     skipFacets ? 'skip_facets=1' : '',
   ]
   const data = await request('/assets', { query })
@@ -339,6 +347,15 @@ export function videoUrl(fid, dl = false) {
   return mediaUrl(fid, 0, dl)
 }
 
+/** 原文件地址（视频/音频/模型等非图片媒体） */
+export function rawFileUrl(fid, dl = false) {
+  const server = currentServerUrl()
+  const token = store.getToken()
+  const q = [`token=${encodeURIComponent(token)}`]
+  if (dl) q.push('dl=1')
+  return server + API_BASE + '/assets/' + encodeURIComponent(fid) + '/file?' + q.join('&')
+}
+
 /** 视频封面/海报图地址 */
 export function posterUrl(fid) {
   const server = currentServerUrl()
@@ -412,7 +429,7 @@ export async function triggerRestage(fid, { ratios = ['9:16', '3:4'], mainRatio 
   })
 }
 
-/** 获取动态能力清单 (扩图/消除/超分/漫游等) */
+/** 获取动态能力清单（含可用的图像 / 视频 / 音频生成模式） */
 export async function fetchQuickCapabilities() {
   return request('/ai/capabilities')
 }
@@ -742,4 +759,175 @@ export async function optimizePromptApi({ prompt, modelId, mode, imageUrls }) {
 }
 
 export { viewerCache }
+
+/**
+ * 直达 /gen/* 的调用（图片/视频/音频/聊天），绕过 /request() 的 {success:true,data} 封套假设：
+ * /gen/images|videos|audio 返回裸 {ok:true, success:true, files:[...]}；/gen/chat 返回 {success:true, data:{...}}。
+ * 两种封套都接受；错误时抛 root.error。
+ */
+export async function postGenRoute(route, body = {}, timeout = 180000) {
+  await ensureServerUrl()
+  return new Promise((resolve, reject) => {
+    uni.request({
+      url: buildUrl(route, []),
+      method: 'POST',
+      header: authHeader(),
+      data: body,
+      timeout: timeout || 180000,
+      success: (res) => {
+        const code = res.statusCode || 0
+        const root = res.data
+        if (root == null || typeof root !== 'object') {
+          reject(new Error(`服务端响应异常（HTTP ${code}），请确认地址是否正确`))
+          return
+        }
+        if (code === 401) {
+          try { store.clearSession() } catch (_) {}
+          reject(new Error('未登录或会话已过期'))
+          return
+        }
+        const payload = root.data && typeof root.data === 'object' ? root.data : root
+        if (code >= 400 || root.error || root.ok === false) {
+          reject(new Error(root.error || `HTTP ${code}`))
+          return
+        }
+        resolve(payload)
+      },
+      fail: (err) => {
+        markServerDown(currentServerUrl())
+        const msg = (err && err.errMsg) || '网络错误'
+        if (/timeout/i.test(msg)) reject(new Error('生成超时，请稍后重试'))
+        else reject(new Error(/cleartext|not allowed/i.test(msg) ? '无法建立连接（HTTP 明文请求被拦截）' : msg))
+      },
+    })
+  })
+}
+
+// ─────────────────────────────────────────────
+// 精准编辑 / 请求预览（无黑盒）
+// ─────────────────────────────────────────────
+
+/** 生图/视频/聊天「请求预览」：复用 /gen/images 的组装（不调用适配器，脱敏） */
+export async function previewAiGeneration(payload = {}) {
+  return request('/gen/preview', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+    timeout: 60000,
+  })
+}
+
+/** 精准编辑「请求预览」：与 /edit/run 共用同一段组装逻辑，直到供应商调用前为止 */
+export async function previewEditRun(payload = {}) {
+  return request('/edit/preview', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+    timeout: 120000,
+  })
+}
+
+// ─────────────────────────────────────────────
+// 回收站（软删可恢复，窗口按来源分档）
+// ─────────────────────────────────────────────
+
+/** 回收站列表 */
+export async function fetchTrashAssets({ page = 1, pageSize = 24, source = '', sort = 'deleted_at', keyword = '' } = {}) {
+  const query = [
+    `page=${page}`,
+    `pageSize=${pageSize}`,
+    source ? `source=${encodeURIComponent(source)}` : '',
+    sort ? `sort=${encodeURIComponent(sort)}` : '',
+    keyword ? `keyword=${encodeURIComponent(keyword)}` : '',
+  ].filter(Boolean)
+  return request('/assets/trash', { method: 'GET', query })
+}
+
+/** 回收站单条详情（含「为何进入回收站」判定原文） */
+export async function fetchTrashDetail(fid) {
+  return request(`/assets/trash/${encodeURIComponent(fid)}`, { method: 'GET' })
+}
+
+/** 从回收站恢复（支持单条 / 数组 fids） */
+export async function restoreTrashAsset(fids) {
+  const list = Array.isArray(fids) ? fids : [fids]
+  return request('/assets/trash/restore', {
+    method: 'POST',
+    body: JSON.stringify({ fids: list }),
+  })
+}
+
+/** 彻底粉碎（支持单条 / 数组 fids；需 viewer 白名单，已开） */
+export async function purgeTrashAsset(fids) {
+  const list = Array.isArray(fids) ? fids : [fids]
+  return request('/assets/trash/purge', {
+    method: 'POST',
+    body: JSON.stringify({ fids: list }),
+  })
+}
+
+/** 相册已删除对账：预览（不落库，GET /sync/reconcile） */
+export async function previewAlbumReconcile({ deviceId = '', graceDays = null } = {}) {
+  const qs = []
+  if (deviceId) qs.push(`deviceId=${encodeURIComponent(deviceId)}`)
+  if (graceDays !== null && graceDays !== undefined && graceDays !== '') {
+    qs.push(`graceDays=${encodeURIComponent(graceDays)}`)
+  }
+  const q = qs.length ? `?${qs.join('&')}` : ''
+  return request(`/sync/reconcile${q}`, { method: 'GET' })
+}
+
+/** 相册已删除对账：应用（移入回收站，apply=true；需 admin，SEC-007） */
+export async function applyAlbumReconcile({ deviceId = '', graceDays = null, limit = 200 } = {}) {
+  const res = await request('/sync/reconcile', {
+    method: 'POST',
+    body: JSON.stringify({ deviceId, graceDays, limit, apply: true }),
+    timeout: 300000,
+  })
+  try { viewerCache.clearAll() } catch (_) {}
+  return res
+}
+
+/** 全库查重移入回收站（destructive，需二次确认） */
+export async function dedupeLibraryToTrash() {
+  return request('/assets/dedupe-library', {
+    method: 'POST',
+    body: JSON.stringify({ moveToTrash: true }),
+    timeout: 300000,
+  })
+}
+
+/** 把 base64 图片写入临时文件并保存到系统相册 */
+export async function saveBase64ImageToAlbum(b64, fileName) {
+  if (!b64) throw new Error('无效的图片数据')
+  const name = `ML_EDIT_${Date.now()}.jpg`
+  const path = `${uni.env.USER_DATA_PATH}/${name}`
+  await new Promise((resolve, reject) => {
+    uni.writeFile({
+      filePath: path,
+      data: b64,
+      encoding: 'base64',
+      success: resolve,
+      fail: (e) => reject(new Error((e && e.errMsg) || '写入临时文件失败')),
+    })
+  })
+  return saveLocalFileAndRecord(path, fileName || name)
+}
+
+// 保存本地文件到相册 / 登记防重白名单（供 saveBase64ImageToAlbum 复用）
+function saveLocalFileAndRecord(filePath, fileName) {
+  return new Promise((resolve, reject) => {
+    uni.saveImageToPhotosAlbum({
+      filePath,
+      success: () => {
+        try { store.recordExportedMedia(fileName) } catch (_) {}
+        uni.showToast({ title: '已成功保存至相册', icon: 'success' })
+        resolve({ success: true, fileName, filePath })
+      },
+      fail: (e) => {
+        const msg = (e && e.errMsg) || '保存相册失败'
+        uni.showToast({ title: msg, icon: 'none' })
+        reject(new Error(msg))
+      },
+    })
+  })
+}
 

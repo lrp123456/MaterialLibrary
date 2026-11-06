@@ -22,6 +22,8 @@ function stripThinking(text) {
 function isVlmFallbackableError(err) {
   const m = String((err && err.message) || err || '');
   if (!m) return false;
+  // 400 参数格式/上游拒绝/返回非 JSON/密钥失效
+  if (/HTTP 400|INVALID_ARGUMENT|valid API key|BadRequestError|返回非 JSON/i.test(m)) return true;
   // 403 专属识别：Google/Gemini 报告 key leaked 或 free tier 不可用或 permission_denied/forbidden
   if (/HTTP 403|leaked|free[_ ]?tier|permission_denied|forbidden|billing|quota/i.test(m)) return true;
   // 429 / 503 / 500 / 502 / 504 / 池满 / 部署满 / 速率限制
@@ -184,7 +186,8 @@ async function chatVisionOnce({ baseUrl, apiKey, model, prompt, images, timeoutM
  *   workflow_vision_low 低优先组
  *   model_image_input 兜底模型
  */
-const VISION_FALLBACK_CHAIN = ['agnes-3.0-flash', 'workflow_vision_low', 'model_image_input'];
+// 视觉大模型级联多组回退候选池：遇错优先切换豆包 2.1 Lite（高稳定超低成本商用付费模型），再回落 Agnes 与低优先池
+const VISION_FALLBACK_CHAIN = ['doubao-seed-2-1-lite-260915', 'agnes-3.0-flash', 'workflow_vision_low', 'model_image_input'];
 
 function buildVisionChain(requestedModel, customChain = null) {
   if (Array.isArray(customChain) && customChain.length > 0) {
@@ -192,7 +195,7 @@ function buildVisionChain(requestedModel, customChain = null) {
   }
   const primary = requestedModel || 'workflow_vision';
   const chain = [primary];
-  const defaultFallbacks = ['agnes-3.0-flash', 'workflow_vision', 'workflow_vision_low', 'model_image_input'];
+  const defaultFallbacks = ['doubao-seed-2-1-lite-260915', 'agnes-3.0-flash', 'workflow_vision', 'workflow_vision_low', 'model_image_input'];
   for (const fb of defaultFallbacks) {
     if (fb && !chain.includes(fb)) {
       chain.push(fb);
@@ -206,6 +209,31 @@ function buildVisionChain(requestedModel, customChain = null) {
  * 针对 Gemini / workflow_vision 等模型，若遇到 403 泄露/429限流/超时/网络异常，
  * 自动级联回退到备用异构模型链（agnes-3.0-flash 等），保障服务不中断。
  */
+function resolveVisionEndpointForCandidate(candModel, defaultBaseUrl, defaultApiKey) {
+  const m = String(candModel || '').toLowerCase();
+  if (m.includes('doubao') || m.includes('volcengine')) {
+    const arkKey = process.env.ARK_API_KEY || defaultApiKey;
+    return {
+      baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+      apiKey: arkKey,
+      model: 'doubao-seed-2-1-lite-260915',
+    };
+  }
+  if (m.includes('agnes')) {
+    const agnesKey = process.env.AGNES_API_KEY || defaultApiKey;
+    return {
+      baseUrl: 'https://api.agnes-ai.cn/v1',
+      apiKey: agnesKey,
+      model: 'agnes-3.0-flash',
+    };
+  }
+  return {
+    baseUrl: defaultBaseUrl,
+    apiKey: defaultApiKey,
+    model: candModel,
+  };
+}
+
 async function chatVision(opts) {
   const primaryModel = (opts && opts.model) || 'workflow_vision';
   const enableFallback = !(opts && opts.disableFallback === true);
@@ -221,7 +249,8 @@ async function chatVision(opts) {
     tried.push(model);
     try {
       const fn = (module.exports && module.exports.chatVisionOnce) || chatVisionOnce;
-      return await fn({ ...opts, model });
+      const candConfig = resolveVisionEndpointForCandidate(model, opts?.baseUrl, opts?.apiKey);
+      return await fn({ ...opts, ...candConfig });
     } catch (e) {
       lastErr = e;
       if (!enableFallback || !isVlmFallbackableError(e)) {

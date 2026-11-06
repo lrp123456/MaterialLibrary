@@ -81,27 +81,29 @@ export function buildCandidates() {
     if (!list.includes(n)) list.push(n);
   };
 
-  // 0) 同源
+  const { proto } = here();
+  const isHttps = proto === 'https:';
+
+  // 0) 同源（首选：由 30002 统一反代，协议 100% 保持一致，零 Mixed Content 风险）
   push('');
 
-  // 1) 上次成功
-  push(safeStorageGet(SAVE_KEY));
+  // 1) 上次成功（若在 HTTPS 环境下，过滤掉历史中遗留的明文 http:// 地址）
+  const lastSuccess = safeStorageGet(SAVE_KEY);
+  if (!isHttps || !lastSuccess.startsWith('http://')) {
+    push(lastSuccess);
+  }
 
-  // 2) 本机直连（仅当页面本身就在本机，或本机与浏览器同机时有意义；失败成本很低）
-  if (hostname === '127.0.0.1' || hostname === 'localhost') {
+  // 2) 局域网直连：在 HTTPS 页面下，浏览器严格禁止混合内容请求，仅在 HTTP 协议下才尝试直连明文端口
+  if (!isHttps) {
+    if (hostname === '127.0.0.1' || hostname === 'localhost') {
+      push(`http://127.0.0.1:${API_PORT}`);
+    }
+    if (isIpHost(hostname) && hostname !== '127.0.0.1') {
+      push(`http://${hostname}:${API_PORT}`);
+    }
+    for (const h of KNOWN_LAN_HOSTS) push(`http://${h}:${API_PORT}`);
     push(`http://127.0.0.1:${API_PORT}`);
   }
-
-  // 3) 当前主机直连（页面从 LAN IP 打开时，后端大概率也在该 IP 的 30001）
-  if (isIpHost(hostname) && hostname !== '127.0.0.1') {
-    push(`http://${hostname}:${API_PORT}`);
-  }
-
-  // 4) 已知 LAN IP
-  for (const h of KNOWN_LAN_HOSTS) push(`http://${h}:${API_PORT}`);
-
-  // 本机兜底（页面从域名/非常规主机打开时也试一下）
-  push(`http://127.0.0.1:${API_PORT}`);
 
   // 5) 手动公网地址（最高优先级的人工指定——插到最前，但仍让同源先试一次）
   const manual = norm(safeStorageGet(MANUAL_KEY));

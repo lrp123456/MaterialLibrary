@@ -1202,6 +1202,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue';
+import { bindOverlays } from '../../service/overlay-stack.js';
 import StudioIcon from '../../components/StudioIcon.vue';
 import BaseAttrPicker from '../../components/BaseAttrPicker.vue';
 import BeforeAfterSlider from '../../components/BeforeAfterSlider.vue';
@@ -1243,6 +1244,11 @@ const assetPickPurpose = ref('base');
 const recentEditedAssets = ref([]);
 const lastFiledResult = ref('');
 const installPreview = ref('');
+// installPreview 是字符串型 ref，关闭要回到空串而不是 null。
+bindOverlays({
+  assetPicker: showAssetModal,
+  installPreview: { ref: installPreview, close: () => { installPreview.value = ''; } }
+}, { prefix: 'quick-studio:' });
 const installFileName = ref('');
 const installFileInput = ref(null);
 const imageNaturalSize = ref({ w: 0, h: 0 });

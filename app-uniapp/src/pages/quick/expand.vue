@@ -27,7 +27,7 @@
 </template>
 
 <script>
-import { aiTaskManager } from '../../service/AiTaskManager'
+import { handoffPreciseEdit } from '../../common/handoff'
 import { fieldOf } from '../../service/QuickParams'
 
 export default {
@@ -53,39 +53,42 @@ export default {
     async submitTask() {
       if (!this.imgUrl || this.submitting) return
       this.submitting = true
-      try {
-        await aiTaskManager.createTask({
-          fid: this.fid, type: 'expand', title: '扩图',
-          payload: { mode: 'expand', ratio: this.ratio || undefined, image: this.imgUrl },
-        })
-        uni.showToast({ title: '已提交扩图任务', icon: 'success' })
-        setTimeout(() => this.goBack(), 1200)
-      } catch (e) {
-        uni.showToast({ title: e.message || '提交失败', icon: 'none' })
-      } finally { this.submitting = false }
+      handoffPreciseEdit({
+        fid: this.fid,
+        imgUrl: this.imgUrl,
+        op: 'expand',
+        recipe: this.ratio
+          ? `将画面扩展到 ${this.ratio} 画幅，智能延展背景并保持主体完整。`
+          : '智能扩展画面，延展背景并保持主体完整。',
+        recipeHint: this.ratio ? `扩图至 ${this.ratio}` : '智能扩图',
+        expandRatio: this.ratio || undefined,
+        expandRatios: this.ratio ? [this.ratio] : undefined,
+      })
+      this.submitting = false
     },
   },
 }
 </script>
 
 <style scoped>
-.quick-page { display: flex; flex-direction: column; height: 100vh; background: #0F172A; }
-.nav-bar { display: flex; align-items: center; padding: 10px 16px; background: #1E293B; }
+.quick-page { display: flex; flex-direction: column; height: 100vh; background: #F8FAFC; }
+.nav-bar { display: flex; align-items: center; padding: 10px 16px; background: #FFFFFF; border-bottom: 1rpx solid #E7ECF3; }
 .nav-left { display: flex; align-items: center; }
-.back-icon { font-size: 28px; color: #FFF; margin-right: 8px; line-height: 1; }
-.nav-title { font-size: 17px; font-weight: 600; color: #FFF; }
+.back-icon { font-size: 28px; color: #0F172A; margin-right: 8px; line-height: 1; }
+.nav-title { font-size: 17px; font-weight: 600; color: #0F172A; }
 .preview-wrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 16px; min-height: 0; }
-.preview-img { width: 100%; height: 100%; }
+.preview-img { width: 100%; height: 100%; border-radius: 16px; }
 .preview-empty { padding: 40px; }
-.preview-empty-t { color: #64748B; font-size: 14px; }
-.bottom-panel { background: #1E293B; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); border-radius: 20px 20px 0 0; }
+.preview-empty-t { color: #94A3B8; font-size: 14px; }
+.bottom-panel { background: #FFFFFF; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); border-radius: 20px 20px 0 0; border-top: 1rpx solid #E7ECF3; }
 .options-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 8px; }
-.option-label { font-size: 14px; color: #E2E8F0; }
+.option-label { font-size: 13px; color: #334155; }
 .ratio-row { display: flex; flex-wrap: wrap; gap: 8px; }
-.ratio-chip { padding: 6px 12px; border-radius: 999px; background: #334155; }
-.ratio-chip.active { background: #2563EB; }
-.ratio-t { font-size: 12px; color: #E2E8F0; }
-.submit-btn { background: #2563EB; border-radius: 24px; padding: 14px 0; display: flex; align-items: center; justify-content: center; }
+.ratio-chip { padding: 6px 12px; border-radius: 999px; background: #F1F5F9; border: 1rpx solid #E7ECF3; }
+.ratio-chip.active { background: #EAF2FE; border-color: #BFDBFE; }
+.ratio-t { font-size: 12px; color: #475569; }
+.ratio-chip.active .ratio-t { color: #1D4ED8; font-weight: 600; }
+.submit-btn { background: linear-gradient(135deg, #3B82F6, #6366F1); border-radius: 24px; padding: 14px 0; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 20px rgba(59,130,246,.25); }
 .submit-btn.disabled { opacity: .5; }
-.submit-text { font-size: 16px; font-weight: 600; color: #FFF; }
+.submit-text { font-size: 15px; font-weight: 600; color: #FFFFFF; }
 </style>

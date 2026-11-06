@@ -16,6 +16,7 @@ import { scanAlbum } from './AlbumScanner'
 import { uploadSnapshot, retryPending } from './Uploader'
 import { startUploadQueue } from './MediaUploader'
 import { localMediaIndex } from './LocalMediaIndex'
+import { isAndroidTiramisu } from './android-permission.js'
 
 let running = false
 
@@ -32,10 +33,22 @@ export function isPermissionGranted() {
         return
       }
       const MainActivity = plus.android.runtimeMainActivity()
-      const perm =
-        parseFloat(String(plus.os.version)) >= 33
-          ? 'android.permission.READ_MEDIA_IMAGES'
-          : 'android.permission.READ_EXTERNAL_STORAGE'
+      let sdkInt = 0
+      try {
+        const Build = plus.android.importClass('android.os.Build')
+        if (Build && Build.VERSION && Build.VERSION.SDK_INT) {
+          sdkInt = Number(Build.VERSION.SDK_INT) || 0
+        }
+      } catch (_) {}
+      if (!sdkInt) {
+        try {
+          const Version = plus.android.importClass('android.os.Build$VERSION')
+          if (Version && Version.SDK_INT) sdkInt = Number(Version.SDK_INT) || 0
+        } catch (_) {}
+      }
+      const perm = isAndroidTiramisu(plus.os && plus.os.version, sdkInt)
+        ? 'android.permission.READ_MEDIA_IMAGES'
+        : 'android.permission.READ_EXTERNAL_STORAGE'
       // plus 桥：必须 invoke；PERMISSION_GRANTED === 0
       const code = Number(plus.android.invoke(MainActivity, 'checkSelfPermission', perm))
       const granted = code === 0

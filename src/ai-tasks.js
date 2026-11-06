@@ -187,6 +187,16 @@ async function resolveAssetBuffer(services, raw) {
     const local = await readLocalAssetImage(services, decodeURIComponent(mAsset[1]), '');
     if (local) return local;
   }
+  // 如果是带 origin 的自身服务图片，尝试提取 pathname 回环或本地读取
+  if (/^https?:\/\//i.test(s) && (s.includes(':3000') || s.includes('127.0.0.1') || s.includes('localhost') || s.includes('/api/'))) {
+    try {
+      const u = new URL(s);
+      if (u.pathname.startsWith('/api/cache/temp/')) {
+        const cPath = cacheTempFile(services.config, u.pathname);
+        if (cPath && fs.existsSync(cPath)) return fs.readFileSync(cPath);
+      }
+    } catch (_) {}
+  }
   if (/^https?:\/\//i.test(s)) {
     // 自己的素材地址已经在上面按 fid 读盘。走到这里的是外部 URL。
     // SEC-006：SSRF 防护——拒绝环回/链路本地/内网段目标（防探测内网与云元数据）；

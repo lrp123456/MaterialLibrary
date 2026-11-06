@@ -2,13 +2,13 @@
   <view class="ts">
     <image
       class="ts-img"
-      :src="imageUrl"
+      :src="realImageUrl"
       mode="widthFix"
       @load="onImgLoad"
     />
     <canvas
       canvas-id="tsCanvas"
-      :style="{ width: cssW + 'px', height: cssH + 'px' }"
+      :style="{ width: (cssW ? cssW + 'px' : '100%'), height: (cssH ? cssH + 'px' : '100%') }"
       class="ts-canvas"
       @touchstart="onStart"
       @touchmove="onMove"
@@ -20,7 +20,7 @@
       <view
         v-for="t in tools"
         :key="t.id"
-        :class="['ts-tool', { active: mode === t.id }]"
+        :class="['ts-tool', { active: currentMode === t.id }]"
         @click="setMode(t.id)"
       >
         {{ t.label }}
@@ -36,14 +36,18 @@
 
 <script>
 import { sortQuadClockwise } from '../common/coords'
+import { buildSelectionPayload } from '../common/selection-payload.js'
 
 export default {
   name: 'TouchSelector',
   props: {
     imageUrl: { type: String, default: '' },
+    imgUrl: { type: String, default: '' },
     // 检测结果（ch04）：[{ id,label,bbox(norm 0-1), polygon(norm) }]
     detections: { type: Array, default: () => [] },
-    mode: { type: String, default: 'box' }
+    mode: { type: String, default: 'box' },
+    defaultMode: { type: String, default: 'box' },
+    viewportHeight: { type: [Number, String], default: 0 },
   },
   data() {
     return {
@@ -57,6 +61,7 @@ export default {
       polyIds: [],
       poly: [],
       _rect: null,
+      internalMode: '',
       tools: [
         { id: 'box', label: '框选' },
         { id: 'quad', label: '四点' },
@@ -66,18 +71,32 @@ export default {
     }
   },
   computed: {
+    cssW() {
+      return this.imgCssW || 0
+    },
+    cssH() {
+      return this.imgCssH || (Number(this.viewportHeight) || 0)
+    },
+    realImageUrl() {
+      return this.imageUrl || this.imgUrl || ''
+    },
+    currentMode() {
+      if (this.internalMode) return this.internalMode
+      if (this.defaultMode === 'rect') return 'box'
+      return this.mode || this.defaultMode || 'box'
+    },
     hintText() {
       if (this.polyIds.length) return '已选 ' + this.polyIds.length + ' 个目标'
       if (this.quadPts.length) return '已定位 ' + this.quadPts.length + '/4 点'
       if (this.box) return '选区已就绪'
-      if (this.mode === 'tap') return '点击图中的检测框'
-      if (this.mode === 'quad') return '依次点四个角，前两点定长边角度'
+      if (this.currentMode === 'tap') return '点击图中的检测框'
+      if (this.currentMode === 'quad') return '依次点四个角，前两点定长边角度'
       return '按住拖动画矩形'
     }
   },
   methods: {
     setMode(m) {
-      this.mode = m
+      this.internalMode = m
       this.redraw()
     },
     onImgLoad(e) {
@@ -124,11 +143,11 @@ export default {
       const r = await this.getRect()
       if (!r) return
       const t = e.touches[0]
-      if (this.mode === 'box') {
+      if (this.currentMode === 'box') {
         this.drawing = true
         const n = this.toNorm(t.clientX, t.clientY)
         this.box = { x1: n.x, y1: n.y, x2: n.x, y2: n.y }
-      } else if (this.mode === 'quad') {
+      } else if (this.currentMode === 'quad') {
         const n = this.toNorm(t.clientX, t.clientY)
         this.quadPts.push([n.x, n.y])
         if (this.quadPts.length > 4) this.quadPts.shift()
@@ -163,7 +182,7 @@ export default {
       if (!hit) return
       const id = hit.id
       const idx = this.polyIds.indexOf(id)
-      if (this.mode === 'multi') {
+      if (this.currentMode === 'multi') {
         if (idx >= 0) this.polyIds.splice(idx, 1)
         else this.polyIds.push(id)
       } else {
@@ -262,22 +281,17 @@ export default {
       // #endif
     },
     emitSelection() {
-      let bbox = null
-      let quad = null
-      let polygon = null
-      if (this.box) {
-        bbox = {
-          x1: Math.min(this.box.x1, this.box.x2), y1: Math.min(this.box.y1, this.box.y2),
-          x2: Math.max(this.box.x1, this.box.x2), y2: Math.max(this.box.y1, this.box.y2)
-        }
-      }
-      if (this.quadPts.length === 4) quad = sortQuadClockwise(this.quadPts)
-      if (this.poly && this.poly.length) polygon = this.poly
-      this.$emit('select', {
-        method: this.mode,
-        bbox, quad, polygon,
-        w: this.imgNaturalW, h: this.imgNaturalH
+      const quad = this.quadPts.length === 4 ? sortQuadClockwise(this.quadPts) : null
+      const payload = buildSelectionPayload({
+        currentMode: this.currentMode,
+        box: this.box,
+        quad,
+        polygon: this.poly,
+        naturalW: this.imgNaturalW,
+        naturalH: this.imgNaturalH,
       })
+      this.$emit('select', payload)
+      this.$emit('change', payload)
     }
   }
 }

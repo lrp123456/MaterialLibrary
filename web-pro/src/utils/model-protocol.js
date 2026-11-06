@@ -45,6 +45,20 @@ export const STUDIO_SKILLS_REGISTRY = [
 /**
  * 评估当前模型 Schema 下的条件联动规则（Mode 约束 + Value 约束）
  */
+/**
+ * 模式级锁定的人话说明：契约里只写了 lock 数组，没写 reason，
+ * 直接显示「已由模型契约锁定」用户会以为参数坏了（尤其首尾帧画幅是灰的）。
+ */
+function modeLockReason(mode, key) {
+  if (key === 'ratio' || key === 'aspect_ratio') {
+    if (mode === 'first_last_frame') return '首尾帧模式的画幅由两张关键帧决定，已自动锁定；想换画幅请改用「图生视频」或「全能参考」';
+    if (mode === 'video_edit') return '视频编辑沿用原片画幅，无法单独改比例';
+    if (mode === 'video_extend') return '视频续写沿用原片画幅，无法单独改比例';
+  }
+  if (key === 'duration' && mode === 'video_edit') return '视频编辑的时长由原片决定，已锁定';
+  return '已由模型契约锁定';
+}
+
 export function evaluateClientModelRules(schema, activeMode, currentParams = {}, refCounts = { images: 0, videos: 0, audios: 0 }) {
   const nextParams = { ...(currentParams || {}) };
   const lockedKeys = new Set();
@@ -73,7 +87,7 @@ export function evaluateClientModelRules(schema, activeMode, currentParams = {},
     if (Array.isArray(mc.lock)) {
       for (const k of mc.lock) {
         lockedKeys.add(k);
-        lockReasons[k] = mc.reason || '已由模型契约锁定';
+        lockReasons[k] = mc.reason || modeLockReason(activeMode, k);
       }
     }
   }
@@ -561,11 +575,12 @@ export function detectMediaSemantics(item) {
   const isVideo = rawKind === 'video' || /\.(mp4|mov|webm)$/i.test(url) || /\.(mp4|mov|webm)$/i.test(name);
   const isAudio = rawKind === 'audio' || rawKind === 'music' || /\.(mp3|wav|m4a|aac|flac|ogg)$/i.test(url) || /\.(mp3|wav|m4a|aac|flac|ogg)$/i.test(name);
   
-  const is3DFurniture = item.origin === '3d_snapshot'
-    || Boolean(item.isRefObject)
-    || Boolean(item.targetRegionId)
-    || /(sofa|chair|table|furniture|3d|模型|家具|单品|科技沙发|双人沙发|收纳柜|sofa_model|sofa_electric)/i.test(name)
-    || /(sofa|chair|table|furniture|models|assets-3d)/i.test(url);
+  const is3DFurniture = (item.origin === '3d_snapshot' && (item.glb || item.modelUrl || item.targetRegionId))
+    || Boolean(item.glb || item.modelUrl)
+    || item.kind === '3d'
+    || item.category === '3d'
+    || /\.(glb|gltf|obj)($|\?)/i.test(url)
+    || /\.(glb|gltf|obj)$/i.test(name);
 
   const isMaterialSwatch = item.kind === 'swatch'
     || item.kind === 'basecolor'

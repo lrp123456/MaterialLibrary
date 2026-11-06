@@ -323,6 +323,15 @@ async function runTests() {
     assert.strictEqual(dualSync.body.deleted_next.id, 'tpl_old_tomb');
     console.log('✅ 双游标独立演进验证通过');
 
+    console.log('=== 11. 测试 POST /api/creation-templates/pull-external 主动拉取接口 ===');
+    const anonPull = await request('POST', '/api/creation-templates/pull-external', {});
+    assert.strictEqual(anonPull.status, 401, '未登录必须 401');
+
+    const authPull = await request('POST', '/api/creation-templates/pull-external', {}, user1Token);
+    assert.strictEqual(authPull.status, 200, '登录后主动拉取接口必须 200');
+    assert.strictEqual(typeof authPull.body.count, 'number', '返回 count 必须是数字');
+    console.log('✅ 主动拉取接口鉴权与降级响应检查通过');
+
     console.log('\n🎉 PR1 全部 10 项核心功能与极端边界测试均无缝通过！');
   } finally {
     if (server) {

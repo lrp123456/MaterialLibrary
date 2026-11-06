@@ -972,28 +972,51 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/events') {
     res.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
-      'Cache-Control': 'no-cache',
+      'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive',
       'Access-Control-Allow-Origin': '*',
     });
+    if (req.socket) {
+      req.socket.setKeepAlive(true, 10000);
+      req.socket.setTimeout(0);
+    }
     res.write('data: ' + JSON.stringify({ type: 'hello', log: lastLog, logcat: logcatBuf }) + '\n\n');
+
+    const heartbeatTimer = setInterval(() => {
+      try {
+        res.write(': heartbeat\n\n');
+      } catch (_) {
+        cleanup();
+      }
+    }, 15000);
+
     const onLog = (line) => {
-      res.write('data: ' + JSON.stringify({ type: 'log', line }) + '\n\n');
+      try { res.write('data: ' + JSON.stringify({ type: 'log', line }) + '\n\n'); } catch (_) {}
     };
     const onLogcat = (line) => {
-      res.write('data: ' + JSON.stringify({ type: 'logcat', line }) + '\n\n');
+      try { res.write('data: ' + JSON.stringify({ type: 'logcat', line }) + '\n\n'); } catch (_) {}
     };
     const onDone = (info) => {
-      res.write('data: ' + JSON.stringify({ type: 'done', ...info }) + '\n\n');
+      try { res.write('data: ' + JSON.stringify({ type: 'done', ...info }) + '\n\n'); } catch (_) {}
     };
     bus.on('log', onLog);
     bus.on('logcat', onLogcat);
     bus.on('done', onDone);
-    req.on('close', () => {
+
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      clearInterval(heartbeatTimer);
       bus.off('log', onLog);
       bus.off('logcat', onLogcat);
       bus.off('done', onDone);
-    });
+      try { res.end(); } catch (_) {}
+    };
+
+    req.on('close', cleanup);
+    req.on('error', cleanup);
+    res.on('error', cleanup);
     return;
   }
 

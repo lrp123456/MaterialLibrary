@@ -442,8 +442,9 @@ async function syncBaCreationCatalog(services, opts = {}) {
   let token = await getToken(config, fetchImpl, false);
   const seen = new Set();
   const summary = { keywords: keywords.length, seen: 0, cards: 0, image: 0, video: 0, failed: 0, truncated: false };
+  const maxPages = Math.max(1, Math.min(MAX_PAGES, Number(opts.maxPages) || MAX_PAGES));
   for (const keyword of keywords) {
-    for (let current = 1; current <= MAX_PAGES; current += 1) {
+    for (let current = 1; current <= maxPages; current += 1) {
       let page;
       try {
         page = await searchPage(config, fetchImpl, token, { keyword, type, current, size });

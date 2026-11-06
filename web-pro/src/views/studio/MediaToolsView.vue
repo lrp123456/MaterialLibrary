@@ -40,7 +40,10 @@
       <!-- ========================================================================= -->
       <!-- 1. 极速逐帧解码与抽帧工作台 (WebCodecs 硬件加速 + LRU 缓存 + 胶片条) -->
       <!-- ========================================================================= -->
-      <div v-if="activeTool === 'frames'" class="space-y-4 max-w-7xl mx-auto">
+      <div
+        v-if="activeTool === 'frames'"
+        :class="['space-y-4 max-w-7xl mx-auto', extractorStatus.loading ? 'pointer-events-none' : '']"
+      >
         <!-- 头部说明条 -->
         <div class="flex items-center justify-between pb-2 border-b border-studio-800">
           <div class="flex items-center space-x-3">
@@ -61,6 +64,13 @@
                 >
                   <span class="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
                   🎬 HTML5 增强寻帧 (24 帧热缓存)
+                </span>
+                <span
+                  v-else-if="extractorStatus.strategy === 'proxy'"
+                  class="px-2 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-200 border border-amber-500/40 font-mono font-bold flex items-center gap-1"
+                >
+                  <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                  H.264 实时代理
                 </span>
                 <span
                   v-else-if="extractorStatus.strategy === 'error'"
@@ -151,10 +161,10 @@
                 class="max-w-full max-h-full object-contain transition-transform"
               ></canvas>
 
-              <!-- 隐藏的 HTML5 Video 元素（仅作为二级火箭兜底与解码源） -->
+              <!-- 必须留在布局里。display:none 时 Chrome 不给 video 上屏，drawImage 永远是旧帧。 -->
               <video
                 ref="videoRef"
-                class="hidden"
+                class="absolute w-2 h-2 opacity-0 pointer-events-none"
                 playsinline
                 preload="auto"
               ></video>
@@ -178,7 +188,7 @@
                 <span class="text-3xl">⚠️</span>
                 <div class="text-sm font-bold text-rose-300">浏览器无法直接解码此视频格式</div>
                 <p class="text-xs text-slate-400 max-w-md">
-                  当前视频编码可能为特殊格式（如部分 10-bit HEVC、ProRes 或未安装硬件解码扩展）。建议使用系统内置的原生 FFmpeg 引擎一键轻量转码后即可完美寻帧。
+                  浏览器不能直接播放这个编码，H.264 实时预览代理也没有生成。可以重试，或到格式转换工坊转成 H.264 后再回来寻帧。
                 </p>
                 <div class="flex items-center space-x-2 pt-2">
                   <button
@@ -220,9 +230,9 @@
                 <button
                   @click="exportCurrentFramePNG"
                   class="px-3.5 py-1.5 rounded-lg bg-studio-cyan/20 hover:bg-studio-cyan/30 text-studio-cyan border border-studio-cyan/40 text-xs font-extrabold flex items-center space-x-1 cursor-pointer active:scale-95 shadow"
-                  :title="`导出无损原画 PNG (${videoWidth} × ${videoHeight})`"
+                  :title="`导出原片这一帧 (${videoWidth} × ${videoHeight})`"
                 >
-                  <span>📥 导出原画 PNG ({{ videoWidth }}×{{ videoHeight }})</span>
+                  <span>📥 导出原画 ({{ videoWidth }}×{{ videoHeight }})</span>
                 </button>
                 <button
                   @click="saveCurrentFrameToLibrary"
@@ -248,7 +258,9 @@
                   <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
                   {{ extractorStatus.strategy === 'webcodecs'
                     ? 'WebCodecs GPU 硬解'
-                    : (extractorStatus.strategy === 'html5' ? 'HTML5 引擎' : '引擎待命中') }}
+                    : (extractorStatus.strategy === 'proxy' ? 'H.264 实时代理'
+                      : (extractorStatus.strategy === 'html5' ? 'HTML5 引擎'
+                        : (extractorStatus.strategy === 'error' ? '解码失败' : '引擎待命中'))) }}
                 </span>
               </span>
 
@@ -286,7 +298,9 @@
                   <span class="text-emerald-400 font-bold">
                     {{ extractorStatus.strategy === 'webcodecs'
                       ? 'WebCodecs 硬件加速'
-                      : (extractorStatus.strategy === 'html5' ? 'HTML5 元素寻帧' : '引擎探测中') }}
+                      : (extractorStatus.strategy === 'proxy' ? 'H.264 代理实时寻帧'
+                        : (extractorStatus.strategy === 'html5' ? 'HTML5 元素寻帧'
+                          : (extractorStatus.strategy === 'error' ? '解码失败' : '引擎探测中'))) }}
                   </span>
                 </div>
               </div>
@@ -397,20 +411,21 @@
             </div>
 
             <!-- 胶片横向排布 -->
-            <div class="grid grid-cols-6 sm:grid-cols-12 gap-1.5 p-1.5 bg-studio-850 rounded-xl border border-studio-750 overflow-hidden">
+            <div class="flex gap-1.5 p-1.5 bg-studio-850 rounded-xl border border-studio-750 overflow-x-auto">
               <div
                 v-for="(f, i) in filmstripFrames"
-                :key="i"
+                :key="f.time + '-' + i"
                 @click="jumpToFrame(f.frame)"
                 :class="[
-                  'relative group rounded-lg overflow-hidden border aspect-[16/9] cursor-pointer transition-all hover:scale-105 hover:z-10 shadow',
-                  Math.abs(f.frame - currentFrameNumber) < 15
-                    ? 'border-studio-cyan ring-2 ring-studio-cyan/40 scale-[1.02]'
+                  'relative group shrink-0 w-14 rounded-lg overflow-hidden border cursor-pointer bg-black',
+                  Math.abs(f.time - currentTimestamp) < Math.max(0.4, videoDuration / 24)
+                    ? 'border-studio-cyan ring-2 ring-studio-cyan/40'
                     : 'border-studio-800 hover:border-studio-600'
                 ]"
+                :style="{ aspectRatio: `${videoWidth} / ${videoHeight}` }"
                 :title="`跳转到 ${f.timeStr} (第 ${f.frame} 帧)`"
               >
-                <img :src="f.dataUrl" class="w-full h-full object-cover" />
+                <img :src="f.dataUrl" class="w-full h-full object-contain" />
                 <div class="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center" style="background: rgba(15, 23, 42, 0.65);">
                   <span class="text-[10px] text-white font-mono font-bold">F:{{ f.frame }}</span>
                 </div>
@@ -1119,8 +1134,9 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
 import StudioIcon from '../../components/StudioIcon.vue';
 import AssetPickerModal from '../../components/AssetPickerModal.vue';
-import { authFetch, registerGeneratedAsset, getAssetPlayableUrl } from '../../api';
+import { authFetch, registerGeneratedAsset, getAssetPlayableUrl, getToken } from '../../api';
 import { MediaFrameExtractor } from './mediaFrameExtractor';
+import { bindOverlays } from '../../service/overlay-stack.js';
 // jszip（~28KB gzip）仅在打包 ZIP 时按需异步加载；wgslVideoEnhancer 同理（GPU 锐化开启时）
 
 const toolTabs = [
@@ -1189,6 +1205,10 @@ const batchProgress = ref({ current: 0, total: 0, percent: 0 });
 
 // 大图对比模态窗
 const compareModalVisible = ref(false);
+bindOverlays({
+  batch: showBatchModal,
+  compare: compareModalVisible
+}, { prefix: 'media-tools:' });
 const compareModalImg = ref('');
 const compareModalData = ref({ frame: 0, timeStr: '' });
 
@@ -1211,6 +1231,61 @@ function formatSeconds(sec) {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
 }
 
+let toolVideoKey = '';
+let toolVideoBody = null;
+
+async function resolveToolBody() {
+  const src = videoSource.value;
+  const key = src.fid
+    ? `fid:${src.fid}`
+    : (src.file ? `file:${src.file.name}:${src.file.size}:${src.file.lastModified}` : '');
+  if (!key) throw new Error('没有可转码的视频源');
+  if (toolVideoKey === key && toolVideoBody) return toolVideoBody;
+  if (src.fid) {
+    toolVideoBody = { fid: src.fid };
+  } else {
+    const uploaded = await uploadLocalVideo(src.file);
+    toolVideoBody = { videoPath: uploaded.videoPath };
+  }
+  toolVideoKey = key;
+  return toolVideoBody;
+}
+
+async function postTool(path, body) {
+  const res = await authFetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.success === false) throw new Error(json.error || '媒体工具请求失败');
+  return json.data;
+}
+
+function authedMediaUrl(url) {
+  const token = getToken();
+  if (!url || !token) return url;
+  const u = new URL(url, window.location.origin);
+  u.searchParams.set('token', token);
+  return `${u.pathname}${u.search}`;
+}
+
+async function openToolVideo() {
+  const data = await postTool('/api/tools/video-open', await resolveToolBody());
+  if (data?.proxyUrl) data.proxyUrl = authedMediaUrl(data.proxyUrl);
+  return data;
+}
+
+async function frameTool(body) {
+  return postTool('/api/tools/frame-at', { ...(await resolveToolBody()), ...body });
+}
+
+async function proxyStatusTool() {
+  const data = await postTool('/api/tools/browser-proxy', await resolveToolBody());
+  if (data?.url) data.url = authedMediaUrl(data.url);
+  return data;
+}
+
 /**
  * 初始化抽帧引擎
  */
@@ -1221,6 +1296,17 @@ function initExtractor() {
     videoElement: videoRef.value,
     canvasElement: frameCanvasRef.value,
     stageElement: frameStageRef.value,
+    serverBridge: {
+      open: openToolVideo,
+      previewFrame: frameTool,
+      originalFrame: frameTool,
+      thumb: frameTool,
+      filmstrip: async (count) => postTool('/api/tools/filmstrip', { ...(await resolveToolBody()), count }),
+      proxyStatus: proxyStatusTool,
+    },
+    onFilmstrip: (list) => {
+      if (list && list.length) filmstripFrames.value = list;
+    },
     onStatusChange: (status) => {
       extractorStatus.value = { ...status };
       if (extractor) {
@@ -1278,7 +1364,7 @@ async function toggleWgslEnhancerMode() {
  * 应用并载入视频源
  */
 async function applyVideoSource({ kind, fid = '', name, url, file = null }) {
-  videoSource.value = { kind, fid, name };
+  videoSource.value = { kind, fid, name, file };
   currentTimestamp.value = 0;
   currentFrameNumber.value = 0;
   targetJumpFrame.value = 0;
@@ -1295,7 +1381,7 @@ async function applyVideoSource({ kind, fid = '', name, url, file = null }) {
   });
 
   try {
-    await extractor.loadSource({ kind, name, url, file });
+    await extractor.loadSource({ kind, name, url, file, fid });
 
     // 同步元数据
     videoDuration.value = extractor.duration;
@@ -1318,9 +1404,11 @@ async function applyVideoSource({ kind, fid = '', name, url, file = null }) {
  */
 async function generateFilmstripBackground() {
   if (!extractor) return;
+  if (filmstripFrames.value.length >= 8) return;
   generatingFilmstrip.value = true;
   try {
     const list = await extractor.generateFilmstrip(12);
+    if (!list || !list.length) return;
     filmstripFrames.value = list;
   } catch (e) {
     console.warn('[MediaTools] 胶片条生成异常:', e);
@@ -1499,7 +1587,8 @@ async function exportCurrentFramePNG() {
   const dataUrl = await extractor.captureFullFrameDataUrl();
   if (!dataUrl) return;
   const a = document.createElement('a');
-  a.download = `frame_${currentFrameNumber.value}_${currentTimecode.value.replace(/:/g, '-')}.png`;
+  const ext = dataUrl.startsWith('data:image/jpeg') ? 'jpg' : 'png';
+  a.download = `frame_${currentFrameNumber.value}_${currentTimecode.value.replace(/:/g, '-')}.${ext}`;
   a.href = dataUrl;
   a.click();
 }

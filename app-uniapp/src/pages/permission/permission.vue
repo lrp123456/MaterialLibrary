@@ -39,6 +39,7 @@
 
 <script>
 import { store } from '../../service/SyncStateStore'
+import { isAndroidTiramisu as decideAndroidTiramisu } from '../../service/android-permission.js'
 
 export default {
   data() {
@@ -72,10 +73,9 @@ export default {
           return
         }
         const MainActivity = plus.android.runtimeMainActivity()
-        const perm =
-          parseFloat(String(plus.os.version)) >= 33
-            ? 'android.permission.READ_MEDIA_IMAGES'
-            : 'android.permission.READ_EXTERNAL_STORAGE'
+        const perm = this.isAndroidTiramisu()
+          ? 'android.permission.READ_MEDIA_IMAGES'
+          : 'android.permission.READ_EXTERNAL_STORAGE'
         const code = Number(plus.android.invoke(MainActivity, 'checkSelfPermission', perm))
         const granted = code === 0
         this.granted = granted
@@ -100,31 +100,53 @@ export default {
       uni.showToast({ title: '演示模式已标记授权', icon: 'none' })
       // #endif
     },
+    isAndroidTiramisu() {
+      let sdkInt = 0
+      try {
+        if (typeof plus !== 'undefined' && plus.android) {
+          const Build = plus.android.importClass('android.os.Build')
+          if (Build && Build.VERSION && Build.VERSION.SDK_INT) {
+            sdkInt = Number(Build.VERSION.SDK_INT) || 0
+          }
+          if (!sdkInt) {
+            const Version = plus.android.importClass('android.os.Build$VERSION')
+            if (Version && Version.SDK_INT) sdkInt = Number(Version.SDK_INT) || 0
+          }
+        }
+      } catch (_) {}
+      const osVersion = (typeof plus !== 'undefined' && plus.os && plus.os.version) || '0'
+      return decideAndroidTiramisu(osVersion, sdkInt)
+    },
     requestAppPermission() {
       // #ifdef APP-PLUS
-      const perms =
-        parseFloat(String(plus.os.version)) >= 33
+      try {
+        const perms = this.isAndroidTiramisu()
           ? ['android.permission.READ_MEDIA_IMAGES', 'android.permission.READ_MEDIA_VIDEO']
           : ['android.permission.READ_EXTERNAL_STORAGE']
-      plus.android.requestPermissions(
-        perms,
-        (e) => {
-          this.requesting = false
-          const granted = e && e.granted && e.granted.length > 0
-          this.granted = granted
-          store.setPhotoPermissionGranted(granted)
-          uni.showToast({
-            title: granted ? '授权成功' : '未授权，同步无法工作',
-            icon: granted ? 'success' : 'none',
-          })
-        },
-        (e) => {
-          this.requesting = false
-          const deniedAlways = e && e.deniedAlways && e.deniedAlways.length > 0
-          if (deniedAlways) this.jumpAppSettings()
-          else uni.showToast({ title: '权限申请失败', icon: 'none' })
-        }
-      )
+        plus.android.requestPermissions(
+          perms,
+          (e) => {
+            this.requesting = false
+            const granted = e && e.granted && e.granted.length > 0
+            this.granted = granted
+            store.setPhotoPermissionGranted(granted)
+            uni.showToast({
+              title: granted ? '授权成功' : '未授权，同步无法工作',
+              icon: granted ? 'success' : 'none',
+            })
+          },
+          (e) => {
+            this.requesting = false
+            const deniedAlways = e && e.deniedAlways && e.deniedAlways.length > 0
+            if (deniedAlways) this.jumpAppSettings()
+            else uni.showToast({ title: '权限申请失败', icon: 'none' })
+          }
+        )
+      } catch (e) {
+        this.requesting = false
+        console.warn('[PermissionGuide] request', e)
+        uni.showToast({ title: '权限申请失败', icon: 'none' })
+      }
       // #endif
     },
     jumpAppSettings() {

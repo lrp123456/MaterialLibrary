@@ -50,7 +50,7 @@ function wslWindowsHost() {
         const ip = [hex.slice(6, 8), hex.slice(4, 6), hex.slice(2, 4), hex.slice(0, 2)]
           .map((h) => parseInt(h, 16))
           .join('.');
-        if (net.isIP(ip) && !seen.includes(ip)) seen.push(ip);
+        if (net.isIP(ip) && !ip.startsWith('198.18.') && !seen.includes(ip)) seen.push(ip);
       }
     }
   } catch {}
@@ -77,12 +77,34 @@ function readConfigProxy() {
   return '';
 }
 
+const DOMESTIC_NO_PROXY = [
+  '127.0.0.1',
+  'localhost',
+  '::1',
+  '.local',
+  '10.0.0.0/8',
+  '192.168.0.0/16',
+  '172.16.0.0/12',
+  'newapi.naite.cc',
+  'naite.cc',
+  'aliyuncs.com',
+  'aliyun.com',
+  'volces.com',
+  'volcengine.com',
+  'modelscope.cn',
+  'agnes-ai.cn',
+  'api.agnes-ai.cn',
+  'laozhang.ai',
+  'api2.laozhang.ai'
+];
+
 function applyDispatcher(proxyUrl) {
   process.env.HTTP_PROXY = proxyUrl;
   process.env.http_proxy = proxyUrl;
   process.env.HTTPS_PROXY = proxyUrl;
   process.env.https_proxy = proxyUrl;
-  const np = process.env.NO_PROXY || process.env.no_proxy || '127.0.0.1,localhost,::1';
+  const rawNp = (process.env.NO_PROXY || process.env.no_proxy || '').split(',').map(s => s.trim()).filter(Boolean);
+  const np = Array.from(new Set([...DOMESTIC_NO_PROXY, ...rawNp])).join(',');
   process.env.NO_PROXY = np;
   process.env.no_proxy = np;
 

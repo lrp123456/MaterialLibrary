@@ -10,21 +10,59 @@
       padding: 0;
       width: 100%;
       height: 100%;
-      background: transparent;
+      background: #F8FAFC;
       overflow: hidden;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;
+      color: #0F172A;
     }
     #wrap {
-      position: relative;
+      display: flex;
+      flex-direction: column;
       width: 100%;
       height: 100%;
-      background: transparent;
+      background: #F8FAFC;
+    }
+    .topbar {
+      flex-shrink: 0;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 12px;
+      background: #FFFFFF;
+      border-bottom: 1px solid #E7ECF3;
+    }
+    .topbar-btn {
+      width: 34px;
+      height: 34px;
+      border: 0;
+      border-radius: 17px;
+      background: #F1F5F9;
+      color: #0F172A;
+      font-size: 18px;
+      line-height: 34px;
+      padding: 0;
+    }
+    .topbar-title {
+      flex: 1;
+      min-width: 0;
+      font-size: 15px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .stage {
+      position: relative;
+      flex: 1;
+      min-height: 0;
+      background: #FFFFFF;
     }
     model-viewer {
       width: 100%;
       height: 100%;
-      background-color: transparent;
-      --poster-color: transparent;
+      background-color: #FFFFFF;
+      --poster-color: #FFFFFF;
     }
     #fallback {
       position: absolute;
@@ -34,32 +72,101 @@
       align-items: center;
       justify-content: center;
       gap: 8px;
-      background: #0f172a;
+      background: #F8FAFC;
       z-index: 2;
     }
     #fallback.show { display: flex; }
-    #fallback .icon { font-size: 44px; }
-    #fallback .tip { font-size: 13px; color: #94a3b8; text-align: center; padding: 0 16px; line-height: 1.5; }
+    #fallback .icon { font-size: 40px; }
+    #fallback .tip { font-size: 13px; color: #64748B; text-align: center; padding: 0 24px; line-height: 1.5; }
+    .controls {
+      flex-shrink: 0;
+      padding: 10px 16px calc(14px + env(safe-area-inset-bottom));
+      background: #FFFFFF;
+      border-top: 1px solid #E7ECF3;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .row label {
+      width: 38px;
+      font-size: 12px;
+      color: #334155;
+      flex-shrink: 0;
+    }
+    .row input[type=range] {
+      flex: 1;
+      accent-color: #3B82F6;
+      height: 20px;
+    }
+    .row .val {
+      width: 46px;
+      text-align: right;
+      font-size: 11px;
+      color: #64748B;
+      font-variant-numeric: tabular-nums;
+    }
+    #shot {
+      width: 100%;
+      height: 44px;
+      margin-top: 6px;
+      border: 0;
+      border-radius: 22px;
+      background: linear-gradient(135deg, #3B82F6, #6366F1);
+      color: #FFFFFF;
+      font-size: 15px;
+      font-weight: 700;
+      box-shadow: 0 8px 20px rgba(59, 130, 246, .28);
+    }
+    #shot:disabled { opacity: .55; }
+    .hint {
+      margin-top: 8px;
+      text-align: center;
+      font-size: 11px;
+      color: #94A3B8;
+    }
   </style>
 </head>
 <body>
   <div id="wrap">
-    <model-viewer
-      id="mv"
-      src=""
-      camera-controls
-      camera-orbit="45deg 85deg auto"
-      min-camera-orbit="auto 70deg auto"
-      max-camera-orbit="auto 110deg auto"
-      orientation="0deg 0deg 0deg"
-      shadow-intensity="1"
-      exposure="1"
-      loading="eager"
-      reveal="auto"
-    ></model-viewer>
-    <div id="fallback">
-      <div class="icon">🛋️</div>
-      <div class="tip" id="fallbackTip">3D 模型加载中或需要重试</div>
+    <div class="topbar">
+      <button class="topbar-btn" id="cancel">✕</button>
+      <div class="topbar-title" id="title">3D 朝向</div>
+    </div>
+    <div class="stage">
+      <model-viewer
+        id="mv"
+        src=""
+        camera-controls
+        camera-orbit="45deg 85deg auto"
+        min-camera-orbit="auto 70deg auto"
+        max-camera-orbit="auto 110deg auto"
+        orientation="0deg 0deg 0deg"
+        shadow-intensity="1"
+        exposure="1.05"
+        loading="eager"
+        reveal="auto"
+      ></model-viewer>
+      <div id="fallback">
+        <div class="icon">🛋️</div>
+        <div class="tip" id="fallbackTip">3D 模型加载中或需重试</div>
+      </div>
+    </div>
+    <div class="controls">
+      <div class="row">
+        <label for="yaw">左右</label>
+        <input id="yaw" type="range" min="0" max="359" step="1" />
+        <span class="val" id="yawVal">0°</span>
+      </div>
+      <div class="row">
+        <label for="pitch">上下</label>
+        <input id="pitch" type="range" min="-30" max="30" step="1" />
+        <span class="val" id="pitchVal">0°</span>
+      </div>
+      <button id="shot">完成截图</button>
+      <div class="hint">拖动只在本地旋转，点完成时截取一次</div>
     </div>
   </div>
 
@@ -71,13 +178,6 @@
         var m = location.search.match(new RegExp('[?&]' + k + '=([^&]*)'));
         return m ? decodeURIComponent(m[1]) : '';
       }
-    }
-
-    function showFallback(msg) {
-      var tip = document.getElementById('fallbackTip');
-      if (tip && msg) tip.textContent = msg;
-      document.getElementById('fallback').classList.add('show');
-      notifyParent({ type: 'model-viewer-error', msg: msg || 'load failed' });
     }
 
     function notifyParent(data) {
@@ -103,21 +203,69 @@
 
     var mv = document.getElementById('mv');
     var src = qs('src');
+    var name = qs('name');
     var initYaw = parseInt(qs('yaw') || '0', 10) || 0;
+    var initPitch = parseInt(qs('pitch') || '0', 10) || 0;
+    var yawInput = document.getElementById('yaw');
+    var pitchInput = document.getElementById('pitch');
+    var yawVal = document.getElementById('yawVal');
+    var pitchVal = document.getElementById('pitchVal');
+    var shotBtn = document.getElementById('shot');
+    var ready = false;
+
+    if (name) {
+      document.getElementById('title').textContent = name + ' · 3D 朝向';
+    }
+    var topInset = parseInt(qs('top') || '0', 10) || 0;
+    if (topInset > 0) {
+      var bar = document.querySelector('.topbar');
+      if (bar) {
+        bar.style.height = (48 + topInset) + 'px';
+        bar.style.paddingTop = topInset + 'px';
+        bar.style.boxSizing = 'border-box';
+      }
+    }
 
     if (!/^https?:\/\//i.test(src)) {
       showFallback('模型地址无效（需 http/https 绝对地址）');
     } else {
       mv.setAttribute('src', src);
     }
-    setYaw(initYaw);
+    yawInput.value = String(initYaw);
+    pitchInput.value = String(initPitch);
+    applyOrientation();
+
+    yawInput.addEventListener('input', function () {
+      applyOrientation();
+    });
+    pitchInput.addEventListener('input', function () {
+      applyOrientation();
+    });
+
+    document.getElementById('cancel').addEventListener('click', function () {
+      notifyParent({ type: 'model-cancel' });
+    });
+
+    shotBtn.addEventListener('click', function () {
+      if (!ready) {
+        notifyParent({ type: 'model-snapshot-error', error: '模型尚未加载完成，请稍候' });
+        return;
+      }
+      shotBtn.disabled = true;
+      shotBtn.textContent = '截图中…';
+      exportPngSnapshot().then(function (ok) {
+        shotBtn.disabled = false;
+        shotBtn.textContent = ok ? '重新截图' : '完成截图';
+      });
+    });
 
     var failedTimer = setTimeout(function () {
       if (!mv.loaded) showFallback('3D 模型加载超时');
-    }, 12000);
+    }, 15000);
 
     mv.addEventListener('load', function () {
       clearTimeout(failedTimer);
+      ready = true;
       document.getElementById('fallback').classList.remove('show');
       notifyParent({ type: 'model-loaded', src: src });
     });
@@ -127,24 +275,34 @@
       showFallback('3D 模型加载失败（网络/跨域/文件格式）');
     });
 
-    function setYaw(deg) {
-      var d = ((Math.round(deg) % 360) + 360) % 360;
-      mv.setAttribute('orientation', '0deg 0deg ' + d + 'deg');
+    function showFallback(msg) {
+      var tip = document.getElementById('fallbackTip');
+      if (tip && msg) tip.textContent = msg;
+      document.getElementById('fallback').classList.add('show');
+      notifyParent({ type: 'model-viewer-error', msg: msg || 'load failed' });
     }
-    window.setYaw = setYaw;
+
+    function applyOrientation() {
+      var yaw = parseInt(yawInput.value, 10) || 0;
+      var pitch = parseInt(pitchInput.value, 10) || 0;
+      mv.setAttribute('orientation', pitch + 'deg 0deg ' + yaw + 'deg');
+      yawVal.textContent = yaw + '°';
+      pitchVal.textContent = pitch + '°';
+    }
 
     /**
      * 导出截图：
-     * 相机锁回 方位 45°、俯仰 85°，导出干净透明/纯色 PNG 作为图2，再把相机恢复
+     * 相机锁回 方位 45°、俯仰 85°，导出干净透明 PNG，
+     * 再铺到白底上（家具图必须去掉黑/透明底），最后把相机恢复。
      */
     async function exportPngSnapshot() {
-      if (!mv) throw new Error('model-viewer not ready');
+      if (!mv) return false;
+      var yaw = parseInt(yawInput.value, 10) || 0;
+      var pitch = parseInt(pitchInput.value, 10) || 0;
       var prevOrbit = mv.cameraOrbit;
       try {
         mv.cameraOrbit = '45deg 85deg auto';
-        if (typeof mv.jumpCameraToGoal === 'function') {
-          mv.jumpCameraToGoal();
-        }
+        if (typeof mv.jumpCameraToGoal === 'function') mv.jumpCameraToGoal();
         await new Promise(function (resolve) {
           requestAnimationFrame(function () {
             requestAnimationFrame(resolve);
@@ -153,15 +311,20 @@
         var blob = await mv.toBlob({ mimeType: 'image/png', idealAspect: true });
         if (!blob) throw new Error('截图导出失败');
 
-        var reader = new FileReader();
-        reader.onloadend = function () {
-          var dataUrl = reader.result;
-          notifyParent({
-            type: 'model-snapshot-ready',
-            dataUrl: dataUrl
-          });
-        };
-        reader.readAsDataURL(blob);
+        var dataUrl = await new Promise(function (resolve, reject) {
+          var reader = new FileReader();
+          reader.onloadend = function () { resolve(reader.result); };
+          reader.onerror = function () { reject(new Error('读取截图失败')); };
+          reader.readAsDataURL(blob);
+        });
+
+        var flattened = await flattenToWhite(dataUrl);
+        notifyParent({
+          type: 'model-snapshot-ready',
+          dataUrl: flattened,
+          yaw: yaw,
+          pitch: pitch
+        });
         return true;
       } catch (err) {
         notifyParent({
@@ -172,20 +335,53 @@
       } finally {
         if (prevOrbit) {
           mv.cameraOrbit = prevOrbit;
-          if (typeof mv.jumpCameraToGoal === 'function') {
-            mv.jumpCameraToGoal();
-          }
+          if (typeof mv.jumpCameraToGoal === 'function') mv.jumpCameraToGoal();
         }
       }
     }
-    window.exportPngSnapshot = exportPngSnapshot;
 
-    // 通信接收
+    function flattenToWhite(dataUrl) {
+      return new Promise(function (resolve, reject) {
+        var img = new Image();
+        img.onload = function () {
+          try {
+            var max = 1024;
+            var scale = Math.min(1, max / Math.max(img.width, img.height));
+            var w = Math.max(1, Math.round(img.width * scale));
+            var h = Math.max(1, Math.round(img.height * scale));
+            var pad = Math.max(12, Math.round(Math.max(w, h) * 0.06));
+            var cw = w + pad * 2;
+            var ch = h + pad * 2;
+            var canvas = document.createElement('canvas');
+            canvas.width = cw;
+            canvas.height = ch;
+            var ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(0, 0, cw, ch);
+            ctx.drawImage(img, pad, pad, w, h);
+            resolve(canvas.toDataURL('image/png'));
+          } catch (e) {
+            reject(e);
+          }
+        };
+        img.onerror = function () { reject(new Error('截图转白底失败')); };
+        img.src = dataUrl;
+      });
+    }
+
+    // 通信接收（App 端如需由外部控制）
     window.addEventListener('message', function (e) {
       try {
         var d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
         if (!d) return;
-        if (d.type === 'set-yaw' || d.yaw != null) setYaw(d.yaw);
+        if (d.type === 'set-yaw' || d.yaw != null) {
+          yawInput.value = String(d.yaw);
+          applyOrientation();
+        }
+        if (d.type === 'set-pitch' || d.pitch != null) {
+          pitchInput.value = String(d.pitch);
+          applyOrientation();
+        }
         if (d.type === 'load-model' && d.src && /^https?:\/\//i.test(d.src)) {
           mv.setAttribute('src', d.src);
         }
@@ -198,9 +394,9 @@
       try {
         var d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
         if (!d) return;
-        if (d.type === 'set-yaw' || d.yaw != null) setYaw(d.yaw);
-        if (d.type === 'load-model' && d.src && /^https?:\/\//i.test(d.src)) {
-          mv.setAttribute('src', d.src);
+        if (d.type === 'set-yaw' || d.yaw != null) {
+          yawInput.value = String(d.yaw);
+          applyOrientation();
         }
         if (d.type === 'export-snapshot') {
           exportPngSnapshot();

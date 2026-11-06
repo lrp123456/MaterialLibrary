@@ -418,6 +418,25 @@
                     <StudioIcon name="star" :size="13" />
                     <span>⭐ 收藏为配方</span>
                   </button>
+                  <button
+                    type="button"
+                    :disabled="msg.savingToLibrary || msg.librarySaved"
+                    @click="saveResultToLibrary(msg)"
+                    class="flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-studio-850 hover:bg-emerald-500/20 text-emerald-300 hover:text-emerald-200 border border-emerald-500/40 text-xs font-bold transition-all cursor-pointer shadow-xs disabled:opacity-60 disabled:cursor-default"
+                    :title="msg.librarySaveError || '手动存入素材库（生成结果默认不入库）'"
+                  >
+                    <StudioIcon name="plus" :size="13" />
+                    <span>{{ msg.librarySaved ? '✓ 已入库' : (msg.savingToLibrary ? '存入中…' : '存入素材库') }}</span>
+                  </button>
+                  <button
+                    type="button"
+                    @click="openRetry(msg)"
+                    class="flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-studio-850 hover:bg-studio-800 text-slate-200 hover:text-white border border-studio-750 text-xs font-bold transition-all cursor-pointer shadow-xs"
+                    title="用相同提示词与参数配置重新生成"
+                  >
+                    <StudioIcon name="rotateRight" :size="13" />
+                    <span>重新生成</span>
+                  </button>
                   <a
                     :href="resultImageDownloadHref(msg)"
                     target="_blank"
@@ -700,6 +719,7 @@
           @suggest-prompts="handleSuggestPrompts"
           @open-picker="openAssetSelectorModal"
           @upload-files="handleDirectUploadFiles"
+          @reorder="handleTrayReorder"
         />
 
         <!-- 图3所标：右侧窄长槽位 (高度铺满看图区，收缩时回归顶部) -->
@@ -710,6 +730,7 @@
           :hoveredRegionKey="hoveredRegionKey"
           @region-hover="k => hoveredRegionKey = k"
           @select="onTraySelect($event)"
+          @reorder="handleTrayReorder"
           @open-picker="openAssetSelectorModal"
           @upload-files="handleDirectUploadFiles"
         />
@@ -723,6 +744,7 @@
         :images="referenceTray"
         :selectedIndex="selectedImageIndex"
         @select="onTraySelect($event)"
+        @reorder="handleTrayReorder"
         @open-picker="openAssetSelectorModal"
         @upload-files="handleDirectUploadFiles"
         @expand-viewer="viewerCollapsed = false"
@@ -803,6 +825,7 @@
                 v-model:showAdvanced="showAdvanced"
                 :refCounts="currentRefCounts"
                 @select-mode="setGenMode"
+                @param-change="onParamBarChange"
               />
             </div>
             <p v-if="catalogError" class="basis-full text-xs text-amber-300">
@@ -815,6 +838,9 @@
             </p>
             <p v-if="activeModality === 'image' && imageModelKey === 'qwenimage_local'" class="basis-full text-xs text-slate-300 leading-relaxed">
               文生图，或挂最多 10 张参考图做编辑。标准模型和加速 8 步在上面选。
+            </p>
+            <p v-else-if="activeModality === 'image' && currentSchema && !fieldByKey(currentSchema, 'size')" class="basis-full text-xs text-slate-300 leading-relaxed">
+              这个模型按宽高比直接出图，没有独立的分辨率档位；尺寸跟着「宽高比」走。
             </p>
             <p v-else-if="audioOnlyModel()" class="basis-full text-xs text-slate-300 leading-relaxed">
               先上传一段参考音频，10 到 15 秒最合适。上面的文字是要说的话。
@@ -1892,6 +1918,34 @@
                 提示：此配方为早期系统配方，复用时默认适配至最新稳定版模型。
               </p>
             </div>
+
+            <!-- 🗂️ 关联衍生版本切片 (聚合折叠母本时，可在详情内自由切换对比任一版本) -->
+            <div v-if="detailModal.tpl.variants && detailModal.tpl.variants.length > 1" class="space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="text-xs font-bold text-studio-cyan flex items-center gap-1.5">
+                  <span>🗂️ 关联衍生版本 (共 {{ detailModal.tpl.variants.length }} 项)</span>
+                </label>
+                <span class="text-[11px] text-slate-400">点击查看不同画幅或版本</span>
+              </div>
+              <div class="grid grid-cols-3 gap-2 max-h-40 overflow-y-auto scrollbar-thin p-1 bg-studio-950 rounded-xl border border-studio-800">
+                <div
+                  v-for="(v, vIdx) in detailModal.tpl.variants"
+                  :key="v.id"
+                  @click="selectModalVariant(v)"
+                  class="p-1.5 rounded-lg border transition-all cursor-pointer flex flex-col items-center gap-1"
+                  :class="detailModal.tpl.id === v.id ? 'border-studio-accent bg-studio-accent/20 ring-1 ring-studio-accent' : 'border-studio-800 hover:border-studio-700 bg-studio-900'"
+                >
+                  <img
+                    v-if="v.result_images?.[0]?.url"
+                    :src="v.result_images[0].url"
+                    class="w-full h-14 object-cover rounded"
+                  />
+                  <div class="text-[10px] text-slate-300 font-mono truncate w-full text-center">
+                    {{ v.aspect_ratio || v.params?.ratio || '衍生版' }}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- 底部操作大按钮 -->
@@ -1928,7 +1982,8 @@
 
     <!-- 6. 全景放大创作库画廊工作台 (Expanded Library Studio) -->
     <div
-      v-if="showExpandedLibrary"
+      v-if="libraryMounted"
+      v-show="showExpandedLibrary"
       :class="[
         'fixed inset-0 z-[60] flex items-center justify-center bg-black/85 backdrop-blur-md transition-all',
         isLibraryFullscreen ? 'p-0' : 'p-3 sm:p-5 lg:p-6'
@@ -1951,7 +2006,7 @@
             </div>
             <div>
               <div class="flex items-center space-x-2">
-                <h3 class="text-base font-bold text-white tracking-wide">灵感创作资产库</h3>
+                <h3 class="text-base font-bold text-slate-100 dark:text-white tracking-wide">灵感创作资产库</h3>
                 <span class="text-xs px-2 py-0.5 rounded-full bg-studio-800 text-slate-300 font-mono border border-studio-700">
                   共 {{ templates.length }} 项 · 过滤 {{ filteredTemplates.length }} 项
                 </span>
@@ -1962,6 +2017,18 @@
 
           <!-- 右侧操作 -->
           <div class="flex items-center space-x-2 sm:space-x-3">
+            <span v-if="pullExternalNotice" class="text-xs px-2.5 py-1 rounded-lg bg-amber-500/15 text-amber-500 border border-amber-500/30 animate-pulse font-mono hidden sm:inline-block">
+              {{ pullExternalNotice }}
+            </span>
+            <button
+              @click="triggerPullExternal(true)"
+              :disabled="isPullingExternal"
+              class="px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl bg-studio-850 hover:bg-studio-800 border border-studio-700 text-slate-200 text-xs font-bold shadow-xs flex items-center space-x-1.5 cursor-pointer transition-all disabled:opacity-50"
+              title="主动拉取外部数据源最新创作配方资产"
+            >
+              <span :class="{ 'inline-block animate-spin': isPullingExternal }">🔄</span>
+              <span>{{ isPullingExternal ? '正在拉取...' : '主动拉取' }}</span>
+            </button>
             <button
               @click="openAddTemplateModal"
               class="px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl bg-studio-accent hover:brightness-110 text-white text-xs font-bold shadow-md flex items-center space-x-1.5 cursor-pointer transition-all"
@@ -2010,7 +2077,7 @@
               <span class="text-xs text-slate-400 font-bold">空间:</span>
               <select
                 v-model="tplSpaceFilter"
-                class="bg-studio-950 border border-studio-750 rounded-lg px-2.5 py-1.5 text-xs text-white outline-none font-medium"
+                class="bg-studio-950 border border-studio-750 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 dark:text-white outline-none font-medium"
               >
                 <option value="">全部空间</option>
                 <option v-for="sp in tagVocab.space" :key="sp.dir" :value="sp.dir">{{ sp.label }}</option>
@@ -2022,7 +2089,7 @@
               <span class="text-xs text-slate-400 font-bold">风格:</span>
               <select
                 v-model="tplStyleFilter"
-                class="bg-studio-950 border border-studio-750 rounded-lg px-2.5 py-1.5 text-xs text-white outline-none font-medium"
+                class="bg-studio-950 border border-studio-750 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 dark:text-white outline-none font-medium"
               >
                 <option value="">全部风格</option>
                 <option v-for="st in tagVocab.style_atom" :key="st.dir" :value="st.dir">{{ st.label }}</option>
@@ -2037,6 +2104,18 @@
             >
               <span>⭐</span>
               <span>仅看常用</span>
+            </button>
+
+            <!-- 🗂️ 聚合衍生版本 开关 -->
+            <button
+              type="button"
+              @click="tplGroupDerivatives = !tplGroupDerivatives"
+              class="px-3 py-1.5 rounded-lg border text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer"
+              :class="tplGroupDerivatives ? 'bg-studio-accent/20 border-studio-accent/60 text-studio-cyan shadow-sm shadow-studio-accent/20' : 'bg-studio-950 border-studio-750 text-slate-400 hover:text-white'"
+              title="将同源参考图或同一母本的多次衍生版本折叠聚合，避免平铺冗余"
+            >
+              <span>🗂️</span>
+              <span>聚合衍生版本</span>
             </button>
           </div>
 
@@ -2054,7 +2133,7 @@
         </div>
 
         <!-- 卡片网格展示区 (Grid 3 列) -->
-        <div class="flex-1 overflow-y-auto p-6 scrollbar-thin">
+        <div class="flex-1 overflow-y-auto p-6 scrollbar-thin creation-grid-scroller">
           <!-- 创作库为空 -->
           <div v-if="templates.length === 0" class="h-full flex flex-col items-center justify-center text-center py-16">
             <div class="w-16 h-16 rounded-3xl bg-studio-850 border border-studio-750 flex items-center justify-center text-studio-accent mb-4 shadow-lg">
@@ -2163,7 +2242,7 @@
                       </span>
                     </div>
                     <div class="space-y-1">
-                      <h4 class="text-xs font-bold text-white truncate group-hover:text-studio-accent">{{ tpl.title }}</h4>
+                      <h4 class="text-xs font-bold text-slate-100 dark:text-white truncate group-hover:text-studio-accent">{{ tpl.title }}</h4>
                       <p class="text-[11px] text-slate-400 line-clamp-2 leading-relaxed">{{ tpl.prompt }}</p>
                     </div>
                     <div class="pt-2 mt-2 border-t border-studio-800 flex items-center justify-between">
@@ -2257,7 +2336,7 @@
                       </span>
                     </div>
                     <div class="space-y-1">
-                      <h4 class="text-xs font-bold text-white truncate group-hover:text-amber-200">{{ tpl.title }}</h4>
+                      <h4 class="text-xs font-bold text-slate-100 dark:text-white truncate group-hover:text-amber-200">{{ tpl.title }}</h4>
                       <p class="text-[11px] text-slate-400 line-clamp-2 leading-relaxed">{{ tpl.prompt }}</p>
                     </div>
                     <div class="pt-2 mt-2 border-t border-studio-800 flex items-center justify-between">
@@ -2277,12 +2356,12 @@
             </div>
 
             <!-- 主时间轴瀑布流标题 (第三段式：常规排序) -->
-            <div class="flex items-center space-x-2 pt-2 px-1 text-slate-300 font-bold text-xs">
+            <div class="flex items-center space-x-2 pt-2 px-1 text-slate-200 dark:text-slate-100 font-bold text-xs">
               <span>🎨</span>
               <span>常规创作时间轴</span>
-              <span class="text-slate-500 font-normal font-mono text-[11px]">按真实创作时间倒序呈现</span>
-              <span v-if="regularTemplates.length > 0" class="px-2 py-0.5 text-[10px] font-mono font-bold bg-studio-900 text-slate-400 rounded-full border border-studio-800">
-                {{ regularTemplates.length }} 件
+              <span class="text-slate-400 font-normal font-mono text-[11px]">按真实创作时间倒序呈现</span>
+              <span v-if="regularTemplates.length > 0" class="px-2 py-0.5 text-[10px] font-mono font-bold bg-studio-900 text-slate-300 rounded-full border border-studio-800">
+                共 {{ totalRegularTemplates }} {{ tplGroupDerivatives ? '组母本' : '件' }} ({{ regularTemplates.length }}件资产) · 第 {{ tplPage }} / {{ totalTplPages }} 页
               </span>
             </div>
 
@@ -2315,19 +2394,65 @@
                   class="break-inside-avoid mb-4 w-full inline-block rounded-2xl bg-studio-850 border border-studio-750 hover:border-studio-accent/70 transition-all shadow-md hover:shadow-2xl overflow-hidden group/card"
                   :data-tpl-id="tpl.id"
                 >
-                  <!-- 卡片大预览区域 (自适应画幅) -->
+                  <!-- 卡片大预览区域 (自适应画幅，支持多版本横向切换) -->
                   <div
                     class="relative bg-studio-950 overflow-hidden border-b border-studio-800 cursor-pointer"
                     :style="{ aspectRatio: getTemplateAspectRatio(tpl) }"
                     @click="openTemplateDetail(tpl)"
                     title="点击查看配方详情"
                   >
+                    <!-- 多版本聚合角标 -->
+                    <div
+                      v-if="tpl.variants && tpl.variants.length > 1"
+                      class="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-studio-900/90 text-studio-cyan text-[10px] font-bold border border-studio-accent/40 backdrop-blur-md shadow-md z-10 flex items-center gap-1"
+                    >
+                      <span>🗂️</span>
+                      <span>{{ tpl.variants.length }}个版本</span>
+                    </div>
+
+                    <!-- 左右快速翻版按钮 (仅当卡片悬浮且存在多版本时出现) -->
+                    <div
+                      v-if="tpl.variants && tpl.variants.length > 1"
+                      class="absolute inset-y-0 inset-x-1 flex items-center justify-between pointer-events-none opacity-0 group-hover/card:opacity-100 transition-opacity z-10"
+                    >
+                      <button
+                        type="button"
+                        @click.stop="stepCardVariant(tpl, -1)"
+                        class="w-6 h-6 rounded-full bg-black/75 hover:bg-black text-white flex items-center justify-center pointer-events-auto transition cursor-pointer text-xs"
+                        title="上一个衍生版本"
+                      >
+                        ‹
+                      </button>
+                      <button
+                        type="button"
+                        @click.stop="stepCardVariant(tpl, 1)"
+                        class="w-6 h-6 rounded-full bg-black/75 hover:bg-black text-white flex items-center justify-center pointer-events-auto transition cursor-pointer text-xs"
+                        title="下一个衍生版本"
+                      >
+                        ›
+                      </button>
+                    </div>
+
+                    <!-- 底部圆点指示器 -->
+                    <div
+                      v-if="tpl.variants && tpl.variants.length > 1"
+                      class="absolute bottom-2 right-2 flex items-center gap-1 bg-black/60 px-1.5 py-0.5 rounded-full backdrop-blur z-10"
+                    >
+                      <span
+                        v-for="(v, vIdx) in tpl.variants"
+                        :key="v.id"
+                        class="w-1.5 h-1.5 rounded-full transition-all"
+                        :class="(tpl.activeVariantIdx || 0) === vIdx ? 'bg-studio-accent scale-125' : 'bg-white/40'"
+                      ></span>
+                    </div>
                     <!-- 图片模式：展示成果大图 + 角标原图 -->
                     <template v-if="!tpl.type || tpl.type === 'image'">
                       <img
                         v-if="tpl.result_images?.[0]?.url"
                         :src="tpl.result_images[0].url"
                         class="w-full h-full object-cover group-hover/card:scale-105 transition-transform duration-300"
+                        loading="lazy"
+                        decoding="async"
                       />
                       <div v-else class="w-full h-full flex items-center justify-center text-slate-600 text-xs">
                         无渲染成果图
@@ -2455,7 +2580,7 @@
                         <button @click.stop="editingTemplateId = ''" class="text-slate-400 hover:text-slate-300 text-xs px-1.5 py-1">取消</button>
                       </div>
                       <div v-else class="flex-1 flex items-center justify-between min-w-0">
-                        <h4 class="text-sm font-bold text-white truncate group-hover/card:text-studio-accent transition-colors" :title="tpl.title">
+                        <h4 class="text-sm font-bold text-slate-100 dark:text-white truncate group-hover/card:text-studio-accent transition-colors" :title="tpl.title">
                           {{ tpl.title }}
                         </h4>
                         <button
@@ -2505,6 +2630,96 @@
                       </div>
                     </div>
                   </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 创作库分页控制器 (Pagination Controls) -->
+            <div
+              v-if="totalRegularTemplates > 0"
+              class="mt-6 pt-4 pb-2 border-t border-studio-800 flex flex-wrap items-center justify-between gap-3 text-xs"
+            >
+              <!-- 左侧：数量与每页条数选择 -->
+              <div class="flex items-center space-x-3 text-slate-400">
+                <span>
+                  共 <strong class="text-slate-200 font-mono">{{ totalRegularTemplates }}</strong> {{ tplGroupDerivatives ? '组母本' : '件' }}
+                  <span v-if="tplGroupDerivatives && regularTemplates.length !== totalRegularTemplates" class="text-slate-400 font-normal">（折叠包含 {{ regularTemplates.length }} 个版本）</span>
+                  <span class="hidden sm:inline">（第 {{ (tplPage - 1) * tplPageSize + 1 }} - {{ Math.min(tplPage * tplPageSize, totalRegularTemplates) }} 项）</span>
+                </span>
+                <div class="flex items-center space-x-1">
+                  <span>每页</span>
+                  <select
+                    v-model.number="tplPageSize"
+                    class="bg-studio-950 border border-studio-750 rounded-lg px-2 py-1 text-xs text-slate-200 outline-none font-mono cursor-pointer"
+                  >
+                    <option v-for="sz in tplPageSizeOptions" :key="sz" :value="sz">{{ sz }} 项</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- 右侧：翻页按钮与页码 -->
+              <div class="flex items-center space-x-1.5 font-mono">
+                <button
+                  type="button"
+                  @click="goToTplPage(1)"
+                  :disabled="tplPage <= 1"
+                  class="px-2 py-1 rounded-lg border border-studio-750 bg-studio-950 hover:bg-studio-850 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-all"
+                  title="第一页"
+                >
+                  «
+                </button>
+                <button
+                  type="button"
+                  @click="goToTplPage(tplPage - 1)"
+                  :disabled="tplPage <= 1"
+                  class="px-2.5 py-1 rounded-lg border border-studio-750 bg-studio-950 hover:bg-studio-850 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-all font-sans text-xs font-bold"
+                >
+                  ‹ 上一页
+                </button>
+
+                <div class="flex items-center space-x-1 px-1">
+                  <button
+                    v-for="p in visibleTplPages"
+                    :key="'p_' + p"
+                    type="button"
+                    @click="goToTplPage(p)"
+                    class="w-7 h-7 rounded-lg text-xs font-bold transition-all flex items-center justify-center cursor-pointer"
+                    :class="p === tplPage ? 'bg-studio-accent text-white shadow' : 'bg-studio-950 border border-studio-750 text-slate-300 hover:bg-studio-850'"
+                  >
+                    {{ p }}
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  @click="goToTplPage(tplPage + 1)"
+                  :disabled="tplPage >= totalTplPages"
+                  class="px-2.5 py-1 rounded-lg border border-studio-750 bg-studio-950 hover:bg-studio-850 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-all font-sans text-xs font-bold"
+                >
+                  下一页 ›
+                </button>
+                <button
+                  type="button"
+                  @click="goToTplPage(totalTplPages)"
+                  :disabled="tplPage >= totalTplPages"
+                  class="px-2 py-1 rounded-lg border border-studio-750 bg-studio-950 hover:bg-studio-850 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-all"
+                  title="最后一页"
+                >
+                  »
+                </button>
+
+                <div class="flex items-center space-x-1 pl-2 text-slate-400 font-sans text-xs">
+                  <span>跳至</span>
+                  <input
+                    type="number"
+                    min="1"
+                    :max="totalTplPages"
+                    :value="tplPage"
+                    @keydown.enter="jumpToTplPage($event.target.value)"
+                    @blur="jumpToTplPage($event.target.value)"
+                    class="w-12 px-1.5 py-1 text-center bg-studio-950 border border-studio-750 rounded-lg text-xs text-slate-200 outline-none font-mono"
+                  />
+                  <span>页</span>
                 </div>
               </div>
             </div>
@@ -2561,6 +2776,8 @@ import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import StudioIcon from '../../components/StudioIcon.vue';
 import { onTaskUpdate, onAssetChange } from '../../service/sse.js';
+import { bindOverlays } from '../../service/overlay-stack.js';
+import { resolveParams, buildSessionSnapshot, snapshotFromMessage } from '../../utils/studio-params.js';
 import DynamicModelParamBar from '../../components/DynamicModelParamBar.vue';
 import AssetPickerModal from '../../components/AssetPickerModal.vue';
 import StudioViewer from './StudioViewer.vue';
@@ -2610,7 +2827,9 @@ import {
   fetchStudioCatalog,
   previewAiGeneration,
   fetchSuggestPrompts,
-  fetchCreationTemplatesIncremental
+  fetchCreationTemplatesIncremental,
+  pullExternalCreationTemplates,
+  queryGenTask
 } from '../../api';
 
 const props = defineProps({
@@ -2707,7 +2926,11 @@ const combinedRecipePrompt = computed(() =>
 );
 const recipeExpanded = ref(false);
 const hoveredRegionKey = ref(null);
-const DRAFT_STORAGE_KEY = 'ml_studio_persistent_draft_v1';
+// 草稿按用户隔离：不同账号不能共用同一份持久化草稿（严格隔离的一部分）。
+const DRAFT_STORAGE_KEY = (() => {
+  const u = getCurrentUser();
+  return `ml_studio_persistent_draft_v1_${String(u?.username || u?.id || 'anon')}`;
+})();
 
 function saveDraftToStorage() {
   try {
@@ -3027,13 +3250,13 @@ async function handlePreviewRequest() {
       }
     });
 
-    const submitImageRatio = schemaParams.value.ratio || selectedRatio.value || '1:1';
+    const isVideoMode = currentMod === 'video';
+    const submitRatio = schemaParams.value.ratio || (isVideoMode ? '9:16' : (selectedRatio.value || '9:16'));
     const previewPayload = {
       prompt: dialectPrompt,
       model: currentModel,
       modality: currentMod,
-      size: selectedResolution.value || '2K',
-      ratio: submitImageRatio,
+      ratio: submitRatio,
       imageUrls: imageUrls.map(sanitizeForPreview),
       imageItems: imageItems.map(it => ({
         ...it,
@@ -3043,6 +3266,9 @@ async function handlePreviewRequest() {
       extras: schemaParams.value || {},
       snippetIds: activeSnippetIds()
     };
+    if (!isVideoMode) {
+      previewPayload.size = selectedResolution.value || '2K';
+    }
 
     const result = await previewAiGeneration(previewPayload);
     const targetImages = (result && Array.isArray(result.images))
@@ -3455,6 +3681,12 @@ function triggerAdaptiveNotice(msg) {
   }, 4500);
 }
 
+// 参数治理共存开关：默认严格 9:16、只有用户手动改才变。
+// 不删自适应代码，只在外层短路，完整保留另一会话加的 ratioUserLocked / fieldByKey(size) 守卫。
+// 需要临时恢复「挂参考图自动推断画幅」时把这两个常量改回 true 即可。
+const AUTO_ADAPT_RATIO = false;
+const AUTO_ADAPT_SIZE = false;
+
 function dispatchSmartWorkflow({ force = false, fromTemplate = null, source = 'general' } = {}) {
   const result = inferOptimalWorkflowAndParams({
     referenceTray: referenceTray.value,
@@ -3477,7 +3709,11 @@ function dispatchSmartWorkflow({ force = false, fromTemplate = null, source = 'g
   }
 
   // 3. 画幅比例自适应调度 (Ratio)：优先保护底图真实比例，杜绝 9:16 / 3:4 竖屏被 16:9 / 1:1 压扁
-  if (result.targetRatio && (!isFieldLocked('ratio') || force)) {
+  //    但用户在参数条上手选过画幅后不再自动顶回去（force 仅用于复用配方这类显式覆盖场景）
+  //    共存开关：默认关闭「挂参考图/切模型自动改写画幅」，只有用户手动改才变。
+  //    保留下方全部守卫（ratioUserLocked / isFieldLocked / fieldByKey(size)），
+  //    不删另一个会话的修复代码；将来想恢复自适应只需把 AUTO_ADAPT_* 改回 true。
+  if (AUTO_ADAPT_RATIO && result.targetRatio && (!ratioUserLocked.value || force) && (!isFieldLocked('ratio') || force)) {
     selectedRatio.value = result.targetRatio;
     if (schemaParams.value) {
       schemaParams.value.ratio = result.targetRatio;
@@ -3485,13 +3721,15 @@ function dispatchSmartWorkflow({ force = false, fromTemplate = null, source = 'g
   }
 
   // 4. 分辨率档位自适应调度 (Size / Resolution)
-  if (result.targetSize && !isFieldLocked('size')) {
+  //    契约没有 size 字段的模型（GPT Image VIP 系列）按画幅出图，这里不能把 suggestedSize
+  //    写进全局 selectedResolution —— 那个值用户看不见，却会被当成 size 发给上游并触发 400。
+  if (AUTO_ADAPT_SIZE && result.targetSize && !isFieldLocked('size') && fieldByKey(currentSchema.value, 'size')) {
     selectedResolution.value = result.targetSize;
     if (schemaParams.value && schemaParams.value.size !== undefined) {
       schemaParams.value.size = result.targetSize;
     }
   }
-  if (result.targetVideoResolution && !isFieldLocked('resolution')) {
+  if (AUTO_ADAPT_SIZE && result.targetVideoResolution && !isFieldLocked('resolution')) {
     videoResolution.value = result.targetVideoResolution;
     if (schemaParams.value && schemaParams.value.resolution !== undefined) {
       schemaParams.value.resolution = result.targetVideoResolution;
@@ -3616,18 +3854,8 @@ function onEditApplyRegionsToImage({ imageIndex, regions, recipe, silentRefs, an
     }
   }
 
-  // 自动对齐原图画幅比例（杜绝 9:16 底图被 16:9 / 1:1 强行压扁变形）
-  if (naturalWidth && naturalHeight) {
-    const ratioOptions = (currentSchema.value?.common || []).find(f => f.key === 'ratio')?.options
-      || (currentSchema.value?.params || []).find(p => p.key === 'ratio')?.options
-      || ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'];
-    const matched = getNearestCanonicalRatio(naturalWidth, naturalHeight, ratioOptions);
-    selectedRatio.value = matched;
-    if (schemaParams.value) {
-      schemaParams.value.ratio = matched;
-    }
-  }
-
+  // 画幅不再跟随底图自动改写：默认严格 9:16，只有用户手动改才变。
+  // naturalWidth / naturalHeight 仍由 autoSyncRatioFromImage 记录，供提示词编译与选区使用。
   if (activeModality.value !== 'image') activeModality.value = 'image';
   nextTick(() => {
     setGenMode('image_edit');
@@ -3765,7 +3993,13 @@ function selectAtRegionMention(item, idx, reg) {
 }
 
 const sidebarTab = ref('history'); // 'history' | 'library'
-const currentSessionId = ref('default_session');
+// 严格隔离后不能让所有账号共用 default_session：非 admin 账号用带用户名的默认会话 id，
+// 否则第二个用户登录时会撞上属于 admin 的会话而 403。
+const currentSessionId = ref((() => {
+  const u = getCurrentUser();
+  const who = String(u?.username || u?.id || '');
+  return (who && who !== 'admin') ? `default_${who}` : 'default_session';
+})());
 const tplSearch = ref('');
 const generating = ref(false);
 const optimizing = ref(false);
@@ -3913,15 +4147,15 @@ const sessionRefPool = ref([]);
 const activeModality = ref('chat'); // 默认纯对话！
 
 // 纯对话专属状态
-const chatModelKey = ref('volc_doubao_seed_2_1_pro');
+const chatModelKey = ref('gemini_4_argon');
 // 思考强度：取值由当前模型在官方目录声明的 caps.reasoning 决定
 const thinkingStrength = ref('');
 const expandedThinking = ref({});
 
 // 图像模式专属参数
-const imageModelKey = ref('seedream5flash');
+const imageModelKey = ref('gemini_3_1_flash_image');
 const selectedResolution = ref('2K');
-const selectedRatio = ref('16:9');
+const selectedRatio = ref('9:16');
 const selectedStylePreset = ref('default');
 const imageWatermark = ref(false);
 
@@ -3944,7 +4178,7 @@ function autoSyncRatioFromImage(url, item = null) {
             targetItem.width = vw;
             targetItem.height = vh;
           }
-          dispatchSmartWorkflow({ source: 'autoSyncRatioFromVideo' });
+          // 只记录媒体真实尺寸，不再触发画幅自适应调度。
         }
       };
       v.src = url;
@@ -3964,7 +4198,7 @@ function autoSyncRatioFromImage(url, item = null) {
         targetItem.width = nw;
         targetItem.height = nh;
       }
-      dispatchSmartWorkflow({ source: 'autoSyncRatioFromImage' });
+      // 只记录媒体真实尺寸，不再触发画幅自适应调度。
     }
   };
   img.src = url;
@@ -3972,9 +4206,9 @@ function autoSyncRatioFromImage(url, item = null) {
 
 // 视频模式专属参数
 const videoSubMode = ref('first_last'); // 'first_last' | 'multi_ref' | 'prompt_only'
-const videoModelKey = ref('seedance2_5');
+const videoModelKey = ref('seedance2_0');
 const videoDuration = ref('5');
-const videoResolution = ref('1080p');
+const videoResolution = ref('720p');
 
 // 音乐模式专属参数
 const musicType = ref('doubao_bgm_v5');
@@ -4227,6 +4461,106 @@ function onMdClick(event) {
 }
 const activeGenMode = ref('');
 const schemaParams = ref({});
+// 用户手动在参数条上选过画幅后，自适应调度不得再用「底图自然比例」把它顶回去。
+// 只切模型 / 切模态 / 复用配方时才重置（否则视频板块挂一张竖图就永远调不成 16:9）。
+const ratioUserLocked = ref(false);
+
+// ===== 参数三层优先级：会话快照 > 模型专属默认 > 全局默认 =====
+// sessionParamsMap 在阶段 2 之前是内存态（阶段 2 后端 chat_sessions.params_json 落库后优先读后端）。
+const sessionParamsMap = new Map();
+let paramsUserTouched = false;
+
+function currentParamsSnapshot() {
+  return buildSessionSnapshot({
+    ratio: selectedRatio.value,
+    size: selectedResolution.value,
+    video_resolution: videoResolution.value,
+    duration: videoDuration.value,
+    schemaParams: schemaParams.value,
+    // 契约声明了 seed 时随会话快照一起持久化，保证「相同配置重新生成」可复现
+    seed: schemaParams.value?.seed ?? null,
+    imageModelKey: imageModelKey.value,
+    videoModelKey: videoModelKey.value,
+    chatModelKey: chatModelKey.value,
+    activeModality: activeModality.value,
+    thinkingStrength: thinkingStrength.value
+  });
+}
+
+function persistCurrentParamsSnapshot() {
+  if (currentSessionId.value) sessionParamsMap.set(currentSessionId.value, currentParamsSnapshot());
+}
+
+/**
+ * 统一回写参数。必须先 clamp 清掉上一个模型的残留 schema，再同时写
+ * schemaParams 与顶层 ref —— 只写 selectedRatio 会被残留的 schemaParams.ratio
+ * 盖掉（实测：16:9 复用后变成 1:1）。
+ */
+function applyParamsSnapshot(snapshot = {}, { source = 'system' } = {}) {
+  const incoming = snapshot || {};
+  const mergedSchema = { ...(schemaParams.value || {}), ...(incoming.schemaParams || {}) };
+  if (incoming.ratio != null) mergedSchema.ratio = incoming.ratio;
+  if (incoming.size != null) mergedSchema.size = incoming.size;
+  schemaParams.value = clampParamsToSchema(currentSchema.value, mergedSchema);
+
+  if (incoming.ratio != null) selectedRatio.value = incoming.ratio;
+  if (incoming.size != null) selectedResolution.value = incoming.size;
+  if (incoming.video_resolution != null) videoResolution.value = incoming.video_resolution;
+  if (incoming.duration != null) videoDuration.value = incoming.duration;
+  if (incoming.imageModelKey != null) imageModelKey.value = incoming.imageModelKey;
+  if (incoming.videoModelKey != null) videoModelKey.value = incoming.videoModelKey;
+  if (incoming.chatModelKey != null) chatModelKey.value = incoming.chatModelKey;
+  if (incoming.activeModality != null) activeModality.value = incoming.activeModality;
+  if (incoming.thinkingStrength != null) thinkingStrength.value = incoming.thinkingStrength;
+
+  if (source === 'user') {
+    paramsUserTouched = true;
+    if (incoming.ratio != null || incoming.aspect_ratio != null || incoming.schemaParams?.ratio != null) {
+      ratioUserLocked.value = true;
+    }
+    persistCurrentParamsSnapshot();
+  }
+}
+
+function onParamBarChange({ key }) {
+  if (key === 'ratio' || key === 'aspect_ratio') ratioUserLocked.value = true;
+  paramsUserTouched = true;
+  persistCurrentParamsSnapshot();
+}
+
+/** 回到旧会话：优先内存快照，其次后端 chat_sessions.params_json（阶段 2 起才有）。 */
+function restoreSessionParams(s) {
+  const sid = s?.id;
+  if (!sid) return false;
+  let snap = sessionParamsMap.get(sid) || null;
+  if (!snap && s.params_json) {
+    try {
+      snap = typeof s.params_json === 'string' ? JSON.parse(s.params_json) : s.params_json;
+    } catch (_) { snap = null; }
+  }
+  if (!snap) return false;
+  applyParamsSnapshot(snap, { source: 'system' });
+  return true;
+}
+
+/** 新建会话：跳过会话层，严格回到「该模型专属默认 > 全局默认 9:16」。 */
+function resetParamsToDefaults() {
+  const p = resolveParams({
+    sessionSnapshot: null,
+    modelKey: imageModelKey.value,
+    perModel: studioDefaults.value?.perModel || {},
+    global: studioDefaults.value || null
+  });
+  applyParamsSnapshot({
+    ratio: p.ratio,
+    size: p.size,
+    video_resolution: p.video_resolution,
+    duration: p.duration,
+    schemaParams: p.ratio ? { ratio: p.ratio } : undefined
+  }, { source: 'system' });
+  ratioUserLocked.value = false;
+  paramsUserTouched = false;
+}
 // 等待文案按模型/模式给出真实预期，本地 Qwen 是分钟级，不再显示误导性的「3 秒」
 const generatingHint = computed(() => {
   if (activeModality.value === 'video') return '视频云端渲染通常需要 1~3 分钟，完成后会自动出现在对话中，可继续输入其他需求…';
@@ -4333,7 +4667,28 @@ function optionText(field, value) {
 }
 function schemaDefaults(schema) {
   const out = {};
-  for (const field of [...(schema.common || []), ...(schema.advanced || [])]) out[field.key] = field.default;
+  const globalRatio = studioDefaults.value?.params?.ratio || '9:16';
+  const globalVideoRes = studioDefaults.value?.params?.video_resolution || '720p_sr2x';
+  const globalImageSize = studioDefaults.value?.params?.image_size || '2K';
+  for (const field of [...(schema.common || []), ...(schema.advanced || [])]) {
+    let def = field.default;
+    if ((field.key === 'ratio' || field.key === 'aspect_ratio') && Array.isArray(field.options)) {
+      if (field.options.includes(globalRatio)) {
+        def = globalRatio;
+      }
+    }
+    if ((field.key === 'resolution' || field.rawKey === 'resolution') && Array.isArray(field.options)) {
+      if (field.options.includes(globalVideoRes)) {
+        def = globalVideoRes;
+      }
+    }
+    if ((field.key === 'size' || field.rawKey === 'size') && Array.isArray(field.options)) {
+      if (field.options.includes(globalImageSize)) {
+        def = globalImageSize;
+      }
+    }
+    out[field.key] = def;
+  }
   return out;
 }
 function fieldByKey(schema, key) {
@@ -4363,9 +4718,11 @@ function applyModeLocks() {
   const evaluated = evaluateClientModelRules(currentSchema.value, activeGenMode.value, schemaParams.value, currentRefCounts.value);
   schemaParams.value = evaluated.params;
 }
-function resetSchemaForModel() {
+function resetSchemaForModel(options = {}) {
   const schema = currentSchema.value;
   showAdvanced.value = false;
+  // 换模型/换模态等于换了参数表，手选画幅的占用随之解除
+  ratioUserLocked.value = false;
   if (!schema) {
     activeGenMode.value = '';
     schemaParams.value = {};
@@ -4374,8 +4731,28 @@ function resetSchemaForModel() {
   const modes = schema.modes || [];
   if (!modes.some((mode) => mode.id === activeGenMode.value)) activeGenMode.value = modes[0]?.id || '';
   const next = schemaDefaults(schema);
+  const globalRatio = studioDefaults.value?.params?.ratio || '9:16';
+  const globalVideoRes = studioDefaults.value?.params?.video_resolution;
   for (const key of Object.keys(next)) {
-    if (schemaParams.value[key] != null && valueStillFits(schema, key, schemaParams.value[key])) next[key] = schemaParams.value[key];
+    if (schemaParams.value[key] != null && valueStillFits(schema, key, schemaParams.value[key])) {
+      if (key === 'ratio' && schemaParams.value[key] === '1:1' && (!referenceTray.value || referenceTray.value.length === 0)) {
+        const ratioField = fieldByKey(schema, 'ratio');
+        if (ratioField && (ratioField.options || []).includes(globalRatio)) {
+          next[key] = globalRatio;
+          continue;
+        }
+      }
+      if (key === 'resolution' && globalVideoRes) {
+        const resField = fieldByKey(schema, 'resolution');
+        if (resField && (resField.options || []).includes(globalVideoRes)) {
+          if (options.forceResolution || schemaParams.value[key] === '720p') {
+            next[key] = globalVideoRes;
+            continue;
+          }
+        }
+      }
+      next[key] = schemaParams.value[key];
+    }
   }
   schemaParams.value = next;
   applyModeLocks();
@@ -4664,14 +5041,11 @@ const tplSpaceFilter = ref('');
 const tplStyleFilter = ref('');
 const tagVocab = ref({ space: [], style_atom: [], video_purpose: [] });
 const tplPinnedOnly = ref(false);
+const libraryMounted = ref(false);
 const showExpandedLibrary = ref(false);
 const isLibraryFullscreen = ref(false);
 const editingTemplateId = ref('');
 const editingTemplateTitle = ref('');
-
-function openCreationLibraryModal() {
-  showExpandedLibrary.value = true;
-}
 
 function toggleLibraryFullscreen() {
   isLibraryFullscreen.value = !isLibraryFullscreen.value;
@@ -4686,27 +5060,6 @@ const MODALITY_OPTIONS = [
 
 const isPinnedOpen = ref(true);
 const isTopReuseOpen = ref(true);
-
-const pinnedTemplates = computed(() => {
-  return [...filteredTemplates.value]
-    .filter(t => t.is_pinned)
-    .sort((a, b) => (b.updated_at || b.created_at || 0) - (a.updated_at || a.created_at || 0));
-});
-
-const topReuseTemplates = computed(() => {
-  return [...filteredTemplates.value]
-    .filter(t => !t.is_pinned && (t.use_count || 0) > 0)
-    .sort((a, b) => (b.use_count || 0) - (a.use_count || 0) || (b.created_at || 0) - (a.created_at || 0))
-    .slice(0, 10);
-});
-
-const regularTemplates = computed(() => {
-  const pinOrTopSet = new Set([
-    ...pinnedTemplates.value.map(t => t.id),
-    ...topReuseTemplates.value.map(t => t.id)
-  ]);
-  return filteredTemplates.value.filter(t => !pinOrTopSet.has(t.id));
-});
 
 function sortTemplates() {
   templates.value.sort((a, b) => {
@@ -5012,8 +5365,242 @@ function templateRefUrl(tpl) {
 }
 
 
+// ===== 创作库配方衍生列表与分页状态机（在 filteredTemplates 之后按序初始化，彻底消除 TDZ） =====
+const pinnedTemplates = computed(() => {
+  return [...filteredTemplates.value]
+    .filter(t => t.is_pinned)
+    .sort((a, b) => (b.updated_at || b.created_at || 0) - (a.updated_at || a.created_at || 0));
+});
+
+const tplGroupDerivatives = ref(true);
+
+const topReuseTemplates = computed(() => {
+  const pool = [...filteredTemplates.value].filter(t => !t.is_pinned && (t.use_count || 0) > 0);
+  const groupMap = new Map();
+  for (const t of pool) {
+    const key = String(t.prompt || t.title || '').trim().replace(/\s+/g, ' ').toLowerCase();
+    if (!groupMap.has(key)) {
+      groupMap.set(key, {
+        ...t,
+        use_count: t.use_count || 0,
+        variants: [t]
+      });
+    } else {
+      const existing = groupMap.get(key);
+      existing.use_count = Math.max(existing.use_count || 0, t.use_count || 0) + 1;
+      existing.variants.push(t);
+      if ((t.created_at || 0) > (existing.created_at || 0)) {
+        existing.result_images = t.result_images;
+        existing.created_at = t.created_at;
+        existing.id = t.id;
+      }
+    }
+  }
+  return Array.from(groupMap.values())
+    .sort((a, b) => (b.use_count || 0) - (a.use_count || 0) || (b.created_at || 0) - (a.created_at || 0))
+    .slice(0, 10);
+});
+
+const regularTemplates = computed(() => {
+  const pinOrTopSet = new Set([
+    ...pinnedTemplates.value.map(t => t.id),
+    ...topReuseTemplates.value.map(t => t.id)
+  ]);
+  return filteredTemplates.value.filter(t => !pinOrTopSet.has(t.id));
+});
+
+// 分页切片状态
+const tplPage = ref(1);
+const tplPageSize = ref(24);
+const tplPageSizeOptions = [12, 24, 48, 96];
+
+const isPullingExternal = ref(false);
+const pullExternalNotice = ref('');
+
+// 筛选/搜索变更时重置至第一页
+watch([tplSearch, tplTypeFilter, tplSpaceFilter, tplStyleFilter, tplPinnedOnly], () => {
+  tplPage.value = 1;
+});
+
+// 核心：母本智能聚类折叠（在分页前全局聚类，彻底消除散装平铺）
+const clusteredRegularTemplates = computed(() => {
+  const rawList = regularTemplates.value;
+  if (!tplGroupDerivatives.value) {
+    return rawList;
+  }
+  const clusterMap = new Map();
+  const clusters = [];
+
+  for (const item of rawList) {
+    let originImgs = item.origin_images;
+    if (typeof originImgs === 'string') {
+      try { originImgs = JSON.parse(originImgs); } catch (e) { originImgs = []; }
+    }
+    const refUrl = originImgs?.[0]?.url || originImgs?.[0]?.fid || '';
+    const normPrompt = String(item.prompt || '').trim().replace(/\s+/g, ' ').slice(0, 36);
+    const itemType = item.type || 'image';
+
+    let clusterKey = '';
+    if (refUrl) {
+      clusterKey = `ref:${refUrl}_${itemType}`;
+    } else if (normPrompt.length >= 6) {
+      clusterKey = `p:${normPrompt}_${itemType}`;
+    } else {
+      clusterKey = `id:${item.id}`;
+    }
+
+    if (!clusterMap.has(clusterKey)) {
+      const entry = {
+        ...item,
+        variants: [item],
+        activeVariantIdx: 0
+      };
+      clusterMap.set(clusterKey, entry);
+      clusters.push(entry);
+    } else {
+      const parent = clusterMap.get(clusterKey);
+      parent.variants.push(item);
+      // 保持母本卡片展示最新生成的封面结果与时间
+      if ((item.created_at || item.updated_at || 0) > (parent.created_at || parent.updated_at || 0)) {
+        parent.result_images = item.result_images;
+        parent.created_at = item.created_at;
+        parent.updated_at = item.updated_at;
+        parent.id = item.id;
+      }
+    }
+  }
+
+  return clusters;
+});
+
+const totalRegularTemplates = computed(() => clusteredRegularTemplates.value.length);
+const totalTplPages = computed(() => Math.max(1, Math.ceil(totalRegularTemplates.value / tplPageSize.value)));
+
+watch(totalTplPages, (maxP) => {
+  if (tplPage.value > maxP) {
+    tplPage.value = Math.max(1, maxP);
+  }
+});
+
+const pagedRegularTemplates = computed(() => {
+  const start = (tplPage.value - 1) * tplPageSize.value;
+  return clusteredRegularTemplates.value.slice(start, start + tplPageSize.value);
+});
+
+const visibleTplPages = computed(() => {
+  const total = totalTplPages.value;
+  const curr = tplPage.value;
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+  let start = Math.max(1, curr - 2);
+  let end = Math.min(total, curr + 2);
+  if (curr <= 3) {
+    end = 5;
+  } else if (curr >= total - 2) {
+    start = total - 4;
+  }
+  const pages = [];
+  for (let i = start; i <= end; i++) pages.push(i);
+  return pages;
+});
+
+function goToTplPage(p) {
+  const target = Math.max(1, Math.min(totalTplPages.value, Number(p) || 1));
+  tplPage.value = target;
+  nextTick(() => {
+    const scroller = document.querySelector('.creation-grid-scroller');
+    if (scroller) {
+      scroller.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  });
+}
+
+function jumpToTplPage(val) {
+  const num = parseInt(val, 10);
+  if (!Number.isNaN(num)) {
+    goToTplPage(num);
+  }
+}
+
+// 极速预览图预热（在后台提前异步解码，确保开窗 20ms 内图片即见即得）
+function prewarmPreviewImages(list, count = 36) {
+  if (!Array.isArray(list) || typeof Image === 'undefined') return;
+  const slice = list.slice(0, count);
+  for (const item of slice) {
+    const rawUrl = item.result_images?.[0]?.url || item.origin_images?.[0]?.url;
+    if (rawUrl) {
+      const img = new Image();
+      img.decoding = 'async';
+      img.src = authedMediaUrl(rawUrl);
+    }
+  }
+}
+
+// 主动从外部数据源拉取最新配方资产
+async function triggerPullExternal(manual = false) {
+  if (isPullingExternal.value) return;
+  isPullingExternal.value = true;
+  if (manual) {
+    pullExternalNotice.value = '正在主动拉取外部数据源...';
+  }
+  try {
+    const res = await pullExternalCreationTemplates({ maxPages: 2, size: 50 });
+    if (res && res.success) {
+      if (res.count > 0) {
+        pullExternalNotice.value = `已同步 ${res.count} 件外部新资产`;
+        await loadTemplates();
+      } else {
+        if (manual) pullExternalNotice.value = '外部数据源已是最新，无新增资产';
+      }
+    } else if (res && res.unconfigured) {
+      if (manual) pullExternalNotice.value = '外部数据源未配置，使用本地创作库';
+    } else if (res && res.error) {
+      if (manual) pullExternalNotice.value = res.error;
+    }
+  } catch (err) {
+    console.warn('拉取外部数据源异常:', err);
+    if (manual) pullExternalNotice.value = '外部数据源拉取失败';
+  } finally {
+    isPullingExternal.value = false;
+    setTimeout(() => {
+      pullExternalNotice.value = '';
+    }, 3500);
+  }
+}
+
+function openCreationLibraryModal() {
+  const t0 = performance.now();
+  libraryMounted.value = true;
+  showExpandedLibrary.value = true;
+  const elapsed = performance.now() - t0;
+  console.log(`[CreationLibrary] 打开耗时: ${elapsed.toFixed(2)}ms (20ms指标)`);
+  // 打开后主动异步拉取外部最新资产（Stale-While-Revalidate，首屏秒呈无阻塞）
+  triggerPullExternal(false);
+}
+
+function stepCardVariant(tpl, delta) {
+  if (!tpl.variants || tpl.variants.length <= 1) return;
+  const len = tpl.variants.length;
+  const nextIdx = ((tpl.activeVariantIdx || 0) + delta + len) % len;
+  tpl.activeVariantIdx = nextIdx;
+  const activeVar = tpl.variants[nextIdx];
+  tpl.result_images = activeVar.result_images;
+  tpl.params = activeVar.params;
+  tpl.aspect_ratio = activeVar.aspect_ratio;
+  tpl.prompt = activeVar.prompt;
+}
+
+function selectModalVariant(v) {
+  if (!v || !detailModal.value.tpl) return;
+  detailModal.value.tpl = {
+    ...v,
+    variants: detailModal.value.tpl.variants
+  };
+}
+
 const templateDateGroups = computed(() => {
-  const list = regularTemplates.value;
+  const list = pagedRegularTemplates.value;
   if (!list || !list.length) return [];
   const map = new Map();
 
@@ -5032,7 +5619,6 @@ const templateDateGroups = computed(() => {
     grp.items.push(tpl);
   }
 
-  // 严格按日历真实日期倒序排序（保证最新日期排在最上方）
   const sortedKeys = Array.from(map.keys()).sort((a, b) => {
     if (a === '未知时间') return 1;
     if (b === '未知时间') return -1;
@@ -5096,9 +5682,16 @@ const catalogError = ref('');
  */
 function repairStudioModelKeys() {
   const pick = (modality, list, current) => {
-    if (!list.length || list.some((m) => m.id === current)) return current;
+    if (!list.length) return current;
+    const serverDef = studioDefaults.value?.[modality];
+    if (serverDef && list.some(m => m.id === serverDef)) {
+      if (!current || current === 'seedream5flash' || current === 'seedance2_5' || !list.some(m => m.id === current)) {
+        return serverDef;
+      }
+    }
+    if (list.some((m) => m.id === current)) return current;
     const byName = list.find((m) => m.name === current || `${m.name}${m.badge ? ` · ${m.badge}` : ''}` === current);
-    return byName?.id || studioDefaults.value[modality] || list[0].id;
+    return byName?.id || serverDef || list[0].id;
   };
   chatModelKey.value = pick('chat', studioModels.value.chat, chatModelKey.value);
   imageModelKey.value = pick('image', studioModels.value.image, imageModelKey.value);
@@ -5117,12 +5710,38 @@ async function loadStudioCatalog() {
       if (catalog.studio.video?.models) studioModels.value.video = catalog.studio.video.models;
       if (catalog.studio.music?.models) studioModels.value.music = catalog.studio.music.models;
       studioDefaults.value = {
-        chat: catalog.studio.chat?.defaultModel || '',
-        image: catalog.studio.image?.defaultModel || '',
-        video: catalog.studio.video?.defaultModel || '',
-        music: catalog.studio.music?.defaultModel || ''
+        chat: catalog.defaults?.models?.chat || catalog.studio.chat?.defaultModel || '',
+        image: catalog.defaults?.models?.image || catalog.studio.image?.defaultModel || '',
+        video: catalog.defaults?.models?.video || catalog.studio.video?.defaultModel || '',
+        music: catalog.defaults?.models?.music || catalog.studio.music?.defaultModel || '',
+        params: catalog.defaults?.params || {}
       };
+      if (catalog.defaults?.models?.image) imageModelKey.value = catalog.defaults.models.image;
+      if (catalog.defaults?.models?.video) videoModelKey.value = catalog.defaults.models.video;
+      // 先按目录修正模型 key 并重建参数表；后端默认必须在 resetSchemaForModel 之后写回，
+      // 否则刚写的 schemaParams 会被重建逻辑冲掉。
       repairStudioModelKeys();
+      resetSchemaForModel({ forceResolution: true });
+      if (catalog.defaults) {
+        // 后端默认属于三层优先级的第 3 层：只有当前会话没有快照、
+        // 且当前模型没有设置页专属默认时才生效，避免盖掉用户上一轮参数。
+        const p = catalog.defaults.params || {};
+        const sid = currentSessionId.value;
+        const modelDefault = studioDefaults.value?.perModel?.[imageModelKey.value];
+        const hasSessionSnapshot = !!(sid && sessionParamsMap.has(sid));
+        if (!hasSessionSnapshot && !modelDefault?.ratio) {
+          applyParamsSnapshot({
+            ratio: p.ratio || p.image_ratio,
+            size: p.image_size,
+            video_resolution: p.video_resolution,
+            duration: p.video_duration,
+            schemaParams: {
+              ...(p.ratio ? { ratio: p.ratio } : {}),
+              ...(p.video_resolution ? { resolution: p.video_resolution } : {})
+            }
+          }, { source: 'system' });
+        }
+      }
     }
   } catch (e) {
     // 目录挂了 = 四个模型下拉全空 + 误报「参数表还没接入」，必须让用户看得见并可以重试
@@ -5347,6 +5966,7 @@ onMounted(async () => {
   // 换登录 / 掉登录都要重签媒体 URL：token 存在 localStorage，不触发渲染，旧 <img> 会一直 401
   window.addEventListener('ml_login', bumpMediaAuth);
   window.addEventListener('ml_auth_required', bumpMediaAuth);
+  window.addEventListener('studio_defaults_changed', () => { loadStudioCatalog(); });
   streamRO = new ResizeObserver(() => {
     if (pinned.value) {
       if (!pinRaf) pinRaf = requestAnimationFrame(() => { pinRaf = 0; stickToBottom(); });
@@ -5600,6 +6220,41 @@ const selectionBubble = reactive({
   y: 0,
   text: ''
 });
+
+// ===== 全局浮层栈登记 =====
+// 旧 ESC 链（handleGlobalKeydown）覆盖的浮层必须全量登记：App.vue 的 capture ESC
+// 在 hasOverlays() 为真时会吞掉事件，漏登记会导致该浮层既不在栈里又收不到 ESC 而关不掉。
+// 对象型 ref 必须用 computed 包装：overlay-stack 的 watch 非 deep，直接传对象会因恒 truthy 永远占栈顶。
+bindOverlays({
+  selectionBubble: {
+    ref: computed(() => !!selectionBubble.visible),
+    close: () => { selectionBubble.visible = false; }
+  },
+  previewModal: {
+    ref: computed(() => !!previewModal.value.visible),
+    close: () => { previewModal.value.visible = false; }
+  },
+  detailModal: {
+    ref: computed(() => !!detailModal.value.visible),
+    close: () => { detailModal.value.visible = false; }
+  },
+  saveModal: {
+    ref: computed(() => !!saveModal.value.visible),
+    close: () => { saveModal.value.visible = false; }
+  },
+  assetSelector: showAssetSelector,
+  // 全屏看图优先于抽屉：连续返回时先退全屏、再关抽屉
+  libraryFullscreen: { ref: isLibraryFullscreen, priority: 20 },
+  expandedLibrary: { ref: showExpandedLibrary, priority: 10 },
+  rightDrawer: rightDrawerOpen,
+  editModal: showEditModal,
+  atMenu: showAtMenu,
+  hashMenu: showHashMenu,
+  previewModalV2: showPreviewModal,
+  skillsMenu: showSkillsMenu,
+  advanced: showAdvanced,
+  advancedRules: showAdvancedRules
+}, { prefix: 'chat-studio:' });
 
 function handleChatTextSelection() {
   const sel = window.getSelection();
@@ -6159,28 +6814,33 @@ function resultImageDownloadHref(msg) {
 async function downloadGeneratedMedia(raw, label) {
   const url = String(raw || '');
   if (!url) return;
-  const name = label || decodeURIComponent(url.split('/').pop().split('?')[0] || 'generated') ;
+  const name = label || decodeURIComponent(url.split('/').pop().split('?')[0] || 'generated');
+  // 优先直接使用服务端带 token 直链下载（带 download=1 触发流式 disposition），避免内存膨胀与 blob 销毁时机问题
   try {
-    const res = await authFetch(url, { method: 'GET', cache: 'no-store' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const blob = await res.blob();
-    const objUrl = URL.createObjectURL(blob);
+    const directUrl = authedMediaUrl(url) + (url.includes('?') ? '&download=1' : '?download=1');
     const a = document.createElement('a');
-    a.href = objUrl;
+    a.href = directUrl;
     a.download = name;
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(() => URL.revokeObjectURL(objUrl), 60000);
   } catch (e) {
-    // 兜底退回带 token 的直链（服务端已允许 GET/HEAD 用 query token 鉴权）
-    const a = document.createElement('a');
-    a.href = authedMediaUrl(url);
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    alert(`直接下载失败（${e.message}），已改用带 token 的链接重试；若仍失败请刷新页面重新登录`);
+    // 降级使用 fetch 转 blob
+    try {
+      const res = await authFetch(url, { method: 'GET', cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objUrl;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(objUrl), 120000);
+    } catch (err) {
+      alert(`下载失败：${err.message}`);
+    }
   }
 }
 
@@ -6525,6 +7185,7 @@ async function loadTemplates() {
       templates.value = cached.templates;
       sortTemplates();
       setupCardObserver();
+      prewarmPreviewImages(cached.templates, 48);
     }
   } catch (e) {
     console.warn('读取创作库本地缓存异常:', e);
@@ -6672,6 +7333,10 @@ async function selectSession(s) {
   }
 
   currentSessionId.value = s.id;
+  // 参数与模型选择严格跟随该会话上一轮：先清掉上一个会话的残留，
+  // 再恢复本会话快照（内存优先，阶段 2 后 chat_sessions.params_json 持久化）。
+  resetParamsToDefaults();
+  restoreSessionParams(s);
   generating.value = Boolean(sessionGeneratingMap.get(s.id) || sessionPlaceholderMap.has(s.id));
   messages.value = [];
   pinned.value = true;
@@ -6739,6 +7404,17 @@ async function selectSession(s) {
           retryParams: m.result?.retryParams || null
         };
       });
+
+      // 旧会话若还没有参数快照（例如刚刷新页面），用最后一条带 params 的消息回填，
+      // 保证「回到上一轮」时模型 / 画幅 / 分辨率与上一轮一致。
+      if (!sessionParamsMap.has(s.id)) {
+        const lastWithParams = [...rawMsgs].reverse().find((m) => m.params && Object.keys(m.params || {}).length);
+        const msgSnapshot = snapshotFromMessage({ params: lastWithParams?.params });
+        if (msgSnapshot) {
+          applyParamsSnapshot(msgSnapshot, { source: 'system' });
+          sessionParamsMap.set(s.id, currentParamsSnapshot());
+        }
+      }
 
       const activePlaceholder = sessionPlaceholderMap.get(s.id);
       if (activePlaceholder && !messages.value.some(m => m === activePlaceholder || m.isGenerating)) {
@@ -6857,6 +7533,8 @@ async function createNewSession(opts = {}) {
   sessions.value.unshift(newSess);
   currentSessionId.value = newId;
   messages.value = [];
+  // 新会话严格回到默认（模型专属默认 > 全局 9:16），绝不继承上一个会话的参数。
+  resetParamsToDefaults();
   try {
     await authFetch('/api/chat/sessions', {
       method: 'POST',
@@ -7002,7 +7680,15 @@ function applyTemplate(tpl) {
   }
   if (params.ratio) selectedRatio.value = params.ratio;
   else if (tpl.aspect_ratio) selectedRatio.value = tpl.aspect_ratio;
-  if (params.resolution) selectedResolution.value = params.resolution;
+  // 模板的 params.resolution 可能是视频档位（720p / 1080p），不能直接塞进图片尺寸档位，
+  // 否则会一路传到 GPT Image VIP 的 size 字段（该通道只认 WxH 像素或 auto，其它一律 400）
+  {
+    const sizeField = fieldByKey(currentSchema.value, 'size');
+    const sizeOpts = (sizeField?.options || []).map(String);
+    if (params.resolution && (!sizeOpts.length || sizeOpts.includes(String(params.resolution)))) {
+      selectedResolution.value = params.resolution;
+    }
+  }
   // 提交时画幅/分辨率优先取 schemaParams（retryParams → schemaParams → selectedRatio），旧配方只把它们
   // 存在顶层。只回填 selectedRatio 会被上一个模型残留的 schema 值盖掉（实测：16:9 复用后变成 1:1）。
   const legacySeed = {};
@@ -7100,7 +7786,7 @@ function onAssetPickerConfirm(versions) {
   for (const version of versions || []) {
     if (!version?.url) continue;
     const idx = referenceTray.value.length + 1;
-    const is3D = /(sofa|chair|table|furniture|3d|模型|家具|单品|sofa_model)/i.test(version.name || version.url || '');
+    const is3D = Boolean(version.glb || version.modelUrl || version.kind === '3d' || version.category === '3d' || /\.(glb|gltf|obj)($|\?)/i.test(version.url || ''));
     const w = Number(version.width || version.naturalWidth || 0);
     const h = Number(version.height || version.naturalHeight || 0);
     const asset = {
@@ -7136,8 +7822,8 @@ function onAssetPickerUpload(file) {
   const url = URL.createObjectURL(file);
   localFileByUrl.set(url, file);
   const idx = referenceTray.value.length + 1;
-  const kind = file.type.startsWith('video/') ? 'video' : (file.type.startsWith('audio/') ? 'audio' : 'image');
-  const is3D = /(sofa|chair|table|furniture|3d|模型|家具|单品|sofa_model)/i.test(name);
+  const kind = file.type.startsWith('video/') ? 'video' : (file.type.startsWith('audio/') ? 'audio' : (file.name.match(/\.(glb|gltf|obj)$/i) ? '3d' : 'image'));
+  const is3D = Boolean(file.name.match(/\.(glb|gltf|obj)$/i));
   const asset = { name, url, weight: 85, tag: `@图${idx}`, kind, origin: is3D ? '3d_snapshot' : 'upload', isRefObject: is3D };
   referenceTray.value.push(asset);
   // 用户需求：不自动在对话框新增胶囊
@@ -7226,6 +7912,29 @@ function dropMentionNumber(removed) {
     }
   };
   [...richEditorRef.value.childNodes].forEach(walk);
+}
+
+function handleTrayReorder({ from, to }) {
+  if (from === to) return;
+  if (from < 0 || from >= referenceTray.value.length) return;
+  if (to < 0 || to >= referenceTray.value.length) return;
+  const list = referenceTray.value.slice();
+  const [moved] = list.splice(from, 1);
+  list.splice(to, 0, moved);
+  list.forEach((item, index) => {
+    item.tag = `@图${index + 1}`;
+  });
+  referenceTray.value = list;
+
+  if (selectedImageIndex.value === from) {
+    selectedImageIndex.value = to;
+  } else if (from < selectedImageIndex.value && to >= selectedImageIndex.value) {
+    selectedImageIndex.value -= 1;
+  } else if (from > selectedImageIndex.value && to <= selectedImageIndex.value) {
+    selectedImageIndex.value += 1;
+  }
+  rememberSessionRefs(referenceTray.value);
+  syncAggregatedRecipePrompt();
 }
 
 function removeRef(idx) {
@@ -7383,7 +8092,9 @@ async function sendMessage() {
   }
   syncTrayFromEditor();
   const rawContent = getFullPromptText();
-  if (!rawContent || generating.value) return;
+  // 按会话判断生成锁：A 会话生成中切到 B 仍可提交，为后台并行任务队列铺路。
+  // generating 单例仍用于当前视图的 UI 状态，但不再作为全局提交闸门。
+  if (!rawContent || sessionGeneratingMap.get(currentSessionId.value) || sessionPlaceholderMap.has(currentSessionId.value)) return;
 
   // 2. 点击立即生图后自动收回全屏图片展示与抽屉
   viewerCollapsed.value = true;
@@ -7502,8 +8213,8 @@ async function sendMessage() {
 
   // 5. 占位渲染图实时显示生成进度（图片、视频）
   if (currentMod === 'image' || currentMod === 'video') {
-    const targetRatio = retryParams.ratio || schemaParams.value.ratio || selectedRatio.value || '16:9';
-    const targetResolution = retryParams.size || retryParams.resolution || schemaParams.value.size || selectedResolution.value || '2K';
+    const targetRatio = retryParams.ratio || schemaParams.value.ratio || selectedRatio.value || '9:16';
+    const targetResolution = retryParams.resolution || retryParams.size || schemaParams.value.resolution || schemaParams.value.size || videoResolution.value || selectedResolution.value || '2K';
     placeholderMsg = reactive({
       role: 'assistant',
       modality: currentMod,
@@ -7556,8 +8267,10 @@ async function sendMessage() {
       prompt: rawContent,
       images: currentTray.map(r => r.url),
       params: {
-        resolution: selectedResolution.value,
-        ratio: selectedRatio.value,
+        // 以参数条（schemaParams）为准：selectedResolution / selectedRatio 是全局兜底值，
+        // 切过模型后可能和真正提交的档位不一致，之前会出现「卡片显示 1:1、实际发 3:4」。
+        resolution: retryParams.size || schemaParams.value.size || selectedResolution.value,
+        ratio: retryParams.ratio || schemaParams.value.ratio || selectedRatio.value,
         model: retryModel,
         refs: currentTray,
         recipePrompt: recipePrompt.value || '',
@@ -7696,8 +8409,24 @@ async function sendMessage() {
         }
       });
       // 尺寸/画幅以契约参数条为准（Qwen 本地默认 1K：2K 生成慢 2~3 倍，不再用写死的 2K 兜底）
-      const submitImageSize = retryParams.size || retryParams.resolution || schemaParams.value.size || selectedResolution.value;
-      const submitImageRatio = retryParams.ratio || schemaParams.value.ratio || selectedRatio.value;
+      // 只接受当前图片模型参数表里真实存在的档位：复用视频配方后会残留 resolution='1080p'，
+      // 这类值原样透传会让 GPT Image VIP 直接 HTTP 400（该通道只认 WxH 像素或 auto）。
+      // 契约里压根没有 size 字段的模型（GPT Image VIP 系列就是），一律不发 size，交给后端按画幅算像素。
+      const imageSizeField = fieldByKey(currentSchema.value, 'size');
+      const imageSizeOptions = (imageSizeField?.options || []).map(String);
+      const submitImageSize = imageSizeField
+        ? ([retryParams.size, schemaParams.value.size, selectedResolution.value]
+            .find((v) => v != null && v !== '' && (!imageSizeOptions.length || imageSizeOptions.includes(String(v))))
+           || imageSizeField.default
+           || '2K')
+        : undefined;
+      const sizeLabel = submitImageSize || '按画幅自适应';
+      const imageRatioField = fieldByKey(currentSchema.value, 'ratio');
+      const imageRatioOptions = (imageRatioField?.options || []).map(String);
+      const submitImageRatio = [retryParams.ratio, schemaParams.value.ratio, selectedRatio.value]
+        .find((v) => v != null && v !== '' && (!imageRatioOptions.length || imageRatioOptions.includes(String(v))))
+        || imageRatioField?.default
+        || '9:16';
       const imageStartedAt = Date.now();
       const res = await generateAiImage({
         prompt: promptForModel,
@@ -7707,7 +8436,10 @@ async function sendMessage() {
         imageUrls,
         genMode: retryMode,
         extras: retryParams,
-        snippetIds: activeSnippetIds()
+        snippetIds: activeSnippetIds(),
+        // 后台任务队列按会话归属结果，clientRequestId 用于幂等去重
+        sessionId: targetSessionId,
+        clientRequestId: `${targetSessionId}_${imageStartedAt}_${Math.random().toString(36).slice(2, 8)}`
       });
 
       const genUrl = res.files?.[0]?.previewUrl || res.files?.[0]?.url || res.imageUrl || res.url || res.data?.imageUrl || (res.files?.[0]?.localPath ? `/api/cache/temp/${res.files[0].localPath.split('/').pop()}` : '');
@@ -7723,13 +8455,13 @@ async function sendMessage() {
         modality: 'image',
         content: layerStack && layerStack.layers.length > 1
           ? `已完成 Seedream 5.0 多图层拆分生成（共 ${layerStack.layers.length} 个独立图层），可直接在上方切换查看或单层二次引用。`
-          : `已为您完成空间视效生成。家具材质光泽与参考项深度统一，光影自然，画质达到 ${submitImageSize}。`,
+          : `已为您完成空间视效生成。家具材质光泽与参考项深度统一，光影自然，画质达到 ${sizeLabel}。`,
         userPrompt: rawContent,
         refs: currentTray,
         imageUrl: genUrl,
         layerStack,
         duration: imageElapsedSec > 0 ? `${imageElapsedSec}s` : (res.duration ? `${res.duration}s` : ''),
-        resolution: submitImageSize,
+        resolution: sizeLabel,
         ratio: submitImageRatio,
         model: getModelDisplayName(imageModelKey.value),
         modelKey: imageModelKey.value,
@@ -7737,23 +8469,8 @@ async function sendMessage() {
         schemaParams: retryParams,
         genMode: 'image'
       };
-      try {
-        const filed = await registerGeneratedAsset({
-          previewUrl: genUrl,
-          parentFid: currentTray.find((item) => item.fid)?.fid || '',
-          refFids: currentTray.map((item) => item.fid).filter(Boolean).slice(1),
-          prompt: rawContent,
-          model: imageModelKey.value,
-          mode: 'image',
-          ratio: submitImageRatio,
-          resolution: submitImageSize,
-          sessionId: targetSessionId
-        });
-        asstMsg.assetFid = filed.fid;
-      } catch (fileErr) {
-        console.warn('写入精修素材失败', fileErr);
-      }
-      rememberSessionRefs([{ url: genUrl, name: labelForRef(genUrl, ''), fid: asstMsg.assetFid || '' }], 'generated');
+      // 生成结果默认不入库：产物留在 /api/cache/temp/，由用户点「存入素材库」手动登记。
+      rememberSessionRefs([{ url: genUrl, name: labelForRef(genUrl, ''), fid: '' }], 'generated');
 
       // 原地响应式替换占位卡片为真实生成的图片
       if (placeholderMsg && messages.value.includes(placeholderMsg)) {
@@ -7800,7 +8517,7 @@ async function sendMessage() {
         ? retryParams.duration
         : schemaParams.value.duration != null ? schemaParams.value.duration : videoDuration.value;
       const submitRatio = retryParams.ratio || schemaParams.value.ratio || selectedRatio.value;
-      const submitSize = retryParams.resolution || retryParams.size || schemaParams.value.size || videoResolution.value;
+      const submitSize = retryParams.resolution || retryParams.size || schemaParams.value.resolution || schemaParams.value.size || videoResolution.value;
       const res = await generateAiVideo({
         prompt: promptForModel,
         model: videoModelKey.value,
@@ -7833,23 +8550,7 @@ async function sendMessage() {
         schemaMode: retryMode,
         schemaParams: retryParams
       };
-      try {
-        const filed = await registerGeneratedAsset({
-          previewUrl: genVideoUrl,
-          parentFid: currentTray.find((item) => item.fid)?.fid || '',
-          refFids: currentTray.map((item) => item.fid).filter(Boolean).slice(1),
-          prompt: rawContent,
-          model: videoModelKey.value,
-          mode: 'video',
-          ratio: submitRatio,
-          resolution: submitSize,
-          sessionId: targetSessionId
-        });
-        asstMsg.assetFid = filed.fid;
-      } catch (fileErr) {
-        // 入库失败不阻断消息展示：视频仍可播放、可下载
-        console.warn('写入精修素材失败', fileErr);
-      }
+      // 生成结果默认不入库：视频留在 /api/cache/temp/，由用户点「存入素材库」手动登记。
       // 原地响应式替换占位卡片为真实生成的视频
       if (placeholderMsg && messages.value.includes(placeholderMsg)) {
         Object.assign(placeholderMsg, asstMsg, {
@@ -7900,21 +8601,7 @@ async function sendMessage() {
         schemaParams: retryParams
       };
       if (genAudioUrl.includes('/api/cache/temp/')) {
-        try {
-          const filed = await registerGeneratedAsset({
-            previewUrl: genAudioUrl,
-            parentFid: currentTray.find((item) => item.fid)?.fid || '',
-            refFids: currentTray.map((item) => item.fid).filter(Boolean).slice(1),
-            prompt: rawContent,
-            model: musicType.value,
-            mode: 'music',
-            sessionId: targetSessionId
-          });
-          // 多产物时只登记第一条：当前播放器也只播第一条，其余暂不入库
-          asstMsg.assetFid = filed.fid;
-        } catch (fileErr) {
-          console.warn('写入精修素材失败', fileErr);
-        }
+        // 生成结果默认不入库：音频留在 temp，由用户点「存入素材库」手动登记。
       } else {
         // 后端已持久化（如 doubao_bgm_v5）：直接复用已入库 fid，无需重复登记
         const firstFile = res.files?.[0] || {};
@@ -8099,6 +8786,39 @@ function errorHint(raw) {
   }
   return '';
 }
+/**
+ * 生成结果默认不入库：只有用户手动点「存入素材库」才登记 assets。
+ * 复用 /api/assets/from-generation（shelf-lineage.registerGenerated），
+ * 与「⭐ 收藏为配方」不同，后者写的是 creation_templates。
+ */
+async function saveResultToLibrary(msg) {
+  if (!msg || msg.savingToLibrary || msg.librarySaved) return;
+  const previewUrl = msg.imageUrl || msg.videoUrl || msg.audioUrl;
+  if (!previewUrl) {
+    msg.librarySaveError = '这一轮没有可入库的产物';
+    return;
+  }
+  msg.savingToLibrary = true;
+  msg.librarySaveError = '';
+  try {
+    const filed = await registerGeneratedAsset({
+      previewUrl,
+      prompt: msg.userPrompt || msg.retryPrompt || '',
+      model: msg.modelKey || msg.model || '',
+      mode: msg.modality || 'image',
+      ratio: msg.ratio || msg.params?.ratio || selectedRatio.value,
+      resolution: msg.resolution || msg.params?.resolution || selectedResolution.value,
+      sessionId: currentSessionId.value
+    });
+    msg.assetFid = filed?.fid || '';
+    msg.librarySaved = true;
+  } catch (e) {
+    msg.librarySaveError = `存入失败：${e?.message || String(e)}`;
+  } finally {
+    msg.savingToLibrary = false;
+  }
+}
+
 async function openRetry(msg) {
   if (!msg) return;
   fillComposerFromError(msg);

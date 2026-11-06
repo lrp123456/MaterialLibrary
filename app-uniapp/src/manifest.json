@@ -1,87 +1,97 @@
-{
-  "name": "素材库-turret",
-  "appid": "__UNI__F183218",
-  "description": "仅上传相册元数据，不上传照片内容",
-  "versionName": "1.0.5",
-  "versionCode": "2050009",
-  "transformPx": false,
-  "app": {
-    "darkmode": false,
-    "name": "素材库-turret",
-    "modules": {},
-    "installPlugins": []
-  },
-  "quickapp": {},
-  "mp-weixin": {
-    "appid": "",
-    "setting": {
-      "urlCheck": false
-    },
-    "usingComponents": true
-  },
-  "h5": {
-    "title": "素材工作台",
-    "router": {
-      "mode": "hash",
-      "base": "./"
-    }
-  },
-  "vueVersion": "3",
-  "app-plus": {
-    "compatible": {
-      "ignoreVersion": true
-    },
-    "modules": {
-      "VideoPlayer": {}
-    },
-    "nativePlugins": {
-      "uni-local-infer": {
-        "__plugin_info__": {
-          "name": "uni-local-infer",
-          "description": "NCNN EdgeSAM + Real-ESRGAN",
-          "platforms": "Android",
-          "android_package_name": "io.dcloud.uni_modules.unilocalinfer",
-          "ios_bundle_id": "",
-          "isCloud": false,
-          "bought": -1,
-          "pid": "uni-local-infer",
-          "parameters": {}
-        },
-        "android": {
-          "plugins": [
-            {
-              "type": "module",
-              "name": "LocalInferNative",
-              "class": "io.dcloud.uni_modules.unilocalinfer.LocalInferNative"
-            }
-          ]
-        }
-      }
-    },
-    "distribute": {
-      "android": {
-        "permissions": [
-          "<uses-permission android:name=\"android.permission.READ_MEDIA_IMAGES\"/>",
-          "<uses-permission android:name=\"android.permission.READ_MEDIA_VIDEO\"/>",
-          "<uses-permission android:name=\"android.permission.READ_EXTERNAL_STORAGE\" android:maxSdkVersion=\"32\"/>",
-          "<uses-permission android:name=\"android.permission.INTERNET\"/>",
-          "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>",
-          "<uses-permission android:name=\"android.permission.POST_NOTIFICATIONS\"/>",
-          "<uses-permission android:name=\"android.permission.FOREGROUND_SERVICE\"/>",
-          "<uses-permission android:name=\"android.permission.FOREGROUND_SERVICE_DATA_SYNC\"/>",
-          "<uses-permission android:name=\"android.permission.WAKE_LOCK\"/>",
-          "<uses-permission android:name=\"android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS\"/>"
-        ],
-        "minSdkVersion": 26,
-        "targetSdkVersion": 34,
-        "usesCleartextTraffic": true
-      },
-      "ios": {
-        "dSYMs": false,
-        "privacyDescription": {
-          "NSPhotoLibraryUsageDescription": "读取相册元数据用于同步到素材库服务器"
-        }
-      }
-    }
-  }
+﻿{
+    "name":  "素材库-turret",
+    "appid":  "__UNI__F183218",
+    "description":  "仅上传相册元数据，不上传照片内容",
+    "versionName":  "1.0.7",
+    "versionCode":  "2070003",
+    "transformPx":  false,
+    "app":  {
+                "darkmode":  false,
+                "name":  "素材库-turret",
+                "modules":  {
+
+                            },
+                "installPlugins":  [
+
+                                   ]
+            },
+    "quickapp":  {
+
+                 },
+    "mp-weixin":  {
+                      "appid":  "",
+                      "setting":  {
+                                      "urlCheck":  false
+                                  },
+                      "usingComponents":  true
+                  },
+    "h5":  {
+               "title":  "素材工作台",
+               "router":  {
+                              "mode":  "hash",
+                              "base":  "./"
+                          }
+           },
+    "vueVersion":  "3",
+    "app-plus":  {
+                     "compatible":  {
+                                        "ignoreVersion":  true
+                                    },
+                     "modules":  {
+                                     "VideoPlayer":  {
+
+                                                     }
+                                 },
+                     "nativePlugins":  {
+                                           "uni-local-infer":  {
+                                                                   "__plugin_info__":  {
+                                                                                           "name":  "uni-local-infer",
+                                                                                           "description":  "NCNN EdgeSAM + Real-ESRGAN",
+                                                                                           "platforms":  "Android",
+                                                                                           "android_package_name":  "io.dcloud.uni_modules.unilocalinfer",
+                                                                                           "ios_bundle_id":  "",
+                                                                                           "isCloud":  false,
+                                                                                           "bought":  -1,
+                                                                                           "pid":  "uni-local-infer",
+                                                                                           "parameters":  {
+
+                                                                                                          }
+                                                                                       },
+                                                                   "android":  {
+                                                                                   "plugins":  [
+                                                                                                   {
+                                                                                                       "type":  "module",
+                                                                                                       "name":  "LocalInferNative",
+                                                                                                       "class":  "io.dcloud.uni_modules.unilocalinfer.LocalInferNative"
+                                                                                                   }
+                                                                                               ]
+                                                                               }
+                                                               }
+                                       },
+                     "distribute":  {
+                                        "android":  {
+                                                        "permissions":  [
+                                                                            "\u003cuses-permission android:name=\"android.permission.READ_MEDIA_IMAGES\"/\u003e",
+                                                                            "\u003cuses-permission android:name=\"android.permission.READ_MEDIA_VIDEO\"/\u003e",
+                                                                            "\u003cuses-permission android:name=\"android.permission.READ_EXTERNAL_STORAGE\" android:maxSdkVersion=\"32\"/\u003e",
+                                                                            "\u003cuses-permission android:name=\"android.permission.INTERNET\"/\u003e",
+                                                                            "\u003cuses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/\u003e",
+                                                                            "\u003cuses-permission android:name=\"android.permission.POST_NOTIFICATIONS\"/\u003e",
+                                                                            "\u003cuses-permission android:name=\"android.permission.FOREGROUND_SERVICE\"/\u003e",
+                                                                            "\u003cuses-permission android:name=\"android.permission.FOREGROUND_SERVICE_DATA_SYNC\"/\u003e",
+                                                                            "\u003cuses-permission android:name=\"android.permission.WAKE_LOCK\"/\u003e",
+                                                                            "\u003cuses-permission android:name=\"android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS\"/\u003e"
+                                                                        ],
+                                                        "minSdkVersion":  26,
+                                                        "targetSdkVersion":  34,
+                                                        "usesCleartextTraffic":  true
+                                                    },
+                                        "ios":  {
+                                                    "dSYMs":  false,
+                                                    "privacyDescription":  {
+                                                                               "NSPhotoLibraryUsageDescription":  "读取相册元数据用于同步到素材库服务器"
+                                                                           }
+                                                }
+                                    }
+                 }
 }

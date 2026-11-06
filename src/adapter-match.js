@@ -11,8 +11,14 @@ function pickAdapterId(kind, modelCode, adapters, preferEndpointId) {
     return hit ? hit.id : null;
   };
 
-  // 模型契约已经指明了 endpoint（如 newapi 的 Gemini 原生图像），必须优先走对应适配器
-  if (preferEndpointId === 'newapi') {
+  // 模型契约已经指明了 endpoint（如 newapi 的 Gemini 原生图像与 GPT Image 系列），必须优先走对应适配器
+  if (preferEndpointId === 'newapi' || code.includes('gpt-image') || code.includes('gpt_image') || code.includes('flare') || code.includes('sunburst')) {
+    if (code.includes('gpt-image') || code.includes('gpt_image') || code.includes('flare') || code.includes('sunburst')) {
+      return findId((a) => a.id === 'newapi_gpt_image')
+        || findId((a) => a.id === 'openai_images')
+        || findId((a) => a.protocol === 'gemini_generate_content' || a.id === 'newapi_gemini_image')
+        || null;
+    }
     return findId((a) => a.protocol === 'gemini_generate_content' || a.id === 'newapi_gemini_image')
       || null;
   }
@@ -98,8 +104,8 @@ function pickAdapterId(kind, modelCode, adapters, preferEndpointId) {
   return null;
 }
 
-function pickAdapterRow(kind, modelCode, adapters) {
-  const id = pickAdapterId(kind, modelCode, adapters);
+function pickAdapterRow(kind, modelCode, adapters, preferEndpointId) {
+  const id = pickAdapterId(kind, modelCode, adapters, preferEndpointId);
   if (!id) return null;
   return (adapters || []).find((a) => a.id === id) || null;
 }

@@ -201,7 +201,7 @@ async function listObjects(prefix, services, maxKeys = 1000) {
  * 清理 chat-temp/ 下超时的临时图片。上传路径失败时由请求 finally 删除，
  * 这里兜底进程崩溃/删除失败留下的对象。只动 chat-temp/ 前缀。
  */
-async function sweepChatTemp(services, { maxAgeMs = 24 * 60 * 60 * 1000, limit = 200 } = {}) {
+async function sweepChatTemp(services, { maxAgeMs = 30 * 24 * 60 * 60 * 1000, limit = 200 } = {}) {
   if (!isOssEnabled(services)) return { deleted: 0 };
   const listed = await listObjects('chat-temp/', services, 1000);
   const cutoff = Date.now() - maxAgeMs;
