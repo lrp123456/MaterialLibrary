@@ -19,6 +19,7 @@ const PUBLIC_MODEL_IDS = [
   // 视频
   'seedance2_0',
   'seedance2_5',
+  'wan3_0_video',
   // 对话
   'gemini_4_argon',
 ];

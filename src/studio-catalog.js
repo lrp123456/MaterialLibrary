@@ -539,6 +539,28 @@ const OFFICIAL_STUDIO = {
         },
       }),
       M({
+        id: 'wan3_0_video',
+        name: '万相 3.0',
+        model_code: 'wan3.0-video',
+        provider: 'dashscope',
+        providerName: '阿里云',
+        badge: '标准版',
+        capabilities: 'video',
+        dbId: 'wan3_0_video',
+        aliases: ['wan3.0-video'],
+        params: { duration: true, resolution: ['480p', '720p', '1080p'], refs: 5 },
+        caps: {
+          output: 'video',
+          input: { images: 5, videos: 0, audios: 0 },
+          region: R_NONE,
+          multiRef: true,
+          ratioFromImage1: false,
+          refStyle: 'generic',
+          polishId: 'wan3_0_video',
+          freeTier: false,
+        },
+      }),
+      M({
         id: 'agnes_video_2_5_flash',
         name: 'Agnes Video 2.5 Flash',
         model_code: 'agnes-video-2.5-flash',
@@ -735,6 +757,7 @@ const FAMILY_RULES = [
   { family: 'seedance', name: 'Seedance', re: /seedance/i },
   { family: 'seed', name: 'Seed', re: /(^|[-_/])seed([-_/]|$)|doubao-seed/i },
   { family: 'agnes', name: 'Agnes', re: /agnes/i },
+  { family: 'wan', name: '万相', re: /wan3|wanx|万相/i },
   { family: 'qwen', name: 'Qwen', re: /qwen/i },
   { family: 'local', name: '本机', re: /(local|acestep|index-tts)/i },
 ];
@@ -762,6 +785,7 @@ function providerGroupOf(providerId) {
   if (p === 'agnes') return 'Agnes';
   if (p === 'local') return '本机';
   if (p === 'modelscope') return '魔搭社区';
+  if (p === 'dashscope') return '阿里云';
   if (p === 'litellm') return 'LiteLLM';
   return p || '其他';
 }

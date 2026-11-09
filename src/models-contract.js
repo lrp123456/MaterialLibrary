@@ -72,17 +72,45 @@ function contractNumber(key, label, min, max, def, extra) {
 
 const RATIO_SEEDANCE = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9', 'adaptive'];
 
-function seedance20Params() {
-  const resOptions = ['480p_sr2x', '720p', '1080p', '720p_sr2x', '480p'];
-  const resLabels = {
-    '480p_sr2x': '480p → 720p (2x超分)',
-    '720p': '720p (原生)',
-    '1080p': '1080p (原生)',
-    '720p_sr2x': '720p → 1080p (2x超分)',
-    '480p': '480p (原生)'
+const VIDEO_RESOLUTIONS_SIX = [
+  '480p',
+  '480px2（超分）',
+  '720p',
+  '720px2（超分）',
+  '1080p',
+  '1080px2（超分）',
+];
+
+const VIDEO_RESOLUTIONS_LABELS = {
+  '480p': '480p',
+  '480px2（超分）': '480px2（超分）',
+  '720p': '720p',
+  '720px2（超分）': '720px2（超分）',
+  '1080p': '1080p',
+  '1080px2（超分）': '1080px2（超分）',
+};
+
+function nativeVideoResolutions() {
+  return {
+    options: [...VIDEO_RESOLUTIONS_SIX],
+    labels: { ...VIDEO_RESOLUTIONS_LABELS },
+    default: '720px2（超分）',
   };
+}
+
+function stripVideoResolution(val) {
+  const s = String(val || '').trim();
+  const lower = s.toLowerCase();
+  if (lower.startsWith('480')) return '480P';
+  if (lower.startsWith('1080')) return '1080P';
+  if (lower.startsWith('720')) return '720P';
+  return s;
+}
+
+function seedance20Params() {
+  const res = nativeVideoResolutions();
   return [
-    contractEnum('resolution', '分辨率', resOptions, '720p_sr2x', { option_labels: resLabels }),
+    contractEnum('resolution', '分辨率', res.options, res.default, { option_labels: res.labels }),
     contractDuration('duration', '时长', 4, 15, 5, { extra_stops: [-1], extra_labels: { '-1': '智能' } }),
     contractEnum('ratio', '画幅', RATIO_SEEDANCE, '9:16'),
     contractBool('generate_audio', '生成同步音频', true, { visibility: 'public' }),
@@ -99,16 +127,9 @@ function seedance20Params() {
 }
 
 function seedance25Params() {
-  const resOptions = ['480p_sr2x', '720p', '1080p', '720p_sr2x', '480p'];
-  const resLabels = {
-    '480p_sr2x': '480p → 720p (2x超分)',
-    '720p': '720p (原生)',
-    '1080p': '1080p (原生)',
-    '720p_sr2x': '720p → 1080p (2x超分)',
-    '480p': '480p (原生)'
-  };
+  const res = nativeVideoResolutions();
   return [
-    contractEnum('resolution', '分辨率', resOptions, '720p_sr2x', { option_labels: resLabels }),
+    contractEnum('resolution', '分辨率', res.options, res.default, { option_labels: res.labels }),
     contractDuration('duration', '时长', 4, 30, 5, { extra_stops: [-1], extra_labels: { '-1': '智能' } }),
     contractEnum('ratio', '画幅', RATIO_SEEDANCE, '9:16'),
     contractBool('generate_audio', '生成同步音频', true, { visibility: 'public' }),
@@ -128,6 +149,24 @@ function seedance25Params() {
     contractEnum('omni_reference_task_type', '任务类型', ['auto', 'reference', 'edit', 'extend'], 'auto', {
       visibility: 'advanced',
       option_labels: { auto: '自动', reference: '参考生视频', edit: '编辑', extend: '延长' },
+    }),
+  ];
+}
+
+function wan30Params() {
+  const res = nativeVideoResolutions();
+  return [
+    contractEnum('resolution', '分辨率', res.options, res.default, { option_labels: res.labels }),
+    contractDuration('duration', '时长', 2, 30, 5, { extra_stops: [-1], extra_labels: { '-1': '智能' } }),
+    contractEnum('ratio', '画幅', ['16:9', '9:16', '1:1', '4:3', '3:4', 'adaptive'], '9:16'),
+    contractEnum('mode', '模式', ['text_to_video', 'image_to_video', 'first_last_frame', 'omni_reference'], 'text_to_video', {
+      location: 'none',
+      option_labels: {
+        text_to_video: '文生视频',
+        image_to_video: '图生视频',
+        first_last_frame: '首尾帧',
+        omni_reference: '参考生视频',
+      },
     }),
   ];
 }
@@ -752,6 +791,32 @@ const DEFAULT_MODEL_CONTRACTS = [
     }
   },
   {
+    id: 'wan3_0_video',
+    name: '万相 3.0',
+    vendor_model_id: 'wan3.0-video',
+    capability_id: 'wan_video',
+    refStyle: 'generic',
+    polishHint: '文生 / 首帧 / 首尾帧 / 参考图 · 2–30s',
+    modes: [
+      { id: 'text_to_video', label: '文生视频' },
+      { id: 'image_to_video', label: '图生视频' },
+      { id: 'first_last_frame', label: '首尾帧' },
+      { id: 'omni_reference', label: '参考生视频' },
+    ],
+    slots: { images: 5, videos: 0, audios: 0 },
+    enabled: 1,
+    params: wan30Params(),
+    table_mappings: {},
+    conditional_rules: [
+      { when: { mode: 'first_last_frame' }, set: { ratio: 'adaptive' }, lock: ['ratio'] },
+    ],
+    mutex_groups: [],
+    optimizer: {
+      optimizer_model_id: 'agnes3_0flash',
+      prompt: ''
+    }
+  },
+  {
     id: 'agnes_video_2_5_flash',
     name: 'Agnes Video 2.5 Flash',
     vendor_model_id: 'agnes-video-2.5-flash',
@@ -789,15 +854,15 @@ const DEFAULT_MODEL_CONTRACTS = [
         location: 'body',
         body_field: 'seconds'
       },
-      {
-        key: 'size',
-        label: '分辨率',
-        type: 'string',
-        default: '720P',
-        visibility: 'advanced',
+      contractEnum('resolution', '分辨率', ['720p', '720px2（超分）'], '720px2（超分）', {
+        visibility: 'public',
         location: 'body',
-        body_field: 'size'
-      }
+        body_field: 'size',
+        option_labels: {
+          '720p': '720p',
+          '720px2（超分）': '720px2（超分）'
+        }
+      })
     ],
     table_mappings: {},
     conditional_rules: [],
@@ -2447,13 +2512,39 @@ function modelParamsNeedRatioRepair(params) {
   return r.default !== '9:16' && Array.isArray(r.options) && r.options.includes('9:16');
 }
 
-function seedanceParamsNeedRepair(params) {
+function videoParamsNeedRepair(modelId, params) {
   if (!Array.isArray(params) || !params.length) return true;
-  const dur = params.find((p) => p.key === 'duration');
-  const res = params.find((p) => p.key === 'resolution');
-  if (!res || !Array.isArray(res.options) || !res.options.includes('480p_sr2x')) return true;
-  if (!dur || Number(dur.max) === 12 || dur.type !== 'duration') return true;
+  const isSeedance = (modelId === 'seedance2_0' || modelId === 'seedance2_5');
+  const isWan = (modelId === 'wan3_0_video');
+  const isAgnes = (modelId === 'agnes_video_2_5_flash');
+  if (!isSeedance && !isWan && !isAgnes) return false;
+
+  const res = params.find((p) => p && (p.key === 'resolution' || p.key === 'size'));
+  if (!res || !Array.isArray(res.options)) return true;
+  const options = res.options.map(String);
+
+  if (isAgnes) {
+    if (options.length !== 2 || !options.includes('720p') || !options.includes('720px2（超分）')) return true;
+    if (res.default !== '720px2（超分）') return true;
+    return false;
+  }
+
+  // Seedance and Wan: 6 tiers
+  if (options.length !== 6) return true;
+  for (let i = 0; i < VIDEO_RESOLUTIONS_SIX.length; i++) {
+    if (options[i] !== VIDEO_RESOLUTIONS_SIX[i]) return true;
+  }
+  if (res.default !== '720px2（超分）') return true;
+
+  if (isSeedance) {
+    const dur = params.find((p) => p && p.key === 'duration');
+    if (!dur || Number(dur.max) === 12 || dur.type !== 'duration') return true;
+  }
   return false;
+}
+
+function seedanceParamsNeedRepair(params) {
+  return videoParamsNeedRepair('seedance2_0', params);
 }
 
 function baselineOptimizer(mc) {
@@ -2463,7 +2554,7 @@ function baselineOptimizer(mc) {
   return base;
 }
 
-/** 新行写入官方技能。已有非空技能不覆盖。已保存的显示名与非 Seedance 参数不覆盖。Seedance 只在时长被收成 4–12 或丢掉分辨率时按原 schema 修回。 */
+/** 新行写入官方技能。已有非空技能不覆盖。已保存的显示名与非 Seedance 参数不覆盖。Seedance/Wan 仍带旧三档或 sr2x 时，修成标准六档，Agnes 修成两档。 */
 function seedStoredContract(db, insContract, mc, now) {
   const seedOpt = baselineOptimizer(mc);
   const existing = db.prepare('SELECT name, vendor_model_id, capability_id, optimizer_json, params_json FROM model_contracts WHERE id=?').get(mc.id);
@@ -2504,12 +2595,13 @@ function seedStoredContract(db, insContract, mc, now) {
     try { params = JSON.parse(existing.params_json); } catch { params = null; }
   }
 
-  const isSeedance = (mc.id === 'seedance2_0' || mc.id === 'seedance2_5');
+  const isVideoToRepair = (mc.id === 'seedance2_0' || mc.id === 'seedance2_5' || mc.id === 'wan3_0_video' || mc.id === 'agnes_video_2_5_flash');
+  const videoRepair = isVideoToRepair && videoParamsNeedRepair(mc.id, params);
   const ratioRepair = modelParamsNeedRatioRepair(params);
-  const repair = (isSeedance && seedanceParamsNeedRepair(params)) || ratioRepair;
+  const repair = videoRepair || ratioRepair;
 
   if (repair) {
-    if (isSeedance) {
+    if (isVideoToRepair) {
       params = mc.params || [];
     } else if (ratioRepair && Array.isArray(params)) {
       for (const p of params) {
@@ -3001,7 +3093,10 @@ function assembleModelPayload({
       }
 
       if (field && val !== undefined && val !== null) {
-        const casted = transformFieldValue(val, p);
+        let casted = transformFieldValue(val, p);
+        if (field === 'resolution' || (field === 'size' && (contract.capability_id === 'agnes_video' || contract.capability_id === 'wan_video'))) {
+          casted = stripVideoResolution(casted);
+        }
         if (field.includes('.')) {
           if (field === 'optimize_prompt_options.mode') {
             if (casted && casted !== 'off') setDeepField(body, field, casted);
@@ -3192,6 +3287,12 @@ function buildSchemaForContract(c, db = null) {
   const advanced = [];
   const submitMap = {};
 
+  // 「默认视频清晰度」只该改写视频契约的 resolution 枚举默认值。
+  // 以前只按字段名判断，将来若有图片契约也声明 resolution 枚举，就会被 720p_sr2x 顶掉默认值。
+  const isVideoContract = (Array.isArray(rawParams)
+      && rawParams.some((p) => p && ['duration', 'seconds', 'Duration'].includes(p.key)))
+    || (Array.isArray(modes) && modes.some((m) => m && /video/i.test(String(m.id || ''))));
+
   for (const p of rawParams) {
     if (!p || !p.key || p.key === 'mode' || p.key === 'omni_reference_task_type') continue;
     let uiKey = p.key;
@@ -3236,7 +3337,7 @@ function buildSchemaForContract(c, db = null) {
         fieldObj.options.unshift('9:16');
       }
     }
-    if ((uiKey === 'resolution' || p.key === 'resolution') && Array.isArray(fieldObj.options)) {
+    if (isVideoContract && (uiKey === 'resolution' || p.key === 'resolution') && Array.isArray(fieldObj.options)) {
       try {
         const { getStudioDefaultSettings } = require('./studio-defaults');
         const sDef = getStudioDefaultSettings(db);
@@ -3561,7 +3662,7 @@ const DEFAULT_WORKFLOWS_DOCUMENT = {
       id: 'video',
       name: '视频漫游',
       default_model: 'seedance2_0',
-      allow_models: ['seedance2_0', 'seedance2_5', 'agnes_video_2_5_flash'],
+      allow_models: ['seedance2_0', 'seedance2_5', 'agnes_video_2_5_flash', 'wan3_0_video'],
       show_optimize_button: true,
       fixed_params: {}
     },
@@ -4781,6 +4882,11 @@ module.exports = {
   syncEndpointToLegacyTables,
   DEFAULT_ENDPOINTS,
   DEFAULT_MODEL_CONTRACTS,
+  seedanceParamsNeedRepair,
+  videoParamsNeedRepair,
+  VIDEO_RESOLUTIONS_SIX,
+  VIDEO_RESOLUTIONS_LABELS,
+  stripVideoResolution,
   LITELLM_TEXT_NAMES: GATEWAY_TEXT_NAMES,
   LITELLM_TEXT_CONTRACTS,
   GATEWAY_TEXT_NAMES,

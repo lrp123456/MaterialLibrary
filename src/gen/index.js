@@ -515,12 +515,16 @@ async function executeAdapterInner(services, adapter, input) {
         const db = services.db;
         const originRow = () => db.prepare("SELECT * FROM derivatives WHERE asset_fid=? AND kind='origin' ORDER BY id DESC LIMIT 1").get(fid);
         const derivId = Number(q.get('derivative') || 0);
+        const asset = db.prepare('SELECT category, main_derivative_id FROM assets WHERE fid=?').get(fid);
+        const isPortraitOrClothing = asset?.category === 'portrait' || asset?.category === 'clothing';
         let deriv = null;
-        if (derivId) deriv = getDerivativeById(db, derivId);
-        else if (q.get('raw') === '1') deriv = originRow();
+        if (derivId && !isPortraitOrClothing) deriv = getDerivativeById(db, derivId);
+        else if (q.get('raw') === '1' || isPortraitOrClothing) deriv = originRow();
         else {
-          const asset = db.prepare('SELECT main_derivative_id FROM assets WHERE fid=?').get(fid);
           deriv = asset?.main_derivative_id ? getDerivativeById(db, asset.main_derivative_id) : originRow();
+        }
+        if (isPortraitOrClothing && (!deriv || String(deriv.kind || '').startsWith('restage_'))) {
+          deriv = originRow();
         }
         if (deriv && deriv.asset_fid === fid) {
           const fp = await resolveDerivativeFile(services, deriv);
@@ -1612,12 +1616,13 @@ async function executeAdapterInner(services, adapter, input) {
 
         await downloadToFile(resultUrl, outPath, { timeoutMs: 120000 });
         const previewUrl = `/api/cache/temp/${outFileName}`;
+        const remoteUrl = /^https?:\/\//i.test(String(resultUrl)) ? String(resultUrl) : '';
         noteVendorOutcome(input, true);
         return {
           ok: true,
           success: true,
           taskId,
-          files: [{ localPath: outPath, previewUrl, mime: input.kind === 'video' ? 'video/mp4' : 'image/jpeg' }],
+          files: [{ localPath: outPath, previewUrl, remoteUrl, mime: input.kind === 'video' ? 'video/mp4' : 'image/jpeg' }],
           raw: pollData
         };
       }

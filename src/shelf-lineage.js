@@ -134,13 +134,73 @@ function resolveInside(root, filePath) {
   return abs;
 }
 
+const REMOTE_MAX_BYTES = 512 * 1024 * 1024;
+const REMOTE_EXT = {
+  'video/mp4': '.mp4',
+  'video/webm': '.webm',
+  'video/quicktime': '.mov',
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/webp': '.webp',
+  'audio/mpeg': '.mp3',
+  'audio/wav': '.wav',
+  'audio/mp4': '.m4a',
+};
+
 function fileFromPreview(config, previewUrl) {
   const clean = String(previewUrl || '').split('?')[0];
   const name = path.basename(clean);
   if (!name || name === '.' || name === '..') throw new Error('结果文件无效');
   const abs = resolveInside(path.join(config.dataDir, 'cache', 'temp'), path.join(config.dataDir, 'cache', 'temp', name));
-  if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) throw new Error('结果文件不在临时目录');
+  if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) throw new Error('临时文件已清理，请重新生成');
   return abs;
+}
+
+function extForRemote(url, contentType) {
+  const fromPath = path.extname(new URL(url).pathname).toLowerCase();
+  if (['.mp4', '.webm', '.mov', '.png', '.jpg', '.jpeg', '.webp', '.mp3', '.wav', '.m4a'].includes(fromPath)) {
+    return fromPath === '.jpeg' ? '.jpg' : fromPath;
+  }
+  const mime = String(contentType || '').split(';')[0].trim().toLowerCase();
+  return REMOTE_EXT[mime] || '.mp4';
+}
+
+/** 供应商回的 http(s) 成片先落到 cache/temp，再按本地临时文件入库。 */
+async function downloadRemoteToTemp(config, url) {
+  let parsed;
+  try { parsed = new URL(String(url || '').trim()); } catch { parsed = null; }
+  if (!parsed || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) {
+    throw new Error('结果地址无效');
+  }
+  const res = await fetch(parsed.href, { redirect: 'follow', signal: AbortSignal.timeout(180000) });
+  if (!res.ok) throw new Error(`远程结果下载失败（HTTP ${res.status}）`);
+  const declared = Number(res.headers.get('content-length') || 0);
+  if (declared > REMOTE_MAX_BYTES) throw new Error('远程结果过大');
+  const destDir = path.join(config.dataDir, 'cache', 'temp');
+  fs.mkdirSync(destDir, { recursive: true });
+  const dest = path.join(destDir, `gen_remote_${Date.now()}_${crypto.randomBytes(4).toString('hex')}${extForRemote(parsed.href, res.headers.get('content-type'))}`);
+  if (!res.body) throw new Error('远程结果是空文件');
+  const { Readable } = require('stream');
+  const { pipeline } = require('stream/promises');
+  let total = 0;
+  const counter = new (require('stream').Transform)({
+    transform(chunk, _enc, cb) {
+      total += chunk.length;
+      if (total > REMOTE_MAX_BYTES) {
+        cb(new Error('远程结果过大'));
+        return;
+      }
+      cb(null, chunk);
+    },
+  });
+  try {
+    await pipeline(Readable.fromWeb(res.body), counter, fs.createWriteStream(dest));
+  } catch (err) {
+    try { fs.unlinkSync(dest); } catch { /* 半截文件丢掉 */ }
+    throw err;
+  }
+  if (!total || !fs.existsSync(dest)) throw new Error('远程结果是空文件');
+  return dest;
 }
 
 function fileFromDataUrl(config, dataUrl) {
@@ -158,8 +218,20 @@ async function registerGenerated(services, input = {}) {
   const { db, config } = services;
   ensureColumns(db);
   let src = '';
-  if (input.previewUrl && String(input.previewUrl).includes('/api/cache/temp/')) {
-    src = fileFromPreview(config, input.previewUrl);
+  const preview = String(input.previewUrl || '').trim();
+  const vendor = String(input.vendorUrl || '').trim();
+  if (/^https?:\/\//i.test(preview) && !/\/api\/cache\/temp\//i.test(preview)) {
+    src = await downloadRemoteToTemp(config, preview);
+  } else if (preview.includes('/api/cache/temp/')) {
+    try {
+      src = fileFromPreview(config, preview);
+    } catch (err) {
+      if (/^https?:\/\//i.test(vendor) && !/\/api\/cache\/temp\//i.test(vendor)) {
+        src = await downloadRemoteToTemp(config, vendor);
+      } else {
+        throw err;
+      }
+    }
   } else if (String(input.imageBase64 || '').startsWith('data:')) {
     src = fileFromDataUrl(config, input.imageBase64);
   } else {
@@ -282,7 +354,14 @@ async function registerGenerated(services, input = {}) {
     const videoTags = require('./video-tags');
     const purpose = videoTags.purposeFromText(input.prompt || '');
     if (purpose) videoTags.applyVideoPurpose(db, fid, purpose, 'job');
-    try { await videoTags.ensureVideoPoster(config, fid, src); } catch { /* 海报缺失不挡住成片 */ }
+    let poster = '';
+    try { poster = await videoTags.ensureVideoPoster(config, fid, src); } catch { poster = ''; }
+    if (!poster) {
+      try { db.prepare('DELETE FROM asset_tags WHERE asset_fid=?').run(fid); } catch { /* 回滚时表可能还没有 */ }
+      try { db.prepare('DELETE FROM derivatives WHERE asset_fid=?').run(fid); } catch { /* 同上 */ }
+      try { db.prepare('DELETE FROM assets WHERE fid=?').run(fid); } catch { /* 同上 */ }
+      throw new Error('封面没有生成，成片未入库');
+    }
     const parentHasScene = parentFid && videoTags.parentHasSceneTags(db, parentFid);
     if (!parentHasScene && services.interpreter) {
       try {
@@ -352,6 +431,7 @@ module.exports = {
   ensureColumns,
   lineageTree,
   registerGenerated,
+  downloadRemoteToTemp,
   inheritTags,
   setManualSpace,
   setManualTag,

@@ -12,6 +12,10 @@ const http = require('http');
 
 const ENDPOINT = 'videoenhan.cn-shanghai.aliyuncs.com';
 const API_VERSION = '2020-03-20';
+const UTILS_ENDPOINT = 'viapiutils.cn-shanghai.aliyuncs.com';
+const UTILS_VERSION = '2020-04-01';
+const VIAPI_BUCKET = 'viapi-customer-temp';
+const VIAPI_OSS_HOST = `${VIAPI_BUCKET}.oss-cn-shanghai.aliyuncs.com`;
 
 function percentEncode(str) {
   return encodeURIComponent(str)
@@ -39,7 +43,19 @@ function signParams(params, secret, method = 'POST') {
   return { ...params, Signature: signature };
 }
 
-async function sendRpcRequest(action, actionParams = {}, method = 'POST') {
+function isShanghaiOssUrl(value) {
+  try {
+    const host = new URL(String(value || '')).hostname.toLowerCase();
+    return host === VIAPI_OSS_HOST || host.endsWith('.oss-cn-shanghai.aliyuncs.com');
+  } catch {
+    return false;
+  }
+}
+
+async function sendRpcRequest(action, actionParams = {}, options = {}) {
+  const method = options.method || 'POST';
+  const endpoint = options.endpoint || ENDPOINT;
+  const version = options.version || API_VERSION;
   const { accessKeyId, accessKeySecret } = getCredentials();
   if (!accessKeyId || !accessKeySecret) {
     throw new Error('未配置 ALIYUN_ACCESS_KEY_ID 或 ALIYUN_ACCESS_KEY_SECRET，无法调用阿里云视频超分');
@@ -47,7 +63,7 @@ async function sendRpcRequest(action, actionParams = {}, method = 'POST') {
 
   const commonParams = {
     Action: action,
-    Version: API_VERSION,
+    Version: version,
     Format: 'JSON',
     AccessKeyId: accessKeyId,
     SignatureMethod: 'HMAC-SHA1',
@@ -63,7 +79,7 @@ async function sendRpcRequest(action, actionParams = {}, method = 'POST') {
     .map(k => `${percentEncode(k)}=${percentEncode(String(signed[k]))}`)
     .join('&');
 
-  const url = `https://${ENDPOINT}/`;
+  const url = `https://${endpoint}/`;
 
   const res = await fetch(url, {
     method: 'POST',
@@ -89,6 +105,48 @@ async function sendRpcRequest(action, actionParams = {}, method = 'POST') {
   }
 
   return json;
+}
+
+/**
+ * 本地文件或非上海 OSS 地址先上传到视觉智能的临时上海 Bucket。
+ * 路径前缀必须是调用 GetOssStsToken 时使用的 AccessKeyId。
+ * 得到的地址只给 SuperResolveVideo 用，浏览器打不开。
+ */
+async function uploadLocalForViapi(localPath) {
+  const { accessKeyId } = getCredentials();
+  if (!accessKeyId) {
+    throw new Error('未配置 ALIYUN_ACCESS_KEY_ID 或 ALIYUN_ACCESS_KEY_SECRET，无法调用阿里云视频超分');
+  }
+  if (!localPath || !fs.existsSync(localPath)) throw new Error('超分源文件不在本地');
+  const tokenJson = await sendRpcRequest('GetOssStsToken', {}, {
+    endpoint: UTILS_ENDPOINT,
+    version: UTILS_VERSION,
+  });
+  const data = tokenJson.Data || tokenJson;
+  const stsId = String(data.AccessKeyId || '');
+  const stsSecret = String(data.AccessKeySecret || '');
+  const stsToken = String(data.SecurityToken || '');
+  if (!stsId || !stsSecret || !stsToken) throw new Error('超分临时上传凭证不完整');
+
+  const baseName = path.basename(localPath).replace(/[^\w.-]/g, '') || 'clip.mp4';
+  const objectKey = `${accessKeyId}/${crypto.randomUUID()}/${baseName}`;
+  const contentType = 'video/mp4';
+  const date = new Date().toUTCString();
+  const stringToSign = `PUT\n\n${contentType}\n${date}\nx-oss-security-token:${stsToken}\n/${VIAPI_BUCKET}/${objectKey}`;
+  const signature = crypto.createHmac('sha1', stsSecret).update(stringToSign).digest('base64');
+  const res = await fetch(`https://${VIAPI_OSS_HOST}/${objectKey}`, {
+    method: 'PUT',
+    headers: {
+      Date: date,
+      'Content-Type': contentType,
+      'x-oss-security-token': stsToken,
+      Authorization: `OSS ${stsId}:${signature}`,
+    },
+    body: fs.readFileSync(localPath),
+    signal: AbortSignal.timeout(180000),
+  });
+  if (!res.ok) throw new Error(`超分临时文件上传失败（HTTP ${res.status}）`);
+  return `http://${VIAPI_OSS_HOST}/${objectKey}`;
 }
 
 /**
@@ -123,10 +181,10 @@ async function querySuperResolveResult(jobId) {
   });
 
   const jobData = data.Data || {};
-  const status = String(jobData.Status || '').toUpperCase(); // PROCESSING, SUCCESS, FAIL
+  const status = String(jobData.Status || '').toUpperCase();
   let resultUrl = null;
 
-  if (status === 'SUCCESS' && jobData.Result) {
+  if (classifyJobStatus(status) === 'success' && jobData.Result) {
     try {
       const parsed = typeof jobData.Result === 'string' ? JSON.parse(jobData.Result) : jobData.Result;
       resultUrl = parsed.VideoUrl || null;
@@ -145,6 +203,16 @@ async function querySuperResolveResult(jobId) {
 /**
  * 下载远程 URL 到指定本地路径
  */
+/** 视觉智能异步任务的成功态是 PROCESS_SUCCESS，失败态是 PROCESS_FAILED。 */
+function classifyJobStatus(status) {
+  const value = String(status || '').toUpperCase();
+  if (value === 'SUCCESS' || value === 'PROCESS_SUCCESS') return 'success';
+  if (value === 'FAIL' || value === 'FAILED' || value === 'PROCESS_FAILED' || value === 'TIMEOUT_FAILED' || value === 'LIMIT_RETRY_FAILED') {
+    return 'fail';
+  }
+  return 'pending';
+}
+
 function downloadFile(fileUrl, destPath) {
   return new Promise((resolve, reject) => {
     const file = fs.createWriteStream(destPath);
@@ -183,14 +251,17 @@ function downloadFile(fileUrl, destPath) {
  * @returns {Promise<{ localPath: string, remoteUrl: string, jobId: string }>}
  */
 async function processVideoSuperResolution(videoUrl, options = {}) {
-  const { outputDir = os.tmpdir(), bitRate = 10, maxWaitMs = 300000, pollIntervalMs = 3000 } = options;
-  const jobId = await submitSuperResolveVideo(videoUrl, bitRate);
+  const { outputDir = os.tmpdir(), bitRate = 10, maxWaitMs = 300000, pollIntervalMs = 3000, localPath = '' } = options;
+  let inputUrl = String(videoUrl || '');
+  if (localPath) inputUrl = await uploadLocalForViapi(localPath);
+  else if (!isShanghaiOssUrl(inputUrl)) throw new Error('超分源文件不在本地');
+  const jobId = await submitSuperResolveVideo(inputUrl, bitRate);
 
   const startTime = Date.now();
   while (Date.now() - startTime < maxWaitMs) {
     await new Promise(r => setTimeout(r, pollIntervalMs));
     const query = await querySuperResolveResult(jobId);
-    if (query.status === 'SUCCESS' && query.resultUrl) {
+    if (classifyJobStatus(query.status) === 'success' && query.resultUrl) {
       const fileName = `ali_sr_${jobId}_${Date.now()}.mp4`;
       const localPath = path.join(outputDir, fileName);
       await downloadFile(query.resultUrl, localPath);
@@ -200,7 +271,7 @@ async function processVideoSuperResolution(videoUrl, options = {}) {
         localPath,
       };
     }
-    if (query.status === 'FAIL') {
+    if (classifyJobStatus(query.status) === 'fail') {
       throw new Error(`阿里云视频超分辨率任务处理失败: ${query.errorMessage || '未知算法异常'}`);
     }
   }
@@ -210,6 +281,9 @@ async function processVideoSuperResolution(videoUrl, options = {}) {
 
 module.exports = {
   getCredentials,
+  isShanghaiOssUrl,
+  uploadLocalForViapi,
+  classifyJobStatus,
   submitSuperResolveVideo,
   querySuperResolveResult,
   downloadFile,

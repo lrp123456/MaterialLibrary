@@ -75,9 +75,31 @@ function listGenJobs(db, { sessionId, userId } = {}) {
   return db.prepare('SELECT * FROM gen_jobs ORDER BY created_at DESC LIMIT 100').all();
 }
 
+function cancelGenJob(db, jobId, userId) {
+  const row = getGenJob(db, jobId);
+  if (!row) {
+    const err = new Error('任务不存在');
+    err.status = 404;
+    throw err;
+  }
+  if (userId != null && Number(row.user_id) !== Number(userId)) {
+    const err = new Error('无权取消该任务');
+    err.status = 403;
+    throw err;
+  }
+  if (['succeeded', 'failed', 'cancelled'].includes(row.status)) {
+    return { success: false, status: row.status, message: '任务已结束，无法取消' };
+  }
+  const now = Date.now();
+  db.prepare("UPDATE gen_jobs SET status='cancelled', updated_at=?, completed_at=? WHERE job_id=?")
+    .run(now, now, jobId);
+  return { success: true, status: 'cancelled', job: { ...row, status: 'cancelled' } };
+}
+
 module.exports = {
   idempotencyKeyFor,
   enqueueGenJob,
   getGenJob,
   listGenJobs,
+  cancelGenJob,
 };
