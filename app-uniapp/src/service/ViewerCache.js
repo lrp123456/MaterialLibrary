@@ -11,6 +11,50 @@ const DEFAULT_TTL = 5 * 60 * 1000 // 5 分钟
 const MAX_LIST_CACHE = 20
 const MAX_DETAIL_CACHE = 100
 
+/**
+ * 列表查询序列化（fetchAssets 与 makeListKey 共用，保证缓存 key 与实际请求同源）。
+ * 返回 query 片段数组，空串表示该维度未启用；buildUrl 会 filter(Boolean) 后 join('&')。
+ * 任何影响服务端结果的维度都必须在此登记，否则跨板块/筛选会碰撞脏缓存。
+ */
+export function buildAssetsQuery(opts = {}) {
+  const {
+    page = 1, pageSize = 30, keyword = '', space = '', style = '', material = '',
+    colors = '', colorStyle = '', color_style = '', orientation = '', sort = 'latest',
+    mediaType = '', videoSource = '', videoPurpose = '', category = '', lane = '',
+    section = '', shelf = '', onlyFavorite = false, furniture_item = '', furniture_category = '', mood = '',
+    genre = '', pose = '', character = '', skipFacets = false,
+  } = opts
+  const resolvedSort = sort === 'oldest' ? 'earliest' : sort
+  const resolvedColorStyle = colorStyle || color_style
+  return [
+    `page=${page}`,
+    `pageSize=${pageSize}`,
+    keyword ? `keyword=${encodeURIComponent(keyword)}` : '',
+    category ? `category=${encodeURIComponent(category)}` : '',
+    space ? `space=${encodeURIComponent(space)}` : '',
+    style ? `style=${encodeURIComponent(style)}` : '',
+    material ? `material=${encodeURIComponent(material)}` : '',
+    furniture_item ? `furniture_item=${encodeURIComponent(furniture_item)}` : '',
+    furniture_category ? `furniture_category=${encodeURIComponent(furniture_category)}` : '',
+    mood ? `mood=${encodeURIComponent(mood)}` : '',
+    genre ? `genre=${encodeURIComponent(genre)}` : '',
+    pose ? `pose=${encodeURIComponent(pose)}` : '',
+    character ? `character=${encodeURIComponent(character)}` : '',
+    colors ? `colors=${encodeURIComponent(colors)}` : '',
+    resolvedColorStyle ? `color_style=${encodeURIComponent(resolvedColorStyle)}` : '',
+    orientation ? `orientation=${encodeURIComponent(orientation)}` : '',
+    resolvedSort ? `sort=${encodeURIComponent(resolvedSort)}` : '',
+    mediaType ? `media_type=${encodeURIComponent(mediaType)}` : '',
+    lane ? `lane=${encodeURIComponent(lane)}` : '',
+    section ? `section=${encodeURIComponent(section)}` : '',
+    shelf ? `shelf=${encodeURIComponent(shelf)}` : '',
+    videoSource ? `video_source=${encodeURIComponent(videoSource)}` : '',
+    videoPurpose ? `video_purpose=${encodeURIComponent(videoPurpose)}` : '',
+    onlyFavorite ? 'only_favorite=1' : '',
+    skipFacets ? 'skip_facets=1' : '',
+  ]
+}
+
 class ViewerCacheService {
   constructor() {
     this._listMap = new Map()
@@ -60,28 +104,10 @@ class ViewerCacheService {
   }
 
   /**
-   * 生成列表查询缓存 Key（包含所有多维筛选参数，杜绝脏缓存）
+   * 生成列表查询缓存 Key：直接复用请求序列化，key 即实际 query string，杜绝维度遗漏碰撞。
    */
   makeListKey(opts = {}) {
-    const {
-      page = 1,
-      pageSize = 30,
-      keyword = '',
-      space = '',
-      style = '',
-      material = '',
-      colors = '',
-      furniture_item = '',
-      furniture_category = '',
-      orientation = '',
-      sort = 'latest',
-      mediaType = 'image',
-      videoSource = '',
-      mood = '',
-      pose = '',
-      character = '',
-    } = opts
-    return `list:m=${mediaType}:vs=${videoSource}:p=${page}:ps=${pageSize}:k=${keyword}:sp=${space}:st=${style}:mat=${material}:c=${colors}:f=${furniture_item || furniture_category}:mood=${mood}:pose=${pose}:char=${character}:o=${orientation}:s=${sort}`
+    return 'list:' + buildAssetsQuery(opts).filter(Boolean).join('&')
   }
 
   /**

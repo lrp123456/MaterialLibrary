@@ -1,5 +1,5 @@
 <template>
-  <view class="page">
+  <view class="page" :style="themeStyle">
     <view class="header-container">
       <view class="status-bar" :style="{ paddingTop: statusBarHeight + 'px' }" />
 
@@ -67,7 +67,7 @@
       </view>
 
       <!-- 二级细分品类：轻量紧凑水平滑动胶囊 -->
-      <view v-if="activeMediaTab !== 'trash'" class="section-pill-bar">
+      <view v-if="activeMediaTab !== 'trash' && currentSections.length" class="section-pill-bar">
         <scroll-view scroll-x class="section-pill-scroll" :show-scrollbar="false">
           <view class="section-pill-inner">
             <view
@@ -126,6 +126,17 @@
         </view>
       </view>
 
+      <!-- 快捷状态筛选：成片阶段 + 只看收藏 -->
+      <view v-if="activeMediaTab !== 'trash' && activeMediaTab !== 'favorite'" class="quick-filter-bar">
+        <view class="qf-chip" :class="{ active: shelfFilter === '' && !onlyFavorite }" @click="setShelf('')">全部</view>
+        <view class="qf-chip" :class="{ active: shelfFilter === 'retouched' }" @click="setShelf('retouched')">仅精修</view>
+        <view class="qf-chip" :class="{ active: shelfFilter === 'finished' }" @click="setShelf('finished')">仅成片</view>
+        <view class="qf-chip qf-star" :class="{ active: onlyFavorite }" @click="toggleOnlyFavorite">
+          <app-icon name="star" :size="11" :color="onlyFavorite ? '#FFFFFF' : '#8E8E93'" />
+          <text>只看收藏</text>
+        </view>
+      </view>
+
       <!-- 生效筛选胶囊横条 (仅当抽屉里勾选了筛选时显示) -->
       <view v-if="activeMediaTab !== 'trash' && activeFilterCount > 0" class="active-chips-bar">
         <scroll-view scroll-x class="active-chips-scroll" :show-scrollbar="false">
@@ -160,6 +171,7 @@
       :refresher-triggered="refreshing"
       @refresherrefresh="onRefresh"
       @scrolltolower="onScrollToLower"
+      @scroll="onGridScroll"
     >
       <view v-if="loading && !loaded" class="state-box">
         <view class="loading-spinner-wrap">
@@ -178,9 +190,10 @@
       <view v-else>
         <view v-for="g in groups" :key="g.key" class="date-group">
           <text class="date-label">{{ g.label }}</text>
-          <view class="cards">
+          <view class="waterfall">
+            <view v-for="col in g.columns" :key="g.key + '-' + col.id" class="wf-col">
             <view
-              v-for="item in g.items"
+              v-for="item in col.items"
               :key="item.fid"
               class="card"
               :class="{ selected: isSelected(item.fid) }"
@@ -233,6 +246,19 @@
                 >
                   <app-icon v-if="isSelected(item.fid)" name="check" :size="12" color="#FFFFFF" />
                 </view>
+                <!-- 快捷收藏 -->
+                <view
+                  v-else-if="activeMediaTab !== 'trash' && !item.isMusic"
+                  class="fav-star"
+                  :class="{ on: !!item.favoritedAt }"
+                  @click.stop="toggleFavorite(item)"
+                >
+                  <app-icon
+                    :name="item.favoritedAt ? 'star-fill' : 'star'"
+                    :size="13"
+                    :color="item.favoritedAt ? '#F59E0B' : '#FFFFFF'"
+                  />
+                </view>
 
                 <!-- 视频专属播放徽标与遮罩 -->
                 <view v-if="item.isVideo" class="video-overlay">
@@ -250,6 +276,8 @@
                 <text v-else-if="item.isPortrait" class="badge portrait-badge">人像</text>
                 <text v-else-if="item.isFurniture" class="badge furn-badge">单品</text>
                 <text v-else-if="item.isRestage" class="badge">AI</text>
+                <text v-if="activeMediaTab !== 'trash' && item.libraryShelf === 'retouched'" class="badge shelf-badge retouched">精修</text>
+                <text v-else-if="activeMediaTab !== 'trash' && item.libraryShelf === 'finished'" class="badge shelf-badge finished">成品</text>
                 <text v-if="activeMediaTab === 'trash'" class="badge trash-badge" :class="{ soon: item.expiringSoon, missing: item.fileMissing }">{{ item.disposeLabel }}</text>
                 <text v-if="activeMediaTab === 'trash'" class="badge trash-remain" :class="{ soon: item.expiringSoon }">{{ formatRemain(item.remainingHours) }}</text>
                 <text v-if="item.hasWatermark" class="badge wm">水印</text>
@@ -266,6 +294,7 @@
                 </view>
               </view>
             </view>
+            </view>
           </view>
         </view>
         <view class="footer">
@@ -277,6 +306,13 @@
         </view>
       </view>
     </scroll-view>
+
+    <!-- 滚动日期气泡 -->
+    <text
+      v-if="bubbleLabel && activeMediaTab !== 'trash' && !isSelectMode"
+      class="date-bubble"
+      :style="{ top: (gridTop + 8) + 'px' }"
+    >{{ bubbleLabel }}</text>
 
     <!-- 左侧筛选抽屉 (Left Drawer) -->
     <view v-if="filterDrawerOpen" class="drawer-mask" @click="closeFilterDrawer" />
@@ -340,6 +376,8 @@
     <view v-if="isSelectMode && selectedFids.length > 0" class="batch-bar">
       <view class="batch-info">
         <text class="batch-count">已选 {{ selectedFids.length }}</text>
+        <text class="batch-clear" @click="selectAllVisible">全选</text>
+        <text class="batch-clear" @click="invertSelection">反选</text>
         <text class="batch-clear" @click="clearSelection">清空</text>
       </view>
       <view v-if="activeMediaTab === 'trash'" class="batch-actions">
@@ -351,6 +389,9 @@
         </view>
       </view>
       <view v-else class="batch-actions">
+        <view class="batch-btn ghost" @click="batchClip">
+          <text class="batch-btn-text">送入剪辑</text>
+        </view>
         <view class="batch-btn" @click="batchCreate('image')">
           <text class="batch-btn-text">生图创作</text>
         </view>
@@ -378,18 +419,22 @@ import {
   videoUrl,
   posterUrl,
   deleteAsset,
+  setAssetFavorite,
+  moveAssetShelf,
   fetchMenuTree,
   fetchTrashAssets,
   restoreTrashAsset,
   purgeTrashAsset,
 } from '../../service/ViewerApi'
 import { switchTabTo } from '../../common/nav'
+import { openClip } from '../../common/clip'
 import { store } from '../../service/SyncStateStore'
 import { viewerCache } from '../../service/ViewerCache'
 import { localMediaIndex } from '../../service/LocalMediaIndex'
 import { prefetch } from '../../service/Prefetch'
 import AiTaskPill from '../../components/AiTaskPill.vue'
 import AppIcon from '../../components/AppIcon.vue'
+import { currentVars } from '../../common/theme'
 
 function goLogin(tip) {
   uni.reLaunch({
@@ -427,6 +472,7 @@ export default {
           { key: 'bgm', label: '背景音乐', iconName: 'audio', desc: '氛围 / 空间配乐' },
           { key: 'vocal', label: '人声参考', iconName: 'audio', desc: '旁白 / 人声素材' },
         ] },
+        { key: 'favorite', label: '收藏', iconName: 'star', sections: [] },
       ],
       filterSheetOpen: false,
       filterDrawerOpen: false,
@@ -445,6 +491,9 @@ export default {
       selectedFids: [],
       keyword: '',
       sortLatest: true,
+      // '' | retouched | finished（服务端 library_shelf 阶段）；只看收藏叠加在当前类型上
+      shelfFilter: '',
+      onlyFavorite: false,
 
       // 回收站
       trashCount: 0,
@@ -500,9 +549,21 @@ export default {
       page: 1,
       userLabel: '',
       refreshing: false,
+      gridScrollTop: 0,
+      gridTop: 0,
+      groupOffsets: [],
+      bubbleLabel: '',
     }
   },
+  watch: {
+    groups() {
+      this.$nextTick(() => this.measureGroupOffsets())
+    },
+  },
   computed: {
+    themeStyle() {
+      return currentVars()
+    },
     isConnectError() {
       return /无法连接|连接超时|网络错误|HTTP 明文|响应异常/.test(this.errorText || '')
     },
@@ -527,6 +588,7 @@ export default {
     },
     searchPlaceholder() {
       if (this.activeMediaTab === 'trash') return '搜索回收站素材、删除原因…'
+      if (this.activeMediaTab === 'favorite') return '搜索收藏素材、名称、标签…'
       if (this.activeMediaTab === 'video') return '搜索视频名称、来源、标签…'
       if (this.activeMediaTab === 'audio') return '搜索配乐、情绪、场景…'
       const sec = this.activeSection
@@ -608,6 +670,8 @@ export default {
           if (!a.isMusic) return false
         } else if (this.activeMediaTab === 'trash') {
           if (!a.is_trashed) return false
+        } else if (this.activeMediaTab === 'favorite') {
+          if (!a.favoritedAt) return false
         }
 
         // 视频模式下区分实拍与AI创作
@@ -632,7 +696,21 @@ export default {
         if (!map.has(k)) map.set(k, { key: k, label: this.dateLabel(a.createdAt), items: [] })
         map.get(k).items.push(a)
       }
-      return Array.from(map.values())
+      // 真瀑布流：按预估高度把每条记录放进较矮的一列，保持列内时间顺序
+      const result = Array.from(map.values())
+      for (const g of result) {
+        const cols = [{ id: 'l', h: 0, items: [] }, { id: 'r', h: 0, items: [] }]
+        for (const it of g.items) {
+          const target = cols[0].h <= cols[1].h ? cols[0] : cols[1]
+          target.items.push(it)
+          target.h += (Number(it.ratio) || 100) + 22
+        }
+        g.columns = cols
+      }
+      return result
+    },
+    visibleItems() {
+      return this.groups.reduce((acc, g) => acc.concat(g.items), [])
     },
   },
   onLoad() {
@@ -690,8 +768,72 @@ export default {
       clearTimeout(this._scrollTimer)
       this._scrollTimer = null
     }
+    if (this._bubbleTimer) {
+      clearTimeout(this._bubbleTimer)
+      this._bubbleTimer = null
+    }
+  },
+  // 返回键先关最上层弹层，避免直接退出页面
+  onBackPress() {
+    if (this.showMediaTypeMenu) {
+      this.showMediaTypeMenu = false
+      return true
+    }
+    if (this.filterDrawerOpen) {
+      this.closeFilterDrawer()
+      return true
+    }
+    if (this.filterSheetOpen) {
+      this.filterSheetOpen = false
+      return true
+    }
+    if (this.isSelectMode) {
+      this.toggleSelectMode()
+      return true
+    }
+    return false
   },
   methods: {
+    onGridScroll(e) {
+      this.gridScrollTop = (e && e.detail && e.detail.scrollTop) || 0
+      if (this._bubbleTimer) return
+      this._bubbleTimer = setTimeout(() => {
+        this._bubbleTimer = null
+        this.updateBubble()
+      }, 80)
+    },
+    updateBubble() {
+      const st = this.gridScrollTop
+      let label = ''
+      for (const o of this.groupOffsets) {
+        if (o.top <= st + 8) label = o.label
+        else break
+      }
+      this.bubbleLabel = st > 80 ? label : ''
+    },
+    measureGroupOffsets() {
+      try {
+        const q = uni.createSelectorQuery().in(this)
+        q.select('.grid-scroll').boundingClientRect()
+        q.selectAll('.date-group').boundingClientRect()
+        q.exec((res) => {
+          const box = res && res[0]
+          const rects = (res && res[1]) || []
+          if (!box || !rects.length) {
+            this.groupOffsets = []
+            return
+          }
+          this.gridTop = box.top
+          this.groupOffsets = rects.map((r, i) => ({
+            top: Math.max(0, r.top - box.top + this.gridScrollTop),
+            label: (this.groups[i] && this.groups[i].label) || '',
+          }))
+          this.updateBubble()
+        })
+      } catch (e) {
+        this.groupOffsets = []
+      }
+    },
     onCardLongPress(item) {
       if (!item || !item.fid) return
       if (this.activeMediaTab === 'trash') {
@@ -710,9 +852,43 @@ export default {
         return
       }
       uni.showActionSheet({
-        itemList: ['移入回收站', '取消'],
+        itemList: ['移动素材架…', '移入回收站', '取消'],
         success: (res) => {
-          if (res.tapIndex === 0) this.confirmDeleteAsset(item)
+          if (res.tapIndex === 0) this.openShelfMenu([item])
+          if (res.tapIndex === 1) this.confirmDeleteAsset(item)
+        },
+      })
+    },
+    openShelfMenu(items) {
+      const list = (Array.isArray(items) ? items : [items]).filter((x) => x && x.fid)
+      if (!list.length) return
+      const options = [
+        { shelf: 'original', label: '原素材' },
+        { shelf: 'retouched', label: '精修素材' },
+        { shelf: 'finished', label: '成品素材' },
+      ]
+      const current = list.length === 1 ? list[0].libraryShelf : ''
+      uni.showActionSheet({
+        itemList: options.map((o) => (o.shelf === current ? `✓ ${o.label}` : o.label)),
+        success: async (res) => {
+          const target = options[res.tapIndex]
+          if (!target) return
+          uni.showLoading({ title: '移动中…', mask: true })
+          try {
+            await moveAssetShelf('', target.shelf, list.map((x) => x.fid))
+            for (const it of list) it.libraryShelf = target.shelf
+            if (this.shelfFilter && this.shelfFilter !== target.shelf) {
+              const moved = new Set(list.map((x) => x.fid))
+              this.all = this.all.filter((a) => !moved.has(a.fid))
+            }
+            this.selectedFids = []
+            this.isSelectMode = false
+            uni.showToast({ title: `已移至${target.label}`, icon: 'none' })
+          } catch (e) {
+            uni.showToast({ title: (e && e.message) || '移动失败', icon: 'none' })
+          } finally {
+            uni.hideLoading()
+          }
         },
       })
     },
@@ -995,9 +1171,11 @@ export default {
         this.currentlyPlayingFid = ''
       }
       this.activeMediaTab = tab
-      this.activeSection = tab === 'image' ? 'interior_exterior' : (tab === 'video' ? 'all' : 'bgm')
+      this.activeSection = tab === 'image' ? 'interior_exterior' : (tab === 'video' ? 'all' : (tab === 'audio' ? 'bgm' : ''))
       this.filterSheetOpen = false
       this.trashSource = ''
+      this.shelfFilter = ''
+      this.onlyFavorite = false
       this.isSelectMode = false
       this.selectedFids = []
       this.all = []
@@ -1011,6 +1189,50 @@ export default {
     toggleSort() {
       this.sortLatest = !this.sortLatest
       this.reload()
+    },
+    setShelf(value) {
+      if (value === '') {
+        if (this.shelfFilter === '' && !this.onlyFavorite) return
+        this.shelfFilter = ''
+        this.onlyFavorite = false
+        this.reload()
+        return
+      }
+      const next = this.shelfFilter === value ? '' : value
+      if (next === this.shelfFilter) return
+      this.shelfFilter = next
+      this.reload()
+    },
+    toggleOnlyFavorite() {
+      this.onlyFavorite = !this.onlyFavorite
+      this.reload()
+    },
+    async toggleFavorite(item) {
+      if (!item || !item.fid || this._favBusy) return
+      this._favBusy = true
+      const next = !item.favoritedAt
+      item.favoritedAt = next ? Date.now() : 0
+      try {
+        const res = await setAssetFavorite(item.fid, next)
+        item.favoritedAt = res.favoritedAt || (next ? item.favoritedAt : 0)
+        if (!next && (this.activeMediaTab === 'favorite' || this.onlyFavorite)) {
+          this.all = this.all.filter((a) => a.fid !== item.fid)
+          this.totalCount = Math.max(0, this.totalCount - 1)
+        }
+        uni.showToast({ title: next ? '已收藏' : '已取消收藏', icon: 'none' })
+      } catch (e) {
+        item.favoritedAt = next ? 0 : item.favoritedAt || Date.now()
+        uni.showToast({ title: (e && e.message) || '操作失败', icon: 'none' })
+      } finally {
+        this._favBusy = false
+      }
+    },
+    selectAllVisible() {
+      this.selectedFids = this.visibleItems.map((a) => a.fid)
+    },
+    invertSelection() {
+      const picked = new Set(this.selectedFids)
+      this.selectedFids = this.visibleItems.filter((a) => !picked.has(a.fid)).map((a) => a.fid)
     },
     async reload(options = {}) {
       if (!sessionValid()) {
@@ -1060,8 +1282,10 @@ export default {
         orientation: this.selectedOrientations.join(','),
         sort: this.sortLatest ? 'latest' : 'earliest',
         mediaType: this.activeMediaTab === 'audio' ? 'music' : this.activeMediaTab,
-        lane: this.activeMediaTab,
+        lane: ['image', 'video', 'audio'].includes(this.activeMediaTab) ? this.activeMediaTab : '',
         section: this.activeSection,
+        shelf: this.shelfFilter,
+        onlyFavorite: this.onlyFavorite,
         videoSource: this.selectedVideoSources.join(','),
         mood: this.selectedMoods.join(','),
         pose: this.selectedPoses.join(','),
@@ -1437,8 +1661,10 @@ export default {
         orientation: this.selectedOrientations.join(','),
         sort: this.sortLatest ? 'latest' : 'earliest',
         mediaType: this.activeMediaTab === 'audio' ? 'music' : this.activeMediaTab,
-        lane: this.activeMediaTab,
+        lane: ['image', 'video', 'audio'].includes(this.activeMediaTab) ? this.activeMediaTab : '',
         section: this.activeSection,
+        shelf: this.shelfFilter,
+        onlyFavorite: this.onlyFavorite,
         videoSource: this.selectedVideoSources.join(','),
         mood: this.selectedMoods.join(','),
         pose: this.selectedPoses.join(','),
@@ -1469,6 +1695,13 @@ export default {
     openDetail(item) {
       if (this._navigating) return
       this._navigating = true
+      // 相邻素材上下文：详情页左右滑动按当前筛选结果切换
+      try {
+        const fids = this.visibleItems.map((a) => a.fid)
+        const idx = fids.indexOf(item.fid)
+        uni.setStorageSync('detail_nav_fids', fids.slice(0, 300))
+        uni.setStorageSync('detail_nav_index', idx >= 0 ? idx : 0)
+      } catch (e) {}
       const defaultTab = (item.isRestage && item.mainDerivativeKind) ? item.mainDerivativeKind : 'origin'
       const initialDerivs = (item.isRestage && item.mainDerivativeKind)
         ? [{ kind: item.mainDerivativeKind, id: 0 }]
@@ -1485,7 +1718,9 @@ export default {
         derivatives: initialDerivs,
       })
       uni.navigateTo({
-        url: '/pages/detail/detail?fid=' + encodeURIComponent(item.fid) + '&tab=' + encodeURIComponent(defaultTab),
+        url: '/pages/detail/detail?fid=' + encodeURIComponent(item.fid)
+          + '&tab=' + encodeURIComponent(defaultTab)
+          + (item.mainDerivativeId ? '&derivId=' + encodeURIComponent(item.mainDerivativeId) : ''),
         complete: () => {
           setTimeout(() => {
             this._navigating = false
@@ -1555,6 +1790,13 @@ export default {
       this.selectedFids = []
       switchTabTo('/pages/home/home', { fids, domain: domain === 'video' ? 'video' : 'image' })
     },
+    batchClip() {
+      const items = this.selectedAssetsList.slice(0, 20)
+      if (!items.length) return
+      this.isSelectMode = false
+      this.selectedFids = []
+      openClip(items)
+    },
     batchTrash() {
       const fids = this.selectedFids.slice()
       if (!fids.length) return
@@ -1605,12 +1847,13 @@ export default {
           if (!res.confirm) return
           uni.showLoading({ title: '恢复中…', mask: true })
           try {
-            await restoreTrashAsset(okFids)
-            const set = new Set(okFids)
-            this.all = this.all.filter((x) => !set.has(x.fid))
-            this.selectedFids = this.selectedFids.filter((fid) => !set.has(fid))
+            const out = await restoreTrashAsset(okFids)
+            const done = new Set(out.restored || [])
+            const failed = out.failed || []
+            this.all = this.all.filter((x) => !done.has(x.fid))
+            this.selectedFids = this.selectedFids.filter((fid) => !done.has(fid))
             try { viewerCache.clearAll?.() } catch (e) {}
-            uni.showToast({ title: `已恢复 ${okFids.length} 个`, icon: 'none' })
+            uni.showToast({ title: failed.length ? `已恢复 ${done.size} 个，${failed.length} 个失败` : `已恢复 ${done.size} 个`, icon: 'none' })
             this.refreshTrashCount()
           } catch (e) {
             uni.showToast({ title: '恢复失败: ' + (e.message || e), icon: 'none' })
@@ -1630,11 +1873,12 @@ export default {
           if (!res.confirm) return
           uni.showLoading({ title: '粉碎中…', mask: true })
           try {
-            await purgeTrashAsset(fids)
-            const set = new Set(fids)
-            this.all = this.all.filter((x) => !set.has(x.fid))
-            this.selectedFids = this.selectedFids.filter((fid) => !set.has(fid))
-            uni.showToast({ title: `已粉碎 ${fids.length} 个`, icon: 'none' })
+            const out = await purgeTrashAsset(fids)
+            const done = new Set(out.purged || [])
+            const failed = out.failed || []
+            this.all = this.all.filter((x) => !done.has(x.fid))
+            this.selectedFids = this.selectedFids.filter((fid) => !done.has(fid))
+            uni.showToast({ title: failed.length ? `已粉碎 ${done.size} 个，${failed.length} 个失败` : `已粉碎 ${done.size} 个`, icon: 'none' })
             this.refreshTrashCount()
           } catch (e) {
             uni.showToast({ title: '粉碎失败: ' + (e.message || e), icon: 'none' })
@@ -2082,30 +2326,35 @@ export default {
   font-weight: 700;
   color: #0f172a;
 }
-.cards {
+.waterfall {
   display: flex;
   flex-direction: row;
-  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 16rpx;
   box-sizing: border-box;
 }
+.wf-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
 .card {
-  width: calc(50% - 10rpx);
-  margin-right: 20rpx;
-  margin-bottom: 20rpx;
-  border-radius: 20rpx;
+  width: 100%;
+  margin-right: 0;
+  margin-bottom: 16rpx;
+  border-radius: var(--cardr, 24rpx);
   overflow: hidden;
-  background: #fff;
+  background: var(--surface, #fff);
   border: 1rpx solid #e2e8f0;
   box-sizing: border-box;
   box-shadow: 0 4rpx 12rpx rgba(15, 23, 42, 0.04);
-  transition: all 0.2s ease;
+  transition: transform var(--ms, 220ms) var(--ease-out, cubic-bezier(.23,1,.32,1)),
+    box-shadow var(--ms, 220ms) var(--ease-out, cubic-bezier(.23,1,.32,1));
 }
 .card.selected {
-  border: 2rpx solid #2563eb;
+  border: 2rpx solid var(--accent, #2563eb);
   box-shadow: 0 4rpx 18rpx rgba(37, 99, 235, 0.2);
-}
-.card:nth-child(2n) {
-  margin-right: 0;
 }
 .select-checkbox {
   position: absolute;
@@ -2355,6 +2604,7 @@ export default {
   display: flex;
   align-items: center;
   gap: 16rpx;
+  flex-shrink: 0;
 }
 .batch-count {
   font-size: 26rpx;
@@ -2370,6 +2620,16 @@ export default {
   display: flex;
   align-items: center;
   gap: 10rpx;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  justify-content: flex-end;
+  scrollbar-width: none;
+}
+.batch-actions::-webkit-scrollbar {
+  display: none;
+}
+.batch-actions > view {
   flex-shrink: 0;
 }
 .batch-btn {
@@ -2476,6 +2736,16 @@ export default {
 }
 .badge.furn-badge {
   background: rgba(139, 92, 246, 0.88);
+}
+/* 素材架角标：避开左上角来源/品类角标，贴在信息条上方 */
+.badge.shelf-badge {
+  top: auto;
+  bottom: 88rpx;
+  left: 14rpx;
+  background: rgba(6, 182, 212, 0.92);
+}
+.badge.shelf-badge.finished {
+  background: rgba(245, 158, 11, 0.94);
 }
 
 /* ========== 一级媒体 Tab ========== */
@@ -3358,4 +3628,182 @@ export default {
   color: #FFFFFF;
 }
 
+/* 滚动日期气泡 */
+.date-bubble {
+  position: fixed;
+  left: 16px;
+  z-index: 30;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(30, 27, 22, 0.62);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  pointer-events: none;
+}
+
+/* 快捷状态筛选 */
+.quick-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px 8px;
+  overflow-x: auto;
+}
+.qf-chip {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--surface2, #f2f2f7);
+  border: 0.5px solid transparent;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink2, #636366);
+}
+.qf-chip.active {
+  background: var(--accent-soft, #eff6ff);
+  border-color: var(--accent-border, #bfd6ff);
+  color: var(--accent, #007aff);
+  font-weight: 600;
+}
+.qf-star {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.qf-star.active {
+  background: #f59e0b;
+  border-color: #f59e0b;
+  color: #ffffff;
+}
+
+/* 卡片快捷收藏 */
+.fav-star {
+  position: absolute;
+  right: 8px;
+  bottom: 34px;
+  width: 26px;
+  height: 26px;
+  border-radius: 13px;
+  background: rgba(15, 23, 42, 0.38);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3;
+  backdrop-filter: blur(6px);
+}
+.fav-star.on {
+  background: rgba(255, 255, 255, 0.92);
+}
+
+/* ===== 主题令牌覆盖（warm/cool，由根节点 :style 注入 CSS 变量） ===== */
+.page {
+  background: var(--bg, #f8fafc);
+  color: var(--ink, #0f172a);
+}
+.header-container {
+  background: var(--glass-bg, rgba(255, 255, 255, 0.94));
+  border-bottom-color: var(--line, rgba(60, 60, 67, 0.12));
+}
+.nav-drawer-btn,
+.refresh-circle-btn,
+.section-pill,
+.sort-chip {
+  background: var(--surface2, #f2f2f7);
+}
+.nav-drawer-btn:active,
+.refresh-circle-btn:active {
+  background: var(--accent-soft, #eff6ff);
+}
+.nav-drawer-text,
+.segmented-item.active .segmented-label {
+  color: var(--ink, #1c1c1e);
+}
+.nav-drawer-btn.has-active {
+  background: var(--accent-soft, rgba(0, 122, 255, 0.12));
+}
+.nav-drawer-text.accent,
+.nav-drawer-btn.has-active .nav-drawer-text,
+.action-text-btn,
+.sort-chip-text {
+  color: var(--accent, #007aff);
+}
+.drawer-badge,
+.section-pill.active,
+.drawer-btn.confirm {
+  background: var(--accent, #007aff);
+  box-shadow: 0 2px 8px var(--accent-border, rgba(0, 122, 255, 0.3));
+}
+.apple-segmented {
+  background: var(--surface2, rgba(118, 118, 128, 0.12));
+}
+.segmented-item.active {
+  background: var(--surface, #ffffff);
+}
+.segmented-label {
+  color: var(--ink2, #8e8e93);
+}
+.section-pill-text {
+  color: var(--ink2, #3a3a3c);
+}
+.search-field {
+  background: var(--surface2, #efeff4);
+}
+.search-input {
+  color: var(--ink, #1c1c1e);
+}
+.card {
+  background: var(--surface, #ffffff);
+  border-color: var(--line, #e2e8f0);
+  border-radius: var(--cardr, 12px);
+  transition: transform var(--ms, 220ms) var(--ease-out, ease-out);
+}
+.card.selected {
+  border-color: var(--accent, #2563eb);
+}
+.card-media,
+.card-placeholder {
+  background: var(--surface2, #f1f5f9);
+}
+.batch-bar {
+  background: var(--surface, #ffffff);
+  border-color: var(--line, #e2e8f0);
+}
+.batch-count {
+  color: var(--ink, #0f172a);
+}
+.drawer-panel {
+  background: var(--surface, #ffffff);
+  border-radius: var(--topr, 30px) var(--topr, 30px) 0 0;
+  transition: transform var(--ms, 320ms) var(--ease-drawer, ease-out);
+}
+.drawer-head,
+.drawer-footer {
+  background: var(--surface, #ffffff);
+  border-color: var(--line, rgba(60, 60, 67, 0.12));
+}
+.drawer-main-title,
+.drawer-group-title {
+  color: var(--ink, #1c1c1e);
+}
+.drawer-sub-title,
+.drawer-chip-text {
+  color: var(--ink2, #636366);
+}
+.drawer-chip {
+  background: var(--surface2, #f2f2f7);
+  border-color: var(--line, transparent);
+}
+.drawer-chip.active {
+  background: var(--accent-soft, #eff6ff);
+  border-color: var(--accent-border, #bfd6ff);
+}
+.drawer-chip.active .drawer-chip-text {
+  color: var(--accent, #007aff);
+}
+.drawer-btn.reset {
+  background: var(--surface2, #f2f2f7);
+}
 </style>

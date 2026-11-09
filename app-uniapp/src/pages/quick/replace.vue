@@ -33,7 +33,7 @@ export default {
   components: { TouchSelector },
   data() {
     return {
-      statusBarHeight: 20, viewportH: 480, fid: '', imgUrl: '',
+      statusBarHeight: 20, viewportH: 480, fid: '', derivId: '', imgUrl: '',
       hasSelection: false, selectionData: null, prompt: '',
       pasteback: true, submitting: false,
     }
@@ -45,6 +45,7 @@ export default {
       this.viewportH = (sys.windowHeight || 667) - this.statusBarHeight - 50 - 180
     } catch (e) {}
     this.fid = opts.fid || ''
+    this.derivId = opts.derivId ? decodeURIComponent(opts.derivId) : ''
     this.imgUrl = opts.imgUrl ? decodeURIComponent(opts.imgUrl) : ''
   },
   methods: {
@@ -55,12 +56,14 @@ export default {
       this.submitting = true
       handoffPreciseEdit({
         fid: this.fid,
+        derivId: this.derivId,
         imgUrl: this.imgUrl,
         op: 'replace',
         recipe: `将选区内的物体替换为：${this.prompt}。保持原图构图、透视与光照一致。`,
         recipeHint: `替换为：${this.prompt}`,
         productName: this.prompt,
         selection: this.selectionData,
+        pasteback: this.pasteback,
       })
       this.submitting = false
     },

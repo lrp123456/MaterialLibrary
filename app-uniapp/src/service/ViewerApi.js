@@ -3,15 +3,15 @@
  * API_BASE = /api/viewer
  */
 import { store } from './SyncStateStore'
-import { viewerCache } from './ViewerCache'
+import { viewerCache, buildAssetsQuery } from './ViewerCache'
 import { currentServerUrl, ensureServerUrl, markServerDown } from './ServerResolve'
 
 const API_BASE = '/api/viewer'
 const TIMEOUT = 20000
 
-function buildUrl(path, query = []) {
+function buildUrl(path, query = [], base = API_BASE) {
   const server = currentServerUrl()
-  let url = server + API_BASE + path
+  let url = server + base + path
   const valid = query.filter(Boolean)
   if (valid.length) url += '?' + valid.join('&')
   return url
@@ -24,11 +24,10 @@ function authHeader() {
   return h
 }
 
-export async function request(path, { method = 'GET', query = [], body = '', timeout = TIMEOUT } = {}) {
-  await ensureServerUrl()
+function dispatch(url, path, { method = 'GET', body = '', timeout = TIMEOUT } = {}) {
   return new Promise((resolve, reject) => {
     uni.request({
-      url: buildUrl(path, query),
+      url,
       method,
       header: authHeader(),
       data: body || undefined,
@@ -70,6 +69,21 @@ export async function request(path, { method = 'GET', query = [], body = '', tim
   })
 }
 
+export async function request(path, { method = 'GET', query = [], body = '', timeout = TIMEOUT } = {}) {
+  await ensureServerUrl()
+  return dispatch(buildUrl(path, query), path, { method, body, timeout })
+}
+
+/**
+ * 管理员专用请求：走 /api/* 管理基址（SEC-007），而非 /api/viewer 视角白名单契约。
+ * 服务端对管理员豁免 viewer 白名单，路由自身仍校验 admin 守卫；非管理员调用会 403/404。
+ * URL 动态拼装，独立于 viewer 契约静态扫描（admin 调用本就不属于 viewer 白名单）。
+ */
+export async function adminRequest(path, { method = 'GET', query = [], body = '', timeout = TIMEOUT } = {}) {
+  await ensureServerUrl()
+  return dispatch(buildUrl(path, query, '/api'), path, { method, body, timeout })
+}
+
 export async function login(username, password) {
   const data = await request('/auth/login', {
     method: 'POST',
@@ -99,62 +113,7 @@ export async function logout() {
 }
 
 export async function fetchAssets(opts = {}) {
-  const {
-    page = 1,
-    pageSize = 30,
-    keyword = '',
-    space = '',
-    style = '',
-    material = '',
-    colors = '',
-    colorStyle = '',
-    color_style = '',
-    orientation = '',
-    sort = 'latest',
-    mediaType = '',
-    videoSource = '',
-    videoPurpose = '',
-    category = '',
-    lane = '',
-    section = '',
-    shelf = '',
-    furniture_item = '',
-    furniture_category = '',
-    mood = '',
-    genre = '',
-    pose = '',
-    character = '',
-    skipFacets = false,
-  } = opts
-  // 服务端 sort：latest | earliest | recommend（兼容误传 oldest）
-  const resolvedSort = sort === 'oldest' ? 'earliest' : sort
-  const resolvedColorStyle = colorStyle || color_style
-  const query = [
-    `page=${page}`,
-    `pageSize=${pageSize}`,
-    keyword ? `keyword=${encodeURIComponent(keyword)}` : '',
-    category ? `category=${encodeURIComponent(category)}` : '',
-    space ? `space=${encodeURIComponent(space)}` : '',
-    style ? `style=${encodeURIComponent(style)}` : '',
-    material ? `material=${encodeURIComponent(material)}` : '',
-    furniture_item ? `furniture_item=${encodeURIComponent(furniture_item)}` : '',
-    furniture_category ? `furniture_category=${encodeURIComponent(furniture_category)}` : '',
-    mood ? `mood=${encodeURIComponent(mood)}` : '',
-    genre ? `genre=${encodeURIComponent(genre)}` : '',
-    pose ? `pose=${encodeURIComponent(pose)}` : '',
-    character ? `character=${encodeURIComponent(character)}` : '',
-    colors ? `colors=${encodeURIComponent(colors)}` : '',
-    resolvedColorStyle ? `color_style=${encodeURIComponent(resolvedColorStyle)}` : '',
-    orientation ? `orientation=${encodeURIComponent(orientation)}` : '',
-    resolvedSort ? `sort=${encodeURIComponent(resolvedSort)}` : '',
-    mediaType ? `media_type=${encodeURIComponent(mediaType)}` : '',
-    lane ? `lane=${encodeURIComponent(lane)}` : '',
-    section ? `section=${encodeURIComponent(section)}` : '',
-    shelf ? `shelf=${encodeURIComponent(shelf)}` : '',
-    videoSource ? `video_source=${encodeURIComponent(videoSource)}` : '',
-    videoPurpose ? `video_purpose=${encodeURIComponent(videoPurpose)}` : '',
-    skipFacets ? 'skip_facets=1' : '',
-  ]
+  const query = buildAssetsQuery(opts)
   const data = await request('/assets', { query })
   if (data) {
     const key = viewerCache.makeListKey(opts)
@@ -725,6 +684,31 @@ export async function deleteAsset(fid) {
   return res
 }
 
+/** 收藏 / 取消收藏（on 省略时服务端取反） */
+export async function setAssetFavorite(fid, on) {
+  if (!fid) throw new Error('缺少素材 ID')
+  const body = typeof on === 'undefined' ? '' : JSON.stringify({ on: !!on })
+  const res = await request(`/assets/${encodeURIComponent(fid)}/favorite`, {
+    method: 'POST',
+    body,
+  })
+  viewerCache.clearAll()
+  return res || {}
+}
+
+/** 在原素材 / 精修素材 / 成品素材之间移动（可批量） */
+export async function moveAssetShelf(fid, shelf, fids) {
+  const list = (Array.isArray(fids) ? fids : [fid]).filter(Boolean)
+  if (!list.length) throw new Error('缺少素材 ID')
+  if (!['original', 'retouched', 'finished'].includes(shelf)) throw new Error('无效的素材架')
+  const res = await request('/assets/shelf', {
+    method: 'POST',
+    body: JSON.stringify(list.length > 1 ? { fids: list, shelf } : { fid: list[0], shelf }),
+  })
+  viewerCache.clearAll()
+  return res || {}
+}
+
 /** 设置母素材的主封面衍生版本 */
 export async function setMainDerivativeApi(fid, derivativeId) {
   if (!fid || !derivativeId) throw new Error('缺少参数')
@@ -743,6 +727,177 @@ export function sessionValid() {
 /** 获取统一三层菜单树与打标联动系统 */
 export async function fetchMenuTree() {
   return request('/dict/menu-tree', { method: 'GET' })
+}
+
+/** 创作配方库：与桌面端共用同一张 creation_templates 表 */
+export async function fetchCreationTemplates() {
+  const data = await request('/creation-templates', { method: 'GET' })
+  return Array.isArray(data) ? data : []
+}
+
+/** 新建配方（标题 + 提示词必填；params/origin_images 与桌面端同构） */
+export async function createCreationTemplate(payload = {}) {
+  if (!payload.title || !payload.prompt) throw new Error('配方标题与提示词不可为空')
+  return request('/creation-templates', {
+    method: 'POST',
+    body: JSON.stringify({
+      type: 'image',
+      aspect_ratio: '16:9',
+      tags: ['App 端'],
+      ...payload,
+    }),
+  })
+}
+
+/** 复用配方：服务端累加使用频次（任何登录用户可操作） */
+export async function markCreationTemplateUsed(id) {
+  if (!id) return null
+  return request(`/creation-templates/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ action: 'use' }),
+  })
+}
+
+/** 重命名 / 标常用 / 取消常用 */
+export async function patchCreationTemplate(id, patch = {}) {
+  if (!id) throw new Error('缺少配方 ID')
+  return request(`/creation-templates/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  })
+}
+
+/** 删除自己的配方（他人配方服务端返回 403） */
+export async function deleteCreationTemplate(id) {
+  if (!id) throw new Error('缺少配方 ID')
+  return request(`/creation-templates/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+/**
+ * 主动拉取外部数据源创作资产（桌面端同款入口）。
+ * 该路由返回裸 { success, count, summary }，不套 data 封套，故直接读根对象。
+ */
+export async function pullExternalCreationTemplates(opts = {}) {
+  await ensureServerUrl()
+  return new Promise((resolve, reject) => {
+    uni.request({
+      url: buildUrl('/creation-templates/pull-external', []),
+      method: 'POST',
+      header: authHeader(),
+      data: { size: 50, maxPages: 2, type: 'all', ...opts },
+      timeout: 60000,
+      success: (res) => {
+        const code = res.statusCode || 0
+        const root = res.data
+        if (root == null || typeof root !== 'object') {
+          reject(new Error(`服务端响应异常（HTTP ${code}）`))
+          return
+        }
+        if (code === 401) {
+          store.clearSession()
+          viewerCache.clearAll()
+          reject(new Error('未登录或会话已过期'))
+          return
+        }
+        if (code < 200 || code >= 300) {
+          reject(new Error(root.error || `HTTP ${code}`))
+          return
+        }
+        if (root.unconfigured) {
+          reject(new Error(root.error || '外部数据源未配置'))
+          return
+        }
+        if (root.success === false) {
+          reject(new Error(root.error || '拉取失败'))
+          return
+        }
+        resolve(root)
+      },
+      fail: (err) => reject(new Error((err && err.errMsg) || '拉取失败')),
+    })
+  })
+}
+
+/** 语音识别服务状态（实时听写 + 整段转写分别上报） */
+export async function fetchAsrStatus() {
+  return request('/asr/status', { method: 'GET' })
+}
+
+/**
+ * 整段语音转写：uni.uploadFile 走 multipart，字段名固定 file。
+ * 服务端直通 GPU 面板，返回 { text, raw_text, ... }（非 success/data 包装）。
+ */
+export function transcribeVoiceFile(filePath) {
+  if (!filePath) return Promise.reject(new Error('缺少录音文件'))
+  return new Promise((resolve, reject) => {
+    ensureServerUrl()
+      .then((server) => {
+        const token = store.getToken()
+        uni.uploadFile({
+          url: `${server}${API_BASE}/asr/transcribe?clean=1`,
+          filePath,
+          name: 'file',
+          formData: { model: 'sensevoice', language: 'zh' },
+          header: token ? { Authorization: 'Bearer ' + token } : {},
+          timeout: 120000,
+          success: (res) => {
+            let body = null
+            try { body = typeof res.data === 'string' ? JSON.parse(res.data) : res.data } catch (e) {}
+            if (res.statusCode === 401) {
+              store.clearSession()
+              viewerCache.clearAll()
+              reject(new Error('未登录或会话已过期'))
+              return
+            }
+            if (res.statusCode < 200 || res.statusCode >= 300) {
+              reject(new Error((body && (body.error || body.detail)) || `语音识别失败（HTTP ${res.statusCode}）`))
+              return
+            }
+            resolve(body || {})
+          },
+          fail: (err) => reject(new Error((err && err.errMsg) || '语音上传失败')),
+        })
+      })
+      .catch(reject)
+  })
+}
+
+/**
+ * H5 语音转写：MediaRecorder 产出 Blob，直接用 XHR + FormData 上传。
+ * uni.uploadFile 在 H5 对 blob: 临时地址支持不稳定，这里显式构造 multipart。
+ */
+export async function transcribeVoiceBlob(blob, filename = 'voice.webm') {
+  if (!blob) throw new Error('缺少录音数据')
+  const server = await ensureServerUrl()
+  const token = store.getToken()
+  return new Promise((resolve, reject) => {
+    const form = new FormData()
+    form.append('file', blob, filename)
+    form.append('model', 'sensevoice')
+    form.append('language', 'zh')
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `${server}${API_BASE}/asr/transcribe?clean=1`)
+    if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token)
+    xhr.timeout = 120000
+    xhr.onload = () => {
+      let body = null
+      try { body = JSON.parse(xhr.responseText || '{}') } catch (e) {}
+      if (xhr.status === 401) {
+        store.clearSession()
+        viewerCache.clearAll()
+        reject(new Error('未登录或会话已过期'))
+        return
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new Error((body && (body.error || body.detail)) || `语音识别失败（HTTP ${xhr.status}）`))
+        return
+      }
+      resolve(body || {})
+    }
+    xhr.onerror = () => reject(new Error('语音上传失败'))
+    xhr.ontimeout = () => reject(new Error('语音识别超时'))
+    xhr.send(form)
+  })
 }
 
 /** 获取统一工作台 Schema 契约（模型列表、快捷项与高级抽屉控制项） */
@@ -846,7 +1001,7 @@ export async function fetchTrashDetail(fid) {
   return request(`/assets/trash/${encodeURIComponent(fid)}`, { method: 'GET' })
 }
 
-/** 从回收站恢复（支持单条 / 数组 fids） */
+/** 从回收站恢复（支持单条 / 数组 fids）；返回 { restored, failed, count } 逐项结果 */
 export async function restoreTrashAsset(fids) {
   const list = Array.isArray(fids) ? fids : [fids]
   return request('/assets/trash/restore', {
@@ -855,14 +1010,15 @@ export async function restoreTrashAsset(fids) {
   })
 }
 
-/** 彻底粉碎（支持单条 / 数组 fids；需 viewer 白名单，已开） */
+/** 彻底粉碎（admin-only，走 /api 管理基址）；返回 { purged, failed, count } 逐项结果 */
 export async function purgeTrashAsset(fids) {
   const list = Array.isArray(fids) ? fids : [fids]
-  return request('/assets/trash/purge', {
+  return adminRequest('/assets/trash/purge', {
     method: 'POST',
     body: JSON.stringify({ fids: list }),
   })
 }
+
 
 /** 相册已删除对账：预览（不落库，GET /sync/reconcile） */
 export async function previewAlbumReconcile({ deviceId = '', graceDays = null } = {}) {
@@ -875,25 +1031,7 @@ export async function previewAlbumReconcile({ deviceId = '', graceDays = null } 
   return request(`/sync/reconcile${q}`, { method: 'GET' })
 }
 
-/** 相册已删除对账：应用（移入回收站，apply=true；需 admin，SEC-007） */
-export async function applyAlbumReconcile({ deviceId = '', graceDays = null, limit = 200 } = {}) {
-  const res = await request('/sync/reconcile', {
-    method: 'POST',
-    body: JSON.stringify({ deviceId, graceDays, limit, apply: true }),
-    timeout: 300000,
-  })
-  try { viewerCache.clearAll() } catch (_) {}
-  return res
-}
 
-/** 全库查重移入回收站（destructive，需二次确认） */
-export async function dedupeLibraryToTrash() {
-  return request('/assets/dedupe-library', {
-    method: 'POST',
-    body: JSON.stringify({ moveToTrash: true }),
-    timeout: 300000,
-  })
-}
 
 /** 把 base64 图片写入临时文件并保存到系统相册 */
 export async function saveBase64ImageToAlbum(b64, fileName) {

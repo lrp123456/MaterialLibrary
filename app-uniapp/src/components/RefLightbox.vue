@@ -6,8 +6,8 @@
       <view class="lb-close" @click="close"><text class="lb-close-x">✕</text></view>
     </view>
 
-    <!-- 图片：双指缩放 + 拖动平移 + 单击切换 1:1 -->
-    <view v-if="kind === 'image'" class="lb-stage" @click="toggleZoom">
+    <!-- 图片：双指缩放 + 拖动平移 + 单击/双击切换 1:1（手势在 touchend 统一判定） -->
+    <view v-if="kind === 'image'" class="lb-stage">
       <image
         :src="url"
         class="lb-img"
@@ -32,7 +32,7 @@
     </view>
 
     <!-- 底部工具条 -->
-    <view v-if="kind === 'image'" class="lb-bottombar">
+    <view v-if="kind === 'image'" class="lb-bottombar" @touchstart.stop @touchend.stop @touchmove.stop>
       <view class="lb-tool" @click="toggleZoom"><text class="lb-tool-t">{{ zoomed ? '适应屏幕' : '1 : 1' }}</text></view>
       <view class="lb-tool primary" @click="$emit('download')"><text class="lb-tool-t">保存到相册</text></view>
     </view>
@@ -63,7 +63,12 @@ export default {
       startY: 0,
       startOffsetX: 0,
       startOffsetY: 0,
-      lastTap: 0,
+      stageW: 0,
+      stageH: 0,
+      _moved: false,
+      _pinching: false,
+      _tapCount: 0,
+      _tapTimer: null,
     }
   },
   computed: {
@@ -74,7 +79,11 @@ export default {
   watch: {
     show(v) {
       if (v) this.resetState()
+      else this.clearTapTimer()
     },
+  },
+  beforeUnmount() {
+    this.clearTapTimer()
   },
   methods: {
     resetState() {
@@ -84,11 +93,25 @@ export default {
       this.zoomed = false
       this.loading = true
       this.startDist = 0
+      this._moved = false
+      this.clearTapTimer()
+      try {
+        const sys = uni.getSystemInfoSync()
+        this.stageW = sys.windowWidth || 375
+        this.stageH = sys.windowHeight || 800
+      } catch (e) {}
+    },
+    clearTapTimer() {
+      if (this._tapTimer) {
+        clearTimeout(this._tapTimer)
+        this._tapTimer = null
+      }
     },
     onImgLoad() {
       this.loading = false
     },
     close() {
+      this.clearTapTimer()
       this.$emit('close')
     },
     toggleZoom() {
@@ -110,15 +133,14 @@ export default {
         this.startScale = this.scale
         this.startOffsetX = this.offsetX
         this.startOffsetY = this.offsetY
+        this._moved = true
+        this._pinching = true
       } else if (ts.length === 1) {
         this.startX = ts[0].pageX
         this.startY = ts[0].pageY
         this.startOffsetX = this.offsetX
         this.startOffsetY = this.offsetY
-        // 双击放大
-        const now = Date.now()
-        if (now - this.lastTap < 280) this.toggleZoom()
-        this.lastTap = now
+        this._moved = false
       }
     },
     onTouchMove(e) {
@@ -135,24 +157,58 @@ export default {
           this.offsetX = 0
           this.offsetY = 0
         }
-      } else if (ts.length === 1 && this.scale > 1.05) {
+      } else if (ts.length === 1) {
         const dx = ts[0].pageX - this.startX
         const dy = ts[0].pageY - this.startY
-        this.offsetX = this.startOffsetX + dx
-        this.offsetY = this.startOffsetY + dy
+        if (Math.hypot(dx, dy) > 8) this._moved = true
+        if (this.scale > 1.05) {
+          // 放大后平移：限制在图幅范围内，避免拖飞
+          const maxX = ((this.scale - 1) * this.stageW) / 2
+          const maxY = ((this.scale - 1) * this.stageH) / 2
+          this.offsetX = Math.max(-maxX, Math.min(maxX, this.startOffsetX + dx))
+          this.offsetY = Math.max(-maxY, Math.min(maxY, this.startOffsetY + dy))
+        }
       }
     },
     onTouchEnd(e) {
-      const ts = this.touchList(e)
-      if (ts.length === 0) {
-        this.startDist = 0
+      // touchend 时 e.touches 为空、e.changedTouches 才是抬起的点
+      if (((e.touches || []).length) !== 0) return
+      this.startDist = 0
+      if (this._pinching) {
+        this._pinching = false
+        this._moved = false
+        return
+      }
+      if (this._moved) {
+        // 未放大时下滑关闭；其余情况回弹
+        const dx = (e.changedTouches && e.changedTouches[0] ? e.changedTouches[0].pageX : this.startX) - this.startX
+        const dy = (e.changedTouches && e.changedTouches[0] ? e.changedTouches[0].pageY : this.startY) - this.startY
+        if (!this.zoomed && dy > 90 && Math.abs(dy) > Math.abs(dx) * 1.2) {
+          this.$emit('close')
+          return
+        }
         if (!this.zoomed) {
-          // 回弹归位
           this.scale = 1
           this.offsetX = 0
           this.offsetY = 0
         }
+        this._moved = false
+        return
       }
+      // 单击 / 双击：双击立即放大，单击稍等 280ms 以区分双击
+      this._tapCount += 1
+      if (this._tapCount >= 2) {
+        this.clearTapTimer()
+        this._tapCount = 0
+        this.toggleZoom()
+        return
+      }
+      this.clearTapTimer()
+      this._tapTimer = setTimeout(() => {
+        this._tapTimer = null
+        this._tapCount = 0
+        this.toggleZoom()
+      }, 280)
     },
   },
 }

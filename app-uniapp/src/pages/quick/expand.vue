@@ -33,7 +33,7 @@ import { fieldOf } from '../../service/QuickParams'
 export default {
   data() {
     return {
-      statusBarHeight: 20, fid: '', imgUrl: '', ratio: '',
+      statusBarHeight: 20, fid: '', derivId: '', imgUrl: '', ratio: '',
       ratios: [],
       submitting: false,
     }
@@ -41,6 +41,7 @@ export default {
   onLoad(opts) {
     try { this.statusBarHeight = uni.getSystemInfoSync().statusBarHeight || 20 } catch (e) {}
     this.fid = opts.fid || ''
+    this.derivId = opts.derivId ? decodeURIComponent(opts.derivId) : ''
     this.imgUrl = opts.imgUrl ? decodeURIComponent(opts.imgUrl) : ''
     fieldOf('image', 'ratio').then((f) => {
       if (!f) return
@@ -55,6 +56,7 @@ export default {
       this.submitting = true
       handoffPreciseEdit({
         fid: this.fid,
+        derivId: this.derivId,
         imgUrl: this.imgUrl,
         op: 'expand',
         recipe: this.ratio

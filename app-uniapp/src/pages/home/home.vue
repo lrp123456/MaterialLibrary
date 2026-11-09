@@ -55,7 +55,7 @@
 
     <!-- 精准编辑交接横幅（可退出） -->
     <view v-if="pendingEdit" class="edit-banner">
-      <image v-if="pendingEdit.sourceFid" class="edit-banner-img" :src="media(pendingEdit.sourceFid)" mode="aspectFill" />
+      <image v-if="pendingEdit.sourceFid" class="edit-banner-img" :src="media(pendingEdit.sourceFid, pendingEdit.sourceDerivId)" mode="aspectFill" />
       <view class="edit-banner-meta">
         <text class="edit-banner-title">精准编辑 · {{ pendingEditLabel }}</text>
         <text class="edit-banner-sub" number-of-lines="1">{{ pendingEditDetail }}</text>
@@ -388,8 +388,10 @@
           </view>
         </scroll-view>
 
-        <!-- 右侧：灵感优化 & 纯圆发送按钮 -->
+        <!-- 右侧：语音输入 & 灵感优化 & 纯圆发送按钮 -->
         <view class="composer-actions-right">
+          <VoiceInputButton :disabled="sending" @text="onVoiceText" />
+
           <!-- 智能优化 ✨ -->
           <view
             :class="['composer-opt-btn', { disabled: optimizingPrompt || !inputPrompt.trim() }]"
@@ -688,10 +690,12 @@
     <CreationLibraryDrawer
       :show="libraryOpen"
       :history-items="historyCreations"
+      :current-recipe="currentRecipe"
       @close="libraryOpen = false"
       @reuse-prompt="onReusePrompt"
       @use-as-ref="onUseAsRefFromLibrary"
       @preview="onPreviewLibraryItem"
+      @apply-template="applyLibraryTemplate"
     />
 
     <!-- 请求预览抽屉 -->
@@ -725,6 +729,7 @@ import RequestPreviewSheet from '../../components/RequestPreviewSheet.vue'
 import SessionDrawer from '../../components/SessionDrawer.vue'
 import AiTaskPill from '../../components/AiTaskPill.vue'
 import CreationLibraryDrawer from '../../components/CreationLibraryDrawer.vue'
+import VoiceInputButton from '../../components/VoiceInputButton.vue'
 import AppIcon from '../../components/AppIcon.vue'
 import {
   fetchLabCapabilities,
@@ -753,6 +758,7 @@ import {
   evaluateClientModelRules,
   schemaDefaults,
   fieldByKey,
+  valueStillFits,
   clampParamsToSchema,
   resolveSchemaMode,
 } from '../../service/ModelProtocol'
@@ -777,7 +783,7 @@ const newId = (prefix) => `${prefix}_${Date.now()}_${++seedId}`
 
 export default {
   name: 'Home',
-  components: { RefLightbox, RequestPreviewSheet, SessionDrawer, CreationLibraryDrawer, AiTaskPill, AppIcon },
+  components: { RefLightbox, RequestPreviewSheet, SessionDrawer, CreationLibraryDrawer, VoiceInputButton, AiTaskPill, AppIcon },
   data() {
     return {
       statusBarHeight: 20,
@@ -963,6 +969,37 @@ export default {
         }
       }
       return count
+    },
+    /** 当前创作现场快照：存配方时与桌面端同构落库 */
+    currentRecipe() {
+      const prompt = String(this.lastSentPrompt || this.inputPrompt || '').trim()
+      if (!prompt) return { prompt: '' }
+      const model = this.currentModelInfo || {}
+      const params = this.effectiveParams || {}
+      const ratio = params.ratio || params.aspect_ratio || ''
+      const type = this.domain === 'music' ? 'audio' : (this.domain === 'chat' ? 'image' : this.domain)
+      return {
+        prompt,
+        type,
+        aspect_ratio: ratio || (this.domain === 'video' ? '9:16' : '16:9'),
+        origin_images: (this.refs || []).map((r, i) => ({
+          name: r.label || '',
+          fid: r.fid || '',
+          kind: r.kind || 'image',
+          weight: 85,
+          tag: `@图${i + 1}`,
+          url: /^https?:\/\//i.test(r.url || '') ? r.url : ''
+        })),
+        params: {
+          modelKey: model.model_code || model.id || '',
+          genMode: this.domain,
+          mode: this.activeMode,
+          schemaMode: this.activeMode,
+          schemaParams: { ...params },
+          ratio: ratio || undefined,
+          resolution: params.size || params.resolution || undefined
+        }
+      }
     },
     historyCreations() {
       const out = []
@@ -1285,8 +1322,9 @@ export default {
       if (payload.sourceFid) {
         refs.push({
           id: newId('ref'),
-          url: mediaUrl(payload.sourceFid),
+          url: mediaUrl(payload.sourceFid, payload.sourceDerivId || 0),
           fid: payload.sourceFid,
+          derivId: payload.sourceDerivId || 0,
           label: payload.sourceName || '原图',
           source: 'stage',
           kind: 'image',
@@ -1535,6 +1573,132 @@ export default {
       this.inputPrompt = prompt
       this.libraryOpen = false
       uni.showToast({ title: '已填入配方提示词', icon: 'none' })
+    },
+    onVoiceText(text) {
+      if (!text) return
+      const cur = this.inputPrompt || ''
+      const gap = cur && !/\s$/.test(cur) ? ' ' : ''
+      this.inputPrompt = cur + gap + text
+      this.isEditingPrompt = true
+      this.scrollToBottom()
+    },
+
+    // ─────────── 创作配方（与桌面端 creation_templates 同源） ───────────
+    findCatalogModel(key) {
+      if (!key) return null
+      const cat = this.studioCatalog || {}
+      const groups = [
+        ['portrait', cat.portrait?.models],
+        ['image', cat.image?.models],
+        ['video', cat.video?.models],
+        ['music', cat.music?.models],
+        ['chat', cat.chat?.models],
+      ]
+      for (const [group, list] of groups) {
+        const hit = (list || []).find((m) => m && (m.id === key || m.model_code === key || m.name === key))
+        if (hit) return { group, model: hit }
+      }
+      return null
+    },
+    applyTemplateModel(domain, modelKey) {
+      const hit = this.findCatalogModel(String(modelKey || ''))
+      if (!hit) return
+      const id = hit.model.id
+      if (hit.group === 'portrait') {
+        this.imageSub = 'portrait'
+        this.currentPortraitModelId = id
+      } else if (hit.group === 'image') {
+        this.imageSub = 'standard'
+        this.currentImageModelId = id
+      } else if (hit.group === 'video') {
+        this.currentVideoModelId = id
+      } else if (hit.group === 'music') {
+        this.currentMusicModelId = id
+      } else {
+        this.currentChatModelId = id
+      }
+      if (hit.group !== domain) this.domain = hit.group === 'portrait' ? 'image' : hit.group
+    },
+    resolveTemplateDomain(tpl) {
+      const params = (tpl && tpl.params) || {}
+      const raw = String(params.genMode || params.mode || tpl.type || '').toLowerCase()
+      const schemaMode = String(params.schemaMode || '').toLowerCase()
+      if (tpl.type === 'video' || raw.includes('video') || ['image_to_video', 'omni_reference', 'first_last_frame', 'video_edit', 'video_extend'].includes(schemaMode)) return 'video'
+      if (['audio', 'music'].includes(tpl.type) || raw.includes('audio') || raw.includes('music')) return 'music'
+      if (tpl.type === 'chat' || raw === 'chat') return 'chat'
+      return 'image'
+    },
+    applyLibraryTemplate(tpl) {
+      if (!tpl) return
+      const params = (tpl && tpl.params && typeof tpl.params === 'object') ? tpl.params : {}
+      const originRefs = Array.isArray(tpl.origin_images) ? tpl.origin_images : []
+      this.domain = this.resolveTemplateDomain(tpl)
+      this.pendingEdit = null
+
+      this.refs = originRefs
+        .map((item) => {
+          const fid = item && item.fid ? String(item.fid) : ''
+          const url = fid ? mediaUrl(fid) : String((item && item.url) || '')
+          if (!url) return null
+          return {
+            id: newId('ref'),
+            url,
+            fid,
+            label: (item && (item.name || item.file_name)) || '配方参考',
+            source: 'template',
+            kind: (item && item.kind) || 'image',
+          }
+        })
+        .filter(Boolean)
+      this.canvasPinnedId = ''
+
+      const schemaMode = String(params.schemaMode || '').toLowerCase()
+      if (this.domain === 'music') {
+        this.musicMode = schemaMode.includes('song') || String(params.mode || '').includes('song') ? 'text_to_song' : 'text_to_bgm'
+      }
+      const modelKey = params.modelKey || params.model
+      if (modelKey) this.applyTemplateModel(this.domain, modelKey)
+
+      this.resetParamsForModel()
+      const schema = this.currentSchema
+      if (schema) {
+        const incoming = {}
+        const incomingParams = params.schemaParams && typeof params.schemaParams === 'object' ? params.schemaParams : {}
+        for (const [key, value] of Object.entries(incomingParams)) {
+          if (fieldByKey(schema, key)) incoming[key] = value
+        }
+        // 旧配方把画幅/分辨率存到顶层
+        const ratioSeed = params.ratio || tpl.aspect_ratio
+        if (ratioSeed) {
+          for (const key of ['ratio', 'aspect_ratio', 'ar']) {
+            if (fieldByKey(schema, key) && valueStillFits(schema, key, ratioSeed)) {
+              incoming[key] = ratioSeed
+              break
+            }
+          }
+        }
+        if (params.resolution) {
+          for (const key of ['resolution', 'size', 'dimension']) {
+            if (fieldByKey(schema, key) && valueStillFits(schema, key, params.resolution)) {
+              incoming[key] = params.resolution
+              break
+            }
+          }
+        }
+        this.schemaParams = clampParamsToSchema(schema, { ...this.effectiveParams, ...incoming })
+      }
+
+      this.inputPrompt = tpl.prompt || ''
+      this.libraryOpen = false
+      this.sheetMode = ''
+      this.drawerOpen = false
+      this.scrollToBottom()
+      const label = this.domain === 'video' ? '生视频'
+        : this.domain === 'music' ? '配乐'
+          : this.domain === 'chat' ? '对话'
+            : (this.imageSub === 'portrait' ? '人像' : '生图')
+      const refNote = this.refs.length ? `，已挂载 ${this.refs.length} 个参考素材` : ''
+      uni.showToast({ title: `已应用配方，切入${label}${refNote}`, icon: 'none' })
     },
     onUseAsRefFromLibrary(item) {
       if (!item || !item.url) return
@@ -1924,6 +2088,8 @@ export default {
       if (imageUrls.length) base.imageUrls = imageUrls
       if (videoUrls.length) base.videoUrls = videoUrls
       if (audioUrls.length) base.audioUrls = audioUrls
+      // 对话模态：/gen/chat 只读取 images，参考图需以 images 形式上车
+      if (this.domain === 'chat' && imageUrls.length) base.images = imageUrls
       const p = this.pendingEdit
       if (p && p.kind === 'global') {
         base.globalOp = p.op
@@ -1950,6 +2116,8 @@ export default {
         productName: p.productName,
         model: p.model || (this.currentModelInfo && this.currentModelInfo.model_code) || undefined,
         assetFid: p.sourceFid || undefined,
+        derivId: p.sourceDerivId || undefined,
+        pasteback: p.pasteback,
         params,
         extras: { ...params },
       }
@@ -2488,8 +2656,8 @@ export default {
       if (m.includes('video') || m === 'first_last_frame') return 'video'
       return 'image'
     },
-    media(fid) {
-      return mediaUrl(fid)
+    media(fid, derivId) {
+      return mediaUrl(fid, derivId || 0)
     },
     grid(fid) {
       return gridUrl(fid)

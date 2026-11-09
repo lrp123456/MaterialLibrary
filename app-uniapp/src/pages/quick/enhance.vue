@@ -19,6 +19,9 @@
           </view>
         </view>
       </view>
+      <view v-if="mode === 'local'" class="dep-tip">
+        <text class="dep-tip-t">本地超分依赖 Android 原生推理插件（仅 Android 生效）；未启用时由云端增强流程承接。</text>
+      </view>
       <view class="options-row">
         <text class="option-label">放大倍数</text>
         <view class="ratio-row">
@@ -40,15 +43,16 @@ import { handoffGlobalEdit } from '../../common/handoff'
 export default {
   data() {
     return {
-      statusBarHeight: 20, fid: '', imgUrl: '',
+      statusBarHeight: 20, fid: '', derivId: '', imgUrl: '',
       mode: 'local', scale: 2,
-      modes: [{ key: 'local', label: '本地 2x/4x' }, { key: 'cloud', label: '云端重绘' }],
+      modes: [{ key: 'local', label: '本地超分 · 需原生插件' }, { key: 'cloud', label: '云端重绘' }],
       scales: [2, 4], submitting: false,
     }
   },
   onLoad(opts) {
     try { this.statusBarHeight = uni.getSystemInfoSync().statusBarHeight || 20 } catch (e) {}
     this.fid = opts.fid || ''
+    this.derivId = opts.derivId ? decodeURIComponent(opts.derivId) : ''
     this.imgUrl = opts.imgUrl ? decodeURIComponent(opts.imgUrl) : ''
   },
   methods: {
@@ -58,12 +62,13 @@ export default {
       this.submitting = true
       handoffGlobalEdit({
         fid: this.fid,
+        derivId: this.derivId,
         imgUrl: this.imgUrl,
         op: 'clarity',
         recipe: this.mode === 'cloud'
           ? `请对参考图进行云端重绘级清晰度增强，提升到 ${this.scale}x 细节。`
           : `请对参考图进行 ${this.scale}x 清晰度增强，保持原构图与色彩。`,
-        recipeHint: `${this.mode === 'cloud' ? '云端重绘' : '本地增强'} · ${this.scale}x`,
+        recipeHint: `${this.mode === 'cloud' ? '云端重绘' : '本地超分（需原生插件）'} · ${this.scale}x`,
         scale: this.scale,
         globalParams: { mode: this.mode, scale: this.scale },
       })
@@ -86,6 +91,8 @@ export default {
 .bottom-panel { background: #FFFFFF; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); border-radius: 20px 20px 0 0; border-top: 1rpx solid #E7ECF3; }
 .options-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 8px; }
 .option-label { font-size: 13px; color: #334155; }
+.dep-tip { background: #EAF2FE; border-radius: 10px; padding: 9px 11px; margin-bottom: 14px; }
+.dep-tip-t { font-size: 11px; line-height: 1.55; color: #475569; }
 .ratio-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .ratio-chip { padding: 6px 12px; border-radius: 999px; background: #F1F5F9; border: 1rpx solid #E7ECF3; }
 .ratio-chip.active { background: #EAF2FE; border-color: #BFDBFE; }

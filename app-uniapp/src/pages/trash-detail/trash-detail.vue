@@ -198,8 +198,13 @@ export default {
           if (!res.confirm) return
           uni.showLoading({ title: '恢复中…', mask: true })
           try {
-            await restoreTrashAsset(this.fid)
+            const out = await restoreTrashAsset(this.fid)
             uni.hideLoading()
+            const fail = (out.failed || []).find((f) => f.fid === this.fid)
+            if (fail) {
+              uni.showToast({ title: '恢复失败: ' + (fail.error || '未知原因'), icon: 'none' })
+              return
+            }
             uni.showToast({ title: '已恢复到素材库', icon: 'none' })
             setTimeout(() => this.goBack(), 700)
           } catch (e) {
@@ -219,8 +224,13 @@ export default {
           if (!res.confirm) return
           uni.showLoading({ title: '粉碎中…', mask: true })
           try {
-            await purgeTrashAsset(this.fid)
+            const out = await purgeTrashAsset(this.fid)
             uni.hideLoading()
+            const fail = (out.failed || []).find((f) => f.fid === this.fid)
+            if (fail) {
+              uni.showToast({ title: '粉碎失败: ' + (fail.error || '未知原因'), icon: 'none' })
+              return
+            }
             uni.showToast({ title: '已彻底粉碎', icon: 'none' })
             setTimeout(() => this.goBack(), 700)
           } catch (e) {

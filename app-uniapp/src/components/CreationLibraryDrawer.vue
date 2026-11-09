@@ -92,7 +92,7 @@
         <view style="height: 32px" />
       </scroll-view>
 
-      <!-- 精选配方模板 Tab -->
+      <!-- 创作配方 Tab（与桌面端共用 creation_templates） -->
       <scroll-view
         v-else
         scroll-y
@@ -110,29 +110,74 @@
           >
             <text class="c-cat-t">{{ cat.label }}</text>
           </view>
+          <view class="c-refresh-pill" :class="{ busy: templatesLoading }" @click="loadTemplates(true)">
+            <AppIcon name="refresh" :size="11" color="#64748B" />
+            <text class="c-refresh-t">刷新</text>
+          </view>
         </view>
 
-        <view class="c-tpl-list">
+        <view
+          class="c-save-row"
+          :class="{ disabled: !currentRecipe || !currentRecipe.prompt }"
+          @click="saveCurrentRecipe"
+        >
+          <AppIcon name="plus" :size="13" color="#007AFF" />
+          <text class="c-save-t">把当前输入存为配方</text>
+        </view>
+
+        <view v-if="templatesLoading && !templates.length" class="c-empty">
+          <view class="c-empty-icon"><AppIcon name="library" :size="30" color="#94A3B8" /></view>
+          <text class="c-empty-t">正在加载配方…</text>
+        </view>
+        <view v-else-if="templatesError" class="c-empty">
+          <view class="c-empty-icon"><AppIcon name="library" :size="30" color="#94A3B8" /></view>
+          <text class="c-empty-t">配方加载失败</text>
+          <text class="c-empty-sub">{{ templatesError }}</text>
+          <view class="c-retry" @click="loadTemplates(true)"><text class="c-retry-t">重试</text></view>
+        </view>
+        <view v-else-if="!filteredTemplates.length" class="c-empty">
+          <view class="c-empty-icon"><AppIcon name="library" :size="30" color="#94A3B8" /></view>
+          <text class="c-empty-t">还没有创作配方</text>
+          <text class="c-empty-sub">生成作品后可在桌面端保存配方，或从外部数据源拉取</text>
+          <view class="c-retry" :class="{ busy: pullingExternal }" @click="pullExternal">
+            <text class="c-retry-t">{{ pullingExternal ? '拉取中…' : '拉取外部配方' }}</text>
+          </view>
+        </view>
+
+        <view v-else class="c-tpl-list">
           <view
             v-for="tpl in filteredTemplates"
             :key="tpl.id"
             class="c-tpl-card"
-            @click="onSelectTemplate(tpl)"
+            @click="onApplyTemplate(tpl)"
+            @longpress="openTemplateMenu(tpl)"
             hover-class="c-tpl-hover"
           >
             <view class="c-tpl-head">
               <text class="c-tpl-title">{{ tpl.title }}</text>
-              <view class="c-tpl-badge">
-                <text class="c-tpl-badge-t">{{ tpl.tag }}</text>
+              <view class="c-tpl-head-right">
+                <text v-if="tpl.is_pinned" class="c-pin-t">置顶</text>
+                <view class="c-tpl-badge">
+                  <text class="c-tpl-badge-t">{{ typeLabel(tpl.type) }}</text>
+                </view>
               </view>
             </view>
             <text class="c-tpl-desc" number-of-lines="2">{{ tpl.prompt }}</text>
             <view class="c-tpl-foot">
-              <text class="c-tpl-meta">{{ tpl.modelHint || '推荐模型' }} · {{ tpl.ratio || '16:9' }}</text>
+              <text class="c-tpl-meta">{{ tpl.aspect_ratio || '16:9' }} · 复用 {{ tpl.use_count || 0 }} 次</text>
               <view class="c-tpl-apply">
                 <text class="c-tpl-apply-t">应用此配方 →</text>
               </view>
             </view>
+            <view class="c-tpl-tools">
+              <text class="c-tpl-tool" @click.stop="togglePin(tpl)">{{ tpl.is_pinned ? '取消置顶' : '置顶' }}</text>
+              <text class="c-tpl-tool" @click.stop="renameTemplate(tpl)">重命名</text>
+              <text class="c-tpl-tool danger" @click.stop="removeTemplate(tpl)">删除</text>
+            </view>
+          </view>
+          <view class="c-pull-row" :class="{ busy: pullingExternal }" @click="pullExternal">
+            <AppIcon name="cloud" :size="13" color="#007AFF" />
+            <text class="c-pull-t">{{ pullingExternal ? '正在拉取外部配方…' : '拉取外部数据源配方' }}</text>
           </view>
         </view>
         <view style="height: 32px" />
@@ -143,80 +188,76 @@
 
 <script>
 import AppIcon from './AppIcon.vue'
+import {
+  fetchCreationTemplates,
+  createCreationTemplate,
+  markCreationTemplateUsed,
+  patchCreationTemplate,
+  deleteCreationTemplate,
+  pullExternalCreationTemplates,
+} from '../service/ViewerApi'
 
-const PRESET_TEMPLATES = [
-  {
-    id: 'tpl-1',
-    category: 'space',
-    tag: '空间渲染',
-    title: '现代极简客餐厅大平层',
-    prompt: '高档现代极简客餐厅，大理石地砖通铺，悬浮吊顶与无主灯设计，巨幅落地窗映入柔和日光，高定意式皮革沙发，极简静谧质感，8k高画质室内摄影',
-    modelHint: 'Seedream 5.0 Flash',
-    ratio: '16:9'
-  },
-  {
-    id: 'tpl-2',
-    category: 'space',
-    tag: '室内漫游',
-    title: '法式复古主卧自然光漫游',
-    prompt: '法式复古风格主卧，奶油白法式雕花护墙板，人字拼木地板，晨光透过百叶窗洒在复古大床上，胶片颗粒质感，电影级柔和光影',
-    modelHint: 'Qwen-Image 3.0',
-    ratio: '4:3'
-  },
-  {
-    id: 'tpl-3',
-    category: 'video',
-    tag: '电影运镜',
-    title: '慢速推镜头 · 室内空间特写',
-    prompt: '摄像机平稳向前缓慢推入，展示客厅餐桌与落地窗外的黄昏天际线，光影随镜头微移产生丁达尔效应，电影级画质，4k60帧',
-    modelHint: 'Kling 2.0',
-    ratio: '16:9'
-  },
-  {
-    id: 'tpl-4',
-    category: 'portrait',
-    tag: '大师人像',
-    title: '自然光情绪肖像',
-    prompt: '胶片质感人像摄影，年轻女性半身侧影，自然柔光照亮面部轮廓，眼神清澈深邃，发丝细节清晰，轻微景深虚化，哈苏镜头质感',
-    modelHint: '豆包生图',
-    ratio: '3:4'
-  },
-  {
-    id: 'tpl-5',
-    category: 'video',
-    tag: '视频运镜',
-    title: '环绕升格镜头 · 家具产品展示',
-    prompt: '360度环绕慢动作升格运镜，高定意式单人沙发细节特写，皮革纹理与金属底座在摄影棚柔光箱下流光溢彩，质感高级',
-    modelHint: 'Kling 2.0',
-    ratio: '16:9'
-  }
-]
+const TYPE_LABELS = { image: '图片', video: '视频', audio: '音频', music: '音乐' }
 
 export default {
   name: 'CreationLibraryDrawer',
   components: { AppIcon },
   props: {
     show: { type: Boolean, default: false },
-    historyItems: { type: Array, default: () => [] }
+    historyItems: { type: Array, default: () => [] },
+    currentRecipe: { type: Object, default: null }
   },
-  emits: ['close', 'reuse-prompt', 'use-as-ref', 'preview'],
+  emits: ['close', 'reuse-prompt', 'use-as-ref', 'preview', 'apply-template'],
   data() {
     return {
       activeTab: 'history',
       activeCategory: 'all',
-      templateCategories: [
-        { id: 'all', label: '全部' },
-        { id: 'space', label: '空间' },
-        { id: 'video', label: '视频' },
-        { id: 'portrait', label: '人像' }
-      ],
-      templates: PRESET_TEMPLATES
+      templates: [],
+      templatesLoading: false,
+      templatesError: '',
+      templatesLoaded: false,
+      pullingExternal: false
     }
   },
   computed: {
+    templateCategories() {
+      const counts = {}
+      for (const t of this.templates) {
+        const type = t.type || 'image'
+        counts[type] = (counts[type] || 0) + 1
+      }
+      const cats = [{ id: 'all', label: '全部' }]
+      for (const type of ['image', 'video', 'audio']) {
+        if (counts[type]) cats.push({ id: type, label: TYPE_LABELS[type] || type })
+      }
+      for (const type of Object.keys(counts)) {
+        if (!['image', 'video', 'audio'].includes(type)) {
+          cats.push({ id: type, label: TYPE_LABELS[type] || type })
+        }
+      }
+      return cats
+    },
     filteredTemplates() {
-      if (this.activeCategory === 'all') return this.templates
-      return this.templates.filter(t => t.category === this.activeCategory)
+      const list = this.activeCategory === 'all'
+        ? this.templates
+        : this.templates.filter(t => (t.type || 'image') === this.activeCategory)
+      return [...list].sort((a, b) => {
+        const pinDiff = Number(b.is_pinned || 0) - Number(a.is_pinned || 0)
+        if (pinDiff) return pinDiff
+        const useDiff = Number(b.use_count || 0) - Number(a.use_count || 0)
+        if (useDiff) return useDiff
+        return Number(b.updated_at || 0) - Number(a.updated_at || 0)
+      })
+    }
+  },
+  watch: {
+    show(val) {
+      if (val && this.activeTab === 'templates' && !this.templatesLoaded) this.loadTemplates()
+    },
+    activeTab(val) {
+      if (val === 'templates' && this.show && !this.templatesLoaded && !this.templatesLoading) {
+        this.loadTemplates()
+      }
     }
   },
   methods: {
@@ -230,10 +271,155 @@ export default {
       if (!item || !item.url) return
       this.$emit('preview', item)
     },
-    onSelectTemplate(tpl) {
-      this.$emit('reuse-prompt', tpl.prompt)
+    typeLabel(type) {
+      return TYPE_LABELS[type] || type || '图片'
+    },
+    async loadTemplates(force = false) {
+      if (this.templatesLoading) return
+      if (!force && this.templatesLoaded) return
+      this.templatesLoading = true
+      this.templatesError = ''
+      try {
+        this.templates = await fetchCreationTemplates()
+        this.templatesLoaded = true
+      } catch (err) {
+        this.templatesError = (err && err.message) || '网络异常'
+        this.templatesLoaded = false
+      } finally {
+        this.templatesLoading = false
+      }
+    },
+    async onApplyTemplate(tpl) {
+      if (!tpl || !tpl.id) return
+      this.$emit('apply-template', tpl)
       this.$emit('close')
-      uni.showToast({ title: '已应用配方提示词', icon: 'none' })
+      try {
+        const res = await markCreationTemplateUsed(tpl.id)
+        const bumped = res && res.use_count !== undefined ? Number(res.use_count) : Number(tpl.use_count || 0) + 1
+        const row = this.templates.find(t => t.id === tpl.id)
+        if (row) row.use_count = bumped
+      } catch (err) {
+        // 频次累加失败不影响应用
+      }
+    },
+    async togglePin(tpl) {
+      if (!tpl || !tpl.id) return
+      const next = tpl.is_pinned ? 0 : 1
+      try {
+        const res = await patchCreationTemplate(tpl.id, { is_pinned: next })
+        tpl.is_pinned = res && res.is_pinned !== undefined ? Number(res.is_pinned) : next
+        uni.showToast({ title: next ? '已置顶' : '已取消置顶', icon: 'none' })
+      } catch (err) {
+        uni.showToast({ title: (err && err.message) || '操作失败', icon: 'none' })
+      }
+    },
+    renameTemplate(tpl) {
+      if (!tpl || !tpl.id) return
+      uni.showModal({
+        title: '重命名配方',
+        editable: true,
+        placeholderText: '输入新的配方名称',
+        content: tpl.title || '',
+        success: async (res) => {
+          if (!res.confirm) return
+          const title = String(res.content || '').trim()
+          if (!title) {
+            uni.showToast({ title: '名称不可为空', icon: 'none' })
+            return
+          }
+          try {
+            await patchCreationTemplate(tpl.id, { title })
+            tpl.title = title
+            uni.showToast({ title: '已重命名', icon: 'none' })
+          } catch (err) {
+            uni.showToast({ title: (err && err.message) || '重命名失败', icon: 'none' })
+          }
+        }
+      })
+    },
+    removeTemplate(tpl) {
+      if (!tpl || !tpl.id) return
+      uni.showModal({
+        title: '删除配方',
+        content: `确定删除「${tpl.title || '该配方'}」吗？`,
+        confirmText: '删除',
+        confirmColor: '#DC2626',
+        success: async (res) => {
+          if (!res.confirm) return
+          try {
+            await deleteCreationTemplate(tpl.id)
+            this.templates = this.templates.filter(t => t.id !== tpl.id)
+            uni.showToast({ title: '已删除', icon: 'none' })
+          } catch (err) {
+            uni.showToast({ title: (err && err.message) || '删除失败', icon: 'none' })
+          }
+        }
+      })
+    },
+    openTemplateMenu(tpl) {
+      if (!tpl || !tpl.id) return
+      uni.showActionSheet({
+        itemList: [tpl.is_pinned ? '取消置顶' : '置顶', '重命名', '删除'],
+        success: (res) => {
+          if (res.tapIndex === 0) this.togglePin(tpl)
+          else if (res.tapIndex === 1) this.renameTemplate(tpl)
+          else if (res.tapIndex === 2) this.removeTemplate(tpl)
+        }
+      })
+    },
+    saveCurrentRecipe() {
+      const recipe = this.currentRecipe
+      if (!recipe || !recipe.prompt) {
+        uni.showToast({ title: '先在输入框写下创作想法', icon: 'none' })
+        return
+      }
+      const fallbackTitle = String(recipe.prompt).slice(0, 16)
+      uni.showModal({
+        title: '保存为配方',
+        editable: true,
+        content: fallbackTitle,
+        placeholderText: '给配方起个名字',
+        success: async (res) => {
+          if (!res.confirm) return
+          const title = String(res.content || '').trim() || fallbackTitle
+          try {
+            const created = await createCreationTemplate({ ...recipe, title })
+            if (created && created.id) {
+              this.templates = [{
+                ...created,
+                params: recipe.params || {},
+                origin_images: recipe.origin_images || [],
+                aspect_ratio: created.aspect_ratio || recipe.aspect_ratio || '16:9',
+                updated_at: created.updated_at || Date.now()
+              }, ...this.templates]
+              this.activeCategory = 'all'
+              this.templatesLoaded = true
+            } else {
+              await this.loadTemplates(true)
+            }
+            uni.showToast({ title: '已存入创作配方', icon: 'none' })
+          } catch (err) {
+            uni.showToast({ title: (err && err.message) || '保存失败', icon: 'none' })
+          }
+        }
+      })
+    },
+    async pullExternal() {
+      if (this.pullingExternal) return
+      this.pullingExternal = true
+      try {
+        const res = await pullExternalCreationTemplates()
+        const count = Number((res && (res.count || res.imported || res.cards)) || 0)
+        await this.loadTemplates(true)
+        uni.showToast({
+          title: count > 0 ? `已拉取 ${count} 条配方` : '拉取完成',
+          icon: 'none'
+        })
+      } catch (err) {
+        uni.showToast({ title: (err && err.message) || '拉取失败', icon: 'none' })
+      } finally {
+        this.pullingExternal = false
+      }
     }
   }
 }
@@ -489,8 +675,47 @@ export default {
 /* 模板样式 */
 .c-filter-row {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
   margin-bottom: 12px;
+}
+
+.c-refresh-pill {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 10px;
+  border-radius: 14px;
+  background: #F8FAFC;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.c-refresh-pill.busy {
+  opacity: 0.55;
+}
+
+.c-refresh-t {
+  font-size: 11px;
+  color: #64748B;
+}
+
+.c-retry {
+  margin-top: 4px;
+  padding: 7px 18px;
+  border-radius: 999px;
+  background: #007AFF;
+}
+
+.c-retry.busy {
+  opacity: 0.6;
+}
+
+.c-retry-t {
+  font-size: 12px;
+  font-weight: 600;
+  color: #FFFFFF;
 }
 
 .c-cat-pill {
@@ -542,9 +767,31 @@ export default {
 }
 
 .c-tpl-title {
+  flex: 1;
+  min-width: 0;
+  margin-right: 8px;
   font-size: 13px;
   font-weight: 600;
   color: #0F172A;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.c-tpl-head-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.c-pin-t {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(245, 158, 11, 0.12);
+  font-size: 10px;
+  font-weight: 600;
+  color: #B45309;
 }
 
 .c-tpl-badge {
@@ -581,6 +828,68 @@ export default {
 .c-tpl-apply-t {
   font-size: 11px;
   font-weight: 600;
+  color: #007AFF;
+}
+
+.c-tpl-tools {
+  display: flex;
+  justify-content: flex-end;
+  gap: 14px;
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px dashed #F1F5F9;
+}
+
+.c-tpl-tool {
+  font-size: 11px;
+  color: #64748B;
+}
+
+.c-tpl-tool.danger {
+  color: #DC2626;
+}
+
+.c-save-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  margin-bottom: 10px;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(0, 122, 255, 0.07);
+  border: 1px solid rgba(0, 122, 255, 0.16);
+}
+
+.c-save-row.disabled {
+  opacity: 0.45;
+}
+
+.c-save-t {
+  font-size: 12px;
+  font-weight: 600;
+  color: #007AFF;
+}
+
+.c-pull-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  margin-top: 4px;
+  padding: 11px;
+  border-radius: 12px;
+  border: 1px dashed rgba(0, 122, 255, 0.28);
+  background: rgba(0, 122, 255, 0.04);
+}
+
+.c-pull-row.busy {
+  opacity: 0.6;
+}
+
+.c-pull-t {
+  font-size: 12px;
+  font-weight: 500;
   color: #007AFF;
 }
 </style>

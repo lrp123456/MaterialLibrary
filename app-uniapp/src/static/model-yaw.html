@@ -78,6 +78,28 @@
     #fallback.show { display: flex; }
     #fallback .icon { font-size: 40px; }
     #fallback .tip { font-size: 13px; color: #64748B; text-align: center; padding: 0 24px; line-height: 1.5; }
+    #dragHot {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      touch-action: none;
+      cursor: grab;
+    }
+    #dragHot.dragging { cursor: grabbing; }
+    .drag-hint {
+      position: absolute;
+      left: 50%;
+      bottom: 12px;
+      transform: translateX(-50%);
+      z-index: 1;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: rgba(15, 23, 42, .62);
+      color: #FFFFFF;
+      font-size: 11px;
+      white-space: nowrap;
+      pointer-events: none;
+    }
     .controls {
       flex-shrink: 0;
       padding: 10px 16px calc(14px + env(safe-area-inset-bottom));
@@ -149,6 +171,8 @@
         loading="eager"
         reveal="auto"
       ></model-viewer>
+      <div id="dragHot"></div>
+      <div class="drag-hint">拖动旋转模型 · 下方滑杆微调</div>
       <div id="fallback">
         <div class="icon">🛋️</div>
         <div class="tip" id="fallbackTip">3D 模型加载中或需重试</div>
@@ -166,7 +190,7 @@
         <span class="val" id="pitchVal">0°</span>
       </div>
       <button id="shot">完成截图</button>
-      <div class="hint">拖动只在本地旋转，点完成时截取一次</div>
+      <div class="hint">旋转只在本地生效，点完成时截取一次</div>
     </div>
   </div>
 
@@ -288,6 +312,78 @@
       mv.setAttribute('orientation', pitch + 'deg 0deg ' + yaw + 'deg');
       yawVal.textContent = yaw + '°';
       pitchVal.textContent = pitch + '°';
+    }
+
+    // 直接在舞台上拖动旋转模型本体（不经过相机，截图所见即所得）
+    var dragHot = document.getElementById('dragHot');
+    var drag = null;
+    var YAW_PER_PX = 0.6;
+    var PITCH_PER_PX = 0.35;
+
+    function normalizeYaw(v) {
+      return ((Math.round(v) % 360) + 360) % 360;
+    }
+    function clampPitch(v) {
+      return Math.max(-30, Math.min(30, Math.round(v)));
+    }
+    function dragStart(x, y) {
+      drag = {
+        x: x,
+        y: y,
+        yaw: parseInt(yawInput.value, 10) || 0,
+        pitch: parseInt(pitchInput.value, 10) || 0
+      };
+      dragHot.classList.add('dragging');
+    }
+    function dragMove(x, y) {
+      if (!drag) return;
+      var dx = x - drag.x;
+      var dy = y - drag.y;
+      yawInput.value = String(normalizeYaw(drag.yaw + dx * YAW_PER_PX));
+      pitchInput.value = String(clampPitch(drag.pitch - dy * PITCH_PER_PX));
+      applyOrientation();
+    }
+    function dragEnd() {
+      drag = null;
+      dragHot.classList.remove('dragging');
+    }
+
+    if (window.PointerEvent) {
+      dragHot.addEventListener('pointerdown', function (e) {
+        if (e.button != null && e.button !== 0) return;
+        try { dragHot.setPointerCapture(e.pointerId); } catch (err) {}
+        dragStart(e.clientX, e.clientY);
+        e.preventDefault();
+      });
+      dragHot.addEventListener('pointermove', function (e) {
+        if (!drag) return;
+        dragMove(e.clientX, e.clientY);
+        e.preventDefault();
+      });
+      dragHot.addEventListener('pointerup', dragEnd);
+      dragHot.addEventListener('pointercancel', dragEnd);
+    } else {
+      dragHot.addEventListener('touchstart', function (e) {
+        var t = e.touches[0];
+        if (!t) return;
+        dragStart(t.clientX, t.clientY);
+      }, { passive: true });
+      dragHot.addEventListener('touchmove', function (e) {
+        var t = e.touches[0];
+        if (!t) return;
+        dragMove(t.clientX, t.clientY);
+        e.preventDefault();
+      }, { passive: false });
+      dragHot.addEventListener('touchend', dragEnd);
+      dragHot.addEventListener('touchcancel', dragEnd);
+      dragHot.addEventListener('mousedown', function (e) {
+        dragStart(e.clientX, e.clientY);
+        e.preventDefault();
+      });
+      window.addEventListener('mousemove', function (e) {
+        if (drag) dragMove(e.clientX, e.clientY);
+      });
+      window.addEventListener('mouseup', dragEnd);
     }
 
     /**

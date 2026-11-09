@@ -131,6 +131,8 @@ export function mapServerAsset(r) {
     main_derivative_id: derivId,
     mainDerivativeKind: (mainDeriv && mainDeriv.kind) || r.main_derivative_kind || '',
     hasWatermark: r.has_watermark === 1 || r.has_watermark === true,
+    favoritedAt: r.favorited_at ? coerceAssetTs(r.favorited_at) : 0,
+    libraryShelf: r.library_shelf || 'original',
     media_type: isMus
       ? 'music'
       : isPort

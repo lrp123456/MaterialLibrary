@@ -71,6 +71,24 @@
       }
     },
     {
+      "path": "pages/clip/clip",
+      "style": {
+        "navigationBarTitleText": "多轨剪辑",
+        "navigationStyle": "custom",
+        "app-plus": {
+          "bounce": "none",
+          "titleNView": false
+        }
+      }
+    },
+    {
+      "path": "pages/tools/tools",
+      "style": {
+        "navigationBarTitleText": "媒体工具",
+        "navigationStyle": "custom"
+      }
+    },
+    {
       "path": "pages/chat/chat",
       "style": {
         "navigationBarTitleText": "元素标签对话",

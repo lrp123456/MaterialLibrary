@@ -43,6 +43,7 @@ export default {
       statusBarHeight: 20,
       viewportH: 480,
       fid: '',
+      derivId: '',
       imgUrl: '',
       hasSelection: false,
       selectionData: null,
@@ -57,6 +58,7 @@ export default {
       this.viewportH = (sys.windowHeight || 667) - this.statusBarHeight - 50 - 140
     } catch (e) {}
     this.fid = opts.fid || ''
+    this.derivId = opts.derivId ? decodeURIComponent(opts.derivId) : ''
     this.imgUrl = opts.imgUrl ? decodeURIComponent(opts.imgUrl) : ''
   },
   methods: {
@@ -72,11 +74,13 @@ export default {
       this.submitting = true
       handoffPreciseEdit({
         fid: this.fid,
+        derivId: this.derivId,
         imgUrl: this.imgUrl,
         op: 'remove',
         recipe: '请消除选区内的物体，并根据周围环境自然补全背景。',
         recipeHint: '消除选区内的物体',
         selection: this.selectionData,
+        pasteback: this.pasteback,
       })
       this.submitting = false
     }

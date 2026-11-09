@@ -1,5 +1,5 @@
 <template>
-  <view class="page">
+  <view class="page" :style="themeStyle">
     <view class="status-bar" :style="{ paddingTop: statusBarHeight + 'px' }" />
 
     <!-- 顶栏 -->
@@ -37,6 +37,46 @@
               <text class="conn-t">{{ pushConnected ? '实时在线' : '离线缓存' }}</text>
             </view>
           </view>
+        </view>
+      </view>
+
+      <!-- 外观主题 -->
+      <view class="sync-card rise d2">
+        <view class="sync-head">
+          <view class="sync-head-l">
+            <text class="sync-title">外观主题</text>
+            <text class="sync-sub">暖色更护眼，冷灰贴近原界面；切换即时生效并记住</text>
+          </view>
+        </view>
+        <view class="chips">
+          <view
+            v-for="t in themeOptions"
+            :key="t.key"
+            class="chip"
+            :class="{ active: themeName === t.key }"
+            @click="pickTheme(t.key)"
+          >{{ t.label }}</view>
+        </view>
+      </view>
+
+      <!-- 创作工具 -->
+      <view class="sync-card rise d2" @click="openClipPage">
+        <view class="sync-head">
+          <view class="sync-head-l">
+            <text class="sync-title">多轨剪辑</text>
+            <text class="sync-sub">图片 / 视频 / 音频上时间轴，可拖拽、缩放与框选</text>
+          </view>
+          <text class="sync-date-t">开始 ›</text>
+        </view>
+      </view>
+
+      <view class="sync-card rise d2" @click="openToolsPage">
+        <view class="sync-head">
+          <view class="sync-head-l">
+            <text class="sync-title">媒体工具</text>
+            <text class="sync-sub">逐帧寻读、格式转换与音频提取、视频智能压缩</text>
+          </view>
+          <text class="sync-date-t">开始 ›</text>
         </view>
       </view>
 
@@ -139,6 +179,125 @@
             <text class="quick-s">{{ checkingUpdate ? '检查中…' : appVersionLabel }}</text>
           </view>
           <text class="quick-chev">›</text>
+        </view>
+      </view>
+
+      <!-- 管理（仅管理员 admin 可见；服务端仍逐接口校验，不降权） -->
+      <view v-if="isAdmin" class="advanced rise d4">
+        <view class="advanced-head" @click="toggleAdmin">
+          <view class="advanced-head-l">
+            <text class="advanced-title">管理</text>
+            <text class="advanced-sub">{{ adminSub }}</text>
+          </view>
+          <text class="chev" :class="{ open: adminOpen }">›</text>
+        </view>
+
+        <view v-if="adminOpen" class="advanced-body">
+          <!-- 工作室默认参数 -->
+          <view class="adv-block">
+            <view class="adv-row">
+              <text class="adv-label">工作室默认参数</text>
+              <text class="adv-value" :class="{ ok: !!studioMsg }">{{ studioMsg || '新建会话初值' }}</text>
+            </view>
+            <text class="adv-hint">默认模型、画幅与清晰度；保存后立即用于新建或重置的会话。</text>
+            <picker mode="selector" :range="studioImageLabels" :value="studioImageIndex" @change="onPickImageModel">
+              <view class="pick-field">
+                <text class="pick-k">默认生图模型</text>
+                <text class="pick-v">{{ studioForm.image }}</text>
+              </view>
+            </picker>
+            <picker mode="selector" :range="studioVideoLabels" :value="studioVideoIndex" @change="onPickVideoModel">
+              <view class="pick-field">
+                <text class="pick-k">默认生视频模型</text>
+                <text class="pick-v">{{ studioForm.video }}</text>
+              </view>
+            </picker>
+            <text class="adv-title mt">默认画幅</text>
+            <view class="chips">
+              <view
+                v-for="r in ratioOptions"
+                :key="r"
+                class="chip"
+                :class="{ active: studioForm.ratio === r }"
+                @click="studioForm.ratio = r"
+              >{{ r }}</view>
+            </view>
+            <text class="adv-title mt">默认视频清晰度</text>
+            <view class="chips">
+              <view
+                v-for="r in resolutionOptions"
+                :key="r"
+                class="chip"
+                :class="{ active: studioForm.video_resolution === r }"
+                @click="studioForm.video_resolution = r"
+              >{{ r }}</view>
+            </view>
+            <text class="adv-title mt">默认图片清晰度</text>
+            <view class="chips">
+              <view
+                v-for="s in imageSizeOptions"
+                :key="s"
+                class="chip"
+                :class="{ active: studioForm.image_size === s }"
+                @click="studioForm.image_size = s"
+              >{{ s }}</view>
+            </view>
+            <view class="btn-row">
+              <view class="btn-primary half" :class="{ disabled: studioSaving }" @click="saveStudioDefaults" hover-class="btn-primary-hover">
+                <text class="btn-primary-t">{{ studioSaving ? '保存中…' : '保存默认参数' }}</text>
+              </view>
+            </view>
+            <text v-if="studioErr" class="err">{{ studioErr }}</text>
+          </view>
+
+          <!-- 用户管理 -->
+          <view class="adv-block">
+            <view class="adv-row">
+              <text class="adv-label">用户管理</text>
+              <text class="adv-value">{{ adminUsers.length }} 个账号</text>
+            </view>
+            <view v-if="adminUsersLoading" class="adv-hint">正在加载用户…</view>
+            <view v-else class="user-list">
+              <view v-for="u in adminUsers" :key="u.id" class="user-row">
+                <view class="user-meta">
+                  <text class="user-name">{{ u.username }}</text>
+                  <text class="user-role">{{ u.role === 'admin' ? '管理员' : '查看者' }}{{ u.is_locked ? ' · 已锁定' : '' }}</text>
+                </view>
+                <text class="user-reset" @click="pickResetUser(u)">重置密码</text>
+              </view>
+            </view>
+            <text v-if="adminUsersErr" class="err">{{ adminUsersErr }}</text>
+
+            <text class="adv-title mt">新建账号</text>
+            <input class="input" v-model="newUser.username" placeholder="用户名（登录名）" />
+            <input class="input mt8" v-model="newUser.password" password placeholder="初始密码（至少 6 位）" />
+            <view class="chips">
+              <view class="chip" :class="{ active: newUser.role === 'viewer' }" @click="newUser.role = 'viewer'">查看者</view>
+              <view class="chip" :class="{ active: newUser.role === 'admin' }" @click="newUser.role = 'admin'">管理员</view>
+            </view>
+            <view class="btn-row">
+              <view class="btn-line half" :class="{ disabled: adminBusy }" @click="createUser" hover-class="btn-line-hover">
+                <text class="btn-line-t">{{ adminBusy ? '创建中…' : '创建账号' }}</text>
+              </view>
+            </view>
+            <text v-if="adminMsg" class="adv-hint ok">{{ adminMsg }}</text>
+            <text v-if="adminErr" class="err">{{ adminErr }}</text>
+          </view>
+
+          <!-- 修改密码 -->
+          <view class="adv-block last">
+            <text class="adv-title">修改密码</text>
+            <text class="adv-hint">仅超级管理员可操作；密码在服务端加盐哈希后写入 users 表。</text>
+            <input class="input" v-model="pwdForm.username" placeholder="目标用户名" />
+            <input class="input mt8" v-model="pwdForm.password" password placeholder="新密码（至少 6 位）" />
+            <view class="btn-row">
+              <view class="btn-primary half" :class="{ disabled: pwdBusy }" @click="submitPassword" hover-class="btn-primary-hover">
+                <text class="btn-primary-t">{{ pwdBusy ? '提交中…' : '修改密码' }}</text>
+              </view>
+            </view>
+            <text v-if="pwdMsg" class="adv-hint ok">{{ pwdMsg }}</text>
+            <text v-if="pwdErr" class="err">{{ pwdErr }}</text>
+          </view>
         </view>
       </view>
 
@@ -262,7 +421,7 @@
 
 <script>
 import { store } from '../../service/SyncStateStore'
-import { logout as apiLogout, fetchTrashAssets, gridUrl } from '../../service/ViewerApi'
+import { logout as apiLogout, fetchTrashAssets, gridUrl, adminRequest } from '../../service/ViewerApi'
 import { runSync } from '../../service/SyncEngine'
 import { viewerCache } from '../../service/ViewerCache'
 import { localMediaIndex } from '../../service/LocalMediaIndex'
@@ -272,7 +431,9 @@ import { currentServerUrl, buildCandidates, setManualServerUrl } from '../../ser
 import { pushClient } from '../../service/PushClient'
 import { isIgnoringBatteryOptimizations, requestIgnoreBatteryOptimizations } from '../../service/KeepAlive'
 import { switchTabTo } from '../../common/nav'
+import { openClip } from '../../common/clip'
 import AiTaskPill from '../../components/AiTaskPill.vue'
+import { themeState, setTheme, currentVars } from '../../common/theme'
 
 const INGEST_AUTO_HIDE_MS = 6000
 
@@ -324,9 +485,61 @@ export default {
         sub: '',
         at: 0,
       },
+      themeOptions: [
+        { key: 'warm', label: '暖色 · 护眼' },
+        { key: 'cool', label: '冷灰 · 原界面' },
+      ],
+      adminOpen: false,
+      adminUsers: [],
+      adminUsersLoading: false,
+      adminUsersErr: '',
+      adminBusy: false,
+      adminMsg: '',
+      adminErr: '',
+      newUser: { username: '', password: '', role: 'viewer' },
+      pwdForm: { username: '', password: '' },
+      pwdBusy: false,
+      pwdMsg: '',
+      pwdErr: '',
+      studioForm: { image: '', video: '', ratio: '9:16', video_resolution: '720p', image_size: '2K' },
+      studioModels: { image: [], video: [] },
+      studioSaving: false,
+      studioMsg: '',
+      studioErr: '',
+      ratioOptions: ['9:16', '16:9', '3:4', '4:3', '1:1', '3:2', '2:3', '21:9'],
+      resolutionOptions: ['480p', '720p', '1080p'],
+      imageSizeOptions: ['1K', '1.5K', '2K', '4K'],
     }
   },
   computed: {
+    themeName() {
+      return themeState.name
+    },
+    isAdmin() {
+      // 与服务端一致：用户/密码管理只认超级管理员账号 admin（src/api.js 的 /users）
+      return this.username === 'admin'
+    },
+    adminSub() {
+      if (this.adminOpen) return '账号、默认参数与密码'
+      return this.serverStatus === 'ok' ? '在线 · 点击展开' : '点击展开'
+    },
+    studioImageLabels() {
+      return this.studioModels.image.map((m) => m.label)
+    },
+    studioVideoLabels() {
+      return this.studioModels.video.map((m) => m.label)
+    },
+    studioImageIndex() {
+      const i = this.studioModels.image.findIndex((m) => m.value === this.studioForm.image)
+      return i < 0 ? 0 : i
+    },
+    studioVideoIndex() {
+      const i = this.studioModels.video.findIndex((m) => m.value === this.studioForm.video)
+      return i < 0 ? 0 : i
+    },
+    themeStyle() {
+      return currentVars()
+    },
     roleText() {
       if (this.role === 'admin') return '系统管理员'
       if (this.role === 'viewer') return '普通查看者'
@@ -375,6 +588,171 @@ export default {
     this.refreshTrashCount()
   },
   methods: {
+    pickTheme(name) {
+      if (name === themeState.name) return
+      setTheme(name)
+    },
+    openClipPage() {
+      openClip([])
+    },
+    openToolsPage() {
+      uni.navigateTo({ url: '/pages/tools/tools' })
+    },
+    // ─────────── 管理（仅 admin） ───────────
+    toggleAdmin() {
+      this.adminOpen = !this.adminOpen
+      if (this.adminOpen) this.refreshAdmin()
+    },
+    refreshAdmin() {
+      if (this.username !== 'admin') return
+      this.loadAdminUsers()
+      this.loadStudioDefaults()
+    },
+    async loadAdminUsers() {
+      this.adminUsersLoading = true
+      this.adminUsersErr = ''
+      try {
+        const list = await adminRequest('/users')
+        this.adminUsers = Array.isArray(list) ? list : []
+        if (!this.pwdForm.username) {
+          this.pwdForm.username = this.username || 'admin'
+        }
+      } catch (e) {
+        this.adminUsersErr = e.message || '加载用户失败'
+      } finally {
+        this.adminUsersLoading = false
+      }
+    },
+    async createUser() {
+      if (this.adminBusy) return
+      const username = this.newUser.username.trim()
+      const password = this.newUser.password
+      this.adminMsg = ''
+      this.adminErr = ''
+      if (!username) {
+        this.adminErr = '请填写用户名'
+        return
+      }
+      if (!password || password.length < 6) {
+        this.adminErr = '密码至少 6 位'
+        return
+      }
+      this.adminBusy = true
+      try {
+        await adminRequest('/users', {
+          method: 'POST',
+          body: JSON.stringify({ username, password, role: this.newUser.role }),
+        })
+        this.adminMsg = '已创建账号 ' + username
+        this.newUser = { username: '', password: '', role: 'viewer' }
+        await this.loadAdminUsers()
+      } catch (e) {
+        this.adminErr = e.message || '创建账号失败'
+      } finally {
+        this.adminBusy = false
+      }
+    },
+    pickResetUser(u) {
+      this.pwdForm.username = u.username
+      this.pwdForm.password = ''
+      this.pwdMsg = ''
+      this.pwdErr = ''
+    },
+    async submitPassword() {
+      if (this.pwdBusy) return
+      const username = this.pwdForm.username.trim()
+      const password = this.pwdForm.password
+      this.pwdMsg = ''
+      this.pwdErr = ''
+      if (!username) {
+        this.pwdErr = '请填写目标用户名'
+        return
+      }
+      if (!password || password.length < 6) {
+        this.pwdErr = '密码至少 6 位'
+        return
+      }
+      this.pwdBusy = true
+      try {
+        await adminRequest('/users/password', {
+          method: 'POST',
+          body: JSON.stringify({ username, password }),
+        })
+        this.pwdMsg = '密码已更新：' + username
+        this.pwdForm.password = ''
+      } catch (e) {
+        this.pwdErr = e.message || '修改密码失败'
+      } finally {
+        this.pwdBusy = false
+      }
+    },
+    async loadStudioDefaults() {
+      this.studioErr = ''
+      const [catalog, defaults] = await Promise.allSettled([
+        adminRequest('/studio/catalog'),
+        adminRequest('/studio/defaults'),
+      ])
+      if (catalog.status === 'fulfilled' && catalog.value && catalog.value.studio) {
+        const pick = (list) =>
+          (list || [])
+            .map((m) => ({ value: m.id || m.dbId || m.catalogId, label: m.name || m.label || m.id }))
+            .filter((o) => o.value)
+        this.studioModels = {
+          image: pick(catalog.value.studio.image && catalog.value.studio.image.models),
+          video: pick(catalog.value.studio.video && catalog.value.studio.video.models),
+        }
+      }
+      if (defaults.status === 'fulfilled' && defaults.value) {
+        const d = defaults.value
+        this.studioForm = {
+          image: (d.models && d.models.image) || '',
+          video: (d.models && d.models.video) || '',
+          ratio: (d.params && d.params.ratio) || '9:16',
+          video_resolution: (d.params && d.params.video_resolution) || '720p',
+          image_size: (d.params && d.params.image_size) || '2K',
+        }
+      }
+      if (!this.studioModels.image.length) {
+        this.studioModels.image = this.studioForm.image ? [{ value: this.studioForm.image, label: this.studioForm.image }] : []
+      }
+      if (!this.studioModels.video.length) {
+        this.studioModels.video = this.studioForm.video ? [{ value: this.studioForm.video, label: this.studioForm.video }] : []
+      }
+      const failed = [catalog, defaults].find((r) => r.status === 'rejected')
+      if (failed) this.studioErr = failed.reason && failed.reason.message ? failed.reason.message : '加载默认参数失败'
+    },
+    onPickImageModel(e) {
+      const opt = this.studioModels.image[Number(e.detail && e.detail.value) || 0]
+      if (opt) this.studioForm.image = opt.value
+    },
+    onPickVideoModel(e) {
+      const opt = this.studioModels.video[Number(e.detail && e.detail.value) || 0]
+      if (opt) this.studioForm.video = opt.value
+    },
+    async saveStudioDefaults() {
+      if (this.studioSaving) return
+      this.studioSaving = true
+      this.studioMsg = ''
+      this.studioErr = ''
+      try {
+        await adminRequest('/studio/defaults', {
+          method: 'POST',
+          body: JSON.stringify({
+            models: { image: this.studioForm.image, video: this.studioForm.video },
+            params: {
+              ratio: this.studioForm.ratio,
+              video_resolution: this.studioForm.video_resolution,
+              image_size: this.studioForm.image_size,
+            },
+          }),
+        })
+        this.studioMsg = '已保存并生效'
+      } catch (e) {
+        this.studioErr = e.message || '保存默认参数失败'
+      } finally {
+        this.studioSaving = false
+      }
+    },
     // ─────────── 入库横条 ───────────
     onAssetIngested(payload) {
       const p = payload || {}
@@ -1229,6 +1607,76 @@ export default {
   margin-top: 8px;
   margin-bottom: 0;
 }
+.adv-hint.ok {
+  color: var(--ok, #059669);
+}
+.pick-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 40px;
+  padding: 0 12px;
+  margin-bottom: 6px;
+  background: var(--surface2, #f8fafc);
+  border: 1px solid var(--line, #e7ecf3);
+  border-radius: 11px;
+}
+.pick-k {
+  font-size: 12px;
+  color: var(--ink2, #64748b);
+}
+.pick-v {
+  max-width: 62%;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink, #0f172a);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.user-list {
+  margin: 2px 0 6px;
+}
+.user-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line, #eef2f7);
+}
+.user-row:last-child {
+  border-bottom: none;
+}
+.user-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.user-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink, #0f172a);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.user-role {
+  font-size: 10px;
+  color: var(--ink2, #94a3b8);
+}
+.user-reset {
+  flex-shrink: 0;
+  padding: 4px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent, #2563eb);
+}
+.mt8 {
+  margin-top: 8px;
+}
 .adv-row {
   display: flex;
   align-items: center;
@@ -1367,5 +1815,65 @@ export default {
   margin: 18px 0 0;
   font-size: 10px;
   color: #cbd5e1;
+}
+
+/* ===== 主题令牌覆盖（warm/cool，由根节点 :style 注入 CSS 变量） ===== */
+.page,
+.status-bar,
+.topbar {
+  background: var(--bg, #f8fafc);
+}
+.profile,
+.sync-card,
+.advanced,
+.device-row {
+  background: var(--surface, #ffffff);
+  border-color: var(--line, #e7ecf3);
+}
+.profile-name,
+.sync-title,
+.advanced-title {
+  color: var(--ink, #0f172a);
+}
+.sync-sub,
+.conn-t,
+.mono,
+.device-id,
+.logout-t {
+  color: var(--ink2, #64748b);
+}
+.back,
+.logout-link {
+  background: var(--surface, #ffffff);
+  border-color: var(--line, #e7ecf3);
+}
+.back-t,
+.topbar-title {
+  color: var(--ink, #0f172a);
+}
+.role,
+.chip.active {
+  background: var(--accent-soft, #eff6ff);
+  border-color: var(--accent-border, #dbeafe);
+  color: var(--accent, #2563eb);
+}
+.conn {
+  background: var(--surface2, #f1f5f9);
+}
+.sync-date {
+  background: var(--surface2, #f8fafc);
+  border-color: var(--line, #e7ecf3);
+}
+.chip {
+  background: var(--surface2, #f1f5f9);
+  color: var(--ink2, #64748b);
+}
+.advanced-body,
+.adv-block {
+  border-color: var(--line, #f1f5f9);
+}
+.chev.open,
+.copy {
+  color: var(--accent, #3b82f6);
 }
 </style>

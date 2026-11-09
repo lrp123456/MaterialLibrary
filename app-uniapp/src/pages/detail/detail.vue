@@ -1,5 +1,5 @@
 <template>
-  <view class="page">
+  <view class="page" :style="themeStyle">
     <!-- 毛玻璃导航：随滚动收进 -->
     <view class="nav" :class="{ solid: navSolid }" :style="{ paddingTop: statusBarHeight + 'px' }">
       <view class="nav-bar">
@@ -35,8 +35,13 @@
       </view>
 
       <block v-else-if="item">
-        <!-- 视差 Hero -->
-        <view class="hero" :style="{ height: heroHeight + 'px' }">
+        <!-- 视差 Hero：左右滑动切换相邻素材 -->
+        <view
+          class="hero"
+          :style="{ height: heroHeight + 'px' }"
+          @touchstart="onHeroTouchStart"
+          @touchend="onHeroTouchEnd"
+        >
           <view class="hero-inner" :style="heroStyle">
             <video
               v-if="item.isVideo && videoSrc"
@@ -78,6 +83,12 @@
             <text class="hero-pill-t">{{ activeTabLabel }}</text>
           </view>
           <text v-if="!item.isVideo && !item.isMusic && !isCurrentTabNotGenerated" class="hero-hint">轻点查看大图</text>
+          <view v-if="navIndex > 0" class="hero-arrow left" @click.stop="goSibling(-1)">
+            <text class="hero-arrow-t">‹</text>
+          </view>
+          <view v-if="navIndex >= 0 && navIndex < navFids.length - 1" class="hero-arrow right" @click.stop="goSibling(1)">
+            <text class="hero-arrow-t">›</text>
+          </view>
         </view>
 
         <!-- 内容抽屉 -->
@@ -136,6 +147,26 @@
             <view v-if="isImage" class="action" @click="goEditor">
               <text class="action-icon">✂</text>
               <text class="action-t">精准编辑</text>
+            </view>
+            <view v-if="isImage" class="action" @click="openQuickTools">
+              <text class="action-icon">🧰</text>
+              <text class="action-t">图片工具</text>
+            </view>
+            <view v-if="item.isVideo" class="action" @click="goMediaTools">
+              <text class="action-icon">🛠</text>
+              <text class="action-t">媒体工具</text>
+            </view>
+            <view class="action" @click="goClip">
+              <text class="action-icon">🎬</text>
+              <text class="action-t">多轨剪辑</text>
+            </view>
+            <view class="action" :class="{ disabled: favBusy }" @click="toggleFavorite">
+              <text class="action-icon">{{ item.favoritedAt ? '★' : '☆' }}</text>
+              <text class="action-t">{{ item.favoritedAt ? '取消收藏' : '收藏素材' }}</text>
+            </view>
+            <view class="action" :class="{ disabled: shelfBusy }" @click="onShelfTap">
+              <text class="action-icon">🗂</text>
+              <text class="action-t">{{ shelfLabel }}</text>
             </view>
             <view class="action" @click="download">
               <text class="action-icon">📥</text>
@@ -237,10 +268,14 @@ import {
   downloadAndSaveToAlbum,
   triggerRestage,
   setMainDerivativeApi,
+  setAssetFavorite,
+  moveAssetShelf,
 } from '../../service/ViewerApi'
 import { viewerCache } from '../../service/ViewerCache'
 import { mapServerDetail } from '../../common/assetMap'
 import RefLightbox from '../../components/RefLightbox.vue'
+import { currentVars } from '../../common/theme'
+import { openClip } from '../../common/clip'
 
 function decodeParam(raw) {
   if (!raw) return ''
@@ -264,6 +299,7 @@ export default {
       navSolid: false,
       fid: '',
       tab: '',
+      requestedDerivId: '',
       item: null,
       pending: null,
       loading: true,
@@ -284,9 +320,16 @@ export default {
       lightboxKind: 'image',
       lightboxSrc: '',
       loadSeq: 0,
+      favBusy: false,
+      shelfBusy: false,
+      navFids: [],
+      navIndex: -1,
     }
   },
   computed: {
+    themeStyle() {
+      return currentVars()
+    },
     navTitle() {
       return (this.item && (this.item.fileName || this.item.fid)) || '素材详情'
     },
@@ -303,6 +346,12 @@ export default {
       if (this.item.isPortrait) return '人像'
       if (this.item.isFurniture) return '单品'
       return '图片'
+    },
+    shelfLabel() {
+      const s = this.item && this.item.libraryShelf
+      if (s === 'retouched') return '精修素材'
+      if (s === 'finished') return '成品素材'
+      return '原素材'
     },
     isImage() {
       return !!this.item && !this.item.isVideo && !this.item.isMusic
@@ -387,6 +436,16 @@ export default {
     this.heroHeight = Math.max(320, Math.min(this.windowWidth * 1.25, this.windowHeight * 0.62))
     this.fid = decodeParam(opts.fid)
     this.tab = decodeParam(opts.tab)
+    this.requestedDerivId = decodeParam(opts.derivId)
+    try {
+      const fids = uni.getStorageSync('detail_nav_fids')
+      this.navFids = Array.isArray(fids) ? fids : []
+      const idx = this.navFids.indexOf(this.fid)
+      this.navIndex = idx >= 0 ? idx : -1
+    } catch (e) {
+      this.navFids = []
+      this.navIndex = -1
+    }
     this.pending = viewerCache.getPendingDetailPreview(this.fid)
     if (this.pending) this.applyPending()
     this.load()
@@ -404,6 +463,14 @@ export default {
       this.previewUrl = p.localPath || p.imgUrl || p.serverUrl || ''
       this.displayLoaded = !!this.previewUrl
       if (!this.versionTabs.some((t) => t.id === this.activeTab)) this.activeTab = 'origin'
+      if (this.requestedDerivId) {
+        const hit = this.versionTabs.find((t) => Number(t.derivativeId) === Number(this.requestedDerivId))
+        if (hit) {
+          this.activeTab = hit.id
+          this.previewUrl = mediaUrl(this.fid, hit.derivativeId)
+          this.displayLoaded = false
+        }
+      }
     },
     async load() {
       if (!this.fid) {
@@ -427,7 +494,11 @@ export default {
         if (startTab === '9:16') startTab = 'restage_9_16'
         if (startTab === '3:4') startTab = 'restage_3_4'
         if (!this.versionTabs.some((t) => t.id === startTab)) startTab = 'origin'
-        if (!hadPreview || this.activeTab === 'origin' || !this.pending) {
+        const derivHit = this.requestedDerivId
+          ? this.versionTabs.find((t) => Number(t.derivativeId) === Number(this.requestedDerivId))
+          : null
+        if (derivHit) startTab = derivHit.id
+        if (!hadPreview || this.activeTab === 'origin' || !this.pending || derivHit) {
           this.activeTab = startTab
         }
         this.applyPreview()
@@ -643,6 +714,39 @@ export default {
         url: `/pages/editor/editor?fid=${encodeURIComponent(this.item.fid)}&derivId=${derivId}&imgUrl=${imgUrl}`,
       })
     },
+    goClip() {
+      if (!this.item) return
+      openClip([{
+        fid: this.item.fid,
+        fileName: this.item.fileName,
+        isVideo: this.item.isVideo,
+        isMusic: this.item.isMusic,
+        derivativeId: this.isImage ? this.activeTabDerivId : 0,
+      }])
+    },
+    goMediaTools() {
+      if (!this.item) return
+      uni.navigateTo({
+        url: `/pages/tools/tools?fid=${encodeURIComponent(this.item.fid)}&name=${encodeURIComponent(this.item.fileName || '')}`,
+      })
+    },
+    openQuickTools() {
+      if (!this.item) return
+      const pages = ['enhance', 'expand', 'insert', 'remove', 'replace', 'watermark']
+      const labels = ['清晰度增强', '智能扩图', '插入物体', '移除物体', '替换物体', '添加水印']
+      uni.showActionSheet({
+        itemList: labels,
+        success: (res) => {
+          const page = pages[res.tapIndex]
+          if (!page) return
+          const derivId = this.activeTabDerivId
+          const imgUrl = encodeURIComponent(this.previewUrl || mediaUrl(this.item.fid, derivId))
+          uni.navigateTo({
+            url: `/pages/quick/${page}?fid=${encodeURIComponent(this.item.fid)}&derivId=${derivId}&imgUrl=${imgUrl}`,
+          })
+        },
+      })
+    },
     async download() {
       if (!this.item) return
       try {
@@ -665,6 +769,93 @@ export default {
     },
     goBack() {
       uni.navigateBack({ fail: () => uni.switchTab({ url: '/pages/browse/browse' }) })
+    },
+    onHeroTouchStart(e) {
+      const t = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0])
+      if (!t) return
+      this._swipeX = t.pageX
+      this._swipeY = t.pageY
+      this._swipeAt = Date.now()
+    },
+    onHeroTouchEnd(e) {
+      if (this._swipeX == null) return
+      const t = (e.changedTouches && e.changedTouches[0]) || (e.touches && e.touches[0])
+      if (!t) return
+      const dx = t.pageX - this._swipeX
+      const dy = t.pageY - this._swipeY
+      const quick = Date.now() - this._swipeAt < 800
+      this._swipeX = null
+      if (!quick || Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.4) return
+      this.goSibling(dx < 0 ? 1 : -1)
+    },
+    goSibling(delta) {
+      if (!this.navFids.length || this.navIndex < 0) return
+      const next = this.navIndex + delta
+      if (next < 0 || next >= this.navFids.length) return
+      this.navIndex = next
+      try { uni.setStorageSync('detail_nav_index', next) } catch (e) {}
+      this.switchToAsset(this.navFids[next])
+    },
+    switchToAsset(fid) {
+      if (!fid || fid === this.fid) return
+      this.fid = fid
+      this.tab = ''
+      this.requestedDerivId = ''
+      this.pending = null
+      this.item = null
+      this.derivatives = []
+      this.similar = []
+      this.sourceAsset = null
+      this.activeTab = 'origin'
+      this.previewUrl = ''
+      this.displayLoaded = false
+      this.errorText = ''
+      this.loading = true
+      this.navSolid = false
+      this.loadSeq++
+      this.scrollTopForReset = 1
+      this.$nextTick(() => { this.scrollTopForReset = 0 })
+      this.load()
+    },
+    async toggleFavorite() {
+      if (!this.item || this.favBusy) return
+      const next = !this.item.favoritedAt
+      this.favBusy = true
+      try {
+        const res = await setAssetFavorite(this.item.fid, next)
+        this.item.favoritedAt = res.favoritedAt || (next ? Date.now() : 0)
+        if (this.item.raw) this.item.raw.favorited_at = this.item.favoritedAt
+        uni.showToast({ title: next ? '已收藏' : '已取消收藏', icon: 'none' })
+      } catch (e) {
+        uni.showToast({ title: (e && e.message) || '操作失败', icon: 'none' })
+      } finally {
+        this.favBusy = false
+      }
+    },
+    onShelfTap() {
+      if (!this.item || this.shelfBusy) return
+      const options = [
+        { shelf: 'original', label: '原素材' },
+        { shelf: 'retouched', label: '精修素材' },
+        { shelf: 'finished', label: '成品素材' },
+      ]
+      uni.showActionSheet({
+        itemList: options.map((o) => (o.shelf === this.item.libraryShelf ? `✓ ${o.label}` : o.label)),
+        success: async (res) => {
+          const target = options[res.tapIndex]
+          if (!target || target.shelf === this.item.libraryShelf) return
+          this.shelfBusy = true
+          try {
+            await moveAssetShelf(this.item.fid, target.shelf)
+            this.item.libraryShelf = target.shelf
+            uni.showToast({ title: `已移至${target.label}`, icon: 'none' })
+          } catch (e) {
+            uni.showToast({ title: (e && e.message) || '移动失败', icon: 'none' })
+          } finally {
+            this.shelfBusy = false
+          }
+        },
+      })
     },
     confirmDelete() {
       if (!this.item) return
@@ -706,6 +897,14 @@ export default {
       this.scrollTopForReset = 0
       uni.redirectTo({ url: '/pages/detail/detail?fid=' + encodeURIComponent(this.sourceAsset.fid) })
     },
+  },
+  // 返回键优先关闭大图预览
+  onBackPress() {
+    if (this.lightboxVisible) {
+      this.lightboxVisible = false
+      return true
+    }
+    return false
   },
 }
 </script>
@@ -1345,5 +1544,112 @@ export default {
   font-size: 13px;
   font-weight: 600;
   color: #0f172a;
+}
+
+/* 相邻素材切换箭头 */
+.hero-arrow {
+  position: absolute;
+  top: 50%;
+  margin-top: -18px;
+  width: 34px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.32);
+  border-radius: 999px;
+  z-index: 4;
+  backdrop-filter: blur(6px);
+}
+.hero-arrow.left {
+  left: 8px;
+}
+.hero-arrow.right {
+  right: 8px;
+}
+.hero-arrow-t {
+  color: #ffffff;
+  font-size: 26px;
+  line-height: 26px;
+  margin-top: -3px;
+}
+
+/* ===== 主题令牌覆盖（warm/cool，由根节点 :style 注入 CSS 变量） ===== */
+.page {
+  background: var(--bg, #f8fafc);
+}
+.nav.solid {
+  background: var(--glass-bg, rgba(255, 255, 255, 0.86));
+  box-shadow: 0 1px 0 var(--line, rgba(226, 232, 240, 0.9));
+}
+.nav.solid .nav-btn {
+  background: var(--surface2, #f1f5f9);
+}
+.nav.solid .nav-icon,
+.nav-title.show {
+  color: var(--ink, #0f172a);
+}
+.sheet {
+  background: var(--bg, #f8fafc);
+  border-radius: var(--topr, 26px) var(--topr, 26px) 0 0;
+}
+.file-name,
+.card-title {
+  color: var(--ink, #0f172a);
+}
+.meta-t,
+.gen-sub {
+  color: var(--ink2, #64748b);
+}
+.tags-text,
+.quality-total {
+  color: var(--accent, #3b82f6);
+}
+.tab {
+  background: var(--surface, #ffffff);
+  border-color: var(--line, #e7ecf3);
+  border-radius: var(--cardr, 12px);
+}
+.tab.active {
+  background: var(--accent-soft, #eaf2fe);
+  border-color: var(--accent-border, #bfdbfe);
+}
+.tab-t {
+  color: var(--ink2, #475569);
+}
+.tab.active .tab-t {
+  color: var(--accent, #1d4ed8);
+}
+.tab-sub {
+  color: var(--ink2, #94a3b8);
+}
+.action,
+.card {
+  background: var(--surface, #ffffff);
+  border-color: var(--line, #e7ecf3);
+  border-radius: var(--cardr, 12px);
+}
+.action:active {
+  background: var(--surface2, #f8fafc);
+  transition: transform var(--ms, 160ms) var(--ease-out, ease-out);
+}
+.action-t {
+  color: var(--ink, #334155);
+}
+.gen-card {
+  background: var(--accent-soft, #eff6ff);
+  border-color: var(--accent-border, #dbeafe);
+}
+.gen-title {
+  color: var(--ink, #1e3a8a);
+}
+.gen-btn {
+  background: var(--accent, #3b82f6);
+}
+.busy-card {
+  background: var(--surface, #ffffff);
+}
+.busy-t {
+  color: var(--ink, #0f172a);
 }
 </style>

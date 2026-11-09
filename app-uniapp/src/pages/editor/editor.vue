@@ -38,7 +38,7 @@ export default {
   data() {
     return {
       statusBarHeight: 20, viewportH: 420,
-      fid: '', imgUrl: '', mode: 'inpaint', prompt: '',
+      fid: '', derivId: '', imgUrl: '', mode: 'inpaint', prompt: '',
       pasteback: true, hasSelection: false, selectionData: null, submitting: false,
       modes: [
         { key: 'inpaint', label: '智能修补' },
@@ -68,9 +68,10 @@ export default {
       this.viewportH = Math.max(280, (sys.windowHeight || 667) - this.statusBarHeight - 50 - 220)
     } catch (e) {}
     this.fid = opts.fid || ''
+    this.derivId = opts.derivId ? decodeURIComponent(opts.derivId) : ''
     if (opts.imgUrl) this.imgUrl = decodeURIComponent(opts.imgUrl)
     if (opts.mode) this.mode = decodeURIComponent(opts.mode)
-    if (this.fid && !this.imgUrl) this.imgUrl = mediaUrl(this.fid, 0)
+    if (this.fid && !this.imgUrl) this.imgUrl = mediaUrl(this.fid, this.derivId || 0)
   },
   methods: {
     goBack() { uni.navigateBack() },
@@ -90,6 +91,7 @@ export default {
         if (this.mode === 'enhance') {
           handoffGlobalEdit({
             fid: this.fid,
+            derivId: this.derivId,
             imgUrl: this.imgUrl,
             op,
             recipe,
@@ -98,11 +100,13 @@ export default {
         } else {
           handoffPreciseEdit({
             fid: this.fid,
+            derivId: this.derivId,
             imgUrl: this.imgUrl,
             op,
             recipe,
             recipeHint: this.modes.find((m) => m.key === this.mode)?.label || '',
             selection: this.selectionData,
+            pasteback: this.pasteback,
           })
         }
       } catch (e) {
