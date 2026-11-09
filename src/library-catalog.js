@@ -16,8 +16,7 @@ const LANES = [
     shelf: true,
     sections: [
       { key: 'interior_exterior', label: '室内外设计' },
-      { key: 'portrait', label: '空间人像' },
-      { key: 'clothing', label: '服装服饰' },
+      { key: 'figure', label: '人物穿搭' },
       { key: 'furniture', label: '单品家具' }
     ]
   },

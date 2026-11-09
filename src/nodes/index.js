@@ -1405,6 +1405,15 @@ async function executeClean(services, nodeConfig, asset, runCtx) {
 // ---------------- 4. Restage9x16Node ----------------
 async function executeRestage9x16(services, nodeConfig, asset, runCtx) {
   const { db, config, logger } = services;
+  const curCat = asset.category || runCtx?.lastOutput?.category;
+  if (curCat === 'portrait' || curCat === 'clothing') {
+    return {
+      success: true,
+      skipped: true,
+      reason: 'portrait_clothing_forbidden',
+      output: { skipped: true, reason: '人像与服装类目禁止画幅重构，仅保留原图以防人脸重建触发安全围栏' }
+    };
+  }
   const { shouldAutoRestage } = require('../gate-route');
   if (!shouldAutoRestage(asset.category || runCtx?.lastOutput?.category)) {
     return {
@@ -1725,6 +1734,15 @@ function nodeModelIds(nodeConfig) {
 
 async function executeRestageDual(services, nodeConfig, asset, runCtx) {
   const { db, config, logger } = services;
+  const curCat = asset.category || runCtx?.lastOutput?.category;
+  if (curCat === 'portrait' || curCat === 'clothing') {
+    return {
+      success: true,
+      skipped: true,
+      reason: 'portrait_clothing_forbidden',
+      output: { restaged: false, skipped: true, reason: '人像与服装类目禁止画幅重构，仅保留原图以防人脸重建触发安全围栏' }
+    };
+  }
   const { shouldAutoRestage } = require('../gate-route');
   // 自动灌入仍然只处理室内/室外，避免给服装、人像、家具库平白增加生图成本。
   // 但素材选择器里点「9:16 待生成」属于用户显式单次请求，这类请求必须放行到任何类目，

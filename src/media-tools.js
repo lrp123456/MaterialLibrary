@@ -245,7 +245,8 @@ async function convertVideo({ videoPath, destDir, targetFormat = 'mp4', crf = 23
     outputPath: outPath,
     size: fs.statSync(outPath).size,
     format: fmt,
-    type: 'video'
+    // GIF 也是从视频转出来的，但产物是图片：前端据此决定用 <image> 渲染并存入相册
+    type: fmt === 'gif' ? 'image' : 'video'
   };
 }
 

@@ -30,6 +30,28 @@ function safeName(fid) {
   return String(fid).replace(/[^A-Za-z0-9_~.-]/g, '_');
 }
 
+/**
+ * 覆盖原图后必须清掉该素材「所有」渲染档缓存：thumbs / grid / preview 的 jpg、webp，
+ * 以及按 derivativeId 命名的 `fid_<id>.*` 变体。
+ *
+ * 踩过的坑：这里以前只删 thumbs 和 preview/fid_*，漏了 grid/*.webp。
+ * 浏览器 Accept 带 image/webp 时，列表与详情一直拿到旧原图生成的 webp，
+ * 于是「裁剪并替换原图」后看到的仍是原图（磁盘上的原图其实已经是裁剪后的图）。
+ */
+function clearAssetRenditionCaches(config, fid) {
+  const safeFid = safeName(fid);
+  for (const sub of ['cache/thumbs', 'cache/grid', 'cache/preview']) {
+    const dir = path.join(config.dataDir, sub);
+    let names = [];
+    try { names = fs.readdirSync(dir); } catch (_) { continue; }
+    for (const name of names) {
+      if (name === `${safeFid}.jpg` || name === `${safeFid}.webp` || name.startsWith(`${safeFid}_`)) {
+        try { fs.unlinkSync(path.join(dir, name)); } catch (_) {}
+      }
+    }
+  }
+}
+
 /** 重建缩略图 / 预览：先删旧产物，再按新原图重生成。 */
 async function rebuildDerivativeViews(services, fid, originalPath, fileBuffer) {
   const { db, config } = services;
@@ -37,6 +59,9 @@ async function rebuildDerivativeViews(services, fid, originalPath, fileBuffer) {
   const previewDir = path.join(config.dataDir, 'cache', 'preview');
   fs.mkdirSync(thumbsDir, { recursive: true });
   fs.mkdirSync(previewDir, { recursive: true });
+
+  // 所有渲染档先整体失效（含 webp 与 derivative 变体），否则旧图会继续被浏览器命中
+  clearAssetRenditionCaches(config, fid);
 
   // 缩略图：对齐 derivatives.js:64-65 的清理 + stream-upload.js:514-575 的 sharp 512 生成
   const thumbPath = path.join(thumbsDir, `${fid}.jpg`);
@@ -51,21 +76,16 @@ async function rebuildDerivativeViews(services, fid, originalPath, fileBuffer) {
     (services.logger || console).warn?.(`[asset-replace] 缩略图重建失败: ${e.message}`);
   }
 
-  // 预览：清掉该 fid 的旧预览后，复用 derivatives.js:198-234 ensurePreviewJpeg 逐个重生成
-  try {
-    for (const f of fs.readdirSync(previewDir)) {
-      if (f.startsWith(String(fid) + '_')) {
-        try { fs.unlinkSync(path.join(previewDir, f)); } catch (_) {}
-      }
-    }
-  } catch (_) {}
+  // 预览：旧预览已在 clearAssetRenditionCaches 里整体清掉，这里逐个按新原图重生成
   let derivs = [];
   try {
     derivs = db.prepare("SELECT * FROM derivatives WHERE asset_fid=? AND kind != 'history'").all(fid) || [];
   } catch (_) {}
   if (!derivs.length) derivs = [{ id: 'origin', mime: 'image/jpeg', kind: 'origin' }];
   for (const d of derivs) {
-    try { await ensurePreviewJpeg(services, fid, d, originalPath); } catch (_) {}
+    // 每个衍生版本按自己的文件出预览；只有取不到衍生文件时才退回新原图
+    const src = (d.storage_ref && fs.existsSync(d.storage_ref)) ? d.storage_ref : originalPath;
+    try { await ensurePreviewJpeg(services, fid, d, src); } catch (_) {}
   }
   // 旧预览/缩略哈希已失效，清掉让 ensurePreviewJpeg 的异步登记重新写入
   try {
@@ -188,4 +208,6 @@ async function restoreAssetVersion(services, fid, versionId) {
 module.exports = {
   replaceAssetImage,
   restoreAssetVersion,
+  // 供回归测试直接验证「覆盖原图后所有渲染档缓存都被清掉」
+  clearAssetRenditionCaches,
 };

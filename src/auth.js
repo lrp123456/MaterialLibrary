@@ -14,9 +14,13 @@ function hashPassword(password, salt) {
 
 function ensureUsersSchema(db) {
   try {
-    const cols = db.pragma('table_info(users)').map(c => c.name);
+    const rows = typeof db.pragma === 'function' ? db.pragma('table_info(users)') : db.prepare('PRAGMA table_info(users)').all();
+    const cols = (rows || []).map(c => c.name);
     if (!cols.includes('is_locked')) {
       db.prepare('ALTER TABLE users ADD COLUMN is_locked INTEGER NOT NULL DEFAULT 0').run();
+    }
+    if (!cols.includes('allow_all_models')) {
+      db.prepare('ALTER TABLE users ADD COLUMN allow_all_models INTEGER NOT NULL DEFAULT 0').run();
     }
   } catch (e) {
     // ignore
@@ -400,6 +404,11 @@ function generateMediaToken(fid, ttlSeconds = 900, dataDir = null) {
   return `${expires}:${hmac}`;
 }
 
+function tempMediaSubject(fileName) {
+  const base = path.basename(String(fileName || ''));
+  return `temp:${base}`;
+}
+
 function verifyMediaToken(fid, mediaToken, dataDir = null) {
   if (!mediaToken || typeof mediaToken !== 'string') return false;
   const parts = mediaToken.split(':');
@@ -434,6 +443,7 @@ module.exports = {
   hashPassword,
   generateMediaToken,
   verifyMediaToken,
+  tempMediaSubject,
   checkLoginRateLimit,
   recordLoginResult,
   getMediaSecret

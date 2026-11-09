@@ -27,9 +27,10 @@ function findQualifiedKind(list, kind) {
   return hits.length ? hits[hits.length - 1] : null;
 }
 
-function pickBrowseMain(derivs, { orientation } = {}) {
+function pickBrowseMain(derivs, { orientation, category } = {}) {
   const list = derivs || [];
   const origin = list.find(d => d.kind === 'origin') || null;
+  if (category === 'portrait' || category === 'clothing') return origin;
   const q916 = findQualifiedKind(list, 'restage_9_16');
   const q34 = findQualifiedKind(list, 'restage_3_4');
   if (orientation === '9:16') return q916 || origin;
@@ -109,10 +110,11 @@ function isBacklogOriginAsset(asset) {
 
 function listAssetsNeedingRestage(db, limit = 2000) {
   const rows = db.prepare(`
-    SELECT a.fid, a.source, a.file_name, a.discovered_at, a.created_at
+    SELECT a.fid, a.source, a.file_name, a.discovered_at, a.created_at, a.category
     FROM assets a
     WHERE a.kind = 'image'
       AND a.status = 'ready'
+      AND (a.category IS NULL OR a.category NOT IN ('portrait', 'clothing'))
       AND a.fid NOT IN (
         SELECT asset_fid FROM node_runs
         WHERE node_type IN ('restage_dual', 'restage_9_16')
@@ -137,7 +139,7 @@ function listAssetsNeedingRestage(db, limit = 2000) {
 
 function resetUnqualifiedMains(db) {
   const rows = db.prepare(`
-    SELECT a.fid, a.main_derivative_id, d.kind, d.params
+    SELECT a.fid, a.category, a.main_derivative_id, d.kind, d.params
     FROM assets a
     JOIN derivatives d ON d.id = a.main_derivative_id
     WHERE d.kind LIKE 'restage_%'
@@ -148,6 +150,15 @@ function resetUnqualifiedMains(db) {
   const originStmt = db.prepare("SELECT id FROM derivatives WHERE asset_fid=? AND kind='origin' LIMIT 1");
   const now = Date.now();
   for (const row of rows) {
+    if (row.category === 'portrait' || row.category === 'clothing') {
+      const origin = originStmt.get(row.fid);
+      const next = origin?.id || null;
+      if (next !== row.main_derivative_id) {
+        upd.run(next, now, row.fid);
+        changed++;
+      }
+      continue;
+    }
     if (row.kind === 'restage_9_16' && isQualifiedAgnes(row)) continue;
     const q916 = findQualifiedKind(q916Stmt.all(row.fid), 'restage_9_16');
     const origin = originStmt.get(row.fid);

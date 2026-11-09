@@ -93,6 +93,48 @@ function ensureIsolationSchema(db) {
   try { db.exec("UPDATE users SET allow_all_models=1 WHERE username='naite_test_user';"); } catch (e) {}
 }
 
+// 创作库表结构懒兜底：GET/POST/PATCH/DELETE 与拉取外部资产都会触碰该表，
+// 不能只在 GET 里补列（新库首写会因缺 type/poster_* 直接 500）。
+function ensureCreationTemplatesSchema(db) {
+  if (schemaCheckedOnce(db, 'creation_templates')) return;
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS creation_templates (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER DEFAULT 1,
+      title TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      aspect_ratio TEXT DEFAULT '16:9',
+      origin_images TEXT DEFAULT '[]',
+      result_images TEXT DEFAULT '[]',
+      params_json TEXT DEFAULT '{}',
+      tags TEXT DEFAULT '[]',
+      type TEXT DEFAULT 'image',
+      space TEXT DEFAULT '',
+      style TEXT DEFAULT '',
+      is_pinned INTEGER DEFAULT 0,
+      use_count INTEGER DEFAULT 0,
+      created_at INTEGER,
+      updated_at INTEGER
+    );
+  `);
+  try { db.exec("ALTER TABLE creation_templates ADD COLUMN type TEXT DEFAULT 'image';"); } catch (e) {}
+  try { db.exec("ALTER TABLE creation_templates ADD COLUMN space TEXT DEFAULT '';"); } catch (e) {}
+  try { db.exec("ALTER TABLE creation_templates ADD COLUMN style TEXT DEFAULT '';"); } catch (e) {}
+  try { db.exec("ALTER TABLE creation_templates ADD COLUMN is_pinned INTEGER DEFAULT 0;"); } catch (e) {}
+  try { db.exec("ALTER TABLE creation_templates ADD COLUMN use_count INTEGER DEFAULT 0;"); } catch (e) {}
+  try { db.exec("ALTER TABLE creation_templates ADD COLUMN purpose TEXT DEFAULT '';"); } catch (e) {}
+  try { db.exec("ALTER TABLE creation_templates ADD COLUMN channel TEXT DEFAULT 'studio';"); } catch (e) {}
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_creation_tpl_sort ON creation_templates(is_pinned DESC, use_count DESC, updated_at DESC);'); } catch (e) {}
+  if (!schemaCheckedOnce(db, 'base_library_schema')) {
+    try {
+      const { ensureBaseLibrarySchema } = require('./base-library/schema');
+      ensureBaseLibrarySchema(db);
+    } catch (e) {
+      console.warn('[base-library] ensureBaseLibrarySchema skip:', e.message);
+    }
+  }
+}
+
 const MIME = {
   '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
@@ -831,6 +873,8 @@ function queryAssets(db, query = {}) {
       where.push("a.category = 'portrait'");
     } else if (section === 'clothing') {
       where.push("a.category = 'clothing'");
+    } else if (section === 'figure') {
+      where.push("a.category IN ('portrait', 'clothing')");
     } else if (section === 'furniture') {
       where.push("(a.category = 'furniture' OR a.kind = 'furniture')");
     }
@@ -1005,14 +1049,23 @@ function queryAssets(db, query = {}) {
 
 
   if (orientation) {
-    if (orientation === '9:16') {
-      where.push(`(a.origin_orientation = '9:16' OR a.fid IN (SELECT asset_fid FROM derivatives WHERE kind = 'restage_9_16'))`);
-    } else if (orientation === '3:4') {
-      where.push(`(a.origin_orientation = '3:4' OR a.fid IN (SELECT asset_fid FROM derivatives WHERE kind = 'restage_3_4'))`);
-    } else {
-      where.push('a.origin_orientation = ?');
-      args.push(orientation);
+    // 画幅多选：客户端以逗号下发（如 "9:16,3:4"），逐值展开为 OR 条件。
+    // 9:16 / 3:4 同时命中原始画幅与对应重构衍生；其余值按原始画幅精确匹配。
+    const orientList = (Array.isArray(orientation) ? orientation : String(orientation).split(','))
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const orientConds = [];
+    for (const o of orientList) {
+      if (o === '9:16') {
+        orientConds.push(`(a.origin_orientation = '9:16' OR a.fid IN (SELECT asset_fid FROM derivatives WHERE kind = 'restage_9_16'))`);
+      } else if (o === '3:4') {
+        orientConds.push(`(a.origin_orientation = '3:4' OR a.fid IN (SELECT asset_fid FROM derivatives WHERE kind = 'restage_3_4'))`);
+      } else {
+        orientConds.push('a.origin_orientation = ?');
+        args.push(o);
+      }
     }
+    if (orientConds.length) where.push('(' + orientConds.join(' OR ') + ')');
   }
 
   // q 为 keyword 的短别名：剪辑器素材库选择器统一用 q 下发关键词，
@@ -1178,7 +1231,13 @@ function queryAssets(db, query = {}) {
       const derivs = derivsByFid.get(it.fid) || [];
 
       const explicitMain = it.main_derivative_id ? (derivById.get(it.main_derivative_id) || null) : null;
-      let picked = explicitMain || pickBrowseMain(derivs, { orientation });
+      let picked = explicitMain || pickBrowseMain(derivs, { orientation, category: it.category });
+      if (it.category === 'portrait' || it.category === 'clothing') {
+        const origin = derivs.find(d => d.kind === 'origin') || null;
+        if (!picked || String(picked.kind || '').startsWith('restage_')) {
+          picked = origin || picked;
+        }
+      }
       if ((mediaType === 'retouched' || category === 'retouched') && derivs.length > 0) {
         const retouchedList = derivs.filter(d => ['style_transferred', 'quick_replace', 'quick_remove', 'quick_insert', 'clarity_enhanced', 'expand', 'retouched', 'manual_edit'].includes(d.kind)).sort((a, b) => (b.id || 0) - (a.id || 0));
         if (retouchedList.length > 0) picked = retouchedList[0];
@@ -1651,10 +1710,11 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     ['GET', /^\/assets\/trash$/],
     ['GET', /^\/assets\/trash\/[^\/]+$/],
     ['POST', /^\/assets\/trash\/restore$/],
-    ['POST', /^\/assets\/trash\/purge$/],
     // R6：purge / rehome-gate 处理器要求 admin，viewer 账号命中也只会吃 403；
     // 管理员经 /api/* 根路径（绕过白名单）访问，故从 viewer 白名单移除（viewer 调则 404）。
     ['POST', /^\/assets\/[^\/]+\/favorite$/],
+    // 素材架（原素材/精修/成品）移动：处理器本身仅要求 isViewerOrAdmin
+    ['POST', /^\/assets\/shelf$/],
     ['POST', /^\/assets\/[^\/]+\/library-prep$/],
     ['GET', /^\/assets\/[^\/]+$/],
     ['GET', /^\/assets\/[^\/]+\/similar$/],
@@ -1734,6 +1794,12 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     ['POST', /^\/chat\/optimize-prompt$/],
     ['GET', /^\/asr\/status$/],
     ['POST', /^\/asr\/transcribe$/],
+    // 创作配方库（列表/保存/置顶/复用计数/删除）处理器均为 isViewerOrAdmin
+    ['GET', /^\/creation-templates$/],
+    ['POST', /^\/creation-templates$/],
+    ['PATCH', /^\/creation-templates\/[^\/]+$/],
+    ['DELETE', /^\/creation-templates\/[^\/]+$/],
+    ['POST', /^\/creation-templates\/pull-external$/],
     ['POST', /^\/ai\/segment$/],
     ['POST', /^\/ai\/detect$/],
     ['GET', /^\/ai\/capabilities$/],
@@ -1829,6 +1895,10 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     const { eventBus, EVENTS } = require('./events');
 
     const onTaskUpdated = (payload) => {
+      // 带 user_id 的事件只发给它的属主：以前不看归属，任何账号/标签页都能收到别人的生图结果，
+      // 前端再据此刷新会话，就会「图片被推到别的对话框」。
+      const owner = payload && payload.userId;
+      if (owner != null && sessionUser && Number(owner) !== Number(sessionUser.id)) return;
       try { res.write(`event: task:updated\ndata: ${JSON.stringify(payload)}\n\n`); } catch (_) {}
     };
     const onAssetIngested = (payload) => {
@@ -2056,7 +2126,8 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
         (req.method === 'GET' || req.method === 'HEAD') &&
         !!mediaToken &&
         ((mImgCheck && auth.verifyMediaToken(decodeURIComponent(mImgCheck[1]), mediaToken)) ||
-          (mMaskCheck && auth.verifyMediaToken(`mask:${decodeURIComponent(mMaskCheck[1])}`, mediaToken)));
+          (mMaskCheck && auth.verifyMediaToken(`mask:${decodeURIComponent(mMaskCheck[1])}`, mediaToken)) ||
+          (mTempCheck && auth.verifyMediaToken(auth.tempMediaSubject(decodeURIComponent(mTempCheck[1])), mediaToken)));
       if (!hasValidMediaToken) {
         return sendJson(res, 401, { error: '未登录或会话已过期' });
       }
@@ -3239,7 +3310,8 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     if (!b.fid) return sendJson(res, 400, { error: '缺少 fid' });
     db.prepare("UPDATE assets SET auth_state=NULL, auth_matched_at=NULL, auth_frozen_at=NULL, auth_revoked_at=NULL, updated_at=? WHERE fid=?").run(Date.now(), b.fid);
     const { applyGovernance } = require('./governance');
-    applyGovernance(db);
+    // 传 dataDir，治理才能按 storage_ref 真正删掉人像/服装的历史 restage 文件，而不只删表行
+    applyGovernance(db, Date.now(), services?.config?.dataDir || null);
     return sendJson(res, 200, { success: true });
   }
 
@@ -3264,6 +3336,8 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
         whereParts.push("a.category = 'portrait'");
       } else if (category === 'clothing') {
         whereParts.push("a.category = 'clothing'");
+      } else if (category === 'figure') {
+        whereParts.push("a.category IN ('portrait', 'clothing')");
       } else if (category === 'furniture') {
         whereParts.push("(a.category = 'furniture' OR a.kind = 'furniture')");
       } else if (mediaType === 'image') {
@@ -3301,7 +3375,7 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     const { applyGovernance } = require('./governance');
     try {
       const data = ingestSnapshot(db, b);
-      applyGovernance(db);
+      applyGovernance(db, Date.now(), services?.config?.dataDir || null);
       return sendJson(res, 200, { success: true, data });
     } catch (e) {
       return sendJson(res, 400, { error: e.message });
@@ -3862,6 +3936,30 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     return sendJson(res, 200, { success: true, data: { id: sessionId, title, params_json: paramsJson, updated_at: now } });
   }
 
+  // 2.1 只更新会话参数快照 / 标题（不动 updated_at，除非显式 touch）
+  // 为什么要单独开 PATCH：POST /chat/sessions 无条件把 updated_at 顶到最新，
+  // 前端每拖一次参数条就把会话推到列表最前，正好复现「界面跳到别的对话」。
+  const mPatchSess = pathname.match(/^\/chat\/sessions\/([^\/]+)$/);
+  if (mPatchSess && req.method === 'PATCH') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const pId = decodeURIComponent(mPatchSess[1]);
+    if (!chatSessionOwned(pId)) return sendJson(res, 403, { error: '无权操作该会话' });
+    const b = await parseBody(req);
+    const paramsJson = b.params_json != null
+      ? (typeof b.params_json === 'string' ? b.params_json : JSON.stringify(b.params_json))
+      : null;
+    const title = b.title != null ? String(b.title).slice(0, 50) : null;
+    const touch = b.touch === true;
+    db.prepare(`
+      UPDATE chat_sessions SET
+        params_json = COALESCE(?, params_json),
+        title = COALESCE(?, title),
+        updated_at = CASE WHEN ? = 1 THEN ? ELSE updated_at END
+      WHERE id=?
+    `).run(paramsJson, title, touch ? 1 : 0, Date.now(), pId);
+    return sendJson(res, 200, { success: true, data: { id: pId, title, params_json: paramsJson } });
+  }
+
   // 3. 删除会话
   const mDelSess = pathname.match(/^\/chat\/sessions\/([^\/]+)$/);
   if (mDelSess && req.method === 'DELETE') {
@@ -3930,6 +4028,12 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
       ON CONFLICT(id) DO UPDATE SET
         status=excluded.status,
         result_json=COALESCE(excluded.result_json, chat_messages.result_json),
+        -- 只补空值：worker 先落库时前端补 params/refs，前端先落库时 worker 不覆盖前端更全的字段
+        prompt=CASE WHEN COALESCE(chat_messages.prompt,'')='' THEN excluded.prompt ELSE chat_messages.prompt END,
+        params_json=CASE WHEN COALESCE(chat_messages.params_json,'') IN ('','{}') THEN excluded.params_json ELSE chat_messages.params_json END,
+        images_json=CASE WHEN COALESCE(chat_messages.images_json,'') IN ('','[]') THEN excluded.images_json ELSE chat_messages.images_json END,
+        run_id=COALESCE(chat_messages.run_id, excluded.run_id),
+        engine=COALESCE(chat_messages.engine, excluded.engine),
         updated_at=excluded.updated_at
     `).run(msgId, sessionId, sessionUser?.id || 0, role, mode, prompt, paramsJson, imagesJson, status, runId, engine, resultJson, b.createdAt || now, now);
 
@@ -4088,45 +4192,7 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
   if (pathname === '/creation-templates' && req.method === 'GET') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
 
-    if (!schemaCheckedOnce(db, 'creation_templates')) {
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS creation_templates (
-          id TEXT PRIMARY KEY,
-          user_id INTEGER DEFAULT 1,
-          title TEXT NOT NULL,
-          prompt TEXT NOT NULL,
-          aspect_ratio TEXT DEFAULT '16:9',
-          origin_images TEXT DEFAULT '[]',
-          result_images TEXT DEFAULT '[]',
-          params_json TEXT DEFAULT '{}',
-          tags TEXT DEFAULT '[]',
-          type TEXT DEFAULT 'image',
-          space TEXT DEFAULT '',
-          style TEXT DEFAULT '',
-          is_pinned INTEGER DEFAULT 0,
-          use_count INTEGER DEFAULT 0,
-          created_at INTEGER,
-          updated_at INTEGER
-        );
-      `);
-      try { db.exec("ALTER TABLE creation_templates ADD COLUMN type TEXT DEFAULT 'image';"); } catch (e) {}
-      try { db.exec("ALTER TABLE creation_templates ADD COLUMN space TEXT DEFAULT '';"); } catch (e) {}
-      try { db.exec("ALTER TABLE creation_templates ADD COLUMN style TEXT DEFAULT '';"); } catch (e) {}
-      try { db.exec("ALTER TABLE creation_templates ADD COLUMN is_pinned INTEGER DEFAULT 0;"); } catch (e) {}
-      try { db.exec("ALTER TABLE creation_templates ADD COLUMN use_count INTEGER DEFAULT 0;"); } catch (e) {}
-      try { db.exec("ALTER TABLE creation_templates ADD COLUMN purpose TEXT DEFAULT '';"); } catch (e) {}
-      try { db.exec("ALTER TABLE creation_templates ADD COLUMN channel TEXT DEFAULT 'studio';"); } catch (e) {}
-      try { db.exec("CREATE INDEX IF NOT EXISTS idx_creation_tpl_sort ON creation_templates(is_pinned DESC, use_count DESC, updated_at DESC);"); } catch (e) {}
-    }
-
-    if (!schemaCheckedOnce(db, 'base_library_schema')) {
-      try {
-        const { ensureBaseLibrarySchema } = require('./base-library/schema');
-        ensureBaseLibrarySchema(db);
-      } catch (e) {
-        console.warn('[base-library] ensureBaseLibrarySchema skip:', e.message);
-      }
-    }
+    ensureCreationTemplatesSchema(db);
 
     const hasSince = urlObj.searchParams.has('since');
     const hasSinceId = urlObj.searchParams.has('since_id');
@@ -4311,6 +4377,7 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
   // 保存/收藏创作配方 (新建或全量保存)
   if (pathname === '/creation-templates' && req.method === 'POST') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationTemplatesSchema(db);
     const b = await parseBody(req);
     const title = (b.title || '').trim();
     const prompt = (b.prompt || '').trim();
@@ -4385,6 +4452,7 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
   const mPatchTpl = pathname.match(/^\/creation-templates\/([^\/]+)$/);
   if (mPatchTpl && req.method === 'PATCH') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationTemplatesSchema(db);
     const tplId = decodeURIComponent(mPatchTpl[1]);
     const b = await parseBody(req);
     const existing = db.prepare('SELECT * FROM creation_templates WHERE id=?').get(tplId);
@@ -4504,6 +4572,7 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
   const mDelTpl = pathname.match(/^\/creation-templates\/([^\/]+)$/);
   if (mDelTpl && req.method === 'DELETE') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationTemplatesSchema(db);
     const tplId = decodeURIComponent(mDelTpl[1]);
     // SEC-007：仅属主或管理员可删
     const tplRow = db.prepare('SELECT user_id FROM creation_templates WHERE id=?').get(tplId);
@@ -4533,6 +4602,7 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
   // 主动拉取/同步外部数据源创作资产 (POST /api/creation-templates/pull-external)
   if (pathname === '/creation-templates/pull-external' && req.method === 'POST') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationTemplatesSchema(db);
     const b = await parseBody(req).catch(() => ({}));
     try {
       const baResource = require('./ba-resource');
@@ -5338,7 +5408,20 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
       return p ? fs.readFileSync(p) : null;
     });
     const sourceImgRaw = b.image || b.imageUrl || b.url || b.src || b.assetFid || b.fid;
-    const sceneImageBuffer = await resolveAssetBuffer(services, sourceImgRaw);
+    const requestedDerivId = b.derivId || b.derivativeId || null;
+    let sceneImageBuffer = null;
+    // 显式指定衍生版本时按版本取图；仅允许同素材的版本，杜绝跨素材注入
+    if (requestedDerivId && sourceImgRaw) {
+      const asset = db.prepare('SELECT fid FROM assets WHERE fid=?').get(String(sourceImgRaw).trim());
+      if (asset) {
+        const deriv = getDerivativeById(db, requestedDerivId);
+        if (deriv && deriv.asset_fid === asset.fid) {
+          const p = await resolveDerivativeFile(services, deriv);
+          if (p && fs.existsSync(p)) sceneImageBuffer = fs.readFileSync(p);
+        }
+      }
+    }
+    if (!sceneImageBuffer) sceneImageBuffer = await resolveAssetBuffer(services, sourceImgRaw);
     if (!sceneImageBuffer) { const e = new Error('无法读取源图'); e.clientCode = 400; throw e; }
 
     let refImageBuffer = null;
@@ -5362,6 +5445,7 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
       stylePrompt: b.stylePrompt || b.style_prompt || b.styleDescription,
       extraPrompt: b.extraPrompt || b.extra_prompt,
       assetFid: b.assetFid || b.fid,
+      sourceDerivId: requestedDerivId || null,
       yaw: (b.glb && b.glb.yaw) != null ? b.glb.yaw : (b.yaw != null ? b.yaw : b.modelYaw),
       refImageBuffer,
       productImageBuffer,
@@ -5988,6 +6072,9 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     const asset = db.prepare('SELECT * FROM assets WHERE fid=?').get(fid);
     if (!asset) return sendJson(res, 404, { error: '资产不存在' });
     if (asset.status === 'deleted') return sendJson(res, 410, { error: '素材已删除，不能重构' });
+    if (asset.category === 'portrait' || asset.category === 'clothing') {
+      return sendJson(res, 400, { error: '人像与服装类目仅保留原图，禁止执行画幅重构以防人脸重建触发安全围栏' });
+    }
     try {
       const { isBlacklisted } = require('./assets-delete');
       if (isBlacklisted(db, { fid, sha256: asset.sha256, clientAssetId: asset.client_asset_id })) {
@@ -6121,7 +6208,7 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     const acceptHeader = String(req.headers['accept'] || '').toLowerCase();
     const formatParam = String(urlObj.searchParams.get('format') || '').toLowerCase();
     const wantsWebp = !isFileOrVideo && !isDl && (formatParam === 'webp' || acceptHeader.includes('image/webp'));
-    const assetRow = db.prepare('SELECT thumb_url, main_derivative_id, kind, file_name FROM assets WHERE fid=?').get(fid);
+    const assetRow = db.prepare('SELECT thumb_url, main_derivative_id, kind, file_name, category FROM assets WHERE fid=?').get(fid);
 
     const buildStandardDisposition = (targetName, defaultExt = '.jpg', kind = 'origin') => {
       let ext = path.extname(targetName || '') || defaultExt;
@@ -6247,10 +6334,11 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
         if (req.method === 'HEAD') return res.end();
         return res.end(tbuf);
       }
-      if (isRaw) {
+      const isPortraitOrClothing = assetRow?.category === 'portrait' || assetRow?.category === 'clothing';
+      if (isRaw || isPortraitOrClothing) {
         deriv = db.prepare("SELECT * FROM derivatives WHERE asset_fid=? AND kind='origin' LIMIT 1").get(fid);
       }
-      if (!deriv) {
+      if (!deriv && !isPortraitOrClothing) {
         const asset = db.prepare('SELECT main_derivative_id FROM assets WHERE fid=?').get(fid);
         if (asset?.main_derivative_id) {
           deriv = getDerivativeById(db, asset.main_derivative_id);
@@ -6261,7 +6349,7 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
       }
     }
 
-    if (!deriv) {
+    if (!deriv && !(assetRow?.category === 'portrait' || assetRow?.category === 'clothing')) {
       // 详情优先本地产物，避免 origin=quark 现场下载超时导致「图片丢失」
       const localDeriv = db.prepare(`
         SELECT * FROM derivatives
@@ -9217,6 +9305,19 @@ module.exports = {
     } catch (e) {
       return sendJson(res, e.status || 403, { error: e.message, code: e.code });
     }
+    // 会话归属校验：worker 会把结果写进 session_id，不校验就能往他人会话注入 assistant 消息。
+    // 与 /chat/messages 一致：缺行先按当前用户建，已存在且非属主则 403。
+    if (b.sessionId) {
+      const sessRow = db.prepare('SELECT user_id FROM chat_sessions WHERE id=?').get(String(b.sessionId));
+      if (!sessRow) {
+        db.prepare(`
+          INSERT INTO chat_sessions (id, user_id, title, created_at, updated_at)
+          VALUES (?, ?, '新创作会话', ?, ?)
+          ON CONFLICT(id) DO NOTHING
+        `).run(String(b.sessionId), sessionUser.id, Date.now(), Date.now());
+      }
+      if (!chatSessionOwned(b.sessionId)) return sendJson(res, 403, { error: '无权写入该会话' });
+    }
     try {
       const modality = ['image', 'video', 'chat', 'music'].includes(b.modality) ? b.modality : 'image';
       const payload = {
@@ -9227,9 +9328,97 @@ module.exports = {
         clientRequestId: b.clientRequestId || '',
       };
       const out = require('./gen-jobs').enqueueGenJob(db, payload);
+      if (b.sessionId) {
+        const now = Date.now();
+        const placeholderId = 'genmsg_' + out.jobId;
+        const placeholderResult = {
+          role: 'assistant',
+          modality,
+          isGenerating: true,
+          startTime: now,
+          model: b.model || '',
+          modelKey: b.model || '',
+          ratio: b.ratio || (b.params && b.params.ratio) || '9:16',
+          resolution: b.resolution || b.size || (b.params && (b.params.resolution || b.params.size)) || '',
+          userPrompt: b.prompt || '',
+          refs: Array.isArray(b.refs) ? b.refs : (b.imageUrls || b.image ? (b.imageUrls || [b.image]) : []),
+          content: modality === 'video' ? '正在渲染空间影视级动态视频...' : '正在为您渲染超写实空间视效...',
+          isError: false,
+          params: b,
+        };
+        try {
+          db.prepare(`
+            INSERT INTO chat_messages (
+              id, session_id, user_id, role, mode, prompt, params_json, images_json,
+              status, run_id, engine, result_json, created_at, updated_at
+            ) VALUES (?, ?, ?, 'assistant', ?, ?, ?, '[]', 'generating', ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              status='generating',
+              result_json=excluded.result_json,
+              updated_at=excluded.updated_at
+          `).run(
+            placeholderId,
+            b.sessionId,
+            sessionUser.id,
+            modality === 'video' ? 'text_to_video' : (modality === 'music' ? 'music' : 'text_to_image'),
+            placeholderResult.content,
+            JSON.stringify(b.params || {}),
+            out.jobId,
+            b.model || '',
+            JSON.stringify(placeholderResult),
+            now,
+            now
+          );
+        } catch (msgErr) {
+          console.warn('[gen-jobs] 写入初始 generating 消息失败:', msgErr.message);
+        }
+      }
       return sendJson(res, 200, { success: true, jobId: out.jobId, status: 'queued' });
     } catch (e) {
       return sendJson(res, e.status || 500, { error: e.message, code: e.code || 'enqueue_failed' });
+    }
+  }
+
+  // 任务取消：POST /gen/jobs/:id/cancel
+  const mGenJobCancel = pathname.match(/^\/gen\/jobs\/([^\/]+)\/cancel$/);
+  if (mGenJobCancel && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const jobId = decodeURIComponent(mGenJobCancel[1]);
+    try {
+      const { cancelGenJob } = require('./gen-jobs');
+      const { abortJob } = require('./gen-jobs-worker');
+      // 先鉴权并落库，再中断执行：旧顺序先 abort 后鉴权，别人可以抢先打断他人的在跑任务、随后才吃 403
+      const out = cancelGenJob(db, jobId, sessionUser.id);
+      // 任务已结束时不能再改消息状态，否则会把成功/失败的结果卡改写成「已取消」
+      if (!out.success) return sendJson(res, 200, out);
+      abortJob(jobId);
+
+      const now = Date.now();
+      const msgId = 'genmsg_' + jobId;
+      try {
+        const existingMsg = db.prepare('SELECT result_json, prompt, params_json FROM chat_messages WHERE id=?').get(msgId);
+        let cancelResult = {
+          role: 'assistant',
+          isCancelled: true,
+          content: '生成已取消',
+        };
+        if (existingMsg?.result_json) {
+          try {
+            cancelResult = { ...JSON.parse(existingMsg.result_json), ...cancelResult, isGenerating: false };
+          } catch (_) {}
+        }
+        db.prepare("UPDATE chat_messages SET status='cancelled', prompt='生成已取消', result_json=?, updated_at=? WHERE id=?")
+          .run(JSON.stringify(cancelResult), now, msgId);
+      } catch (_) {}
+
+      try {
+        const { eventBus, EVENTS } = require('./events');
+        eventBus.emit(EVENTS.TASK_UPDATED, { jobId, status: 'cancelled', type: 'gen_job' });
+      } catch (_) {}
+
+      return sendJson(res, 200, { success: true, ...out });
+    } catch (e) {
+      return sendJson(res, e.status || 500, { error: e.message });
     }
   }
 
@@ -9275,6 +9464,40 @@ module.exports = {
       completed_at: r.completed_at,
     }));
     return sendJson(res, 200, { success: true, jobs });
+  }
+
+  // ===== 最近使用的素材（跨对话共享，按用户保留最近 50 条）=====
+  if (pathname === '/studio/recent-refs' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const sessionId = urlObj.searchParams.get('sessionId') || '';
+    const limit = Number(urlObj.searchParams.get('limit') || 20);
+    try {
+      const { listRecentRefs } = require('./studio-recent-refs');
+      const data = listRecentRefs(db, sessionUser.id, sessionId, { limit });
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message || '读取最近使用素材失败' });
+    }
+  }
+
+  if (pathname === '/studio/recent-refs' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    const sessionId = b.sessionId || '';
+    // 归属校验：只能记到自己会话名下
+    if (sessionId) {
+      const owned = db.prepare('SELECT user_id FROM chat_sessions WHERE id=?').get(sessionId);
+      if (owned && Number(owned.user_id) !== Number(sessionUser.id)) {
+        return sendJson(res, 403, { error: '无权写入该会话的最近素材' });
+      }
+    }
+    try {
+      const { recordRecentRefs } = require('./studio-recent-refs');
+      const data = recordRecentRefs(db, sessionUser.id, sessionId, b.items);
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message || '记录最近使用素材失败' });
+    }
   }
 
   if (pathname === '/gen/images' && req.method === 'POST') {
@@ -9463,6 +9686,20 @@ module.exports = {
       const vidAdapters = engines.gen?.videoAdapters || [];
       const { pickAdapterId, adapterMissingError, isGoogleModel } = require('./adapter-match');
       const mCode = String(modelContract?.vendor_model_id || b.model || '');
+      const { isWanModel, generateWanVideo } = require('./services/wan-video');
+      if (isWanModel(b.model) || isWanModel(mCode) || isWanModel(modelContract?.id)) {
+        const result = await generateWanVideo(services, {
+          prompt: finalPrompt,
+          ratio: assembled?.body?.ratio || b.ratio,
+          resolution: assembled?.body?.resolution || b.resolution || assembled?.body?.size || b.size,
+          duration: assembled?.body?.duration || assembled?.body?.seconds || b.duration || b.durationSec || b.seconds,
+          imageUrls: b.imageUrls || (b.image ? [b.image] : []),
+          firstFrame: b.firstFrame || b.first_frame,
+          lastFrame: b.lastFrame || b.last_frame,
+          genMode: b.genMode || b.mode,
+        });
+        return sendJson(res, 200, result);
+      }
       const pickedId = pickAdapterId('video', mCode, vidAdapters);
       let adapterRow = null;
       if (b.adapterId) {
@@ -9509,7 +9746,7 @@ module.exports = {
       const userFixable = [
         'seedance_required', 'portrait_missing', 'portrait_not_active',
         'agnes_keyframe_missing', 'agnes_bad_duration', 'agnes_bad_ratio',
-        'public_base_missing', 'public_base_private',
+        'public_base_missing', 'public_base_private', 'wan_env_missing', 'alibailian_key_missing',
         'frame_blob', 'frame_bad_data_url', 'frame_unresolved',
       ].includes(e.code);
       const explicit = Number(e?.status || e?.statusCode) || 0;
@@ -9535,6 +9772,18 @@ module.exports = {
       return sendJson(res, 200, { success: true, jobId });
     } catch (e) {
       return sendJson(res, 400, { success: false, error: e.message });
+    }
+  }
+
+  if (pathname === '/video/super-resolve-local' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const b = await parseBody(req);
+      const { superResolveFromPreview } = require('./services/video-sr-local');
+      const data = await superResolveFromPreview(services, b.previewUrl || b.videoUrl || b.url || '', b.vendorUrl || b.remoteUrl || '');
+      return sendJson(res, 200, data);
+    } catch (e) {
+      return sendJson(res, 200, { ok: false, modelVideoUrl: '', error: e.message || '超分失败，已改播模型原片' });
     }
   }
 
@@ -9674,6 +9923,7 @@ module.exports = {
         model,
         messages,
         images: b.images,
+        videoUrls: b.videoUrls,
         temperature: b.temperature ?? 0.4,
         max_tokens: b.max_tokens ?? 4096,
         timeoutMs: chatTimeoutMs(modelCaps, b.timeoutMs),

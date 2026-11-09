@@ -91,7 +91,7 @@ async function runScan(services, { manual = false } = {}) {
     }
   }
 
-  const gov = applyGovernance(db, now);
+  const gov = applyGovernance(db, now, config.dataDir || null);
   if (gov.live || gov.revoked || gov.frozen || gov.frozenRevoked || gov.revived) {
     logger?.info?.(`[sync] 治理对账: live=${gov.live} revoked=${gov.revoked} frozen=${gov.frozen} frozen_revoked=${gov.frozenRevoked} revived=${gov.revived}`);
   }

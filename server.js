@@ -71,7 +71,7 @@ if (restageTimer.unref) restageTimer.unref();
 const { applyGovernance } = require('./src/governance');
 const { ProcessWorker, unfreezeVideos } = require('./src/process');
 const { AiTaskWorker } = require('./src/ai-tasks');
-applyGovernance(db);
+applyGovernance(db, Date.now(), dataDir);
 console.log('[governance] 启动时首次治理完成');
 if (!DISABLE_WORKERS) {
   const processWorker = new ProcessWorker(services);
@@ -164,7 +164,7 @@ if (!DISABLE_WORKERS) {
   if (nasBootTimer.unref) nasBootTimer.unref();
 
   const govTimer = setInterval(() => {
-    const r = applyGovernance(db);
+    const r = applyGovernance(db, Date.now(), dataDir);
     if (r.live || r.revoked || r.frozen || r.frozenRevoked || r.revived) {
       console.log(`[governance] 定时治理: live=${r.live} revoked=${r.revoked} frozen=${r.frozen} frozen_revoked=${r.frozenRevoked} revived=${r.revived}`);
     }
@@ -260,6 +260,40 @@ function resolveStaticWithin(rootDir, urlPath) {
   return fp;
 }
 
+// 剪辑子应用（Next.js /editor）反向代理：App 端只认 30001 一个源，
+// 素材下载 /api、工程读写 /editor-api 与页面同源，WebView 里不需要第二套地址。
+const EDITOR_TARGET = process.env.EDITOR_TARGET || 'http://127.0.0.1:3010';
+function proxyToEditor(req, res) {
+  let targetUrl;
+  try {
+    targetUrl = new URL(req.url, EDITOR_TARGET);
+  } catch (e) {
+    res.writeHead(400); return res.end('bad editor target');
+  }
+  const headers = { ...req.headers, host: targetUrl.host };
+  headers['x-forwarded-proto'] = req.socket.encrypted ? 'https' : 'http';
+  if (req.headers.host) headers['x-forwarded-host'] = req.headers.host;
+  delete headers['x-umbra-internal'];
+  delete headers['x-internal-call'];
+  const upstream = http.request({
+    hostname: targetUrl.hostname,
+    port: targetUrl.port || 80,
+    path: targetUrl.pathname + targetUrl.search,
+    method: req.method,
+    headers,
+  }, (upstreamRes) => {
+    res.writeHead(upstreamRes.statusCode || 502, upstreamRes.headers);
+    upstreamRes.pipe(res);
+  });
+  upstream.on('error', (err) => {
+    if (!res.headersSent) {
+      res.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ error: `剪辑编辑器未启动 (${EDITOR_TARGET}): ${err.message}` }));
+    }
+  });
+  req.pipe(upstream);
+}
+
 const server = http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://127.0.0.1');
   const p = u.pathname;
@@ -276,6 +310,11 @@ const server = http.createServer(async (req, res) => {
       const handled = await require('./src/clip-api').handleClipApi(services, req, res);
       if (handled) return;
       return require('./src/editor-projects').handleEditorApi(services, req, res);
+    }
+    // 0b. 剪辑工作台页面：/editor 与 /editor/* 代理到 Next（basePath=/editor）。
+    //     必须在 /editor-api 之后判断，否则会把工程接口一起吞掉。
+    if (p === '/editor' || p.startsWith('/editor/')) {
+      return proxyToEditor(req, res);
     }
     // 1. API 路由 (支持 /api/ 前缀与标准网关根端点)
     if (p.startsWith('/api/') || p === '/api') {
