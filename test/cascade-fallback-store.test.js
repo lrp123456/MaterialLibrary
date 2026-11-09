@@ -35,7 +35,7 @@ async function runTests() {
   assert(vlm.isVlmFallbackableError(new Error('VLM HTTP 503: Service Unavailable')), '应识别 503 服务不可用');
   assert(vlm.isVlmFallbackableError(new Error('The operation was aborted due to timeout')), '应识别超时');
   assert(vlm.isVlmFallbackableError(new Error('TypeError: fetch failed')), '应识别网络连接失败');
-  assert(!vlm.isVlmFallbackableError(new Error('VLM 返回非 JSON: invalid text')), '非网络/配额的解析错误不应被判定为回退型');
+  assert(!vlm.isVlmFallbackableError(new Error('ReferenceError: invalid_variable')), '内部代码错误不应被判定为回退型');
   console.log('✅ isVlmFallbackableError 全类型识别通过');
 
   // 1.3 测试 chatVision 级联切换：模拟 Gemini 403 leaked 自动降级到备选模型
@@ -46,6 +46,9 @@ async function runTests() {
       attemptedModels.push(opts.model);
       if (/gemini/i.test(opts.model)) {
         throw new Error('VLM HTTP 403: Your API key was reported as leaked');
+      }
+      if (opts.model === 'doubao-seed-2-1-lite-260915') {
+        throw new Error('VLM HTTP 429: rate_limit_exceeded');
       }
       if (opts.model === 'agnes-3.0-flash') {
         return { is_material: true, category: 'interior', reason: '测试室内场景' };
@@ -63,7 +66,7 @@ async function runTests() {
 
     assert.strictEqual(res.is_material, true);
     assert.strictEqual(res.category, 'interior');
-    assert.deepStrictEqual(attemptedModels, ['gemini-2.5-flash', 'agnes-3.0-flash']);
+    assert.deepStrictEqual(attemptedModels, ['gemini-2.5-flash', 'doubao-seed-2-1-lite-260915', 'agnes-3.0-flash']);
     console.log('✅ Gemini 遭遇 403 泄露自动平滑级联回退到 Agnes 验证通过！尝试顺序:', attemptedModels);
   } finally {
     vlm.chatVisionOnce = origChatVisionOnce;
@@ -135,7 +138,7 @@ async function runTests() {
 
   assert.strictEqual(res.success, true, '即使主通道 429，也应通过备用通道成功');
   assert.strictEqual(res.output.restaged, true);
-  assert.deepStrictEqual(adapterAttempts, ['agnes_image', 'qwenimage_local']);
+  assert.deepStrictEqual(adapterAttempts, ['agnes_image', 'modelscope_image', 'qwenimage_local']);
   console.log('✅ 主通道 429 限流未打断链路，自动级联回退到 QwenImage 成功产出！尝试顺序:', adapterAttempts);
 
   console.log('\n=== 3. 测试宽容入库策略（Store-First, Gate-Later） ===');
@@ -212,9 +215,9 @@ async function runTests() {
     size: 200
   }, {});
 
-  assert.strictEqual(uiGate.excluded, true);
-  assert.strictEqual(uiGate.rejectReason, 'non_interior_ui');
-  console.log('✅ 截图/UI 素材入库不拦截、工作流判定移入垃圾站验证通过！');
+  assert.strictEqual(uiGate.excluded, false);
+  assert(Array.isArray(uiGate.flags) && uiGate.flags.includes('screenshot_ui'), '应打上 screenshot_ui 标签');
+  console.log('✅ 截图/UI 素材入库不拦截、工作流判定保留在库并打标预警验证通过！');
 
   console.log('\n🎉 所有级联回退与宽容入库核心测试全部顺利通过！');
 }

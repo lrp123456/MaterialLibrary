@@ -132,6 +132,24 @@ async function runTests() {
     assert.strictEqual(anonDel.status, 401, '未登录 DELETE 应 401');
     console.log('✅ 鉴权拦截通过');
 
+    console.log('=== 2b. 新库首写（未先 GET）必须自动补齐表结构 ===');
+    // 回归：POST 曾只在 GET 里补 type/space/style/is_pinned/use_count/purpose/channel，
+    // 新库直接保存配方会 SQLITE_ERROR: no column named type → 500。
+    const coldPost = await request('POST', '/api/creation-templates', {
+      id: 'tpl_cold_start',
+      title: '冷启动配方',
+      prompt: '新库第一次写入',
+      type: 'image',
+      aspect_ratio: '4:3'
+    }, user1Token);
+    assert.strictEqual(coldPost.status, 200, '新库首次 POST 不得因缺列 500');
+    const coldRow = db.prepare('SELECT * FROM creation_templates WHERE id=?').get('tpl_cold_start');
+    assert.ok(coldRow, '首次 POST 必须真正写入数据库');
+    assert.strictEqual(coldRow.type, 'image');
+    const coldPatch = await request('PATCH', '/api/creation-templates/tpl_cold_start', { is_pinned: 1 }, user1Token);
+    assert.strictEqual(coldPatch.status, 200, '新库 PATCH 必须先补齐列');
+    console.log('✅ 新库首写自动补列通过');
+
     console.log('=== 3. 测试全量查询（省略 since） ===');
     // 清空现有数据以便测试
     db.prepare('DELETE FROM creation_templates').run();
@@ -272,12 +290,12 @@ async function runTests() {
     // 构造三条相同 updated_at 的记录
     const fixedTs = Date.now() + 10000;
     db.prepare('DELETE FROM creation_templates').run();
-    db.prepare('INSERT INTO creation_templates (id, user_id, title, prompt, updated_at) VALUES (?, 1, ?, ?, ?)')
-      .run('tpl_same_1', '标题1', '提示1', fixedTs);
-    db.prepare('INSERT INTO creation_templates (id, user_id, title, prompt, updated_at) VALUES (?, 1, ?, ?, ?)')
-      .run('tpl_same_2', '标题2', '提示2', fixedTs);
-    db.prepare('INSERT INTO creation_templates (id, user_id, title, prompt, updated_at) VALUES (?, 1, ?, ?, ?)')
-      .run('tpl_same_3', '标题3', '提示3', fixedTs);
+    db.prepare('INSERT INTO creation_templates (id, user_id, title, prompt, updated_at) VALUES (?, ?, ?, ?, ?)')
+      .run('tpl_same_1', user1.id, '标题1', '提示1', fixedTs);
+    db.prepare('INSERT INTO creation_templates (id, user_id, title, prompt, updated_at) VALUES (?, ?, ?, ?, ?)')
+      .run('tpl_same_2', user1.id, '标题2', '提示2', fixedTs);
+    db.prepare('INSERT INTO creation_templates (id, user_id, title, prompt, updated_at) VALUES (?, ?, ?, ?, ?)')
+      .run('tpl_same_3', user1.id, '标题3', '提示3', fixedTs);
 
     // 第一页：since 从 fixedTs 且 since_id='tpl_same_1' 开始拉
     const deltaPage = await request(
@@ -300,10 +318,10 @@ async function runTests() {
     const tsRow = Date.now() + 20000;
     const tsTomb = Date.now() + 50000;
 
-    db.prepare('INSERT INTO creation_templates (id, user_id, title, prompt, updated_at) VALUES (?, 1, ?, ?, ?)')
-      .run('tpl_row_update', '标题新', '提示', tsRow);
+    db.prepare('INSERT INTO creation_templates (id, user_id, title, prompt, updated_at) VALUES (?, ?, ?, ?, ?)')
+      .run('tpl_row_update', user1.id, '标题新', '提示', tsRow);
     db.prepare('INSERT INTO creation_template_tombstones (id, user_id, deleted_at) VALUES (?, ?, ?)')
-      .run('tpl_old_tomb', 1, tsTomb);
+      .run('tpl_old_tomb', user1.id, tsTomb);
 
     const dualSync = await request(
       'GET',

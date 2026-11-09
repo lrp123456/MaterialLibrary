@@ -56,6 +56,10 @@ const MANIFEST = [
   ['unit', 'frame-relay.test.js'],
   ['unit', 'media-tools-frame.test.js'],
   ['unit', 'gap-closure.test.js'],
+  ['unit', 'p0-app-contract.test.js'],
+  ['unit', 'p1-theme.test.js'],
+  ['unit', 'p2-browse-detail.test.js'],
+  ['unit', 'p3-studio.test.js'],
   ['unit', 'gate-route.test.js'],
   ['unit', 'guide-sentence.test.js'],
   ['unit', 'outpaint-layout.test.js'],
@@ -64,6 +68,7 @@ const MANIFEST = [
   ['unit', 'product-cover.test.js'],
   ['unit', 'qwenimage-local.test.js'],
   ['unit', 'runtime-log.test.js'],
+  ['unit', 'asset-replace-caches.test.js'],
   ['unit', 'batch-ab-regression.test.js'],
 
   // ---------- security：鉴权/凭据隔离/对抗输入 ----------
@@ -76,6 +81,7 @@ const MANIFEST = [
   ['integration', 'ba-created-at.test.js'],
   ['integration', 'ba-schemes.test.js'],
   ['integration', 'ba-video-tags.test.js'],
+  ['integration', 'result-library-sr.test.js'],
   ['integration', 'master-dictionary-crud.test.js'],
   ['integration', 'modular-workflow-governance.test.js'],
   ['integration', 'prompt-optimizer-xu41.test.js'],

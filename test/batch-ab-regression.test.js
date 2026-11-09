@@ -40,8 +40,15 @@ function testViewerCacheListKeyPageSize() {
   const keyPage12 = viewerCache.makeListKey({ page: 1, pageSize: 12 });
   const keyPage30 = viewerCache.makeListKey({ page: 1, pageSize: 30 });
   assert.notStrictEqual(keyPage12, keyPage30);
-  assert.ok(keyPage12.includes(':ps=12:'));
-  assert.ok(keyPage30.includes(':ps=30:'));
+  // 缺口3：缓存键与 fetchAssets 序列化同源（pageSize 必须区分），不再钉死旧 :ps= 前缀
+  assert.ok(/pageSize=12\b/.test(keyPage12), 'pageSize=12 必须进入缓存键');
+  assert.ok(/pageSize=30\b/.test(keyPage30), 'pageSize=30 必须进入缓存键');
+  const base = { page: 1, pageSize: 12 };
+  assert.notStrictEqual(viewerCache.makeListKey({ ...base, lane: 'image' }), viewerCache.makeListKey({ ...base, lane: 'video' }), 'lane 必须区分，禁止跨板块碰撞');
+  assert.notStrictEqual(viewerCache.makeListKey({ ...base, section: 'interior' }), viewerCache.makeListKey({ ...base, section: 'portrait' }), 'section 必须区分');
+  assert.notStrictEqual(viewerCache.makeListKey({ ...base, shelf: 'a' }), viewerCache.makeListKey({ ...base, shelf: 'b' }), 'shelf 必须区分');
+  assert.notStrictEqual(viewerCache.makeListKey({ ...base, orientation: '9:16' }), viewerCache.makeListKey({ ...base, orientation: '3:4' }), 'orientation 必须区分');
+  assert.strictEqual(viewerCache.makeListKey({ ...base, sort: 'oldest' }), viewerCache.makeListKey({ ...base, sort: 'earliest' }), 'oldest 与 earliest 归一后同键');
 }
 
 function testAndroidPermission() {

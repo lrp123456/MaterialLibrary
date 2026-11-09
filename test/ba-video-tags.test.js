@@ -21,6 +21,14 @@ const services = {
 const videoTags = require('../src/video-tags');
 const ba = require('../src/ba-resource');
 const { registerGenerated } = require('../src/shelf-lineage');
+const { spawnSync } = require('child_process');
+
+// shelf-lineage 现在要求成片必须能出封面才入库；夹具必须是真实可解码的 mp4，
+// 否则 umbra.extractPoster 无法抽帧（ffmpeg 本就是该链路依赖）。
+function makeValidMp4(dest) {
+  const r = spawnSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=64x64:d=1', '-pix_fmt', 'yuv420p', dest, '-y'], { encoding: 'utf8' });
+  return r.status === 0 && fs.existsSync(dest) && fs.statSync(dest).size > 0;
+}
 
 function ok(name) { console.log('✅ ' + name); }
 
@@ -64,7 +72,8 @@ function ok(name) { console.log('✅ ' + name); }
   db.prepare(`INSERT INTO asset_tags (asset_fid, tag_id, role, source, confidence, updated_at) VALUES ('parent_img', ?, '', 'ai', 0.9, ?)`).run(space.id, now);
   const tempDir = path.join(testDir, 'cache', 'temp');
   fs.mkdirSync(tempDir, { recursive: true });
-  fs.writeFileSync(path.join(tempDir, 'clip.mp4'), Buffer.from('not-a-real-mp4'));
+  const clipPath = path.join(tempDir, 'clip.mp4');
+  assert.ok(makeValidMp4(clipPath), '需要 ffmpeg 生成真实成片夹具（封面链路依赖）');
   const filed = await registerGenerated(services, {
     previewUrl: '/api/cache/temp/clip.mp4',
     parentFid: 'parent_img',

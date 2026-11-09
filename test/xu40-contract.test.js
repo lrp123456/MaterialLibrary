@@ -76,7 +76,7 @@ function testMounts() {
   assert.strictEqual(d20.max, 15);
   assert.strictEqual(d20.default, 5);
   assert.strictEqual(d25.max, 30);
-  assert.strictEqual(d25.default, -1);
+  assert.strictEqual(d25.default, 5);
   assert.ok(s20.params.some((p) => p.key === 'resolution'));
   assert.ok(String(s20.optimizer.prompt).includes('4–15'));
   assert.ok(String(s25.optimizer.prompt).includes('Seedance 2.5'));
