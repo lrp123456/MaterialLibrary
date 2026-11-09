@@ -1,4 +1,4 @@
-import type { MouseEvent as ReactMouseEvent } from "react";
+import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import {
 	buildMoveGroup,
 	resolveGroupMove,
@@ -30,8 +30,6 @@ import type {
 	TimelineElement,
 	TimelineTrack,
 } from "@/timeline";
-
-const MOUSE_BUTTON_RIGHT = 2;
 
 // --- Config ---
 
@@ -349,17 +347,17 @@ export class ElementInteractionController {
 		this.subscribers.clear();
 	}
 
-	onElementMouseDown = ({
+	onElementPointerDown = ({
 		event,
 		element,
 		track,
 	}: {
-		event: ReactMouseEvent;
+		event: ReactPointerEvent;
 		element: TimelineElement;
 		track: TimelineTrack;
 	}): void => {
-		// Right-click must not stopPropagation — ContextMenu needs the bubble.
-		if (event.button === MOUSE_BUTTON_RIGHT) {
+		// 触屏长按/滑动才进入拖拽；鼠标只认左键（右键留给上下文菜单）。
+		if (event.pointerType === "mouse" && event.button !== 0) {
 			const ref = { trackId: track.id, elementId: element.id };
 			if (!this.deps.selection.isSelected(ref)) {
 				this.deps.selection.handleClick({ ...ref, isMultiKey: false });
@@ -430,13 +428,15 @@ export class ElementInteractionController {
 	};
 
 	private activate(): void {
-		document.addEventListener("mousemove", this.handleMouseMove);
-		document.addEventListener("mouseup", this.handleMouseUp);
+		document.addEventListener("pointermove", this.handlePointerMove);
+		document.addEventListener("pointerup", this.handlePointerUp);
+		document.addEventListener("pointercancel", this.handlePointerCancel);
 	}
 
 	private deactivate(): void {
-		document.removeEventListener("mousemove", this.handleMouseMove);
-		document.removeEventListener("mouseup", this.handleMouseUp);
+		document.removeEventListener("pointermove", this.handlePointerMove);
+		document.removeEventListener("pointerup", this.handlePointerUp);
+		document.removeEventListener("pointercancel", this.handlePointerCancel);
 	}
 
 	private notify(): void {
@@ -526,7 +526,7 @@ export class ElementInteractionController {
 				: null;
 	}
 
-	private handleMouseMove = ({ clientX, clientY }: MouseEvent): void => {
+	private handlePointerMove = ({ clientX, clientY }: PointerEvent): void => {
 		const scrollContainer = this.deps.viewport.getTracksScrollEl();
 		if (!scrollContainer) return;
 
@@ -677,7 +677,7 @@ export class ElementInteractionController {
 		this.notify();
 	}
 
-	private handleMouseUp = ({ clientX, clientY }: MouseEvent): void => {
+	private handlePointerUp = ({ clientX, clientY }: PointerEvent): void => {
 		if (this.session.kind === "pending") {
 			this.finishSession();
 			return;
@@ -726,6 +726,12 @@ export class ElementInteractionController {
 			});
 		}
 
+		this.finishSession();
+	};
+
+	// 触屏被系统手势/来电打断时，pointerup 不会到达，必须显式收尾，否则时间轴卡在拖拽态。
+	private handlePointerCancel = (): void => {
+		this.lastGestureWasDrag = false;
 		this.finishSession();
 	};
 }

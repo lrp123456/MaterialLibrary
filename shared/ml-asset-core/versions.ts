@@ -31,9 +31,11 @@ export function versionsOf(
 		},
 	];
 	if (!Array.isArray(derivatives)) return list;
+	const isPortraitOrClothing = item.category === 'portrait' || item.category === 'clothing';
 	for (const d of derivatives) {
 		if (!d || !d.id) continue;
 		if (d.kind === "origin") continue;
+		if (isPortraitOrClothing && String(d.kind || "").startsWith("restage_")) continue;
 		list.push({
 			key: versionKey(fid, d.id),
 			fid,

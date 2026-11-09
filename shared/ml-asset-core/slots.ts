@@ -69,11 +69,11 @@ export const SLOT_CATEGORY_ORDER: string[] = [
 	'default',
 ];
 
-/** 出厂预设：每类图片默认都要求 9:16 与 3:4 两档。 */
+/** 出厂预设：室内外与单品等默认要求 9:16 与 3:4；人像与服装严格仅保留原图，不预置画幅插槽。 */
 export const DEFAULT_SLOT_RATIOS: Record<string, string[]> = {
 	interior_exterior: ['9:16', '3:4'],
-	portrait: ['9:16', '3:4'],
-	clothing: ['9:16', '3:4'],
+	portrait: [],
+	clothing: [],
 	furniture: ['9:16', '3:4'],
 	finished: ['9:16', '3:4'],
 	default: ['9:16', '3:4'],
@@ -143,14 +143,15 @@ export function onDerivativeSlotPrefsChange(
 	};
 }
 
-/** 某个类目当前应当具备的插槽列表；总开关关闭时返回空数组。 */
+/** 某个类目当前应当具备的插槽列表；总开关关闭或人像/服装类目时返回空数组。 */
 export function slotPresetsFor(
 	category?: string,
 	prefs?: DerivativeSlotPrefs,
 ): DerivativeSlotPreset[] {
+	const key = normalizeSlotCategory(category);
+	if (key === 'portrait' || key === 'clothing') return [];
 	const resolved = prefs || readDerivativeSlotPrefs();
 	if (!resolved.enabled) return [];
-	const key = normalizeSlotCategory(category);
 	const ratios = resolved.ratios[key] ?? DEFAULT_SLOT_RATIOS[key] ?? DEFAULT_SLOT_RATIOS.default ?? [];
 	return ratios
 		.map((ratio) => ALL_SLOT_PRESETS.find((slot) => slot.ratio === ratio))

@@ -133,7 +133,7 @@ export function useBookmarkDrag({
 	useEffect(() => {
 		if (!dragState.isDragging && !isPendingDrag) return;
 
-		const handleMouseMove = (event: MouseEvent) => {
+		const handleMouseMove = (event: PointerEvent) => {
 			lastMouseXRef.current = event.clientX;
 
 			const scrollContainer = scrollRef.current;
@@ -212,8 +212,8 @@ export function useBookmarkDrag({
 			onSnapPointChange?.(snapResult.snapPoint);
 		};
 
-		document.addEventListener("mousemove", handleMouseMove);
-		return () => document.removeEventListener("mousemove", handleMouseMove);
+		document.addEventListener("pointermove", handleMouseMove);
+		return () => document.removeEventListener("pointermove", handleMouseMove);
 	}, [
 		dragState.isDragging,
 		dragState.bookmarkTime,
@@ -249,8 +249,8 @@ export function useBookmarkDrag({
 			onSnapPointChange?.(null);
 		};
 
-		document.addEventListener("mouseup", handleMouseUp);
-		return () => document.removeEventListener("mouseup", handleMouseUp);
+		document.addEventListener("pointerup", handleMouseUp);
+		return () => document.removeEventListener("pointerup", handleMouseUp);
 	}, [
 		dragState.isDragging,
 		dragState.bookmarkTime,
@@ -270,12 +270,12 @@ export function useBookmarkDrag({
 			onSnapPointChange?.(null);
 		};
 
-		document.addEventListener("mouseup", handleMouseUp);
-		return () => document.removeEventListener("mouseup", handleMouseUp);
+		document.addEventListener("pointerup", handleMouseUp);
+		return () => document.removeEventListener("pointerup", handleMouseUp);
 	}, [isPendingDrag, onSnapPointChange]);
 
 	const handleBookmarkMouseDown = useCallback(
-		({ event, bookmark }: { event: React.MouseEvent; bookmark: Bookmark }) => {
+		({ event, bookmark }: { event: React.PointerEvent; bookmark: Bookmark }) => {
 			if (event.button !== 0) return;
 
 			event.preventDefault();

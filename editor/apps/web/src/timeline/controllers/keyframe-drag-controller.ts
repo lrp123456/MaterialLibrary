@@ -1,4 +1,7 @@
-import type { MouseEvent as ReactMouseEvent } from "react";
+import type {
+	MouseEvent as ReactMouseEvent,
+	PointerEvent as ReactPointerEvent,
+} from "react";
 import type { FrameRate } from "opencut-wasm";
 import { BASE_TIMELINE_PIXELS_PER_SECOND } from "@/timeline/scale";
 import {
@@ -93,8 +96,9 @@ export class KeyframeDragController {
 		this.onKeyframeMouseDown = this.onKeyframeMouseDown.bind(this);
 		this.onKeyframeClick = this.onKeyframeClick.bind(this);
 		this.getVisualOffsetPx = this.getVisualOffsetPx.bind(this);
-		this.handleMouseMove = this.handleMouseMove.bind(this);
-		this.handleMouseUp = this.handleMouseUp.bind(this);
+		this.handlePointerMove = this.handlePointerMove.bind(this);
+		this.handlePointerUp = this.handlePointerUp.bind(this);
+		this.handlePointerCancel = this.handlePointerCancel.bind(this);
 	}
 
 	private get config(): KeyframeDragConfig {
@@ -135,7 +139,7 @@ export class KeyframeDragController {
 		event,
 		keyframes,
 	}: {
-		event: ReactMouseEvent;
+		event: ReactPointerEvent;
 		keyframes: SelectedKeyframeRef[];
 	}): void {
 		event.preventDefault();
@@ -242,13 +246,15 @@ export class KeyframeDragController {
 	}
 
 	private activate(): void {
-		document.addEventListener("mousemove", this.handleMouseMove);
-		document.addEventListener("mouseup", this.handleMouseUp);
+		document.addEventListener("pointermove", this.handlePointerMove);
+		document.addEventListener("pointerup", this.handlePointerUp);
+		document.addEventListener("pointercancel", this.handlePointerCancel);
 	}
 
 	private deactivate(): void {
-		document.removeEventListener("mousemove", this.handleMouseMove);
-		document.removeEventListener("mouseup", this.handleMouseUp);
+		document.removeEventListener("pointermove", this.handlePointerMove);
+		document.removeEventListener("pointerup", this.handlePointerUp);
+		document.removeEventListener("pointercancel", this.handlePointerCancel);
 	}
 
 	private notify(): void {
@@ -303,7 +309,7 @@ export class KeyframeDragController {
 		}
 	}
 
-	private handleMouseMove({ clientX }: MouseEvent): void {
+	private handlePointerMove({ clientX }: PointerEvent): void {
 		if (this.session.kind === "pending") {
 			const deltaX = Math.abs(clientX - this.session.startMouseX);
 			if (deltaX <= TIMELINE_DRAG_THRESHOLD_PX) return;
@@ -333,7 +339,7 @@ export class KeyframeDragController {
 		this.notify();
 	}
 
-	private handleMouseUp(): void {
+	private handlePointerUp(): void {
 		if (this.session.kind === "pending") {
 			this.finishSession();
 			return;
@@ -352,6 +358,11 @@ export class KeyframeDragController {
 			this.commitDrag({ keyframeRefs: draggingRefs, deltaTicks });
 		}
 
+		this.finishSession();
+	}
+
+	// 手势被系统打断时丢弃这次拖拽，不做提交
+	private handlePointerCancel(): void {
 		this.finishSession();
 	}
 }

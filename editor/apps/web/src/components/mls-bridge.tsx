@@ -24,6 +24,40 @@ export interface MlsAssetPayload {
 }
 
 const PENDING_STORAGE_KEY = "mls_pending_import_asset";
+const IMPORT_QUERY_KEY = "import";
+
+/**
+ * 从地址栏读取待导入素材（App 的 WebView 无法向 iframe 发 postMessage，只能走 URL）。
+ * 读取后立刻从地址栏摘掉，刷新或返回时不会重复导入。
+ */
+function consumeUrlImportAssets(): MlsAssetPayload[] {
+	if (typeof window === "undefined") return [];
+	const params = new URLSearchParams(window.location.search);
+	const raw = params.getAll(IMPORT_QUERY_KEY);
+	if (!raw.length) return [];
+
+	const list: MlsAssetPayload[] = [];
+	for (const item of raw) {
+		try {
+			const parsed = JSON.parse(item);
+			list.push(...(Array.isArray(parsed) ? parsed : [parsed]));
+		} catch {
+			/* 坏参数直接忽略，不阻断进入编辑器 */
+		}
+	}
+
+	const url = new URL(window.location.href);
+	url.searchParams.delete(IMPORT_QUERY_KEY);
+	window.history.replaceState(
+		null,
+		"",
+		`${url.pathname}${url.search}${url.hash}`,
+	);
+
+	return list.filter(
+		(asset) => asset && typeof asset === "object" && asset.fid,
+	) as MlsAssetPayload[];
+}
 
 /** 判定素材 mime：响应头优先，其次载荷声明，再按 kind/扩展名兜底。 */
 function resolveMediaMime(blobType: string, payload: MlsAssetPayload): string {
@@ -196,6 +230,41 @@ export function MlsBridge() {
 	};
 
 	useEffect(() => {
+		// 0. App WebView 入口：地址栏 ?import=<json>（单体或数组）。
+		// 编辑器页首帧工程还没加载完，必须等 activeProject 就绪，否则会误判成"从列表页进来"而新建工程。
+		const isProjectsListPage =
+			typeof window !== "undefined" &&
+			/\/editor\/projects\/?$/.test(window.location.pathname);
+		const urlAssets =
+			activeProject || isProjectsListPage ? consumeUrlImportAssets() : [];
+		if (urlAssets.length) {
+			if (activeProject) {
+				if (urlAssets.length === 1) {
+					void handleImportPayload(urlAssets[0], activeProject.metadata.id);
+				} else {
+					void importAssetBatch(urlAssets, activeProject.metadata.id);
+				}
+			} else {
+				// 工程列表页：先用暂存 + 新建工程，再由编辑器页消费
+				try {
+					sessionStorage.setItem(
+						PENDING_STORAGE_KEY,
+						JSON.stringify(urlAssets),
+					);
+					void editor.project
+						.createNewProject({
+							name: urlAssets[0].file_name
+								? `剪辑 · ${urlAssets[0].file_name}`
+								: "新建剪辑工程",
+						})
+						.then((newProjectId) => router.push(`/editor/${newProjectId}`))
+						.catch(() => toast.error("自动创建剪辑工程失败"));
+				} catch {
+					toast.error("自动创建剪辑工程失败");
+				}
+			}
+		}
+
 		// 1. 检查是否存在待消费的暂存素材（比如从列表页刚跳过来；批量为数组，逐个导入）
 		if (activeProject) {
 			try {

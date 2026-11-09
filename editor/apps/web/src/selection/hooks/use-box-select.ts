@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { registerCanceller } from "@/editor/cancel-interaction";
 import type {
 	BoxSelectionSnapshot,
 	ResolveIntersections,
@@ -58,16 +59,23 @@ export function useBoxSelect<TId>({
 		initialAnchorId: TId | null;
 		isAdditive: boolean;
 	}) => void;
-	shouldStartSelection?: (event: React.MouseEvent<Element>) => boolean;
-	getIsAdditiveSelection?: (event: React.MouseEvent<Element>) => boolean;
+	shouldStartSelection?: (event: React.PointerEvent<Element>) => boolean;
+	getIsAdditiveSelection?: (event: React.PointerEvent<Element>) => boolean;
 	isEnabled?: boolean;
 }) {
 	const [selectionBox, setSelectionBox] =
 		useState<SelectionBoxState<TId> | null>(null);
 	const justFinishedSelectingRef = useRef(false);
+	const hasSelectionBox = selectionBox !== null;
+
+	// 让全局取消（如时间轴双指缩放、Esc）能终止正在进行的框选
+	useEffect(() => {
+		if (!hasSelectionBox) return;
+		return registerCanceller({ fn: () => setSelectionBox(null) });
+	}, [hasSelectionBox]);
 
 	const handleMouseDown = useCallback(
-		(event: React.MouseEvent<Element>) => {
+		(event: React.PointerEvent<Element>) => {
 			const canStartSelection = shouldStartSelection
 				? shouldStartSelection(event)
 				: true;
@@ -132,7 +140,7 @@ export function useBoxSelect<TId>({
 			return;
 		}
 
-		const handleMouseMove = ({ clientX, clientY }: MouseEvent) => {
+		const handleMouseMove = ({ clientX, clientY }: PointerEvent) => {
 			const currentPos = { x: clientX, y: clientY };
 			const deltaX = Math.abs(clientX - selectionBox.startPos.x);
 			const deltaY = Math.abs(clientY - selectionBox.startPos.y);
@@ -170,12 +178,14 @@ export function useBoxSelect<TId>({
 			setSelectionBox(null);
 		};
 
-		window.addEventListener("mousemove", handleMouseMove);
-		window.addEventListener("mouseup", handleMouseUp);
+		window.addEventListener("pointermove", handleMouseMove);
+		window.addEventListener("pointerup", handleMouseUp);
+		window.addEventListener("pointercancel", handleMouseUp);
 
 		return () => {
-			window.removeEventListener("mousemove", handleMouseMove);
-			window.removeEventListener("mouseup", handleMouseUp);
+			window.removeEventListener("pointermove", handleMouseMove);
+			window.removeEventListener("pointerup", handleMouseUp);
+			window.removeEventListener("pointercancel", handleMouseUp);
 		};
 	}, [containerRef, selectionBox, updateSelection]);
 

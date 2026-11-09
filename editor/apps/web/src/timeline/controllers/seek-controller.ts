@@ -1,9 +1,15 @@
-import type { MouseEvent as ReactMouseEvent } from "react";
+import type {
+	MouseEvent as ReactMouseEvent,
+	PointerEvent as ReactPointerEvent,
+} from "react";
 import type { FrameRate } from "opencut-wasm";
 import { BASE_TIMELINE_PIXELS_PER_SECOND } from "@/timeline/scale";
 import { mediaTime, snapSeekMediaTime, TICKS_PER_SECOND, type MediaTime } from "@/wasm";
 
 type SeekSource = "ruler" | "tracks";
+// 指针事件与鼠标事件在这里结构一致（clientX/clientY/button/timeStamp/target）；
+// 触屏必须走 pointerdown，否则拖拽式 seek 在手机上收不到按下信号。
+type GestureEvent = ReactMouseEvent | ReactPointerEvent;
 
 interface PendingSeekSession {
 	kind: "pending";
@@ -67,7 +73,7 @@ function isClickGesture({
 	event,
 	session,
 }: {
-	event: ReactMouseEvent;
+	event: GestureEvent;
 	session: PendingSeekSession;
 }): boolean {
 	const deltaX = Math.abs(event.clientX - session.downX);
@@ -97,19 +103,19 @@ export class SeekController {
 		this.session = { kind: "idle" };
 	}
 
-	onTracksMouseDown(event: ReactMouseEvent): void {
+	onTracksMouseDown(event: GestureEvent): void {
 		this.beginPendingSeek({ event, source: "tracks" });
 	}
 
-	onRulerMouseDown(event: ReactMouseEvent): void {
+	onRulerMouseDown(event: GestureEvent): void {
 		this.beginPendingSeek({ event, source: "ruler" });
 	}
 
-	onTracksClick(event: ReactMouseEvent): void {
+	onTracksClick(event: GestureEvent): void {
 		this.handleClick({ event, source: "tracks" });
 	}
 
-	onRulerClick(event: ReactMouseEvent): void {
+	onRulerClick(event: GestureEvent): void {
 		this.handleClick({ event, source: "ruler" });
 	}
 
@@ -117,7 +123,7 @@ export class SeekController {
 		event,
 		source,
 	}: {
-		event: ReactMouseEvent;
+		event: GestureEvent;
 		source: SeekSource;
 	}): void {
 		if (event.button !== 0) return;
@@ -135,7 +141,7 @@ export class SeekController {
 		event,
 		source,
 	}: {
-		event: ReactMouseEvent;
+		event: GestureEvent;
 		source: SeekSource;
 	}): void {
 		const shouldProcess = this.shouldProcessClick({ event, source });
@@ -151,7 +157,7 @@ export class SeekController {
 		event,
 		source,
 	}: {
-		event: ReactMouseEvent;
+		event: GestureEvent;
 		source: SeekSource;
 	}): boolean {
 		if (this.session.kind !== "pending") return false;
@@ -174,7 +180,7 @@ export class SeekController {
 		event,
 		source,
 	}: {
-		event: ReactMouseEvent;
+		event: GestureEvent;
 		source: SeekSource;
 	}): void {
 		const scrollContainer =

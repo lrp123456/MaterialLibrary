@@ -111,6 +111,7 @@ function toAssetLike(item: MaterialAssetItem): AssetLike {
 		kind: item.kind,
 		mediaToken: "",
 		url: item.thumb_url || "",
+		category: item.category,
 	};
 }
 

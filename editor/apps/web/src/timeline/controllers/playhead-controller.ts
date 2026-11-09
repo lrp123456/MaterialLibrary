@@ -1,4 +1,7 @@
-import type { MouseEvent as ReactMouseEvent } from "react";
+import type {
+	MouseEvent as ReactMouseEvent,
+	PointerEvent as ReactPointerEvent,
+} from "react";
 import type { FrameRate } from "opencut-wasm";
 import {
 	mediaTime,
@@ -104,8 +107,9 @@ export class PlayheadController {
 		this.configRef = deps.configRef;
 		this.onPlayheadMouseDown = this.onPlayheadMouseDown.bind(this);
 		this.onRulerMouseDown = this.onRulerMouseDown.bind(this);
-		this.handleMouseMove = this.handleMouseMove.bind(this);
-		this.handleMouseUp = this.handleMouseUp.bind(this);
+		this.handlePointerMove = this.handlePointerMove.bind(this);
+		this.handlePointerUp = this.handlePointerUp.bind(this);
+		this.handlePointerCancel = this.handlePointerCancel.bind(this);
 	}
 
 	private get config(): PlayheadConfig {
@@ -126,7 +130,7 @@ export class PlayheadController {
 
 	// --- Public event handlers (bound, stable references) ---
 
-	onPlayheadMouseDown(event: ReactMouseEvent): void {
+	onPlayheadMouseDown(event: ReactPointerEvent): void {
 		event.preventDefault();
 		event.stopPropagation();
 		this.session = {
@@ -140,7 +144,7 @@ export class PlayheadController {
 		this.activate();
 	}
 
-	onRulerMouseDown(event: ReactMouseEvent): void {
+	onRulerMouseDown(event: ReactPointerEvent): void {
 		if (event.button !== 0) return;
 		if (this.config.getPlayheadEl()?.contains(event.target as Node)) return;
 
@@ -215,13 +219,15 @@ export class PlayheadController {
 	// --- Private ---
 
 	private activate(): void {
-		window.addEventListener("mousemove", this.handleMouseMove);
-		window.addEventListener("mouseup", this.handleMouseUp);
+		window.addEventListener("pointermove", this.handlePointerMove);
+		window.addEventListener("pointerup", this.handlePointerUp);
+		window.addEventListener("pointercancel", this.handlePointerCancel);
 	}
 
 	private deactivate(): void {
-		window.removeEventListener("mousemove", this.handleMouseMove);
-		window.removeEventListener("mouseup", this.handleMouseUp);
+		window.removeEventListener("pointermove", this.handlePointerMove);
+		window.removeEventListener("pointerup", this.handlePointerUp);
+		window.removeEventListener("pointercancel", this.handlePointerCancel);
 	}
 
 	/**
@@ -233,7 +239,7 @@ export class PlayheadController {
 		event,
 		isElementSnappingEnabled,
 	}: {
-		event: MouseEvent | ReactMouseEvent;
+		event: PointerEvent | ReactPointerEvent | ReactMouseEvent;
 		isElementSnappingEnabled: boolean;
 	}): void {
 		const ruler = this.config.getRulerEl();
@@ -284,7 +290,7 @@ export class PlayheadController {
 		this.lastMouseClientX = event.clientX;
 	}
 
-	private handleMouseMove(event: MouseEvent): void {
+	private handlePointerMove(event: PointerEvent): void {
 		if (this.session.kind !== "scrubbing") return;
 		this.scrub({ event, isElementSnappingEnabled: true });
 		if (this.session.didStartFromRuler) {
@@ -292,7 +298,7 @@ export class PlayheadController {
 		}
 	}
 
-	private handleMouseUp(event: MouseEvent): void {
+	private handlePointerUp(event: PointerEvent): void {
 		if (this.session.kind !== "scrubbing") return;
 
 		const session = this.session;
@@ -312,6 +318,14 @@ export class PlayheadController {
 			this.scrub({ event, isElementSnappingEnabled: false });
 		}
 
+		this.session = { kind: "idle" };
+		this.deactivate();
+	}
+
+	// 系统手势抢占（来电/侧滑）时不会有 pointerup：立即结束拖拽，不写入视图状态
+	private handlePointerCancel(): void {
+		if (this.session.kind !== "scrubbing") return;
+		this.config.setScrubbing(false);
 		this.session = { kind: "idle" };
 		this.deactivate();
 	}

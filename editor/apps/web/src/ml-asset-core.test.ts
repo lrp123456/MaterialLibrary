@@ -182,8 +182,15 @@ describe("slotPresetsFor", () => {
 
 	test("按类目覆盖只留一个规格", () => {
 		const prefs = defaultSlotPrefs();
+		prefs.ratios.furniture = ["3:4"];
+		expect(slotPresetsFor("furniture", prefs).map((s) => s.kind)).toEqual(["restage_3_4"]);
+	});
+
+	test("人像与服装不预置画幅插槽（即便偏好里有档位）", () => {
+		const prefs = defaultSlotPrefs();
 		prefs.ratios.clothing = ["3:4"];
-		expect(slotPresetsFor("clothing", prefs).map((s) => s.kind)).toEqual(["restage_3_4"]);
+		expect(slotPresetsFor("clothing", prefs)).toEqual([]);
+		expect(slotPresetsFor("portrait", prefs)).toEqual([]);
 	});
 
 	test("类目被显式清空时该类目不补位", () => {
@@ -216,7 +223,12 @@ describe("missingSlotPresets", () => {
 	});
 
 	test("衍生数据缺失时全部算缺", () => {
-		expect(missingSlotPresets("portrait", undefined, prefs)).toHaveLength(2);
+		expect(missingSlotPresets("interior_exterior", undefined, prefs)).toHaveLength(2);
+	});
+
+	test("人像/服装永远没有缺失插槽", () => {
+		expect(missingSlotPresets("portrait", undefined, prefs)).toEqual([]);
+		expect(missingSlotPresets("clothing", [{ kind: "origin" }], prefs)).toEqual([]);
 	});
 });
 

@@ -300,7 +300,7 @@ export function Timeline() {
 		isReady: tracks.length > 0,
 	});
 
-	const { dragView, handleElementMouseDown, handleElementClick } =
+	const { dragView, handleElementPointerDown, handleElementClick } =
 		useElementInteraction({
 		zoomLevel,
 		tracksContainerRef,
@@ -442,7 +442,10 @@ export function Timeline() {
 				setZoomLevel={({ zoom }) => setZoomLevel(zoom)}
 			/>
 
-			<div className="relative flex flex-1 overflow-hidden" ref={timelineRef}>
+			<div
+				className="relative flex flex-1 touch-pan-y overflow-hidden"
+				ref={timelineRef}
+			>
 				<TrackLabelsPanel
 					trackLabelsRef={trackLabelsRef}
 					trackLabelsScrollRef={trackLabelsScrollRef}
@@ -529,7 +532,7 @@ export function Timeline() {
 										) + TIMELINE_CONTENT_TOP_PADDING_PX
 									}px`,
 								}}
-								onMouseDown={(event) => {
+								onPointerDown={(event) => {
 									const isDirectTarget = event.target === event.currentTarget;
 									if (!isDirectTarget) return;
 									event.stopPropagation();
@@ -549,7 +552,7 @@ export function Timeline() {
 										zoomLevel={zoomLevel}
 										dragView={dragView}
 										onResizeStart={handleResizeStart}
-										onElementMouseDown={handleElementMouseDown}
+										onElementPointerDown={handleElementPointerDown}
 										onElementClick={handleElementClick}
 										onTrackMouseDown={(event) => {
 											handleSelectionMouseDown(event);
@@ -563,7 +566,7 @@ export function Timeline() {
 								)}
 							</div>
 							<TimelineGutter
-								onMouseDown={(event) => {
+								onPointerDown={(event) => {
 									handleTracksMouseDown(event);
 									handleSelectionMouseDown(event);
 								}}
@@ -726,7 +729,7 @@ function TimelineTrackRows({
 	zoomLevel,
 	dragView,
 	onResizeStart,
-	onElementMouseDown,
+	onElementPointerDown,
 	onElementClick,
 	onTrackMouseDown,
 	onTrackMouseUp,
@@ -740,14 +743,14 @@ function TimelineTrackRows({
 	onResizeStart: React.ComponentProps<
 		typeof TimelineTrackContent
 	>["onResizeStart"];
-	onElementMouseDown: React.ComponentProps<
+	onElementPointerDown: React.ComponentProps<
 		typeof TimelineTrackContent
-	>["onElementMouseDown"];
+	>["onElementPointerDown"];
 	onElementClick: React.ComponentProps<
 		typeof TimelineTrackContent
 	>["onElementClick"];
-	onTrackMouseDown: (event: React.MouseEvent) => void;
-	onTrackMouseUp: (event: React.MouseEvent) => void;
+	onTrackMouseDown: (event: React.PointerEvent) => void;
+	onTrackMouseUp: (event: React.PointerEvent) => void;
 	shouldIgnoreClick: () => boolean;
 	isDragOver: boolean;
 	dropTarget: DropTarget | null;
@@ -823,7 +826,7 @@ function TimelineTrackRows({
 								zoomLevel={zoomLevel}
 								dragView={dragView}
 								onResizeStart={onResizeStart}
-								onElementMouseDown={onElementMouseDown}
+								onElementPointerDown={onElementPointerDown}
 								onElementClick={onElementClick}
 								onTrackMouseDown={onTrackMouseDown}
 								onTrackMouseUp={onTrackMouseUp}
@@ -888,15 +891,15 @@ function TimelineTrackRows({
 }
 
 function TimelineGutter({
-	onMouseDown,
+	onPointerDown,
 	onClick,
 }: {
-	onMouseDown: (event: React.MouseEvent) => void;
+	onPointerDown: (event: React.PointerEvent) => void;
 	onClick: (event: React.MouseEvent) => void;
 }) {
 	return (
 		// eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- spatial gesture surface (empty space below tracks); clicks here clear selection. Keyboard control is global timeline shortcuts.
-		<div className="flex-1" onMouseDown={onMouseDown} onClick={onClick} />
+		<div className="flex-1" onPointerDown={onPointerDown} onClick={onClick} />
 	);
 }
 
@@ -928,7 +931,7 @@ function TrackNameLabel({ track }: { track: TimelineTrack }) {
 				value={draft}
 				onChange={(e) => setDraft(e.target.value)}
 				onBlur={commit}
-				onMouseDown={(e) => e.stopPropagation()}
+				onPointerDown={(e) => e.stopPropagation()}
 				onKeyDown={(e) => {
 					if (e.key === "Enter") commit();
 					if (e.key === "Escape") setEditing(false);

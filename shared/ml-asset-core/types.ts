@@ -10,6 +10,8 @@ export interface AssetLike {
 	kind?: string;
 	mediaToken?: string;
 	url?: string;
+	/** 素材类目（portrait/clothing 等）；版本列表据此过滤掉 restage 衍生。 */
+	category?: string;
 }
 
 /** 详情接口 `/api/viewer/assets/<fid>` 返回的衍生版本条目（只取用到的字段）。 */

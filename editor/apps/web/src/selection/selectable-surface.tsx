@@ -56,7 +56,7 @@ export function SelectableSurface({
 		return itemElementsRef.current.get(id) ?? null;
 	}, []);
 	const shouldStartSelection = useCallback(
-		(event: React.MouseEvent<Element>) => {
+		(event: React.PointerEvent<Element>) => {
 			return !(
 				event.target instanceof Element &&
 				event.target.closest(`[${SELECTABLE_ITEM_ATTRIBUTE}='true']`)
@@ -272,7 +272,7 @@ export function SelectableSurface({
 				aria-label={ariaLabel}
 				aria-multiselectable="true"
 				tabIndex={0}
-				onMouseDown={handleMouseDown}
+				onPointerDown={handleMouseDown}
 				onClick={handleBackgroundClick}
 				onKeyDown={handleBackgroundKeyDown}
 			>

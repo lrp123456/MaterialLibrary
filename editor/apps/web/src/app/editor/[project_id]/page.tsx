@@ -16,7 +16,8 @@ import { Onboarding } from "@/components/editor/onboarding";
 import { MigrationDialog } from "@/project/components/migration-dialog";
 import { usePanelStore } from "@/editor/panel-store";
 import { usePasteMedia } from "@/media/use-paste-media";
-import { MobileGate } from "@/components/editor/mobile-gate";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { MobileEditorLayout } from "@/components/editor/mobile-editor-layout";
 import { useEffect, useMemo, useState } from "react";
 import { useEditor } from "@/editor/use-editor";
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
@@ -27,6 +28,8 @@ import {
 	createPreviewOverlayControl,
 	isPreviewOverlayVisible,
 	mergePreviewOverlaySources,
+	type PreviewOverlayControl,
+	type PreviewOverlayInstance,
 } from "@/preview/overlays";
 import { usePreviewStore } from "@/preview/preview-store";
 import { getGuidePreviewOverlaySource } from "@/guides";
@@ -60,22 +63,20 @@ export default function Editor() {
 	}, []);
 
 	return (
-		<MobileGate>
-			<EditorProvider projectId={projectId}>
-				<MlsBridge />
-				<div className="bg-background flex h-screen w-screen flex-col overflow-hidden">
-					<RuntimeCapabilityBanner />
-					<DegradedRendererBanner />
-					<EditorHeader />
-					<div className="min-h-0 min-w-0 flex-1">
-						<EditorLayout />
-					</div>
-					<Onboarding />
-					<MigrationDialog />
-					<ChangelogNotification />
+		<EditorProvider projectId={projectId}>
+			<MlsBridge />
+			<div className="bg-background flex h-screen w-screen flex-col overflow-hidden">
+				<RuntimeCapabilityBanner />
+				<DegradedRendererBanner />
+				<EditorHeader />
+				<div className="min-h-0 min-w-0 flex-1">
+					<EditorWorkspace />
 				</div>
-			</EditorProvider>
-		</MobileGate>
+				<Onboarding />
+				<MigrationDialog />
+				<ChangelogNotification />
+			</div>
+		</EditorProvider>
 	);
 }
 
@@ -100,9 +101,9 @@ function DegradedRendererBanner() {
 	);
 }
 
-function EditorLayout() {
+function EditorWorkspace() {
 	usePasteMedia();
-	const { panels, setPanel } = usePanelStore();
+	const isCompact = useIsMobile(1024);
 	const activeScene = useEditor((editor) =>
 		editor.scenes.getActiveSceneOrNull(),
 	);
@@ -146,6 +147,33 @@ function EditorLayout() {
 			),
 		[overlaySource.definitions, overlays],
 	);
+
+	const previewOverlayProps = {
+		overlayControls,
+		overlayInstances: overlaySource.instances,
+		onOverlayVisibilityChange: setOverlayVisibility,
+	};
+
+	if (isCompact) {
+		return <MobileEditorLayout {...previewOverlayProps} />;
+	}
+
+	return <DesktopEditorLayout {...previewOverlayProps} />;
+}
+
+function DesktopEditorLayout({
+	overlayControls,
+	overlayInstances,
+	onOverlayVisibilityChange,
+}: {
+	overlayControls: PreviewOverlayControl[];
+	overlayInstances: PreviewOverlayInstance[];
+	onOverlayVisibilityChange: (args: {
+		overlayId: string;
+		isVisible: boolean;
+	}) => void;
+}) {
+	const { panels, setPanel } = usePanelStore();
 
 	return (
 		<ResizablePanelGroup
@@ -198,8 +226,8 @@ function EditorLayout() {
 					>
 						<PreviewPanel
 							overlayControls={overlayControls}
-							overlayInstances={overlaySource.instances}
-							onOverlayVisibilityChange={setOverlayVisibility}
+							overlayInstances={overlayInstances}
+							onOverlayVisibilityChange={onOverlayVisibilityChange}
 						/>
 					</ResizablePanel>
 

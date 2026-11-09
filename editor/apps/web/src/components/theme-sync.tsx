@@ -78,9 +78,15 @@ export function ThemeSync() {
 				applyToken(urlToken);
 			}
 			const saved = localStorage.getItem("material_theme") || "dark";
+			// App 的 WebView 不能 postMessage，主题只能走地址栏参数
+			const urlTheme = search.get("theme");
+			const initialTheme =
+				urlTheme === "light" || urlTheme === "eye-care" || urlTheme === "dark"
+					? urlTheme
+					: saved;
 			const savedSenior = localStorage.getItem("ml_senior_mode") === "true";
 			const savedZoom = normalizeZoom(localStorage.getItem("ml_senior_zoom"));
-			applyTheme(saved, savedSenior, savedZoom);
+			applyTheme(initialTheme, savedSenior, savedZoom);
 		} catch {
 			/* ignore */
 		}

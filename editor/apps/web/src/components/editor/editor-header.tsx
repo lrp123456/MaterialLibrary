@@ -30,15 +30,30 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Archive } from "lucide-react";
 import { exportProjectFile } from "@/services/mlsclip";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 export function EditorHeader() {
+	const isCompact = useIsMobile(1024);
 	return (
-		<header className="bg-background flex h-[3.4rem] items-center justify-between px-3 pt-0.5 border-b border-border/60">
-			<div className="flex items-center gap-2">
+		<header
+			className={cn(
+				"bg-background flex items-center justify-between gap-2 border-b border-border/60 pt-0.5",
+				isCompact ? "h-12 px-2" : "h-[3.4rem] px-3",
+			)}
+		>
+			<div className="flex min-w-0 items-center gap-2">
 				<ProjectDropdown />
-				<EditableProjectName />
+				<EditableProjectName compact={isCompact} />
 			</div>
-			<nav className="flex items-center gap-2.5">
+			{/* 窄屏只留图标：文字置 0 号字保留无障碍名称，按钮仍可点（title 提供提示） */}
+			<nav
+				className={cn(
+					"flex shrink-0 items-center",
+					isCompact
+						? "gap-1 [&_button]:gap-0 [&_button]:px-2 [&_button]:text-[0px]"
+						: "gap-2.5",
+				)}
+			>
 				<ExportProjectButton />
 				<CloudBackupButton />
 				<ExportButton />
@@ -285,7 +300,7 @@ function ProjectDropdown() {
 	);
 }
 
-function EditableProjectName() {
+function EditableProjectName({ compact = false }: { compact?: boolean }) {
 	const editor = useEditor();
 	const activeProject = useEditor((e) => e.project.getActiveOrNull());
 	const [isEditing, setIsEditing] = useState(false);
@@ -357,6 +372,7 @@ function EditableProjectName() {
 			style={{ fieldSizing: "content" }}
 			className={cn(
 				"text-[0.9rem] font-medium h-8 px-2 py-1 rounded-sm bg-transparent outline-none cursor-pointer hover:bg-accent hover:text-accent-foreground transition-all",
+				compact && "max-w-[40vw] truncate",
 				isEditing && "ring-1 ring-ring cursor-text hover:bg-transparent",
 			)}
 		/>

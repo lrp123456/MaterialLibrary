@@ -13,13 +13,13 @@ interface TimelineTrackContentProps {
 	zoomLevel: number;
 	dragView: ElementDragView;
 	onResizeStart: (params: {
-		event: React.MouseEvent;
+		event: React.PointerEvent;
 		element: TimelineElementType;
 		track: TimelineTrack;
 		side: "left" | "right";
 	}) => void;
-	onElementMouseDown: (params: {
-		event: React.MouseEvent;
+	onElementPointerDown: (params: {
+		event: React.PointerEvent;
 		element: TimelineElementType;
 		track: TimelineTrack;
 	}) => void;
@@ -28,8 +28,8 @@ interface TimelineTrackContentProps {
 		element: TimelineElementType;
 		track: TimelineTrack;
 	}) => void;
-	onTrackMouseDown?: (event: React.MouseEvent) => void;
-	onTrackMouseUp?: (event: React.MouseEvent) => void;
+	onTrackMouseDown?: (event: React.PointerEvent) => void;
+	onTrackMouseUp?: (event: React.PointerEvent) => void;
 	shouldIgnoreClick?: () => boolean;
 	targetElementId?: string | null;
 }
@@ -39,7 +39,7 @@ export function TimelineTrackContent({
 	zoomLevel,
 	dragView,
 	onResizeStart,
-	onElementMouseDown,
+	onElementPointerDown,
 	onElementClick,
 	onTrackMouseDown,
 	onTrackMouseUp,
@@ -52,27 +52,28 @@ export function TimelineTrackContent({
 		<div className="relative size-full">
 			<button
 				type="button"
-				className="absolute inset-0 m-0 size-full appearance-none border-0 bg-transparent p-0"
+				className="absolute inset-0 m-0 size-full appearance-none border-0 bg-transparent p-0 touch-pan-y"
 				aria-label={`Select ${track.name} track`}
-				onMouseUp={(event) => {
+				onPointerUp={(event) => {
 					if (shouldIgnoreClick?.()) return;
 					onTrackMouseUp?.(event);
 				}}
-				onMouseDown={(event) => {
-					event.preventDefault();
+				onPointerDown={(event) => {
+					// 触屏不能吞掉默认行为，否则随后的 click 可能不派发，点空白处 seek 就失效了
+					if (event.pointerType === "mouse") event.preventDefault();
 					onTrackMouseDown?.(event);
 				}}
 			/>
 			{/* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- spatial gesture surface; the wrapping <button> handles keyboard track selection, this <div> only forwards background clicks for box-select / deselect. */}
 			<div
-				className="relative h-full min-w-full"
+				className="relative h-full min-w-full touch-pan-y"
 				style={{ zIndex: TIMELINE_LAYERS.trackContent }}
-				onMouseUp={(event) => {
+				onPointerUp={(event) => {
 					if (event.target !== event.currentTarget) return;
 					if (shouldIgnoreClick?.()) return;
 					onTrackMouseUp?.(event);
 				}}
-				onMouseDown={(event) => {
+				onPointerDown={(event) => {
 					if (event.target !== event.currentTarget) return;
 					event.preventDefault();
 					onTrackMouseDown?.(event);
@@ -97,8 +98,8 @@ export function TimelineTrackContent({
 								onResizeStart={({ event, element, side }) =>
 									onResizeStart({ event, element, track, side })
 								}
-								onElementMouseDown={({ event, element }) =>
-									onElementMouseDown({ event, element, track })
+								onElementPointerDown={({ event, element }) =>
+									onElementPointerDown({ event, element, track })
 								}
 								onElementClick={({ event, element }) =>
 									onElementClick({ event, element, track })
