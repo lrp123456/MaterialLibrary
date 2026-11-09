@@ -475,6 +475,19 @@ export function registerGeneratedAsset(body) {
   return postJson('/api/assets/from-generation', body);
 }
 
+export async function superResolveLocalVideo(previewUrl, vendorUrl) {
+  const res = await authFetch('/api/video/super-resolve-local', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ previewUrl, vendorUrl: vendorUrl || '' })
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok && !json.modelVideoUrl && json.ok !== false) {
+    throw new Error(json.error || `超分失败 ${res.status}`);
+  }
+  return json;
+}
+
 /**
  * 触发单张素材的画幅重构（默认 9:16 + 3:4）。
  *
@@ -713,16 +726,7 @@ export async function generateAiAudio(params) {
 }
 
 export async function generateAiVideo(params) {
-  const res = await authFetch('/api/gen/videos', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params)
-  });
-  const json = await res.json();
-  if (!res.ok || json.error) {
-    throw new Error(json.error || `视频生成请求失败: HTTP ${res.status}`);
-  }
-  return json.data || json;
+  return submitGenerationJob('video', params);
 }
 
 /**
@@ -782,6 +786,43 @@ export async function saveChatMessage(payload) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
+  });
+  return await res.json();
+}
+
+/**
+ * 最近使用的素材（跨对话共享，服务端按用户保留最近 50 条）
+ * 返回 { current: [...本对话], others: [...其他对话] }
+ */
+export async function fetchRecentRefs(sessionId = '', limit = 20) {
+  const qs = new URLSearchParams();
+  if (sessionId) qs.set('sessionId', sessionId);
+  qs.set('limit', String(limit));
+  const res = await authFetch(`/api/studio/recent-refs?${qs.toString()}`);
+  if (!res.ok) return { current: [], others: [] };
+  const json = await res.json();
+  return json.data || { current: [], others: [] };
+}
+
+/** 上报「刚用过/刚生成」的素材；失败静默（不能因为记流水账打断创作） */
+export async function pushRecentRefs(sessionId, items) {
+  if (!Array.isArray(items) || !items.length) return { inserted: 0 };
+  const res = await authFetch('/api/studio/recent-refs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId, items })
+  });
+  if (!res.ok) return { inserted: 0 };
+  const json = await res.json();
+  return json.data || { inserted: 0 };
+}
+
+/** 只更新会话参数快照/标题，不动 updated_at（拖参数条不该把会话顶到列表最前） */
+export async function patchChatSession(sessionId, payload) {
+  const res = await authFetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {})
   });
   return await res.json();
 }
@@ -1084,6 +1125,18 @@ export async function listGenJobs(sessionId) {
   return json;
 }
 
+export async function cancelGenJob(jobId) {
+  const res = await authFetch(`/api/gen/jobs/${encodeURIComponent(jobId)}/cancel`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.error) {
+    throw new Error(json.error || `取消任务失败: HTTP ${res.status}`);
+  }
+  return json;
+}
+
 /** 等待任务完成：以轮询为准（不依赖 SSE 事件名匹配），网络抖动不中断。 */
 function waitForGenJob(jobId, { timeoutMs = 15 * 60 * 1000, intervalMs = 2000 } = {}) {
   return new Promise((resolve, reject) => {
@@ -1101,7 +1154,11 @@ function waitForGenJob(jobId, { timeoutMs = 15 * 60 * 1000, intervalMs = 2000 } 
       if (!job || settled) return;
       if (job.status === 'succeeded') {
         finish(resolve, job.result || { files: [] });
-      } else if (job.status === 'failed' || job.status === 'cancelled') {
+      } else if (job.status === 'cancelled') {
+        const err = new Error('生成任务已取消');
+        err.isCancelled = true;
+        finish(reject, err);
+      } else if (job.status === 'failed') {
         const detail = job.error || {};
         const err = new Error(detail.message || detail.error || `生成任务${job.status}`);
         err.upstreamStatus = detail.upstreamStatus || detail.status;
@@ -1127,7 +1184,7 @@ function waitForGenJob(jobId, { timeoutMs = 15 * 60 * 1000, intervalMs = 2000 } 
   });
 }
 
-/** 入队 + 等待，返回形状与旧同步 /gen/images 完全一致。 */
+/** 入队 + 等待，返回 { result, jobId }：jobId 用于和 worker 落库共用同一个消息 id。 */
 export async function submitGenerationJob(modality, params) {
   const sessionId = params.sessionId || 'default_session';
   const body = {
@@ -1139,7 +1196,14 @@ export async function submitGenerationJob(modality, params) {
   };
   const json = await enqueueGenJob(body);
   if (!json.jobId) throw new Error('生成任务入队失败：未返回 jobId');
-  return waitForGenJob(json.jobId);
+  try {
+    const result = await waitForGenJob(json.jobId);
+    return { result, jobId: json.jobId };
+  } catch (err) {
+    // 入队已成功：把 jobId 带出去，调用方据此认定 worker 已落库，不再重复写一条失败消息
+    if (err && !err.jobId) err.jobId = json.jobId;
+    throw err;
+  }
 }
 
 // ===== 素材库图片替换（覆盖但留历史版本，可一键还原）=====

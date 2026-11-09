@@ -184,6 +184,8 @@ function handleLoginSuccess(user) {
 }
 
 function handleLogout() {
+  // 先清本地草稿再 logout：logout 之后 getCurrentUser() 已经空了，带用户后缀的键就删不掉
+  resetStudioSession();
   logout();
   currentUser.value = null;
   sessionTick.value += 1;
@@ -246,7 +248,11 @@ async function copyCrashError() {
 
 function resetStudioSession() {
   try {
-    localStorage.removeItem('ml_studio_persistent_draft_v1');
+    // 按前缀清：草稿/活动会话/参数快照现在都带用户后缀（旧代码只删了个不存在的键，等于没删）
+    for (let i = localStorage.length - 1; i >= 0; i -= 1) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('ml_studio_')) localStorage.removeItem(key);
+    }
     sessionStorage.clear();
   } catch {}
   studioPayload.value = null;

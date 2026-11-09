@@ -226,149 +226,52 @@
         </div>
       </div>
 
-      <!-- 设置模块 1：AI 推理模型网关与火山方舟配置 -->
+      <!-- 设置模块 1：系统基础设施与算力治理中枢 (只读探针 + 引导至 30001 服务端控制台) -->
       <div class="p-6 rounded-2xl bg-studio-900 border border-studio-700 space-y-4 shadow-sm">
-        <div class="flex items-center justify-between">
-          <h3 class="text-sm font-bold text-white flex items-center gap-2 uppercase tracking-wide font-mono">
-            <StudioIcon name="sparkles" :size="16" class="text-studio-accent" />
-            AI 模型引擎与火山方舟密钥
-          </h3>
-          <span class="text-xs font-mono" :class="runtimeError ? 'text-red-400' : 'text-slate-400'">
-            {{ runtimeLoading ? '读取中…' : runtimeError ? runtimeError : '已加载生效配置' }}
-          </span>
-        </div>
-        <div class="grid grid-cols-2 gap-4 text-xs">
+        <div class="flex items-center justify-between flex-wrap gap-3">
           <div>
-            <label class="text-slate-300 font-semibold block mb-1.5">主推理模型（LiteLLM 模型名）</label>
-            <input
-              v-model="runtimeForm.litellm_model"
-              type="text"
-              placeholder="doubao-seed-2-0-lite-260428"
-              class="w-full bg-studio-950 border border-studio-700 rounded-lg p-2.5 text-white font-mono text-xs font-medium outline-none focus:border-studio-accent"
-            />
+            <h3 class="text-sm font-bold text-white flex items-center gap-2 uppercase tracking-wide font-mono">
+              <StudioIcon name="sparkles" :size="16" class="text-studio-accent" />
+              AI 算力引擎与基础设施状态
+            </h3>
+            <p class="text-xs text-slate-400 mt-1">模型供应商密钥、网络代理、NAS 路径与任务治理已统一收敛至【服务端控制台 (30001)】</p>
           </div>
-          <div>
-            <label class="text-slate-300 font-semibold block mb-1.5">LiteLLM 网关地址</label>
-            <input
-              v-model="runtimeForm.litellm_base_url"
-              type="text"
-              placeholder="http://127.0.0.1:4000"
-              class="w-full bg-studio-950 border border-studio-700 rounded-lg p-2.5 text-white font-mono text-xs font-medium outline-none focus:border-studio-accent"
-            />
-          </div>
-          <div class="col-span-2">
-            <label class="text-slate-300 font-semibold block mb-1.5">火山方舟 API Key（服务端仅回显末 4 位）</label>
-            <div class="flex space-x-2.5">
-              <input
-                :value="arkKeyMasked"
-                disabled
-                class="flex-1 bg-studio-950 border border-studio-700 rounded-lg p-2.5 text-white font-mono text-xs font-medium opacity-80"
-              />
-              <input
-                v-model="arkKeyDraft"
-                type="password"
-                placeholder="输入新 ARK_API_KEY"
-                class="flex-1 bg-studio-950 border border-studio-700 rounded-lg p-2.5 text-white font-mono text-xs font-medium outline-none focus:border-studio-accent"
-              />
-              <button
-                @click="updateArkKey"
-                :disabled="keySaving || !arkKeyDraft.trim()"
-                class="px-4 py-2.5 rounded-lg bg-studio-800 hover:bg-studio-750 text-white text-xs font-bold border border-studio-700 cursor-pointer disabled:opacity-50"
-              >{{ keySaving ? '更新中…' : '更新密钥' }}</button>
-            </div>
-            <span class="text-xs text-slate-400 mt-1.5 block font-medium">
-              密钥写入服务端 .env 并热更新内存，不落 SQLite、不在页面回显明文。
-            </span>
-          </div>
+          <a
+            :href="serverAdminUrl"
+            target="_blank"
+            class="px-4 py-2 rounded-xl bg-studio-accent hover:brightness-110 text-white font-bold text-xs flex items-center gap-1.5 shadow transition-all cursor-pointer"
+          >
+            <StudioIcon name="settings" :size="14" />
+            <span>打开服务端控制台 (30001)</span>
+            <span class="text-xs">↗</span>
+          </a>
         </div>
-        <div class="flex justify-end">
-          <button
-            @click="saveRuntime"
-            :disabled="runtimeSaving || runtimeLoading"
-            class="px-5 py-2.5 rounded-xl bg-studio-accent text-white font-bold text-xs shadow cursor-pointer disabled:opacity-50"
-          >{{ runtimeSaving ? '保存中…' : '保存运行参数' }}</button>
-        </div>
-      </div>
 
-      <!-- 设置模块 1.2：New API 聚合网关 -->
-      <div class="p-6 rounded-2xl bg-studio-900 border border-studio-700 space-y-4 shadow-sm">
-        <div class="flex items-center justify-between">
-          <h3 class="text-sm font-bold text-white flex items-center gap-2 uppercase tracking-wide font-mono">
-            <StudioIcon name="sparkles" :size="16" class="text-studio-accent" />
-            New API 聚合网关（Gemini 4 / Gemini 3.1 图像）
-          </h3>
-          <span class="text-xs font-mono" :class="newapiError ? 'text-red-400' : 'text-slate-400'">
-            {{ newapiLoading ? '读取中…' : newapiError || (newapiCount ? `${newapiCount} 个模型` : '未检测') }}
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
+          <div class="p-3 rounded-xl bg-studio-950 border border-studio-700">
+            <div class="text-slate-400 mb-1">主推理模型</div>
+            <div class="text-white font-semibold truncate">{{ runtimeForm.litellm_model || '默认' }}</div>
+          </div>
+          <div class="p-3 rounded-xl bg-studio-950 border border-studio-700">
+            <div class="text-slate-400 mb-1">火山方舟 (Ark)</div>
+            <div class="text-emerald-400 font-semibold">{{ arkKeyMasked && arkKeyMasked !== '未配置' ? '已接入' : '未就绪' }}</div>
+          </div>
+          <div class="p-3 rounded-xl bg-studio-950 border border-studio-700">
+            <div class="text-slate-400 mb-1">New API 网关</div>
+            <div class="text-emerald-400 font-semibold">{{ newapiCount ? `${newapiCount} 个模型可用` : (newapiKeyMasked && newapiKeyMasked !== '未配置' ? '已接入' : '未就绪') }}</div>
+          </div>
+          <div class="p-3 rounded-xl bg-studio-950 border border-studio-700">
+            <div class="text-slate-400 mb-1">NAS 存储挂载</div>
+            <div class="text-slate-200 font-semibold truncate" :title="runtimeForm.nas_dir">{{ runtimeForm.nas_dir || '本地' }}</div>
+          </div>
+        </div>
+
+        <div class="p-3 rounded-xl bg-studio-950/60 border border-studio-800 flex items-center justify-between flex-wrap gap-2 text-xs text-slate-400">
+          <span class="flex items-center gap-2">
+            <StudioIcon name="info" :size="14" class="text-studio-accent shrink-0" />
+            <span>需要更新 API Key、调整并发数或管理用户？请直接在服务端控制台进行安全维护。</span>
           </span>
-        </div>
-        <div class="grid grid-cols-2 gap-4 text-xs">
-          <div class="col-span-2">
-            <label class="text-slate-300 font-semibold block mb-1.5">NEWAPI_API_KEY（服务端保存，不回显明文）</label>
-            <div class="flex space-x-2.5">
-              <input
-                :value="newapiKeyMasked"
-                disabled
-                class="flex-1 bg-studio-950 border border-studio-700 rounded-lg p-2.5 text-white font-mono text-xs font-medium opacity-80"
-              />
-              <input
-                v-model="newapiKeyDraft"
-                type="password"
-                placeholder="输入新 New API Key"
-                class="flex-1 bg-studio-950 border border-studio-700 rounded-lg p-2.5 text-white font-mono text-xs font-medium outline-none focus:border-studio-accent"
-              />
-              <button
-                @click="updateNewapiKey"
-                :disabled="newapiSaving || !newapiKeyDraft.trim()"
-                class="px-4 py-2.5 rounded-lg bg-studio-800 hover:bg-studio-750 text-white text-xs font-bold border border-studio-700 cursor-pointer disabled:opacity-50"
-              >{{ newapiSaving ? '更新中…' : '更新密钥' }}</button>
-              <button
-                @click="loadNewapiModels"
-                :disabled="newapiLoading"
-                class="px-4 py-2.5 rounded-lg bg-studio-800 hover:bg-studio-750 text-white text-xs font-bold border border-studio-700 cursor-pointer disabled:opacity-50"
-              >测试/拉取模型</button>
-            </div>
-          </div>
-          <div v-if="newapiGeminiModels.length" class="col-span-2">
-            <label class="text-slate-300 font-semibold block mb-1.5">已接通的 Gemini 图像模型</label>
-            <div class="flex flex-wrap gap-1.5">
-              <span v-for="m in newapiGeminiModels" :key="m" class="px-2 py-1 rounded-lg bg-studio-950 border border-studio-700 text-slate-200 font-mono text-[11px]">{{ m }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-
-      <!-- 设置模块 2：灰度发布与应用更新管理 (白名单控制) -->
-      <div class="p-6 rounded-2xl bg-studio-900 border border-studio-700 space-y-4 shadow-sm">
-        <div class="flex items-center justify-between">
-          <h3 class="text-sm font-bold text-white flex items-center gap-2 uppercase tracking-wide font-mono">
-            <StudioIcon name="cloud" :size="16" class="text-cyan-400" />
-            App 灰度更新通道与设备白名单
-          </h3>
-          <span class="text-xs text-amber-300 bg-amber-400/15 px-2.5 py-1 rounded-md border border-amber-400/40 font-mono font-bold">
-            {{ latestVersionText }}
-          </span>
-        </div>
-        <div class="space-y-3.5 text-xs">
-          <div>
-            <label class="text-slate-300 font-semibold block mb-1.5">灰度测试目标机器号 / 设备白名单（当前生效值）</label>
-            <textarea
-              rows="2"
-              readonly
-              :value="targetDevicesText"
-              placeholder="尚未配置灰度白名单"
-              class="w-full bg-studio-950 border border-studio-700 rounded-lg p-3 text-white font-mono text-xs outline-none opacity-90"
-            ></textarea>
-            <span class="text-xs text-slate-400 mt-1.5 block font-medium">
-              白名单随灰度发布（releaseMode=canary + targetDevices）写入清单，本页只读展示；未入白名单的设备即使触发更新检查也收不到灰度包。
-            </span>
-          </div>
-          <div class="flex items-center justify-between font-mono">
-            <span :class="grayscale.active ? 'text-emerald-400 font-bold' : 'text-slate-400'">
-              灰度通道：{{ grayscale.active ? '进行中' : '未启用' }}
-            </span>
-            <span v-if="canaryVersionText" class="text-slate-300">灰度包：{{ canaryVersionText }}</span>
-          </div>
+          <span class="font-mono text-slate-500 text-[11px]">{{ serverLabelText || 'localhost:30001' }}</span>
         </div>
       </div>
 
@@ -441,11 +344,12 @@
           <div>
             <label class="text-slate-300 font-semibold block mb-1.5">默认视频清晰度</label>
             <select v-model="studioDefaultsForm.params.video_resolution" class="w-full bg-studio-950 text-white font-bold border border-studio-700 rounded-lg px-2.5 py-1.5 outline-none">
-              <option value="720p">720p (原生)</option>
-              <option value="480p_sr2x">480p → 720p (2x超分)</option>
-              <option value="1080p">1080p (原生)</option>
-              <option value="720p_sr2x">720p → 1080p (2x超分)</option>
-              <option value="480p">480p (原生极速)</option>
+              <option value="480p">480p</option>
+              <option value="480px2（超分）">480px2（超分）</option>
+              <option value="720p">720p</option>
+              <option value="720px2（超分）">720px2（超分）</option>
+              <option value="1080p">1080p</option>
+              <option value="1080px2（超分）">1080px2（超分）</option>
             </select>
           </div>
         </div>
@@ -574,13 +478,8 @@
             <span class="text-white font-semibold break-all">{{ sqlitePathText }}</span>
           </div>
           <div class="p-3 rounded-xl bg-studio-950 border border-studio-700">
-            <span class="text-slate-400 text-xs block mb-1.5">NAS 存储挂载点</span>
-            <input
-              v-model="runtimeForm.nas_dir"
-              type="text"
-              placeholder="/mnt/synology/material"
-              class="w-full bg-studio-900 border border-studio-700 rounded-md p-2 text-white font-mono text-xs outline-none focus:border-studio-accent"
-            />
+            <span class="text-slate-400 text-xs block mb-1">NAS 存储挂载点</span>
+            <span class="text-white font-semibold break-all">{{ runtimeForm.nas_dir || '未配置' }}</span>
           </div>
         </div>
         <span class="text-xs text-slate-400 block font-medium">
@@ -818,6 +717,11 @@ const httpFallbackUrl = computed(() => {
   if (typeof window === 'undefined') return '';
   return `http://${window.location.hostname}:30002/?keep-http=1`;
 });
+// 服务端控制台（旧管理台）由 30001 根路径托管，与工作台 30002 同机不同端口
+const serverAdminUrl = computed(() => {
+  if (typeof window === 'undefined') return 'http://localhost:30001/';
+  return `http://${window.location.hostname}:30001/`;
+});
 const selectedOsGuide = ref('windows');
 const copiedCaUrl = ref(false);
 
@@ -910,7 +814,7 @@ const studioDefaultsForm = reactive({
   },
   params: {
     ratio: '9:16',
-    video_resolution: '720p',
+    video_resolution: '720px2（超分）',
     image_size: '2K',
     video_duration: 5,
   },

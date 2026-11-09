@@ -17,7 +17,7 @@ export const FALLBACK_PARAMS = Object.freeze({
   ratio: '9:16',
   size: '2K',
   duration: 5,
-  video_resolution: '720p',
+  video_resolution: '720px2（超分）',
   quality: null,
   seed: null
 });

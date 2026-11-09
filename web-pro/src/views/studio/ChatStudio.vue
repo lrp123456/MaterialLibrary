@@ -277,20 +277,20 @@
                 </span>
                 <span class="flex items-center gap-2">
                   <span v-if="!msg.isError && !msg.isGenerating">
-                    {{ msg.modality === 'video' ? `时长: ${msg.duration || '5s'} · 分辨率: ${msg.resolution || '1080p'}` : (msg.modality === 'music' ? `时长: ${msg.duration || '30s'} · 320kbps` : [msg.duration ? `耗时: ${msg.duration}` : '', msg.resolution ? `分辨率: ${msg.resolution}` : ''].filter(Boolean).join(' · ')) }}
+                    {{ msg.modality === 'video' ? `时长: ${msg.duration || '5s'} · 分辨率: ${displayResolution(msg.resolution, msg) || '—'}` : (msg.modality === 'music' ? `时长: ${msg.duration || '30s'} · 320kbps` : [msg.duration ? `耗时: ${msg.duration}` : '', displayResolution(msg.resolution, msg) ? `分辨率: ${displayResolution(msg.resolution, msg)}` : ''].filter(Boolean).join(' · ')) }}
                   </span>
                   <span v-else-if="msg.isGenerating" class="flex items-center gap-1.5 text-studio-cyan font-bold font-mono">
                     <span class="inline-block w-2 h-2 rounded-full bg-studio-cyan animate-pulse"></span>
                     <span>渲染中 · {{ formatTimer(getElapsedSec(msg)) }}</span>
                   </span>
                   <button
-                    v-if="!msg.isError && !msg.isGenerating && msg.content"
+                    v-if="!msg.isError && !msg.isGenerating && msg.modality === 'video' && (msg.videoUrl || msg.modelVideoUrl)"
                     type="button"
                     class="msg-copy-all"
-                    title="复制这条回复的 Markdown 原文"
-                    @click="copyText(msg.content, $event.currentTarget)"
+                    title="在大预览里看模型原片和超分后"
+                    @click="openVideoCompare(msg)"
                   >
-                    复制全文
+                    查看对比
                   </button>
                 </span>
               </div>
@@ -333,10 +333,21 @@
                       <span class="w-1.5 h-1.5 rounded-full bg-studio-cyan animate-pulse"></span>
                       <span>AI {{ msg.modality === 'video' ? '空间动态渲染中' : '空间画质扩散中' }}</span>
                     </span>
-                    <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-studio-900/90 border border-studio-700 text-slate-300 shadow-sm backdrop-blur">
-                      <StudioIcon name="history" :size="11" class="text-studio-accent" />
-                      <span>已耗时 {{ formatTimer(getElapsedSec(msg)) }}</span>
-                    </span>
+                    <div class="flex items-center gap-2">
+                      <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-studio-900/90 border border-studio-700 text-slate-300 shadow-sm backdrop-blur">
+                        <StudioIcon name="history" :size="11" class="text-studio-accent" />
+                        <span>已耗时 {{ formatTimer(getElapsedSec(msg)) }}</span>
+                      </span>
+                      <button
+                        type="button"
+                        class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-red-950/80 border border-red-800/60 text-red-300 hover:bg-red-900 hover:text-white transition-all text-[11px] shadow-sm backdrop-blur cursor-pointer"
+                        title="取消当前生成任务"
+                        @click.stop="handleCancelGeneration(msg)"
+                      >
+                        <StudioIcon name="x" :size="11" />
+                        <span>取消</span>
+                      </button>
+                    </div>
                   </div>
 
                   <!-- 中央核心动效与阶段推进提示 -->
@@ -358,7 +369,7 @@
                         <span>{{ getGeneratingStageText(msg) }}</span>
                       </div>
                       <div class="text-[11px] text-slate-400 font-mono">
-                        画幅 {{ msg.ratio || '16:9' }} · {{ msg.resolution || '高清' }} · {{ msg.model || 'Seedream 5.0' }}
+                        画幅 {{ msg.ratio || '16:9' }}<template v-if="msg.resolution"> · {{ msg.resolution }}</template> · {{ msg.model || 'Seedream 5.0' }}
                       </div>
                     </div>
 
@@ -377,77 +388,28 @@
                 </div>
               </div>
 
-              <!-- 情况 A：生图产物展示 (图片大图 + 存入创作库 + 精准重绘) -->
-              <div v-else-if="msg.imageUrl && msg.modality === 'image'" class="relative group rounded-xl overflow-hidden border border-studio-750 bg-studio-950">
-                <img :src="resultImageSrc(msg)" @error="onResultImgError(msg)" @load="onResultImgLoad(msg)" @click="openMediaPreview(resultImageSrc(msg), 'image')" class="w-full max-h-[460px] object-contain cursor-zoom-in hover:brightness-105 transition-all" title="点击查看高清大图" />
-                <!-- 破图不再只是浏览器那个小图标：把真实失败原因摊开，并给一次重签重试 -->
-                <div v-if="msg.imgFailed" class="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-studio-950/88 px-4 text-center">
-                  <p v-if="msg.imgAuth" class="text-xs text-amber-300 leading-relaxed">登录已过期，服务器不认当前会话。重新登录后这张图会自动出来。</p>
-                  <p v-else class="text-xs text-amber-300 leading-relaxed">这张产物取不到了{{ msg.imgErr ? `：${msg.imgErr}` : '（临时文件被清理，或服务器不可达）' }}。</p>
-                  <p class="text-[10px] font-mono text-slate-500 break-all">{{ resultImageSrc(msg).replace(/token=[^&]*/, 'token=***') }}</p>
-                  <button v-if="msg.imgAuth" type="button" class="text-xs font-bold text-studio-cyan underline cursor-pointer" @click="reportUnauthorized()">重新登录</button>
-                  <button v-else type="button" class="text-xs font-bold text-studio-cyan underline cursor-pointer" @click="retryResultImage(msg)">重新加载</button>
+              <!-- 情况 A：生图产物。按钮在图下方，避免被大图裁掉。 -->
+              <div v-else-if="msg.imageUrl && msg.modality === 'image'" class="space-y-2">
+                <div class="relative rounded-xl overflow-hidden border border-studio-750 bg-studio-950">
+                  <img :src="resultImageSrc(msg)" @error="onResultImgError(msg)" @load="onResultImgLoad(msg)" @click="openMediaPreview(resultImageSrc(msg), 'image')" class="w-full max-h-[460px] object-contain cursor-zoom-in hover:brightness-105 transition-all" title="点击查看高清大图" />
+                  <div v-if="msg.imgFailed" class="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-studio-950/88 px-4 text-center">
+                    <p v-if="msg.imgAuth" class="text-xs text-amber-300 leading-relaxed">登录已过期，服务器不认当前会话。重新登录后这张图会自动出来。</p>
+                    <p v-else class="text-xs text-amber-300 leading-relaxed">这张产物取不到了{{ msg.imgErr ? `：${msg.imgErr}` : '（临时文件被清理，或服务器不可达）' }}。</p>
+                    <button v-if="msg.imgAuth" type="button" class="text-xs font-bold text-studio-cyan underline cursor-pointer" @click="reportUnauthorized()">重新登录</button>
+                    <button v-else type="button" class="text-xs font-bold text-studio-cyan underline cursor-pointer" @click="retryResultImage(msg)">重新加载</button>
+                  </div>
                 </div>
-
-                <!-- 悬浮功能条 -->
-                <div class="absolute bottom-3 right-3 flex items-center space-x-1.5 bg-studio-950/92 backdrop-blur-md px-2.5 py-1.5 rounded-xl border border-studio-700/80 shadow-2xl">
-                  <button
-                    type="button"
-                    @click="editRound(msg)"
-                    class="flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-studio-850 hover:bg-studio-800 text-slate-200 hover:text-white text-xs font-bold transition-all cursor-pointer shadow-xs border border-studio-750"
-                    title="把这一轮的提示词、参考图、选区和参数恢复到输入区"
-                  >
-                    <StudioIcon name="edit" :size="13" />
-                    <span>编辑</span>
-                  </button>
-                  <button
-                    type="button"
-                    @click="addMediaToViewer(msg)"
-                    class="flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-studio-850 hover:bg-studio-800 text-studio-accent hover:text-blue-300 text-xs font-bold transition-all cursor-pointer shadow-xs border border-studio-750"
-                    title="将本图放到看图区展开编辑"
-                  >
-                    <StudioIcon name="plus" :size="13" />
-                    <span>放到看图区</span>
-                  </button>
-                  <button
-                    type="button"
-                    @click="openSaveToLibraryModal(msg)"
-                    class="flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-studio-850 hover:bg-amber-500/20 text-amber-300 hover:text-amber-200 border border-amber-500/40 text-xs font-bold transition-all cursor-pointer shadow-xs"
-                    title="收藏为创作配方"
-                  >
-                    <StudioIcon name="star" :size="13" />
-                    <span>⭐ 收藏为配方</span>
-                  </button>
-                  <button
-                    type="button"
-                    :disabled="msg.savingToLibrary || msg.librarySaved"
-                    @click="saveResultToLibrary(msg)"
-                    class="flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-studio-850 hover:bg-emerald-500/20 text-emerald-300 hover:text-emerald-200 border border-emerald-500/40 text-xs font-bold transition-all cursor-pointer shadow-xs disabled:opacity-60 disabled:cursor-default"
-                    :title="msg.librarySaveError || '手动存入素材库（生成结果默认不入库）'"
-                  >
-                    <StudioIcon name="plus" :size="13" />
-                    <span>{{ msg.librarySaved ? '✓ 已入库' : (msg.savingToLibrary ? '存入中…' : '存入素材库') }}</span>
-                  </button>
-                  <button
-                    type="button"
-                    @click="openRetry(msg)"
-                    class="flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-studio-850 hover:bg-studio-800 text-slate-200 hover:text-white border border-studio-750 text-xs font-bold transition-all cursor-pointer shadow-xs"
-                    title="用相同提示词与参数配置重新生成"
-                  >
-                    <StudioIcon name="rotateRight" :size="13" />
-                    <span>重新生成</span>
-                  </button>
-                  <a
-                    :href="resultImageDownloadHref(msg)"
-                    target="_blank"
-                    download
-                    class="flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-studio-850 hover:bg-studio-800 text-slate-200 hover:text-white border border-studio-750 text-xs font-bold transition-all shadow-xs"
-                    title="下载高清原图"
-                  >
-                    <StudioIcon name="download" :size="13" />
-                    <span>⬇️ 下载</span>
-                  </a>
-                </div>
+                <ResultActions
+                  :created="!!msg.creationSaved"
+                  :creating="!!msg.savingCreation"
+                  :saved="!!msg.librarySaved"
+                  :saving="!!msg.savingToLibrary"
+                  :reason="resultBarReason(msg)"
+                  @create="saveResultToCreation(msg)"
+                  @library="saveResultToLibrary(msg)"
+                  @retry="openRetry(msg)"
+                  @reedit="reeditResult(msg)"
+                />
               </div>
               <!-- Seedream 5.0 图层分解 (layer_decomposition) / Lite 组图连拍 交互画布图层栈 -->
               <div
@@ -488,18 +450,19 @@
                   </div>
                 </div>
               </div>
-              <p v-if="msg.imageUrl && msg.modality === 'image'" class="text-xs text-slate-400 leading-relaxed">
-                这一轮产物已自动沉淀到精修素材库。如需复用本轮完整参数与提示词，点击「⭐ 收藏为配方」。
-              </p>
-
               <!-- 情况 B：视频产物展示 (完整高保真 HTML5 视频播放器) -->
-              <div v-else-if="!msg.isError && (msg.videoUrl || msg.modality === 'video')" class="space-y-3">
-                <!-- 缺产物就直说：原先回落到一个与本次生成无关的 Google 示例视频，用户以为「生成成功但打不开」 -->
+              <div v-else-if="!msg.isError && (msg.videoUrl || msg.srStatus || msg.modality === 'video')" class="space-y-2">
                 <div
-                  v-if="!msg.videoUrl"
+                  v-if="msg.srStatus === 'running'"
+                  class="rounded-xl border border-studio-750 bg-studio-950 px-3 py-10 text-center text-xs leading-relaxed text-slate-300"
+                >
+                  超分中，完成后播放
+                </div>
+                <div
+                  v-else-if="!msg.videoUrl"
                   class="rounded-xl border border-studio-750 bg-studio-950 px-3 py-6 text-center text-xs leading-relaxed text-slate-400"
                 >
-                  这一轮没有可播放的视频产物（生成失败、超时或临时文件已清理），请查看上方失败原因后重试。
+                  这一轮没有可播放的视频产物（生成失败、超时或临时文件已清理），请查看下方原因后重试。
                 </div>
                 <div v-else class="rounded-xl overflow-hidden border border-studio-750 bg-black relative group shadow-inner">
                   <video
@@ -511,49 +474,22 @@
                     preload="metadata"
                   ></video>
                 </div>
-
-                <div v-if="msg.videoUrl" class="flex items-center justify-between p-2.5 rounded-xl bg-studio-950 border border-studio-750 text-xs">
-                  <div class="flex items-center space-x-3 text-slate-300">
-                    <span v-if="msg.model" class="flex items-center gap-1 text-studio-indigo font-bold">
-                      <StudioIcon name="film" :size="14" />
-                      <span>{{ msg.model }}</span>
-                    </span>
-                    <span v-if="msg.model && msg.resolution" class="text-slate-500">|</span>
-                    <span v-if="msg.resolution" class="text-studio-cyan font-mono font-bold">{{ msg.resolution }}</span>
-                  </div>
-
-                  <div class="flex items-center space-x-2">
-                    <button
-                      type="button"
-                      @click="captureFrameFromVideo(msg)"
-                      class="px-2.5 py-1 rounded-lg bg-studio-850 hover:bg-studio-800 text-studio-accent font-bold border border-studio-750 flex items-center space-x-1 cursor-pointer"
-                      title="截取视频当前帧并引用为参考图"
-                    >
-                      <StudioIcon name="refresh" :size="13" />
-                      <span>🔄 引用截帧</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      @click="openSaveToLibraryModal(msg)"
-                      class="px-2.5 py-1 rounded-lg bg-studio-850 hover:bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40 flex items-center space-x-1 cursor-pointer"
-                      title="收藏为可复用视频配方"
-                    >
-                      <StudioIcon name="star" :size="13" />
-                      <span>⭐ 收藏为配方</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      @click="downloadGeneratedMedia(msg.videoUrl, videoFileName(msg))"
-                      class="px-3 py-1 rounded-lg bg-studio-accent hover:brightness-110 text-white font-bold shadow flex items-center space-x-1 cursor-pointer"
-                      title="下载高清视频"
-                    >
-                      <StudioIcon name="download" :size="13" />
-                      <span>⬇️ 下载</span>
-                    </button>
-                  </div>
+                <div class="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                  <span v-if="msg.model" class="font-bold text-slate-200">{{ msg.model }}</span>
+                  <span v-if="displayResolution(msg.resolution, msg)" class="font-mono">{{ displayResolution(msg.resolution, msg) }}</span>
                 </div>
+                <ResultActions
+                  :created="!!msg.creationSaved"
+                  :creating="!!msg.savingCreation"
+                  :saved="!!msg.librarySaved"
+                  :saving="!!msg.savingToLibrary"
+                  :save-disabled="msg.srStatus === 'running'"
+                  :reason="resultBarReason(msg)"
+                  @create="saveResultToCreation(msg)"
+                  @library="saveResultToLibrary(msg)"
+                  @retry="openRetry(msg)"
+                  @reedit="reeditResult(msg)"
+                />
               </div>
 
               <!-- 情况 C：音乐产物展示 -->
@@ -567,16 +503,18 @@
                     <span class="text-emerald-400 font-mono text-xs font-bold">{{ msg.duration || '30s' }}</span>
                   </div>
                   <audio :src="authedMediaUrl(msg.audioUrl)" controls class="w-full h-10"></audio>
-                  <div class="flex items-center justify-end space-x-2 pt-1 border-t border-studio-800/80">
-                    <button
-                      @click="openSaveToLibraryModal(msg)"
-                      class="px-2.5 py-1 rounded-lg bg-studio-850 hover:bg-studio-800 text-studio-cyan font-bold border border-studio-750 flex items-center space-x-1 cursor-pointer text-xs"
-                    >
-                      <StudioIcon name="star" :size="13" />
-                      <span>存入创作库</span>
-                    </button>
-                  </div>
                 </div>
+                <ResultActions
+                  :created="!!msg.creationSaved"
+                  :creating="!!msg.savingCreation"
+                  :saved="!!msg.librarySaved"
+                  :saving="!!msg.savingToLibrary"
+                  :reason="resultBarReason(msg)"
+                  @create="saveResultToCreation(msg)"
+                  @library="saveResultToLibrary(msg)"
+                  @retry="openRetry(msg)"
+                  @reedit="reeditResult(msg)"
+                />
               </div>
 
               <!-- 模型替换 / 图片未送达等非致命问题：必须显式告知，不能静默 -->
@@ -617,6 +555,27 @@
                   <button type="button" class="gen-error-retry" @click="openRetry(msg)">
                     <StudioIcon name="refresh" :size="12" />
                     重试
+                  </button>
+                  <button type="button" class="gen-error-edit" @click="editFromError(msg)">
+                    <StudioIcon name="edit" :size="12" />
+                    编辑后再发
+                  </button>
+                </div>
+              </div>
+
+              <!-- 取消卡片：已手动取消提示与一键重新发起 -->
+              <div v-else-if="msg.isCancelled" class="gen-error border-amber-900/40 bg-amber-950/20">
+                <div class="gen-error-head">
+                  <span class="gen-error-icon text-amber-400">
+                    <StudioIcon name="info" :size="15" />
+                  </span>
+                  <span class="gen-error-title text-amber-200">生成已取消</span>
+                </div>
+                <p class="gen-error-body text-slate-300">该任务已手动取消，未消耗进一步算力与时间。</p>
+                <div class="gen-error-actions">
+                  <button type="button" class="gen-error-retry border-amber-800 text-amber-300 hover:bg-amber-900/40" @click="openRetry(msg)">
+                    <StudioIcon name="refresh" :size="12" />
+                    重新发起
                   </button>
                   <button type="button" class="gen-error-edit" @click="editFromError(msg)">
                     <StudioIcon name="edit" :size="12" />
@@ -679,7 +638,7 @@
           </div>
         </div>
 
-        <div v-if="generating && !hasGeneratingPlaceholder" class="flex justify-start">
+        <div v-if="currentGenerating && !hasGeneratingPlaceholder" class="flex justify-start">
           <div class="rounded-xl bg-studio-900 border border-studio-750 px-4 py-3 text-slate-300 text-xs flex items-center gap-2.5 max-w-xl">
             <StudioIcon name="refresh" :size="16" class="animate-spin text-studio-accent shrink-0" />
             <span class="leading-relaxed">{{ generatingHint }}</span>
@@ -1425,7 +1384,7 @@
             <button
               type="button"
               @click="handlePreviewRequest"
-              :disabled="generating || previewLoading"
+              :disabled="currentGenerating || previewLoading"
               class="px-3.5 py-2 rounded-xl border border-studio-700 bg-studio-850 hover:bg-studio-800 text-studio-cyan text-xs font-extrabold flex items-center space-x-1.5 cursor-pointer transition-all disabled:opacity-40 shadow-sm"
               title="审查透传给大模型网关的完整请求与方言报文"
             >
@@ -1436,7 +1395,7 @@
             <!-- 立即生成/发送按钮 -->
             <button
               @click="sendMessage"
-              :disabled="generating"
+              :disabled="currentGenerating"
               class="px-5 py-2 rounded-xl bg-gradient-to-r from-studio-accent to-studio-cyan hover:brightness-110 text-white text-xs font-extrabold flex items-center space-x-2 shadow-lg shadow-studio-accent/25 transition-all disabled:opacity-40 cursor-pointer ml-1"
             >
               <span>{{ getSendButtonText() }}</span>
@@ -1493,6 +1452,8 @@
       context="chat"
       :max-select="10"
       :recent="assetPickerRecent"
+      :recent-current="assetPickerRecent"
+      :recent-others="recentOthers"
       commit-on-version
       upload-enabled
       @close="showAssetSelector = false"
@@ -1556,9 +1517,20 @@
 
         <!-- 媒体主体展示区 -->
         <div class="w-full max-h-[82vh] flex items-center justify-center overflow-hidden rounded-2xl bg-black/60 border border-studio-800 shadow-2xl p-2 relative">
+          <div v-if="previewModal.compare" class="grid w-full grid-cols-2 gap-3">
+            <div class="space-y-1">
+              <p class="text-[11px] font-bold text-slate-300">{{ previewModal.compare.leftLabel }}</p>
+              <video :src="previewModal.compare.leftUrl" controls playsinline class="max-h-[70vh] w-full rounded-lg bg-black"></video>
+            </div>
+            <div class="space-y-1">
+              <p class="text-[11px] font-bold text-slate-300">{{ previewModal.compare.rightLabel }}</p>
+              <video v-if="previewModal.compare.rightUrl" :src="previewModal.compare.rightUrl" controls playsinline class="max-h-[70vh] w-full rounded-lg bg-black"></video>
+              <p v-else class="flex min-h-[180px] items-center justify-center rounded-lg bg-black px-4 text-center text-xs leading-relaxed text-amber-200">{{ previewModal.compare.rightNote }}</p>
+            </div>
+          </div>
           <!-- 图片视图 -->
           <img
-            v-if="previewModal.type === 'image'"
+            v-else-if="previewModal.type === 'image'"
             :src="previewModal.url"
             :style="{ transform: `scale(${previewModal.scale})` }"
             class="max-h-[78vh] max-w-full object-contain transition-transform duration-100 select-none rounded-lg cursor-pointer"
@@ -1568,7 +1540,7 @@
 
           <!-- 视频播放视图 -->
           <video
-            v-else-if="previewModal.type === 'video'"
+            v-else-if="previewModal.type === 'video' && !previewModal.compare"
             :src="previewModal.url"
             controls
             autoplay
@@ -2785,6 +2757,7 @@ import StudioBottomTray from './StudioBottomTray.vue';
 import StudioGlobalDrawer from './StudioGlobalDrawer.vue';
 import StudioEditLayer from './StudioEditLayer.vue';
 import TemplateVideoCover from './TemplateVideoCover.vue';
+import ResultActions from '../../components/ResultActions.vue';
 import RequestPreviewModal from '../../components/RequestPreviewModal.vue';
 import {
   STUDIO_SKILLS_REGISTRY,
@@ -2820,8 +2793,12 @@ import {
   fetchChatSessions,
   fetchChatMessages,
   saveChatMessage,
+  fetchRecentRefs,
+  pushRecentRefs,
+  patchChatSession,
   deleteChatSession,
   registerGeneratedAsset,
+  superResolveLocalVideo,
   moveAssetShelf,
   reportUnauthorized,
   fetchStudioCatalog,
@@ -2829,7 +2806,8 @@ import {
   fetchSuggestPrompts,
   fetchCreationTemplatesIncremental,
   pullExternalCreationTemplates,
-  queryGenTask
+  queryGenTask,
+  cancelGenJob
 } from '../../api';
 
 const props = defineProps({
@@ -2926,14 +2904,61 @@ const combinedRecipePrompt = computed(() =>
 );
 const recipeExpanded = ref(false);
 const hoveredRegionKey = ref(null);
-// 草稿按用户隔离：不同账号不能共用同一份持久化草稿（严格隔离的一部分）。
-const DRAFT_STORAGE_KEY = (() => {
+// 草稿按「用户 + 会话」隔离：以前只有一个用户级单键，任意会话的输入都覆盖同一份，
+// 刷新后把 A 会话的草稿恢复进 B 会话，@图N 编号就整体错位（这也是「引用素材失效」的放大器）。
+const DRAFT_KEY_PREFIX = (() => {
   const u = getCurrentUser();
-  return `ml_studio_persistent_draft_v1_${String(u?.username || u?.id || 'anon')}`;
+  return `ml_studio_draft_v2_${String(u?.username || u?.id || 'anon')}`;
 })();
-
-function saveDraftToStorage() {
+const LEGACY_DRAFT_PREFIX = 'ml_studio_persistent_draft_v1_';
+function draftKey(sid) {
+  return `${DRAFT_KEY_PREFIX}_${sid || 'none'}`;
+}
+// 老版本单键草稿：读到就清掉，等第一次选定会话时迁移过去，避免升级瞬间丢字
+let pendingLegacyDraft = null;
+function readLegacyDraft() {
   try {
+    const u = getCurrentUser();
+    const key = `${LEGACY_DRAFT_PREFIX}${String(u?.username || u?.id || 'anon')}`;
+    const raw = localStorage.getItem(key);
+    localStorage.removeItem(key);
+    localStorage.removeItem(LEGACY_DRAFT_PREFIX);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    return data && typeof data === 'object' ? data : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function applyDraftData(data) {
+  if (!data || typeof data !== 'object') return false;
+  let applied = false;
+  if (Array.isArray(data.referenceTray) && data.referenceTray.length > 0) {
+    referenceTray.value = data.referenceTray;
+    applied = true;
+  }
+  if (data.recipePrompt) {
+    recipePrompt.value = data.recipePrompt;
+    applied = true;
+  }
+  if (data.globalRecipePrompt) {
+    globalRecipePrompt.value = data.globalRecipePrompt;
+    applied = true;
+  }
+  if (data.editorHtml && richEditorRef.value) {
+    richEditorRef.value.innerHTML = data.editorHtml;
+    applied = true;
+  }
+  if (typeof data.selectedImageIndex === 'number') {
+    selectedImageIndex.value = data.selectedImageIndex;
+  }
+  return applied;
+}
+
+function saveDraftToStorage(sid = currentSessionId.value) {
+  try {
+    const key = draftKey(sid);
     const data = {
       recipePrompt: recipePrompt.value || '',
       globalRecipePrompt: globalRecipePrompt.value || '',
@@ -2942,38 +2967,49 @@ function saveDraftToStorage() {
       selectedImageIndex: selectedImageIndex.value || 0,
     };
     if (data.referenceTray.length > 0 || data.recipePrompt || data.globalRecipePrompt || (data.editorHtml && data.editorHtml.trim())) {
-      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(data));
+      localStorage.setItem(key, JSON.stringify(data));
+      pruneDraftStorage(key);
     } else {
-      localStorage.removeItem(DRAFT_STORAGE_KEY);
+      localStorage.removeItem(key);
     }
   } catch (e) {}
 }
 
-function restoreDraftFromStorage() {
+/** 草稿最多留最近 20 个会话，多的按写入顺序淘汰（localStorage 有 5MB 上限，别被图片流撑爆） */
+function pruneDraftStorage(keepKey) {
   try {
-    const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
-    if (!raw) return false;
-    const data = JSON.parse(raw);
-    if (data && (Array.isArray(data.referenceTray) && data.referenceTray.length > 0 || data.recipePrompt || data.globalRecipePrompt || data.editorHtml)) {
-      if (Array.isArray(data.referenceTray) && data.referenceTray.length > 0) {
-        referenceTray.value = data.referenceTray;
-      }
-      if (data.recipePrompt) {
-        recipePrompt.value = data.recipePrompt;
-      }
-      if (data.globalRecipePrompt) {
-        globalRecipePrompt.value = data.globalRecipePrompt;
-      }
-      if (data.editorHtml && richEditorRef.value) {
-        richEditorRef.value.innerHTML = data.editorHtml;
-      }
-      if (typeof data.selectedImageIndex === 'number') {
-        selectedImageIndex.value = data.selectedImageIndex;
-      }
-      return true;
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(`${DRAFT_KEY_PREFIX}_`)) keys.push(k);
+    }
+    if (keys.length <= 20) return;
+    const keep = new Set([keepKey]);
+    for (const k of keys) {
+      if (keys.length - keep.size <= 20) break;
+      if (keep.has(k)) continue;
+      localStorage.removeItem(k);
+      keep.add(k);
     }
   } catch (e) {}
-  return false;
+}
+
+/** 恢复某个会话上次没发出去的输入；老版本单键草稿会在这里被迁到当前会话 */
+function restoreDraftForSession(sid) {
+  let applied = false;
+  try {
+    const raw = localStorage.getItem(draftKey(sid));
+    if (raw) applied = applyDraftData(JSON.parse(raw));
+  } catch (e) {}
+  if (!applied && pendingLegacyDraft) {
+    applied = applyDraftData(pendingLegacyDraft);
+  }
+  if (applied) {
+    pendingLegacyDraft = null;
+    saveDraftToStorage(sid);
+    syncGenModeWithReferenceTray();
+  }
+  return applied;
 }
 
 const sessionDrafts = reactive(new Map());
@@ -4002,6 +4038,12 @@ const currentSessionId = ref((() => {
 })());
 const tplSearch = ref('');
 const generating = ref(false);
+// 当前会话是否在生成。后台队列支持跨会话并行：A 会话渲染时切到 B / 新建会话，
+// 输入区与「立即生成」必须照常可用，不能沿用全局 generating 单例。
+const currentGenerating = computed(() => {
+  const sid = currentSessionId.value;
+  return Boolean(sid && (sessionGeneratingMap.get(sid) || sessionPlaceholderMap.has(sid)));
+});
 const optimizing = ref(false);
 const optimizeUndo = ref(null);
 const showHashMenu = ref(false);
@@ -4208,7 +4250,18 @@ function autoSyncRatioFromImage(url, item = null) {
 const videoSubMode = ref('first_last'); // 'first_last' | 'multi_ref' | 'prompt_only'
 const videoModelKey = ref('seedance2_0');
 const videoDuration = ref('5');
-const videoResolution = ref('720p');
+const videoResolution = ref('720px2（超分）');
+// 旧版会话快照里存的是内部档位名（720p_sr2x），新契约只认 720px2（超分）这类标签，
+// 恢复快照时统一归一化，避免把失效档位写回参数条
+const VIDEO_RES_LEGACY_ALIAS = {
+  '480p_sr2x': '480px2（超分）',
+  '720p_sr2x': '720px2（超分）',
+  '1080p_sr2x': '1080px2（超分）',
+};
+function normalizeVideoResolution(value) {
+  const raw = String(value || '').trim();
+  return VIDEO_RES_LEGACY_ALIAS[raw] || raw;
+}
 
 // 音乐模式专属参数
 const musicType = ref('doubao_bgm_v5');
@@ -4488,7 +4541,30 @@ function currentParamsSnapshot() {
 }
 
 function persistCurrentParamsSnapshot() {
-  if (currentSessionId.value) sessionParamsMap.set(currentSessionId.value, currentParamsSnapshot());
+  const sid = currentSessionId.value;
+  if (!sid) return;
+  const snap = currentParamsSnapshot();
+  sessionParamsMap.set(sid, snap);
+  schedulePersistParams(sid, snap);
+}
+
+let paramsPersistTimer = 0;
+/**
+ * 把参数快照写回 chat_sessions.params_json。
+ * 走 PATCH 而不是 POST：POST 会无条件把 updated_at 顶到最新，等于每次拖参数条都把会话推到列表最前。
+ */
+function schedulePersistParams(sid, snapshot) {
+  if (!sid || !snapshot) return;
+  if (sessionGeneratingMap.get(sid)) return; // 生成中交给 worker 写，避免两个来源打架
+  if (paramsPersistTimer) clearTimeout(paramsPersistTimer);
+  paramsPersistTimer = setTimeout(async () => {
+    paramsPersistTimer = 0;
+    const target = sid;
+    const snap = sessionParamsMap.get(target) || snapshot;
+    try {
+      await patchChatSession(target, { params_json: snap, touch: false });
+    } catch (e) {}
+  }, 1000);
 }
 
 /**
@@ -4505,7 +4581,7 @@ function applyParamsSnapshot(snapshot = {}, { source = 'system' } = {}) {
 
   if (incoming.ratio != null) selectedRatio.value = incoming.ratio;
   if (incoming.size != null) selectedResolution.value = incoming.size;
-  if (incoming.video_resolution != null) videoResolution.value = incoming.video_resolution;
+  if (incoming.video_resolution != null) videoResolution.value = normalizeVideoResolution(incoming.video_resolution);
   if (incoming.duration != null) videoDuration.value = incoming.duration;
   if (incoming.imageModelKey != null) imageModelKey.value = incoming.imageModelKey;
   if (incoming.videoModelKey != null) videoModelKey.value = incoming.videoModelKey;
@@ -4631,9 +4707,107 @@ const currentSchema = computed(() => {
   return null;
 });
 // 共享素材选择器的「最近素材」：本会话最近上传与生成的素材，置顶并标记来源
+// 跨对话的「最近使用」：服务端按用户存最近 50 条，这里分成 current（本对话）/ others（其他对话）
+const recentRefs = ref({ current: [], others: [] });
+let recentLoadedAt = 0;
+let recentPushTimer = 0;
+let recentPushQueue = [];
+const recentBackfilled = new Set();
+let recentPoolSid = '';
+
+/** 服务端存的是去掉 token 的稳定路径，展示/挂载前要重签一次，否则必然 401 */
+function refineRecentItem(item) {
+  const fid = item?.fid || '';
+  const url = fid ? getAssetImageUrl(fid) : resignAssetUrl(item?.url || '');
+  return {
+    ...item,
+    fid,
+    url,
+    name: item?.name || '',
+    kind: item?.kind || 'image',
+    origin: item?.origin || 'upload',
+    mark: item?.origin === 'generated' ? '本次生成' : '对话使用'
+  };
+}
+
+/** 攒 500ms 再上报，避免一次挂 10 张图打 10 个请求 */
+function scheduleRecentPush(items) {
+  const payload = (items || [])
+    .filter((item) => item && (item.fid || (item.url && !item.url.startsWith('blob:'))))
+    .map((item) => ({
+      fid: item.fid || '',
+      url: item.url || '',
+      name: item.name || '',
+      kind: item.kind || 'image',
+      origin: item.origin || 'upload'
+    }));
+  if (!payload.length) return;
+  recentPushQueue.push(...payload);
+  if (recentPushTimer) return;
+  recentPushTimer = setTimeout(async () => {
+    recentPushTimer = 0;
+    const batch = recentPushQueue.splice(0, recentPushQueue.length);
+    const sid = currentSessionId.value;
+    if (!sid || !batch.length) return;
+    try {
+      await pushRecentRefs(sid, batch);
+      recentLoadedAt = 0;
+      await loadRecentRefs({ force: true });
+    } catch (e) {}
+  }, 500);
+}
+
+/**
+ * 拉取「最近使用」。同时用它重建本会话素材池：
+ * 以前 sessionRefPool 是纯内存累加，切到别的对话时只要目标会话有草稿就不清空，
+ * 上一个对话的素材会串进来。
+ */
+async function loadRecentRefs({ force = false } = {}) {
+  const sid = currentSessionId.value;
+  if (!sid) return;
+  const now = Date.now();
+  if (!force && recentLoadedAt && now - recentLoadedAt < 5000) return;
+  try {
+    const data = await fetchRecentRefs(sid, 20);
+    if (sid !== currentSessionId.value) return;
+    recentRefs.value = { current: data.current || [], others: data.others || [] };
+    recentLoadedAt = Date.now();
+    const current = recentRefs.value.current
+      .map((item) => refineRecentItem(item))
+      .filter((item) => item.url);
+    if (current.length) {
+      const fromServer = current.map((item) => ({
+        fid: item.fid, name: item.name, url: item.url, kind: item.kind, tag: '', origin: item.origin
+      }));
+      // 同一个会话内的刷新：保留还没上报完的本地条目（刚挂上就被清掉会显得"素材丢了"）；
+      // 换了会话则整池替换，避免上一个对话的素材串进来。
+      const keepLocal = recentPoolSid === sid
+        ? sessionRefPool.value.filter((local) => !fromServer.some((s) => (local.fid && s.fid === local.fid) || (local.url && s.url === local.url)))
+        : [];
+      sessionRefPool.value = [...fromServer, ...keepLocal];
+    } else if (recentPoolSid === sid && sessionRefPool.value.length && !recentBackfilled.has(sid)) {
+      // 老会话在服务端还没有最近使用记录：把从历史消息里恢复出来的素材补登记一次，
+      // 这样「本对话」栏不会永远是空的（每个会话只补一次）。
+      recentBackfilled.add(sid);
+      scheduleRecentPush(sessionRefPool.value);
+    } else if (recentPoolSid !== sid) {
+      // 换了会话且服务端为空：清空上一会话残留，别把上一个对话的素材补报进当前会话
+      sessionRefPool.value = [];
+    }
+    recentPoolSid = sid;
+  } catch (e) {
+    // 后端未升级时静默降级：仍然用内存池展示
+  }
+}
+
 const assetPickerRecent = computed(() => {
+  const fromServer = (recentRefs.value.current || [])
+    .map((item) => refineRecentItem(item))
+    .filter((item) => item.url);
+  if (fromServer.length) return fromServer;
+  // 兜底（服务端还没回话 / 离线）：用本会话内存池
   const list = [];
-  for (let i = sessionRefPool.value.length - 1; i >= 0 && list.length < 12; i -= 1) {
+  for (let i = sessionRefPool.value.length - 1; i >= 0 && list.length < 20; i -= 1) {
     const item = sessionRefPool.value[i];
     if (!item?.url) continue;
     list.push({
@@ -4643,6 +4817,9 @@ const assetPickerRecent = computed(() => {
   }
   return list;
 });
+const recentOthers = computed(() => (recentRefs.value.others || [])
+  .map((item) => refineRecentItem(item))
+  .filter((item) => item.url));
 const commonFields = computed(() => {
   const schema = currentSchema.value;
   if (!schema) return [];
@@ -4668,7 +4845,7 @@ function optionText(field, value) {
 function schemaDefaults(schema) {
   const out = {};
   const globalRatio = studioDefaults.value?.params?.ratio || '9:16';
-  const globalVideoRes = studioDefaults.value?.params?.video_resolution || '720p_sr2x';
+  const globalVideoRes = studioDefaults.value?.params?.video_resolution || '';
   const globalImageSize = studioDefaults.value?.params?.image_size || '2K';
   for (const field of [...(schema.common || []), ...(schema.advanced || [])]) {
     let def = field.default;
@@ -4677,7 +4854,11 @@ function schemaDefaults(schema) {
         def = globalRatio;
       }
     }
-    if ((field.key === 'resolution' || field.rawKey === 'resolution') && Array.isArray(field.options)) {
+    // 「默认视频清晰度」只对视频生效：图片契约里的 size 才是它的档位，
+    // 以前这里不分模态，导致 720p_sr2x 被当成图片默认值写进 schemaParams 并显示在占位卡上。
+    if (activeModality.value === 'video'
+      && (field.key === 'resolution' || field.rawKey === 'resolution')
+      && Array.isArray(field.options) && globalVideoRes) {
       if (field.options.includes(globalVideoRes)) {
         def = globalVideoRes;
       }
@@ -4742,7 +4923,7 @@ function resetSchemaForModel(options = {}) {
           continue;
         }
       }
-      if (key === 'resolution' && globalVideoRes) {
+      if (key === 'resolution' && globalVideoRes && activeModality.value === 'video') {
         const resField = fieldByKey(schema, 'resolution');
         if (resField && (resField.options || []).includes(globalVideoRes)) {
           if (options.forceResolution || schemaParams.value[key] === '720p') {
@@ -5225,7 +5406,8 @@ const previewModal = ref({
   url: '',
   type: 'image', // 'image' | 'video'
   title: '',
-  scale: 1.0
+  scale: 1.0,
+  compare: null
 });
 
 // 灵感胶囊预设
@@ -5737,10 +5919,15 @@ async function loadStudioCatalog() {
             duration: p.video_duration,
             schemaParams: {
               ...(p.ratio ? { ratio: p.ratio } : {}),
-              ...(p.video_resolution ? { resolution: p.video_resolution } : {})
+              // 分辨率/尺寸按模态分开继承：图片只吃 image_size，视频才吃 video_resolution。
+              // 以前这里无条件写 resolution，图片模态也被塞进 720p_sr2x，占位卡直接把它当分辨率显示。
+              ...(activeModality.value === 'video' && p.video_resolution ? { resolution: p.video_resolution } : {}),
+              ...(activeModality.value === 'image' && p.image_size ? { size: p.image_size } : {})
             }
           }, { source: 'system' });
         }
+        // 最后按当前契约剪一次枝，把跨模态/跨配方残留的键（如图片模式下的 resolution）清掉
+        schemaParams.value = clampParamsToSchema(currentSchema.value, schemaParams.value);
       }
     }
   } catch (e) {
@@ -5749,7 +5936,16 @@ async function loadStudioCatalog() {
   }
 }
 
-watch([recipePrompt, globalRecipePrompt, referenceTray], () => { saveDraftToStorage(); syncGenModeWithReferenceTray(); }, { deep: true });
+let draftSaveTimer = 0;
+watch([recipePrompt, globalRecipePrompt, referenceTray], () => {
+  syncGenModeWithReferenceTray();
+  // 防抖 600ms：托盘和正文一起变的时候只落一次，避免把「新托盘 + 旧正文」的中间态写进草稿
+  if (draftSaveTimer) clearTimeout(draftSaveTimer);
+  draftSaveTimer = setTimeout(() => {
+    draftSaveTimer = 0;
+    saveDraftToStorage(currentSessionId.value);
+  }, 600);
+}, { deep: true });
 
 // 参考托盘变动与选图变动时，自适应智能联动（需在所有依赖状态声明就绪后挂载，避免 TDZ）
 watch(
@@ -5951,14 +6147,29 @@ let stopSseAssetWatch = null;
 
 onMounted(async () => {
   stopSseTaskWatch = onTaskUpdate(null, (task) => {
-    if (task && (task.status === 'success' || task.status === 'completed')) {
-      loadSessions().catch(() => {});
+    if (!task) return;
+    // 生图/视频走 gen_jobs 队列，完成态是 succeeded（不是 success/completed）。
+    // 事件只做两件事：刷新左侧列表；如果完成的是「当前会话」且不是本轮自己在 await，再补拉一次消息。
+    // 绝不在这里切会话——以前一完成就 loadSessions()→selectSession(最新)，界面会被拽到别的对话框。
+    const isGenJob = task.type === 'gen_job' || Boolean(task.jobId);
+    if (isGenJob) {
+      if (task.status !== 'succeeded' && task.status !== 'failed') return;
+      const sid = task.sessionId || '';
+      const mine = Boolean(sid) && sid === currentSessionId.value;
+      loadSessions({ select: 'none' }).catch(() => {});
+      const busyHere = sid && (sessionGeneratingMap.get(sid) || sessionPlaceholderMap.has(sid));
+      if (mine && !busyHere) refreshMessagesFromServer(sid).catch(() => {});
+      return;
+    }
+    if (task.status === 'success' || task.status === 'completed') {
+      loadSessions({ select: 'none' }).catch(() => {});
     }
   });
   stopSseAssetWatch = onAssetChange(() => {
     loadTemplates().catch(() => {});
   });
-  restoreDraftFromStorage();
+  // 老版本的用户级单键草稿先收进内存，等选定会话时迁移到该会话的 key 下
+  pendingLegacyDraft = readLegacyDraft();
   await loadStudioCatalog();
   resetSchemaForModel();
   window.addEventListener('keydown', handleGlobalKeydown);
@@ -5980,12 +6191,13 @@ onMounted(async () => {
     observeStreamRows();
   }
   timerInterval = setInterval(() => {
-    if (generating.value || messages.value.some((m) => m && m.isGenerating)) {
+    if (currentGenerating.value || messages.value.some((m) => m && m.isGenerating)) {
       nowTimestamp.value = Date.now();
     }
   }, 500);
   await loadTemplates();
   await loadSessions();
+  await loadRecentRefs({ force: true });
   bootstrapDone.value = true;
   while (pendingIncoming.length) {
     await consumeIncoming(pendingIncoming.shift());
@@ -6041,27 +6253,40 @@ function labelForRef(url, promptName) {
   if (promptName && !/^参考图\d+$/.test(promptName)) return promptName;
   return fileNameFromUrl(url) || promptName || '未命名图片';
 }
-function rememberSessionRefs(items, origin = 'upload') {
+/**
+ * 记录到「本会话素材池」。
+ * persist=true 时才同步上报服务端（跨对话的最近使用）——历史消息回填、配方复用这类
+ * 只是"重新加载"的场景不该刷新 used_at，否则最近使用会被旧素材顶满。
+ */
+function rememberSessionRefs(items, origin = 'upload', { persist = false } = {}) {
+  const added = [];
   for (const item of items || []) {
     if (!item?.url && !item?.fid) continue;
     const url = item.url || '';
     if (sessionRefPool.value.some((hit) => (item.fid && hit.fid === item.fid) || (url && hit.url === url))) continue;
-    sessionRefPool.value.push({
+    const entry = {
       fid: item.fid || '',
       name: labelForRef(url, item.name),
       url,
       kind: item.kind || 'image',
       tag: item.tag || '',
       origin: item.origin || origin
-    });
+    };
+    sessionRefPool.value.push(entry);
+    added.push(entry);
   }
+  if (persist && added.length) scheduleRecentPush(added);
 }
 
 // 跨板块：将真实素材追加至看图区并挂载为 @图N，不覆盖已有内容
 function mountAssetFromLibrary(item) {
   const assetUrl = item.url || (item.fid ? getAssetImageUrl(item.fid, item.mediaToken) : '');
   const assetName = item.file_name || item.name || '选定素材';
-  if (!assetUrl) return;
+  if (!assetUrl) {
+    // 以前这里是静默 return：用户看着"已送入"，其实什么都没挂上，后面发送时才报引用失效。
+    composerError.value = `「${assetName}」没有可用的图片地址（素材可能还在生成或缺少预览图），请换一张或在素材库里重新导入。`;
+    return;
+  }
 
   let asset = referenceTray.value.find(r => r.url === assetUrl);
   if (!asset) {
@@ -6094,6 +6319,7 @@ function mountAssetFromLibrary(item) {
 
   // 用户需求：增加了图片后对话框不自动新增图片引用，取消输入框自动关联
   selectedImageIndex.value = referenceTray.value.indexOf(asset);
+  rememberSessionRefs([asset], 'upload', { persist: true });
 }
 
 /**
@@ -6111,7 +6337,7 @@ function mountAssetsFromLibrary(items) {
 
   referenceTray.value = accepted.map((item, idx) => ({
     name: item.file_name || item.name || `素材${idx + 1}`,
-    url: item.url || getAssetImageUrl(item.fid, item.mediaToken),
+    url: item.url || getAssetImageUrl(item.fid, item.mediaToken) || '',
     weight: 90,
     tag: `@图${idx + 1}`,
     fid: item.fid,
@@ -6121,6 +6347,14 @@ function mountAssetsFromLibrary(items) {
         ? 'audio'
         : 'image'
   }));
+  // 整盘重建，这里过滤不会破坏下标语义；但被过滤掉的必须说出来，
+  // 否则用户拿到的是一张「素材明明送进来了却没挂上」的疑案。
+  const unusable = referenceTray.value.filter((asset) => !asset.url);
+  if (unusable.length) {
+    referenceTray.value = referenceTray.value.filter((asset) => asset.url);
+    referenceTray.value.forEach((asset, idx) => { asset.tag = `@图${idx + 1}`; });
+  }
+  rememberSessionRefs(referenceTray.value, 'upload', { persist: true });
 
   // 混选时以视频为准（视频模式可同时吃图片引用）；纯图片走图片模式
   const anyVideo = list.some((item) => item.kind === 'video' || item.media_type === 'video');
@@ -6145,6 +6379,12 @@ function mountAssetsFromLibrary(items) {
     if (dropped > 0) {
       composerError.value = `当前模型最多挂载 ${limit} 个引用，已忽略多出的 ${dropped} 个素材。`;
     }
+    if (unusable.length) {
+      composerNotice.value = `${unusable.length} 个素材没有可用的图片地址，已跳过（${unusable.map((a) => a.name).slice(0, 3).join('、')}${unusable.length > 3 ? ' 等' : ''}）。`;
+    }
+    // 托盘与正文这一刻才对齐，草稿要在这里补存一次：
+    // watch 是 pre-flush，会抢在前面把「新托盘 + 旧正文」写进 localStorage，刷新后编号就错位了。
+    saveDraftToStorage();
   });
 }
 
@@ -6309,11 +6549,93 @@ function syncTrayFromEditor() {
   chips.forEach((chip) => {
     const url = chip.getAttribute('data-url') || '';
     if (!url) return;
-    const existing = referenceTray.value.find((item) => item.url === url);
+    const existing = referenceTray.value.find((item) => item && item.url === url);
     if (existing) {
       paintChipTag(chip, existing.tag);
     }
   });
+}
+
+/** 给一个引用地址做"能不能用"的判定并尽量换新凭证；返回 '' 表示彻底救不回来。 */
+function reviveRefUrl({ fid = '', url = '', mediaToken = '' } = {}) {
+  if (fid) {
+    const fresh = getAssetImageUrl(fid, mediaToken);
+    if (fresh) return fresh;
+  }
+  if (!url) return '';
+  if (url.startsWith('blob:')) return localFileByUrl.has(url) ? url : '';
+  if (url.startsWith('/api/')) return resignAssetUrl(url) || '';
+  if (url.startsWith('data:')) return url;
+  if (/^https?:/i.test(url)) return url;
+  if (url.startsWith('/')) return url;
+  return '';
+}
+
+/**
+ * 发送前的引用自愈（不阻断发送）。
+ *
+ * 素材本身没坏，坏的是「编辑器胶囊」和「referenceTray」这两份状态对不上：
+ * 胶囊有 fid 却没有 URL、陈旧 token 的 /api 地址、切板块后失效的 blob、编号指向不存在的槽位……
+ * 这里先按 fid/凭证把能救的都救回来，再把确实没有地址的槽位摘掉，
+ * 最后按托盘顺序重排 @图N，保证「胶囊编号 = 托盘下标 = 出站图片顺序」三者永远一致。
+ */
+function repairReferenceChips() {
+  const editor = richEditorRef.value;
+  let repaired = 0;
+  let downgraded = 0;
+
+  if (editor) {
+    for (const chip of [...editor.querySelectorAll('.inline-asset-chip')]) {
+      const fid = chip.getAttribute('data-fid') || '';
+      const url = chip.getAttribute('data-url') || '';
+      const fixed = reviveRefUrl({ fid, url });
+      if (!fixed) continue;
+      if (fixed !== url) {
+        chip.setAttribute('data-url', fixed);
+        repaired += 1;
+      }
+      chip.setAttribute('data-resolved', '1');
+    }
+  }
+
+  // 托盘侧同样体检：没有胶囊的挂载项（单张挂载/草稿恢复）也要救，救不了就摘掉
+  const kept = [];
+  for (const asset of referenceTray.value) {
+    if (!asset) continue;
+    const fixed = reviveRefUrl({ fid: asset.fid, url: asset.url, mediaToken: asset.mediaToken });
+    if (!fixed) {
+      downgraded += 1;
+      continue;
+    }
+    if (fixed !== asset.url) repaired += 1;
+    kept.push({ ...asset, url: fixed, resolved: true });
+  }
+  referenceTray.value = kept;
+
+  // 重排编号：tray 顺序即编号，胶囊跟着 tray 走；对不上的胶囊降级成纯文本
+  referenceTray.value.forEach((asset, idx) => {
+    asset.tag = `@图${idx + 1}`;
+  });
+  if (editor) {
+    for (const chip of [...editor.querySelectorAll('.inline-asset-chip')]) {
+      const fid = chip.getAttribute('data-fid') || '';
+      const url = chip.getAttribute('data-url') || '';
+      const idx = referenceTray.value.findIndex(
+        (asset) => asset && ((fid && asset.fid === fid) || (url && asset.url === url))
+      );
+      if (idx < 0) {
+        const num = (chip.getAttribute('data-tag') || '').match(/@图(\d+)/)?.[1] || '';
+        chip.replaceWith(document.createTextNode(`（原@图${num}已失效）`));
+        downgraded += 1;
+        continue;
+      }
+      const tag = `@图${idx + 1}`;
+      // 用 paintChipTag 而不是直接写文本：它能保留 @图1[沙发] 这类区域后缀
+      paintChipTag(chip, tag);
+    }
+  }
+
+  return { repaired, downgraded };
 }
 let savedSelectionRange = null;
 
@@ -6343,19 +6665,25 @@ function editorHasRawMention() {
 function reparseEditorChips(extraAssets) {
   if (!richEditorRef.value || reparsingEditor) return;
   const text = getRawEditorText();
-  const names = namesInPrompt(text);
-  const pools = [...(extraAssets || []), ...referenceTray.value, ...sessionRefPool.value];
-  const tray = names.map((name, index) => {
-    // 关键：挂载图是底座上下文，若当前托盘已有该序号的挂载图，必须优先保留，绝不抹除已有资产
-    if (referenceTray.value[index] && referenceTray.value[index].url) {
-      return { ...referenceTray.value[index], tag: `@图${index + 1}` };
-    }
-    const hit = pools.find((asset) => asset && asset.url && (asset.name === name || asset.file_name === name)) || (extraAssets || [])[index];
-    if (!hit || !hit.url) return { name: name || '未命名图片', url: '', tag: `@图${index + 1}`, resolved: false };
-    return { ...hit, name: hit.name || name, tag: `@图${index + 1}`, resolved: true, origin: hit.origin || 'upload' };
+  const nums = [...new Set(
+    [...text.matchAll(/@(?:图片|图|视频|音频)(\d+)/g)]
+      .map((m) => parseInt(m[1], 10))
+      .filter((n) => Number.isFinite(n) && n > 0)
+  )];
+  if (!nums.length) {
+    syncTrayFromEditor();
+    return;
+  }
+  // 只做「把正文里的 @图N 文本绑成胶囊」，绝不重建/覆盖托盘：
+  // 以前这里按名字 map 出一份新托盘，名字对不上就塞 url:'' 的空项，一次输入就把整盘素材抹掉，
+  // 还顺带留下发不出去的死标签。现在对不上的编号保持纯文本即可。
+  const bindable = nums.filter((n) => {
+    const asset = referenceTray.value[n - 1];
+    return Boolean(asset && (asset.url || asset.fid));
   });
+  if (!bindable.length) return;
   reparsingEditor = true;
-  restorePromptContent(text, tray.length ? tray : referenceTray.value);
+  restorePromptContent(text, referenceTray.value);
   syncTrayFromEditor();
   reparsingEditor = false;
 }
@@ -6462,6 +6790,36 @@ function withKeptRefMentions(text, tray) {
   return `${prefix} ${String(text || '')}`.trim();
 }
 
+/**
+ * 按「@图N / 名字」反查托盘素材，尽量让引用落在一个真有 URL 的素材上。
+ * 顺序：托盘第 N 位（缺 URL 时按 fid 重签）→ 托盘里同名项 → 本会话素材池里同名项。
+ * 返回 null 表示确实对不上，调用方应降级成纯文本，而不是造空胶囊。
+ */
+function resolveTrayAssetForMention(num, bracketName) {
+  const pick = (asset) => {
+    if (!asset) return null;
+    if (asset.url) return asset;
+    if (asset.fid) {
+      const resigned = getAssetImageUrl(asset.fid, asset.mediaToken);
+      if (resigned) return { ...asset, url: resigned, resolved: true };
+    }
+    return null;
+  };
+  const slot = pick(referenceTray.value[num - 1]);
+  if (slot) return slot;
+  const wanted = String(bracketName || '').trim();
+  if (!wanted) return null;
+  const pool = [...referenceTray.value, ...sessionRefPool.value];
+  for (const asset of pool) {
+    if (!asset) continue;
+    if (asset.name === wanted || asset.file_name === wanted) {
+      const hit = pick(asset);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
 function restorePromptContent(itemOrText, optionalTray) {
   let targetText = '';
   let targetTray = [];
@@ -6532,12 +6890,15 @@ function restorePromptContent(itemOrText, optionalTray) {
     if (match.index > lastIdx) appendRichSegmentText(source.slice(lastIdx, match.index));
     const num = parseInt(match[2], 10);
     const bracketName = match[3] || '';
-    const matchedAsset = referenceTray.value[num - 1] || {
-      name: bracketName || `参考${num}`,
-      url: '',
-      tag: `@图${num}`,
-      resolved: false
-    };
+    // 反查顺序：托盘第 N 位 → 靠名字在托盘/本会话素材池里找。
+    // 以前这里找不到就直接造一个 url:'' 的「死胶囊」，它会让整条消息发不出去，
+    // 而素材本身其实好好的，只是编号挪位了。
+    const matchedAsset = resolveTrayAssetForMention(num, bracketName);
+    if (!matchedAsset) {
+      appendRichSegmentText(`（引用素材${num}已不在当前参考图中）`);
+      lastIdx = regex.lastIndex;
+      continue;
+    }
 
     let customTag = `@图${num}`;
     let regionKey = null;
@@ -7289,25 +7650,180 @@ async function loadTemplates() {
   }
 }
 
-async function loadSessions() {
+// 会话消息缓存（stale-while-revalidate）：界面底层仍是服务端，缓存只为切回刚看过的会话时秒开、不闪
+const messagesCache = new Map(); // sid -> { rows, at }
+const MESSAGES_CACHE_TTL = 60 * 1000;
+
+// 记住上次停留的会话，避免刷新后被"最近更新"的会话抢走视线
+const ACTIVE_SESSION_KEY = () => {
+  const u = getCurrentUser();
+  return `ml_studio_active_session_${String(u?.username || u?.id || 'anon')}`;
+};
+function rememberActiveSession(sid) {
+  try {
+    if (sid) localStorage.setItem(ACTIVE_SESSION_KEY(), sid);
+  } catch (e) {}
+}
+
+const DUP_MESSAGE_WINDOW_MS = 15 * 60 * 1000;
+
+/**
+ * 渲染前的脏数据防线：同一次生成曾被 worker（genmsg_<jobId>）与旧前端（无 id 的 msg_xxx）
+ * 各写一条，刷新/切回会话就会看到两张一样的图，或两遍相同的错误。
+ * 失败卡没有媒体地址，所以签名先按媒体取，失败消息退化为「错误正文」；
+ * 只合并「一权威（有 run_id / genmsg 主键）一非权威」且 15 分钟内的成对记录，
+ * 用户真实重试产生的多条独立失败（都带各自的 jobId 或都不带）不会被误吞。
+ * 库里的存量脏行由 scripts/dedupe-gen-messages.js 清理，界面这层保证任何情况下都不重复。
+ */
+function dedupeLoadedMessages(rows) {
+  if (!Array.isArray(rows)) return rows;
+  const drop = new Set();
+  const seenIds = new Set();
+  const seenRuns = new Set();
+  const groups = new Map();
+
+  const signatureOf = (m) => {
+    const r = m.result || {};
+    const media = String(r.imageUrl || r.videoUrl || r.audioUrl || '').trim();
+    if (media) return `media:${media}`;
+    const content = String(r.content || m.prompt || '').trim();
+    if (content.startsWith('生成遇到问题') || content === '生成已取消') return `text:${content}`;
+    return '';
+  };
+
+  for (const m of rows) {
+    if (!m) continue;
+    const id = String(m.id || '');
+    if (id) {
+      if (seenIds.has(id)) { drop.add(m); continue; }
+      seenIds.add(id);
+    }
+    const runId = String(m.run_id || '').trim();
+    if (runId) {
+      if (seenRuns.has(runId)) { drop.add(m); continue; }
+      seenRuns.add(runId);
+    }
+    if (m.role !== 'assistant') continue;
+    const sig = signatureOf(m);
+    if (!sig) continue;
+    const at = Number(m.created_at || 0) || 0;
+    const authoritative = Boolean(runId) || id.startsWith('genmsg_');
+    const list = groups.get(sig) || [];
+    const twin = list.find((g) => Math.abs(at - g.at) <= DUP_MESSAGE_WINDOW_MS && g.authoritative !== authoritative);
+    if (!twin) {
+      list.push({ row: m, at, authoritative });
+      groups.set(sig, list);
+      continue;
+    }
+    if (authoritative) {
+      drop.add(twin.row);
+      twin.row = m;
+      twin.at = at;
+      twin.authoritative = true;
+    } else {
+      drop.add(m);
+    }
+  }
+  return rows.filter((m) => !drop.has(m));
+}
+
+/**
+ * 后台任务落库后补拉一次消息：只把「本地还没见过的结果卡」追加上来，
+ * 不重建整个列表（否则滚动位置、正在看的图都会跳）。
+ */
+async function refreshMessagesFromServer(sid) {
+  if (!sid || sid !== currentSessionId.value) return;
+  const raw = dedupeLoadedMessages(await fetchChatMessages(sid));
+  if (!Array.isArray(raw) || sid !== currentSessionId.value) return;
+  const known = new Set(messages.value.map((m) => m && m.id).filter(Boolean));
+  const seenMedia = new Set(messages.value
+    .filter((m) => m && (m.imageUrl || m.videoUrl || m.audioUrl))
+    .map((m) => m.imageUrl || m.videoUrl || m.audioUrl));
+  const extras = [];
+  for (const m of raw) {
+    if (!m || m.role !== 'assistant' || known.has(m.id)) continue;
+    const r = m.result || {};
+    if (!r.imageUrl && !r.videoUrl && !r.audioUrl) continue;
+    // 同一份产物已经在列表里（历史双写留下的脏数据）就不再追加第二张
+    const mediaUrl = r.imageUrl || r.videoUrl || r.audioUrl;
+    if (mediaUrl && seenMedia.has(mediaUrl)) continue;
+    if (mediaUrl) seenMedia.add(mediaUrl);
+    const modality = r.imageUrl ? 'image' : (r.videoUrl ? 'video' : 'music');
+    extras.push({
+      id: m.id,
+      role: 'assistant',
+      modality,
+      content: r.content || m.prompt || '',
+      imageUrl: r.imageUrl,
+      videoUrl: r.videoUrl,
+      audioUrl: r.audioUrl,
+      resolution: modality === 'image'
+        ? resolutionLabelFor('image', r.modelKey || m.params?.model || imageModelKey.value, { size: r.resolution || m.params?.size })
+        : (r.resolution || m.params?.resolution),
+      ratio: r.ratio || m.params?.ratio,
+      duration: r.duration,
+      model: r.model || m.engine,
+      modelKey: r.modelKey || m.params?.model,
+      userPrompt: r.userPrompt || '',
+      refs: r.refs || m.params?.refs || [],
+      params: m.params || null,
+      genMode: r.genMode || m.mode,
+      // 后台任务在其它标签完成时补插的卡片必须带齐重试/超分元数据，
+      // 否则「重新生成」会按默认参数重发、超分区会一直显示「尚未超分」
+      modelVideoUrl: r.modelVideoUrl,
+      vendorVideoUrl: r.vendorVideoUrl,
+      srStatus: r.srStatus,
+      srError: r.srError,
+      startTime: m.created_at || r.startTime || Date.now(),
+      assetFid: r.assetFid || '',
+      retryPrompt: r.retryPrompt || '',
+      retryRefs: Array.isArray(r.retryRefs) ? r.retryRefs : [],
+      retryModel: r.retryModel || '',
+      retryModality: r.retryModality || '',
+      retryMode: r.retryMode || '',
+      retryParams: r.retryParams || null
+    });
+    if (r.imageUrl) seenMedia.add(r.imageUrl);
+  }
+  if (!extras.length) return;
+  messages.value.push(...extras);
+  if (pinned.value) stickToBottom();
+}
+
+/**
+ * 拉会话列表。select 语义：
+ * - 'auto'（默认）：当前会话还在列表里就原地不动，只有本地没有会话时才按记忆/最新恢复；
+ * - 'first'：强制切到最新的第一个（新建会话后用）；
+ * - 'none'：只刷新列表，不切会话（后台任务完成、其它标签页改数据时用）。
+ */
+async function loadSessions({ select = 'auto' } = {}) {
   try {
     const list = await fetchChatSessions();
     if (Array.isArray(list) && list.length > 0) {
       sessions.value = list;
-      await selectSession(list[0]);
-    } else {
-      const defaultId = `sess_${Date.now()}`;
-      const defaultSess = { id: defaultId, title: '空间美学创作会话' };
-      sessions.value = [defaultSess];
-      currentSessionId.value = defaultId;
-      try {
-        await authFetch('/api/chat/sessions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: defaultId, title: defaultSess.title })
-        });
-      } catch (e) {}
+      const stillThere = Boolean(currentSessionId.value) && list.some((s) => s.id === currentSessionId.value);
+      if (select === 'first') {
+        await selectSession(list[0]);
+      } else if (select === 'auto' && !stillThere) {
+        let remembered = '';
+        try { remembered = localStorage.getItem(ACTIVE_SESSION_KEY()) || ''; } catch (e) {}
+        await selectSession(list.find((s) => s.id === remembered) || list[0]);
+      }
+      return;
     }
+    if (select === 'none') return;
+    const defaultId = `sess_${Date.now()}`;
+    const defaultSess = { id: defaultId, title: '空间美学创作会话' };
+    sessions.value = [defaultSess];
+    currentSessionId.value = defaultId;
+    rememberActiveSession(defaultId);
+    try {
+      await authFetch('/api/chat/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: defaultId, title: defaultSess.title })
+      });
+    } catch (e) {}
   } catch (e) {
     console.warn('加载会话列表失败:', e);
     if (!sessions.value.length) {
@@ -7330,9 +7846,12 @@ async function selectSession(s) {
       referenceTray: JSON.parse(JSON.stringify(referenceTray.value || [])),
       selectedImageIndex: selectedImageIndex.value || 0,
     });
+    // 落盘也按会话分开：刷新后各自能找回自己的草稿，不会再串到别的对话
+    saveDraftToStorage(currentSessionId.value);
   }
 
   currentSessionId.value = s.id;
+  rememberActiveSession(s.id);
   // 参数与模型选择严格跟随该会话上一轮：先清掉上一个会话的残留，
   // 再恢复本会话快照（内存优先，阶段 2 后 chat_sessions.params_json 持久化）。
   resetParamsToDefaults();
@@ -7357,10 +7876,20 @@ async function selectSession(s) {
     globalRecipePrompt.value = '';
     resetComposerState();
     selectedImageIndex.value = 0;
+    // 该会话上次没发出去的输入（按会话 key 存），有就接回来
+    restoreDraftForSession(s.id);
   }
   hasNewBelow.value = false;
+  // 命中缓存先秒开（60s 内看过的会话），下面照旧请求服务端并在回来后覆盖，保证内容仍然权威
+  const cachedRows = messagesCache.get(s.id);
+  if (cachedRows && Date.now() - cachedRows.at < MESSAGES_CACHE_TTL) {
+    messages.value = cachedRows.rows.map((m) => ({ ...m }));
+    pinned.value = true;
+  }
   try {
-    const rawMsgs = await fetchChatMessages(s.id);
+    // 服务端历史里可能同时躺着 worker 的 genmsg_<jobId> 和旧版前端盲目写入的 msg_xxx，
+    // 渲染前先按 id / run_id / 同媒体合并，避免刷新看到两遍错误或两张一样的图
+    const rawMsgs = dedupeLoadedMessages(await fetchChatMessages(s.id));
     if (Array.isArray(rawMsgs)) {
       messages.value = rawMsgs.map(m => {
         let mod = 'chat';
@@ -7380,8 +7909,19 @@ async function selectSession(s) {
           modality: mod,
           imageUrl: m.result?.imageUrl,
           videoUrl: m.result?.videoUrl,
+          modelVideoUrl: m.result?.modelVideoUrl,
+          vendorVideoUrl: m.result?.vendorVideoUrl,
+          srStatus: m.result?.srStatus,
+          srError: m.result?.srError,
+          compareOpen: false,
           audioUrl: m.result?.audioUrl,
-          resolution: m.result?.resolution || m.params?.resolution,
+          // 历史结果里的 resolution 可能是旧的脏值（图片消息里存过 720p_sr2x），
+          // 渲染前统一按「当前模型契约」过滤一遍，图片没有 size 档位就显示空。
+          resolution: mod === 'image'
+            ? resolutionLabelFor('image', m.result?.modelKey || m.params?.model || imageModelKey.value, {
+                size: m.result?.resolution || m.params?.size
+              })
+            : (m.result?.resolution || m.params?.resolution),
           ratio: m.result?.ratio || m.params?.ratio,
           duration: m.result?.duration,
           model: m.result?.model || m.engine,
@@ -7391,7 +7931,11 @@ async function selectSession(s) {
           images: Array.isArray(m.images) ? m.images : [],
           requestSnapshot: m.params?.requestSnapshot || m.params?.outbound || m.result?.requestSnapshot || null,
           params: m.params || null,
-          isError: Boolean(m.result?.isError) || String(m.prompt || m.result?.content || '').startsWith('生成遇到问题'),
+          isGenerating: m.status === 'generating' || Boolean(m.result?.isGenerating),
+          isCancelled: m.status === 'cancelled' || Boolean(m.result?.isCancelled),
+          isError: m.status === 'failed' || Boolean(m.result?.isError) || String(m.prompt || m.result?.content || '').startsWith('生成遇到问题'),
+          jobId: m.run_id || (m.id && m.id.startsWith('genmsg_') ? m.id.replace('genmsg_', '') : ''),
+          startTime: m.created_at || (m.result && m.result.startTime) || Date.now(),
           genMode: m.result?.genMode || m.mode,
           assetFid: m.result?.assetFid || '',
           camera: m.result?.camera,
@@ -7404,6 +7948,8 @@ async function selectSession(s) {
           retryParams: m.result?.retryParams || null
         };
       });
+      // 缓存的是「映射后」的消息，下次切回来直接能渲染（服务端仍是唯一真源）
+      messagesCache.set(s.id, { rows: messages.value.map((m) => ({ ...m })), at: Date.now() });
 
       // 旧会话若还没有参数快照（例如刚刷新页面），用最后一条带 params 的消息回填，
       // 保证「回到上一轮」时模型 / 画幅 / 分辨率与上一轮一致。
@@ -7417,8 +7963,20 @@ async function selectSession(s) {
       }
 
       const activePlaceholder = sessionPlaceholderMap.get(s.id);
-      if (activePlaceholder && !messages.value.some(m => m === activePlaceholder || m.isGenerating)) {
+      // worker 完成时已经把同一张图写进 chat_messages 了（它的结果卡和占位卡内容一致），
+      // 这时再把内存占位卡塞回列表，屏幕上就会出现两张一样的图。
+      const landed = Boolean(activePlaceholder && activePlaceholder.imageUrl
+        && messages.value.some((m) => m && m.imageUrl && m.imageUrl === activePlaceholder.imageUrl));
+      if (landed) sessionPlaceholderMap.delete(s.id);
+      if (activePlaceholder && !landed && !messages.value.some(m => m === activePlaceholder || m.isGenerating)) {
         messages.value.push(activePlaceholder);
+      }
+
+      const serverRunningCard = messages.value.find((m) => m && m.isGenerating);
+      if (serverRunningCard) {
+        sessionGeneratingMap.set(s.id, true);
+        sessionPlaceholderMap.set(s.id, serverRunningCard);
+        generating.value = true;
       }
 
       // 从当前会话历史用户消息中自动充实 promptHistory
@@ -7457,6 +8015,9 @@ async function selectSession(s) {
           rememberSessionRefs([{ url: m.result.imageUrl, name: labelForRef(m.result.imageUrl, ''), fid: m.result.assetFid || '' }], 'generated');
         }
       });
+
+      // 本会话素材池以服务端「最近使用」为准重建（老会话没有记录时会自动补登记一次）
+      loadRecentRefs({ force: true }).catch(() => {});
 
       // 若当前没有内存草稿，自动从最近一条带图消息中恢复看图区参考托盘与生图模式
       if (!sessionDrafts.has(s.id) && referenceTray.value.length === 0) {
@@ -7522,16 +8083,17 @@ async function createNewSession(opts = {}) {
   // 默认跨会话自动继承未提交的参考图托盘、选区与提示词
   if (!opts.forceReset && hasActiveContent) {
     sessionDrafts.set(newId, currentDraft);
-    saveDraftToStorage();
+    saveDraftToStorage(currentSessionId.value);
   } else if (!opts.keepComposer) {
     recipePrompt.value = '';
     resetComposerState();
     selectedImageIndex.value = 0;
-    try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch (_) {}
+    try { localStorage.removeItem(draftKey(currentSessionId.value)); } catch (_) {}
   }
 
   sessions.value.unshift(newSess);
   currentSessionId.value = newId;
+  rememberActiveSession(newId);
   messages.value = [];
   // 新会话严格回到默认（模型专属默认 > 全局 9:16），绝不继承上一个会话的参数。
   resetParamsToDefaults();
@@ -7546,6 +8108,8 @@ async function createNewSession(opts = {}) {
 
 async function deleteSession(id) {
   sessions.value = sessions.value.filter(s => s.id !== id);
+  messagesCache.delete(id);
+  recentBackfilled.delete(id);
   try {
     await deleteChatSession(id);
   } catch (e) {}
@@ -7778,6 +8342,8 @@ function selectHashTemplate(tpl) {
 
 function openAssetSelectorModal() {
   showAssetSelector.value = true;
+  // 打开时静默续期一次，保证「其他对话」那栏是最新的
+  loadRecentRefs({ force: true }).catch(() => {});
 }
 
 // 共享素材选择器确认：把选中的「原图 / 衍生图」版本挂载为 @引用
@@ -7807,7 +8373,7 @@ function onAssetPickerConfirm(versions) {
     };
     referenceTray.value.push(asset);
     kinds.push(asset.kind);
-    rememberSessionRefs([asset]);
+    rememberSessionRefs([asset], 'upload', { persist: true });
     autoSyncRatioFromImage(asset.url, asset);
     // 用户需求：不自动在对话框新增胶囊
   }
@@ -7861,12 +8427,53 @@ function openMediaPreview(itemOrUrl, defaultType = 'image') {
     url: authedMediaUrl(url),
     type,
     title,
-    scale: 1.0
+    scale: 1.0,
+    compare: null
   };
 }
 
 function closeMediaPreview() {
   previewModal.value.visible = false;
+  previewModal.value.compare = null;
+}
+
+function displayResolution(value, msg) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  // 后端超分成功写的是 `720p x 2`，普通视频档位是 `720p`，图片档位是 1K/1.5K/2K/4K
+  const doubled = raw.match(/^(\d{3,4})p\s*[x×]\s*2$/i);
+  if (doubled) return `${doubled[1]}p x 2`;
+  const v = raw.replace(/_sr2x$/i, '');
+  if (msg?.modality === 'video') {
+    if (!/^\d{3,4}p$/i.test(v)) return '';
+    if (msg?.srStatus === 'done') return `${v} x 2`;
+    return v;
+  }
+  // 图片：契约里的尺寸档位原样显示（2K/1K/4K…），像素值/auto 之类不展示
+  return ['1K', '1.5K', '2K', '4K'].includes(v.toUpperCase()) ? v : '';
+}
+
+function openVideoCompare(msg) {
+  const original = msg?.modelVideoUrl || msg?.videoUrl || '';
+  if (!original) return;
+  const srReady = msg?.srStatus === 'done' && msg?.videoUrl && msg.videoUrl !== original;
+  let rightNote = '尚未超分';
+  if (msg?.srStatus === 'running') rightNote = '超分中，完成后可在这里看超分后的片子';
+  else if (msg?.srStatus === 'failed') rightNote = msg.srError || '超分失败，已改播模型原片';
+  previewModal.value = {
+    visible: true,
+    url: authedMediaUrl(original),
+    type: 'video',
+    title: '查看对比',
+    scale: 1,
+    compare: {
+      leftUrl: authedMediaUrl(original),
+      leftLabel: '模型原片',
+      rightUrl: srReady ? authedMediaUrl(msg.videoUrl) : '',
+      rightLabel: '超分后',
+      rightNote: srReady ? '' : rightNote,
+    },
+  };
 }
 
 function openEditFromLightbox() {
@@ -8091,6 +8698,15 @@ async function sendMessage() {
     saveRecipeEdit();
   }
   syncTrayFromEditor();
+  const currentMod = activeModality.value;
+
+  // 引用自愈优先于校验：素材本身没坏，坏的是「胶囊」和「托盘」两份状态的对齐关系。
+  // 先按 fid / 凭证把能救的都救回来，救不回来的摘掉并降级成纯文本，绝不因此拦下发不出去。
+  let refRepair = { repaired: 0, downgraded: 0 };
+  if (currentMod !== 'chat') {
+    refRepair = repairReferenceChips();
+  }
+  // 修复会改写编辑器内容（失效胶囊变纯文本），提示词必须在修复之后再取
   const rawContent = getFullPromptText();
   // 按会话判断生成锁：A 会话生成中切到 B 仍可提交，为后台并行任务队列铺路。
   // generating 单例仍用于当前视图的 UI 状态，但不再作为全局提交闸门。
@@ -8103,32 +8719,12 @@ async function sendMessage() {
   isRecipeEditing.value = false;
 
   let placeholderMsg = null;
-  const currentMod = activeModality.value;
+  // 入队成功后的 jobId：catch 分支靠它判断「worker 已在 genmsg_<jobId> 落库」，不再重复插一条
+  let submittedJobId = '';
   const typedTray = JSON.parse(JSON.stringify(referenceTray.value));
   let currentTray = typedTray;
   const usedPriorMedia = false;
   if (currentMod !== 'chat') {
-    // 死标签不能提交：syncTrayFromEditor 会跳过未解析芯片，但正文里的 @图1 还留着，
-    // 供应商只会看到一串指代不存在的占位符，画面自然「没引用图片」。
-    const deadChips = richEditorRef.value
-      ? richEditorRef.value.querySelectorAll('.inline-asset-chip[data-resolved="0"]').length
-      : 0;
-    if (deadChips > 0) {
-      composerError.value = `有 ${deadChips} 个引用素材已失效（没有可提交的图片地址），请重新挂载素材或删掉这些标签。`;
-      return;
-    }
-    const fullPromptForCheck = ((richEditorRef.value ? richEditorRef.value.innerText : '') + ' ' + (rawContent || ''));
-    const normalizedCheck = normalizeRefMentions(fullPromptForCheck);
-    const tagMatches = normalizedCheck.matchAll(/@图(\d+)/g);
-    for (const match of tagMatches) {
-      const tagNum = parseInt(match[1], 10);
-      const targetTag = `@图${tagNum}`;
-      const foundItem = currentTray.find((item, idx) => item.tag === targetTag || (idx + 1) === tagNum);
-      if (!foundItem || !foundItem.url) {
-        composerError.value = `正文中引用的 @图${tagNum} 不在当前看图区/参考图托盘中，请重新挂载或删除该标签。`;
-        return;
-      }
-    }
     const refError = modeRefError(currentTray);
     if (refError) {
       composerError.value = refError;
@@ -8137,6 +8733,25 @@ async function sendMessage() {
   }
   composerError.value = '';
   composerNotice.value = '';
+  if (refRepair.repaired || refRepair.downgraded) {
+    const parts = [];
+    if (refRepair.repaired) parts.push(`已自动修复 ${refRepair.repaired} 处引用素材的图片地址`);
+    if (refRepair.downgraded) parts.push(`${refRepair.downgraded} 处确实取不到图片，已从引用里移除并降级为文字`);
+    composerNotice.value = `${parts.join('，')}，本次继续生成。`;
+  }
+  if (currentMod !== 'chat' && currentTray.length) {
+    // 正文里提到但没有对应素材的编号：只提示，不再拦（以前的强制拦截正是「素材明明挂上了却说失效」的来源）
+    const mentioned = [...new Set(
+      [...normalizeRefMentions(rawContent || '').matchAll(/@图(\d+)/g)].map((m) => parseInt(m[1], 10))
+    )];
+    const missing = mentioned.filter((n) => !(currentTray[n - 1] && currentTray[n - 1].url));
+    if (missing.length) {
+      composerNotice.value = [
+        composerNotice.value,
+        `正文提到的 ${missing.map((n) => `@图${n}`).join('、')} 当前没有对应素材，本次按已挂载的 ${currentTray.length} 张图生成。`
+      ].filter(Boolean).join(' ');
+    }
+  }
   const retryModel = currentMod === 'chat' ? chatModelKey.value : (currentMod === 'image' ? imageModelKey.value : (currentMod === 'video' ? videoModelKey.value : musicType.value));
   const retryParams = declaredParams();
   const retryMode = activeGenMode.value;
@@ -8154,6 +8769,8 @@ async function sendMessage() {
     await createNewSession({ keepComposer: true });
   }
   const targetSessionId = currentSessionId.value;
+  // 这一轮会往这个会话写新消息，缓存立刻作废，免得切回来看到旧的列表
+  messagesCache.delete(targetSessionId);
   sessionGeneratingMap.set(targetSessionId, true);
   rememberSessionTitle(rawContent);
 
@@ -8214,7 +8831,9 @@ async function sendMessage() {
   // 5. 占位渲染图实时显示生成进度（图片、视频）
   if (currentMod === 'image' || currentMod === 'video') {
     const targetRatio = retryParams.ratio || schemaParams.value.ratio || selectedRatio.value || '9:16';
-    const targetResolution = retryParams.resolution || retryParams.size || schemaParams.value.resolution || schemaParams.value.size || videoResolution.value || selectedResolution.value || '2K';
+    // 分辨率只从「当前模态 + 当前模型契约」里取：图片没有 size 档位就是空串（卡片不显示），
+    // 以前这里会一路回退到 videoResolution，把视频的 720p_sr2x 当成图片分辨率显示。
+    const targetResolution = resolutionLabelFor(currentMod, retryModel, retryParams);
     placeholderMsg = reactive({
       role: 'assistant',
       modality: currentMod,
@@ -8235,7 +8854,7 @@ async function sendMessage() {
     sessionPlaceholderMap.set(targetSessionId, placeholderMsg);
   }
 
-  rememberSessionRefs(currentTray, 'upload');
+  rememberSessionRefs(currentTray, 'upload', { persist: true });
   scrollToBottom({ behavior: 'smooth' });
 
   if (richEditorRef.value) {
@@ -8246,7 +8865,7 @@ async function sendMessage() {
   // 规范：发送之后看图区里的图保留，不执行 referenceTray = []
   optimizeUndo.value = null;
   generating.value = true;
-  try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch (_) {}
+  try { localStorage.removeItem(draftKey(targetSessionId)); } catch (_) {}
   // 关键保护：切勿在发送后粗暴清空当前会话的托盘记忆，确保生成过程中切走再切回时不丢失参考图
   if (targetSessionId) {
     sessionDrafts.set(targetSessionId, {
@@ -8269,7 +8888,10 @@ async function sendMessage() {
       params: {
         // 以参数条（schemaParams）为准：selectedResolution / selectedRatio 是全局兜底值，
         // 切过模型后可能和真正提交的档位不一致，之前会出现「卡片显示 1:1、实际发 3:4」。
-        resolution: retryParams.size || schemaParams.value.size || selectedResolution.value,
+        // 视频写 resolution（Np/超分档），图片写 size（1K/2K/4K），两边不再互相串值。
+        resolution: currentMod === 'video'
+          ? (retryParams.resolution || schemaParams.value.resolution || videoResolution.value)
+          : (retryParams.size || schemaParams.value.size || selectedResolution.value),
         ratio: retryParams.ratio || schemaParams.value.ratio || selectedRatio.value,
         model: retryModel,
         refs: currentTray,
@@ -8420,7 +9042,9 @@ async function sendMessage() {
            || imageSizeField.default
            || '2K')
         : undefined;
-      const sizeLabel = submitImageSize || '按画幅自适应';
+      // sizeLabel 只承载契约里真实存在的档位；GPT Image VIP 这种没有 size 字段的模型留空，
+      // 卡片头就不显示「分辨率」，正文也不再谎称"画质达到 按画幅自适应"。
+      const sizeLabel = submitImageSize || '';
       const imageRatioField = fieldByKey(currentSchema.value, 'ratio');
       const imageRatioOptions = (imageRatioField?.options || []).map(String);
       const submitImageRatio = [retryParams.ratio, schemaParams.value.ratio, selectedRatio.value]
@@ -8428,7 +9052,7 @@ async function sendMessage() {
         || imageRatioField?.default
         || '9:16';
       const imageStartedAt = Date.now();
-      const res = await generateAiImage({
+      const { result: res, jobId: imageJobId } = await generateAiImage({
         prompt: promptForModel,
         model: imageModelKey.value,
         size: submitImageSize,
@@ -8441,6 +9065,12 @@ async function sendMessage() {
         sessionId: targetSessionId,
         clientRequestId: `${targetSessionId}_${imageStartedAt}_${Math.random().toString(36).slice(2, 8)}`
       });
+      submittedJobId = imageJobId || '';
+      if (placeholderMsg && submittedJobId) {
+        // 入队即绑定确定性主键：占位卡、前端落库、worker 落库共用 genmsg_<jobId>
+        placeholderMsg.id = `genmsg_${submittedJobId}`;
+        placeholderMsg.jobId = submittedJobId;
+      }
 
       const genUrl = res.files?.[0]?.previewUrl || res.files?.[0]?.url || res.imageUrl || res.url || res.data?.imageUrl || (res.files?.[0]?.localPath ? `/api/cache/temp/${res.files[0].localPath.split('/').pop()}` : '');
       if (!genUrl) {
@@ -8455,7 +9085,9 @@ async function sendMessage() {
         modality: 'image',
         content: layerStack && layerStack.layers.length > 1
           ? `已完成 Seedream 5.0 多图层拆分生成（共 ${layerStack.layers.length} 个独立图层），可直接在上方切换查看或单层二次引用。`
-          : `已为您完成空间视效生成。家具材质光泽与参考项深度统一，光影自然，画质达到 ${sizeLabel}。`,
+          : (sizeLabel
+            ? `已为您完成空间视效生成。家具材质光泽与参考项深度统一，光影自然，画质达到 ${sizeLabel}。`
+            : `已为您完成空间视效生成。家具材质光泽与参考项深度统一，光影自然，画幅 ${submitImageRatio}。`),
         userPrompt: rawContent,
         refs: currentTray,
         imageUrl: genUrl,
@@ -8470,13 +9102,15 @@ async function sendMessage() {
         genMode: 'image'
       };
       // 生成结果默认不入库：产物留在 /api/cache/temp/，由用户点「存入素材库」手动登记。
-      rememberSessionRefs([{ url: genUrl, name: labelForRef(genUrl, ''), fid: '' }], 'generated');
+      rememberSessionRefs([{ url: genUrl, name: labelForRef(genUrl, ''), fid: '' }], 'generated', { persist: true });
 
       // 原地响应式替换占位卡片为真实生成的图片
       if (placeholderMsg && messages.value.includes(placeholderMsg)) {
         Object.assign(placeholderMsg, asstMsg, {
           isGenerating: false,
-          isError: false
+          isError: false,
+          // 取消与成功竞态：成功落地时清掉取消标记，否则会同时出现结果卡和「已取消」状态
+          isCancelled: false
         });
         loadNextSuggestions(placeholderMsg);
       } else if (currentSessionId.value === targetSessionId) {
@@ -8484,12 +9118,24 @@ async function sendMessage() {
         loadNextSuggestions(asstMsg);
       }
 
+      // 与 worker 落库共用同一个确定性 id：两边都按该 id upsert，一张图只会有一条消息记录。
       await saveChatMessage({
+        ...(imageJobId ? { id: `genmsg_${imageJobId}`, runId: imageJobId } : {}),
         sessionId: targetSessionId,
         role: 'assistant',
         mode: 'text_to_image',
         prompt: asstMsg.content,
         engine: imageModelKey.value,
+        params: {
+          ...retryParams,
+          refs: currentTray,
+          recipePrompt: recipePrompt.value || '',
+          globalRecipePrompt: globalRecipePrompt.value || '',
+          supplementText: getRawEditorText() || '',
+          selectedImageIndex: selectedImageIndex.value || 0,
+          genMode: currentMod,
+          schemaMode: retryMode
+        },
         result: placeholderMsg || asstMsg
       });
     } else if (currentMod === 'video') {
@@ -8510,7 +9156,8 @@ async function sendMessage() {
       if (droppedRefs > 0) notices.push(`有 ${droppedRefs} 张参考图没能转换成可提交的数据，本次已跳过。`);
       if (ignoredRefs > 0) notices.push(`该模型最多接受 ${cap} 个引用，超出部分已忽略 ${ignoredRefs} 个。`);
       if (isKeyframeMode && !slotUrls[1]) notices.push('首尾帧模式只拿到 1 帧：第 2 个槽位是空的或非图片，本次只按首帧生成。');
-      composerNotice.value = notices.join(' ');
+      // 与「引用自愈」的提示合并，别把前面修好的说明冲掉
+      composerNotice.value = [composerNotice.value, ...notices].filter(Boolean).join(' ');
       const promptForModel = promptWithPriorAnalysis(rawContent, usedPriorMedia ? currentTray.length : 0);
       // 时长/画幅一律以契约参数条为准（已经过夹取），杜绝旧 videoDuration=60 这类游离默认值
       const submitDuration = retryParams.duration != null && retryParams.duration !== ''
@@ -8518,7 +9165,7 @@ async function sendMessage() {
         : schemaParams.value.duration != null ? schemaParams.value.duration : videoDuration.value;
       const submitRatio = retryParams.ratio || schemaParams.value.ratio || selectedRatio.value;
       const submitSize = retryParams.resolution || retryParams.size || schemaParams.value.resolution || schemaParams.value.size || videoResolution.value;
-      const res = await generateAiVideo({
+      const { result: res, jobId: videoJobId } = await generateAiVideo({
         prompt: promptForModel,
         model: videoModelKey.value,
         duration: submitDuration,
@@ -8529,20 +9176,34 @@ async function sendMessage() {
         extras: retryParams,
         snippetIds: activeSnippetIds(),
         firstFrame: isKeyframeMode ? (slotUrls[0] || undefined) : undefined,
-        lastFrame: isKeyframeMode ? (slotUrls[1] || undefined) : undefined
+        lastFrame: isKeyframeMode ? (slotUrls[1] || undefined) : undefined,
+        sessionId: targetSessionId,
+        clientRequestId: `${targetSessionId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
       });
+      submittedJobId = videoJobId || '';
+      if (placeholderMsg && submittedJobId) {
+        placeholderMsg.id = `genmsg_${submittedJobId}`;
+        placeholderMsg.jobId = submittedJobId;
+      }
 
-      const genVideoUrl = res.files?.[0]?.previewUrl || res.files?.[0]?.url || res.videoUrl || res.url || res.data?.videoUrl || '';
-      if (!genVideoUrl) throw new Error(res.error || '未获取到生成的视频地址');
+      const modelVideoUrl = res.modelVideoUrl || res.files?.[0]?.previewUrl || res.files?.[0]?.url || res.videoUrl || res.data?.videoUrl || '';
+      const finalVideoUrl = res.videoUrl || modelVideoUrl;
+      const vendorVideoUrl = res.vendorVideoUrl || res.files?.[0]?.remoteUrl || (String(modelVideoUrl).startsWith('http') ? modelVideoUrl : '');
+      if (!finalVideoUrl) throw new Error(res.error || '未获取到生成的视频地址');
       const asstMsg = {
         role: 'assistant',
         modality: 'video',
         content: `影视级空间动态渲染已就绪。运镜平滑连续，空间光影与环境音效自然契合。`,
         userPrompt: rawContent,
         refs: currentTray,
-        videoUrl: genVideoUrl,
+        videoUrl: finalVideoUrl,
+        modelVideoUrl: modelVideoUrl,
+        vendorVideoUrl,
+        srStatus: res.srStatus !== undefined ? res.srStatus : null,
+        srError: res.srError || '',
+        compareOpen: false,
         duration: `${submitDuration === '-1' ? '8' : submitDuration}s`,
-        resolution: submitSize,
+        resolution: res.resolution || String(submitSize || '').replace(/_sr2x$/, ''),
         ratio: submitRatio,
         model: getModelDisplayName(videoModelKey.value),
         // 复用配方要靠 id 回填下拉框；model 只是给人看的显示名，两者不能互相替代
@@ -8550,26 +9211,37 @@ async function sendMessage() {
         schemaMode: retryMode,
         schemaParams: retryParams
       };
-      // 生成结果默认不入库：视频留在 /api/cache/temp/，由用户点「存入素材库」手动登记。
-      // 原地响应式替换占位卡片为真实生成的视频
+      let live = asstMsg;
       if (placeholderMsg && messages.value.includes(placeholderMsg)) {
         Object.assign(placeholderMsg, asstMsg, {
           isGenerating: false,
-          isError: false
+          isError: false,
+          isCancelled: false,
         });
-        loadNextSuggestions(placeholderMsg);
+        live = placeholderMsg;
       } else if (currentSessionId.value === targetSessionId) {
         messages.value.push(asstMsg);
-        loadNextSuggestions(asstMsg);
       }
+      if (currentSessionId.value === targetSessionId) loadNextSuggestions(live);
 
       await saveChatMessage({
+        ...(videoJobId ? { id: `genmsg_${videoJobId}`, runId: videoJobId } : {}),
         sessionId: targetSessionId,
         role: 'assistant',
         mode: 'text_to_video',
         prompt: asstMsg.content,
         engine: videoModelKey.value,
-        result: placeholderMsg || asstMsg
+        params: {
+          ...retryParams,
+          refs: currentTray,
+          recipePrompt: recipePrompt.value || '',
+          globalRecipePrompt: globalRecipePrompt.value || '',
+          supplementText: getRawEditorText() || '',
+          selectedImageIndex: selectedImageIndex.value || 0,
+          genMode: currentMod,
+          schemaMode: retryMode
+        },
+        result: live
       });
     } else {
       const audioUrls = await portableAudioUrls(currentTray, refCap() || currentTray.length || 1);
@@ -8608,6 +9280,7 @@ async function sendMessage() {
         const assetFid = firstFile.fid || genAudioUrl.match(/\/api\/assets\/([^/?#]+)\//)?.[1] || '';
         if (assetFid) {
           asstMsg.assetFid = assetFid;
+          asstMsg.librarySaved = true;
           try {
             // 后端入库默认落在 original，这里移入精修货架
             await moveAssetShelf(assetFid, 'retouched');
@@ -8631,6 +9304,28 @@ async function sendMessage() {
       });
     }
   } catch (err) {
+    if (err && (err.isCancelled || err.message === '生成任务已取消')) {
+      const cancelMsg = {
+        role: 'assistant',
+        modality: currentMod,
+        content: '生成已取消',
+        model: '系统提示',
+        isCancelled: true,
+        isGenerating: false,
+        retryPrompt: rawContent,
+        retryRefs: currentTray,
+        retryModel,
+        retryModality: currentMod,
+        retryMode,
+        retryParams
+      };
+      if (placeholderMsg && messages.value.includes(placeholderMsg)) {
+        Object.assign(placeholderMsg, cancelMsg);
+      } else if (currentSessionId.value === targetSessionId) {
+        messages.value.push(cancelMsg);
+      }
+      return;
+    }
     console.error('AI 生成调用失败:', err);
     const errMsg = {
       role: 'assistant',
@@ -8667,16 +9362,24 @@ async function sendMessage() {
         console.warn('恢复失败输入失败:', restoreErr);
       }
     }
-    try {
-      await saveChatMessage({
-        sessionId: targetSessionId,
-        role: 'assistant',
-        mode: currentMod === 'image' ? 'text_to_image' : currentMod,
-        prompt: errMsg.content,
-        result: placeholderMsg || errMsg
-      });
-    } catch (saveErr) {
-      console.warn('保存失败提示失败:', saveErr);
+    // 任务已入队时，worker 会把 genmsg_<jobId> 原子落成 failed（保留重发上下文），
+    // 这里再插一条无 id 的消息就是「刷新后看到两遍错误」的根因：只更新内存卡片，不再重复落库。
+    // 只有根本没拿到 jobId 的本地前置报错（校验/网络/直连模型）才需要落一条，并带上确定性 id 防重。
+    const failedJobId = submittedJobId || String((err && err.jobId) || '');
+    if (!failedJobId) {
+      try {
+        await saveChatMessage({
+          id: `genmsg_local_${targetSessionId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          status: 'failed',
+          sessionId: targetSessionId,
+          role: 'assistant',
+          mode: currentMod === 'image' ? 'text_to_image' : currentMod,
+          prompt: errMsg.content,
+          result: placeholderMsg || errMsg
+        });
+      } catch (saveErr) {
+        console.warn('保存失败提示失败:', saveErr);
+      }
     }
   } finally {
     sessionGeneratingMap.delete(targetSessionId);
@@ -8710,18 +9413,22 @@ function rememberSessionTitle(text) {
 
 function fillComposerFromError(msg) {
   const prompt = msg.retryPrompt || sourcePromptFor(msg);
-  const refs = Array.isArray(msg.retryRefs) ? msg.retryRefs : [];
+  const refs = Array.isArray(msg.retryRefs) ? msg.retryRefs : (Array.isArray(msg.refs) ? msg.refs : []);
+  const modality = msg.retryModality || (msg.modality === 'music' ? 'music' : msg.modality) || '';
+  const model = msg.retryModel || msg.modelKey || '';
+  const mode = msg.retryMode || msg.schemaMode || '';
+  const params = msg.retryParams || msg.schemaParams || null;
   suppressSchemaReset = true;
-  if (msg.retryModality) activeModality.value = msg.retryModality;
-  if (msg.retryModel) {
-    if (msg.retryModality === 'image') imageModelKey.value = msg.retryModel;
-    else if (msg.retryModality === 'video') videoModelKey.value = msg.retryModel;
-    else if (msg.retryModality === 'music') musicType.value = msg.retryModel;
+  if (modality) activeModality.value = modality;
+  if (model) {
+    if (modality === 'image') imageModelKey.value = model;
+    else if (modality === 'video') videoModelKey.value = model;
+    else if (modality === 'music') musicType.value = model;
   }
   suppressSchemaReset = false;
   resetSchemaForModel();
-  if (msg.retryMode) setGenMode(msg.retryMode);
-  if (msg.retryParams) schemaParams.value = clampParamsToSchema(currentSchema.value, { ...schemaParams.value, ...msg.retryParams });
+  if (mode) setGenMode(mode);
+  if (params) schemaParams.value = clampParamsToSchema(currentSchema.value, { ...schemaParams.value, ...params });
   restorePromptContent(prompt, refs);
   syncTrayFromEditor();
 }
@@ -8730,6 +9437,13 @@ function clampParamsToSchema(schema, params) {
   if (!schema) return params;
   const fields = [...(schema.common || []), ...(schema.advanced || [])];
   const out = { ...params };
+  // 剪枝：schemaParams 只该承载当前契约真有的字段。以前只校验「存在的键」，
+  // 复用视频配方 / 切换模态后残留的 resolution='720p_sr2x' 会一直跟着走，
+  // 最后被占位卡和卡片头当成图片的分辨率显示出来。
+  const known = new Set(fields.map((field) => field.key));
+  for (const key of Object.keys(out)) {
+    if (!known.has(key)) delete out[key];
+  }
   for (const field of fields) {
     if (!(field.key in out) || out[field.key] === '' || out[field.key] == null) continue;
     if (field.type === 'enum') {
@@ -8748,6 +9462,30 @@ function clampParamsToSchema(schema, params) {
   }
   return out;
 }
+/**
+ * 结果卡片上「分辨率」的唯一取值口子。
+ * - 视频：只认 Np / Np_sr2x 这类真实档位；
+ * - 图片：只认该模型契约里真实存在的 size 档位（1K/2K/4K…）。契约里没有 size 字段的
+ *   （GPT Image 2.5 Sunburst VIP 就只认像素或 auto）直接返回 ''，卡片头就不显示分辨率，
+ *   绝不把视频的 720p_sr2x 顶上去。
+ */
+function resolutionLabelFor(modality, modelKey, params = {}) {
+  if (modality === 'video') {
+    const v = String(params.resolution || params.size || '').replace(/_sr2x$/, '');
+    return /^\d{3,4}p$/.test(v) ? v : '';
+  }
+  if (modality !== 'image') return '';
+  const schema = studioSchemas.value[modelKey]
+    || (modelKey === modelKeyNow() ? currentSchema.value : null);
+  const field = fieldByKey(schema, 'size');
+  if (!field) return '';
+  const opts = (field.options || []).map(String);
+  const hit = [params.size, params.resolution, selectorSizeHint.value]
+    .find((v) => v != null && v !== '' && (!opts.length || opts.includes(String(v))));
+  return hit ? String(hit) : (field.default != null ? String(field.default) : '');
+}
+// 选择器里手选的图片档位；只在「当前就是图片模态」且档位合法时才作为兜底
+const selectorSizeHint = computed(() => (activeModality.value === 'image' ? selectedResolution.value : ''));
 // 把后端技术性错误信息转成用户可读的一句话 + 可操作建议
 function friendlyErrorText(raw) {
   const text = String(raw || '').replace(/^生成遇到问题[:：]\s*/, '').trim();
@@ -8791,8 +9529,119 @@ function errorHint(raw) {
  * 复用 /api/assets/from-generation（shelf-lineage.registerGenerated），
  * 与「⭐ 收藏为配方」不同，后者写的是 creation_templates。
  */
+function resultBarReason(msg) {
+  const parts = [];
+  if (msg?.creationError) parts.push(msg.creationError);
+  if (msg?.librarySaveError) parts.push(msg.librarySaveError);
+  if (msg?.srStatus === 'failed' && msg?.srError) parts.push(msg.srError);
+  if (msg?.imgFailed && !msg?.librarySaveError) {
+    parts.push(msg.imgAuth ? '登录已过期，重新登录后再入库。' : `这张产物取不到了${msg.imgErr ? `：${msg.imgErr}` : '。'}`);
+  }
+  return parts.filter(Boolean).join(' ');
+}
+
+function creationBodyFor(msg) {
+  const prompt = sourcePromptFor(msg);
+  let detectedType = 'image';
+  if (msg?.videoUrl || msg?.modelVideoUrl || msg?.modality === 'video') detectedType = 'video';
+  else if (msg?.audioUrl || msg?.modality === 'music') detectedType = 'audio';
+  const isAudio = detectedType === 'audio';
+  const isVideo = detectedType === 'video';
+  const playing = isAudio ? (msg?.audioUrl || '') : (msg?.videoUrl || msg?.imageUrl || '');
+  return {
+    title: prompt.replace(/\s+/g, ' ').trim().slice(0, 24) || '未命名创作',
+    prompt,
+    type: detectedType,
+    space: '',
+    style: '',
+    purpose: '',
+    is_pinned: 0,
+    aspect_ratio: msg?.ratio || schemaParams.value.ratio || selectedRatio.value,
+    origin_images: recipeRefsForStorage(msg?.refs?.length ? msg.refs : referenceTray.value),
+    result_images: isAudio ? [{ url: msg?.audioUrl || '', resolution: msg?.duration || '音频产物' }] : [{
+      url: playing,
+      poster: (isVideo && msg?.assetFid) ? `/api/viewer/assets/${encodeURIComponent(msg.assetFid)}/poster` : '',
+      fid: msg?.assetFid || '',
+      resolution: msg?.resolution || selectedResolution.value
+    }],
+    params: {
+      model: msg?.model,
+      modelKey: msg?.modelKey,
+      genMode: detectedType === 'audio' ? 'music' : detectedType,
+      mode: detectedType === 'audio' ? 'music' : detectedType,
+      schemaMode: msg?.schemaMode || '',
+      schemaParams: msg?.schemaParams || null,
+      ratio: msg?.ratio || selectedRatio.value,
+      resolution: msg?.resolution || selectedResolution.value
+    },
+    tags: [detectedType, '收藏配方'].filter(Boolean)
+  };
+}
+
+async function saveResultToCreation(msg) {
+  if (!msg || msg.savingCreation || msg.creationSaved) return;
+  msg.savingCreation = true;
+  msg.creationError = '';
+  try {
+    const res = await authFetch('/api/creation-templates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(creationBodyFor(msg))
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json.success === false) {
+      msg.creationError = json.error || '没能写入创作库';
+      return;
+    }
+    msg.creationSaved = true;
+    await loadTemplates();
+  } catch (e) {
+    msg.creationError = e?.message || '没能写入创作库';
+  } finally {
+    msg.savingCreation = false;
+  }
+}
+
+async function applyAutoSuperResolve(msg) {
+  if (!msg) return;
+  const source = msg.modelVideoUrl || msg.videoUrl;
+  if (!source) {
+    msg.srStatus = 'failed';
+    msg.srError = '没有可超分的视频，已停止播放';
+    msg.videoUrl = '';
+    return;
+  }
+  msg.modelVideoUrl = source;
+  msg.videoUrl = '';
+  msg.srStatus = 'running';
+  msg.srError = '';
+  msg.compareOpen = false;
+  try {
+    const data = await superResolveLocalVideo(source, msg.vendorVideoUrl || '');
+    if (data?.ok && data.srVideoUrl) {
+      msg.modelVideoUrl = data.modelVideoUrl || source;
+      msg.videoUrl = data.srVideoUrl;
+      msg.srStatus = 'done';
+      msg.srError = '';
+      return;
+    }
+    msg.modelVideoUrl = data?.modelVideoUrl || source;
+    msg.videoUrl = data?.modelVideoUrl || source;
+    msg.srStatus = 'failed';
+    msg.srError = data?.error || '超分失败，已改播模型原片';
+  } catch (e) {
+    msg.videoUrl = source;
+    msg.srStatus = 'failed';
+    msg.srError = e?.message || '超分失败，已改播模型原片';
+  }
+}
+
 async function saveResultToLibrary(msg) {
   if (!msg || msg.savingToLibrary || msg.librarySaved) return;
+  if (msg.srStatus === 'running') {
+    msg.librarySaveError = '超分完成前不能入素材库';
+    return;
+  }
   const previewUrl = msg.imageUrl || msg.videoUrl || msg.audioUrl;
   if (!previewUrl) {
     msg.librarySaveError = '这一轮没有可入库的产物';
@@ -8803,6 +9652,7 @@ async function saveResultToLibrary(msg) {
   try {
     const filed = await registerGeneratedAsset({
       previewUrl,
+      vendorUrl: msg.vendorVideoUrl || '',
       prompt: msg.userPrompt || msg.retryPrompt || '',
       model: msg.modelKey || msg.model || '',
       mode: msg.modality || 'image',
@@ -8819,6 +9669,28 @@ async function saveResultToLibrary(msg) {
   }
 }
 
+async function handleCancelGeneration(msg) {
+  if (!msg) return;
+  const jobId = msg.jobId || msg.runId || (msg.id && msg.id.startsWith('genmsg_') ? msg.id.replace('genmsg_', '') : '');
+  const sid = currentSessionId.value;
+  try {
+    if (jobId) {
+      await cancelGenJob(jobId);
+    }
+  } catch (e) {
+    console.warn('取消生成请求返回异常:', e.message);
+  } finally {
+    msg.isGenerating = false;
+    msg.isCancelled = true;
+    msg.content = '生成已取消';
+    if (sid) {
+      sessionGeneratingMap.delete(sid);
+      sessionPlaceholderMap.delete(sid);
+    }
+    generating.value = false;
+  }
+}
+
 async function openRetry(msg) {
   if (!msg) return;
   fillComposerFromError(msg);
@@ -8826,6 +9698,39 @@ async function openRetry(msg) {
 }
 function editFromError(msg) {
   fillComposerFromError(msg);
+}
+
+function reeditResult(msg) {
+  if (!msg) return;
+  let sourceMsg = msg.role === 'user' ? msg : null;
+  if (!sourceMsg) {
+    const idx = messages.value.indexOf(msg);
+    for (let i = idx - 1; i >= 0; i -= 1) {
+      if (messages.value[i]?.role === 'user' && (messages.value[i].content || messages.value[i].userPrompt)) {
+        sourceMsg = messages.value[i];
+        break;
+      }
+    }
+  }
+  if (!sourceMsg) return;
+  const prompt = sourceMsg.userPrompt || sourceMsg.content || sourcePromptFor(sourceMsg);
+  let refs = [];
+  if (Array.isArray(sourceMsg.refs) && sourceMsg.refs.length) refs = sourceMsg.refs;
+  else if (Array.isArray(sourceMsg.params?.refs) && sourceMsg.params.refs.length) refs = sourceMsg.params.refs;
+  else if (Array.isArray(msg.refs) && msg.refs.length) refs = msg.refs;
+  const params = sourceMsg.params || msg.params || {};
+  fillComposerFromError({
+    retryPrompt: prompt,
+    retryRefs: refs,
+    retryModel: sourceMsg.modelKey || msg.modelKey || params.model || msg.retryModel || '',
+    retryModality: sourceMsg.modality || msg.modality || msg.retryModality || '',
+    retryMode: sourceMsg.genMode || msg.genMode || params.genMode || params.schemaMode || msg.retryMode || '',
+    retryParams: { ...(msg.retryParams || {}), ...params },
+  });
+  nextTick(() => {
+    richEditorRef.value?.focus();
+    scrollToBottom();
+  });
 }
 
 // 把历史某一轮恢复到输入区；若后面还有新的用户轮次，则先新建会话，原对话保留

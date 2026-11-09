@@ -144,25 +144,39 @@
             <span>正在全量读取私有 DAM 素材库资产...</span>
           </div>
           <div v-else>
-            <!-- 最近素材置顶 -->
-            <div v-if="recentList.length" class="mb-5">
-              <div class="text-xs font-bold text-white mb-2 flex items-center gap-2">
-                <span>🕘 {{ context === 'edit' ? '最近调整过的素材' : '最近对话使用 / 生成的素材' }}</span>
-                <span class="text-[10px] font-normal text-slate-500">点击卡片展开版本选择</span>
+            <!-- 最近使用（跨对话）：本对话 / 其他对话 两组，整行大卡，比下方素材格还大一档 -->
+            <div v-if="recentGroups.length" class="mb-6">
+              <div class="flex items-center gap-2 mb-3">
+                <span class="text-sm font-bold text-white">🕘 {{ context === 'edit' ? '最近调整过的素材' : '最近使用的素材' }}</span>
+                <span class="text-[11px] font-normal text-slate-500">跨对话共享 · 点卡片展开版本选择</span>
               </div>
-              <div class="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
-                <button
-                  v-for="item in recentList"
-                  :key="'recent-' + (item.fid || item.url)"
-                  type="button"
-                  class="relative w-24 shrink-0 rounded-lg overflow-hidden border bg-studio-950 cursor-pointer text-left"
-                  :class="isItemSelected(item) ? 'border-studio-cyan ring-2 ring-studio-cyan/30' : 'border-studio-750 hover:border-slate-500'"
-                  @click="openVersions(item)"
-                >
-                  <img :src="item.url" class="w-full h-20 object-cover" :alt="item.name" />
-                  <span v-if="item.mark" class="absolute top-1 left-1 px-1 py-0.5 rounded bg-black/70 text-[9px] font-bold text-sky-300">{{ item.mark }}</span>
-                  <span class="block px-1.5 py-1 text-[10px] text-slate-300 truncate">{{ item.name || '素材' }}</span>
-                </button>
+              <div v-for="group in recentGroups" :key="group.key" class="mb-4 last:mb-0">
+                <div class="flex items-center gap-2 mb-2">
+                  <span
+                    class="px-2 py-0.5 rounded-md text-[11px] font-bold border"
+                    :class="group.key === 'current' ? 'text-studio-cyan border-studio-cyan/40 bg-studio-cyan/10' : 'text-slate-300 border-studio-750 bg-studio-850'"
+                  >{{ group.label }}</span>
+                  <span class="text-[11px] text-slate-500">{{ group.items.length }} 件 · {{ group.hint }}</span>
+                </div>
+                <div class="flex gap-3 overflow-x-auto pb-2">
+                  <button
+                    v-for="item in group.items"
+                    :key="group.key + '-' + (item.fid || item.url)"
+                    type="button"
+                    class="relative w-60 shrink-0 rounded-xl overflow-hidden border bg-studio-950 cursor-pointer text-left group/recent"
+                    :class="isItemSelected(item) ? 'border-studio-cyan ring-2 ring-studio-cyan/30' : 'border-studio-750 hover:border-slate-500'"
+                    @click="openVersions(item)"
+                  >
+                    <img :src="item.url" class="w-full h-44 object-cover group-hover/recent:scale-105 transition-transform duration-200" :alt="item.name" loading="lazy" />
+                    <span v-if="item.mark" class="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/70 text-[10px] font-bold text-sky-300">{{ item.mark }}</span>
+                    <div class="px-2.5 py-2">
+                      <div class="text-xs text-slate-200 truncate">{{ item.name || '素材' }}</div>
+                      <div class="text-[11px] text-slate-500 truncate">
+                        {{ group.key === 'current' ? recentTimeText(item.usedAt) : (item.sessionTitle || '其他对话') }}
+                      </div>
+                    </div>
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -481,6 +495,9 @@ const props = defineProps({
   initialSub: { type: String, default: '' },
   mediaTypes: { type: Array, default: () => ['image', 'video', 'audio'] },
   recent: { type: Array, default: () => [] },
+  // 跨对话的最近使用：本对话一栏、其他对话一栏（服务端 studio_recent_refs，保留最近 50 条）
+  recentCurrent: { type: Array, default: () => [] },
+  recentOthers: { type: Array, default: () => [] },
   uploadEnabled: { type: Boolean, default: false },
   commitOnVersion: { type: Boolean, default: false },
 });
@@ -536,8 +553,7 @@ const subMap = {
   image: [
     { key: 'all', label: '全部图片' },
     { key: 'interior_exterior', label: '室内外设计' },
-    { key: 'portrait', label: '空间人像' },
-    { key: 'clothing', label: '服装服饰' },
+    { key: 'figure', label: '人物穿搭' },
     { key: 'furniture', label: '单品家具' },
   ],
   video: [
@@ -563,7 +579,31 @@ const orientations = [
 ];
 const modalTitle = computed(() => props.title || (props.context === 'edit' ? '从素材库选取底图' : '私有素材库 DAM 资产选择器'));
 const submitText = computed(() => props.submitLabel || (props.context === 'edit' ? '使用该素材' : `确认挂载已选 ${selected.value.length} 件`));
-const recentList = computed(() => (props.recent || []).filter((item) => item && (item.url || item.fid)).slice(0, 12));
+const RECENT_LIMIT = 20;
+const recentCurrentList = computed(() => {
+  const src = (props.recentCurrent && props.recentCurrent.length) ? props.recentCurrent : (props.recent || []);
+  return src.filter((item) => item && (item.url || item.fid)).slice(0, RECENT_LIMIT);
+});
+const recentOtherList = computed(() => {
+  const seen = new Set(recentCurrentList.value.map((item) => item.fid || item.url));
+  return (props.recentOthers || [])
+    .filter((item) => item && (item.url || item.fid) && !seen.has(item.fid || item.url))
+    .slice(0, RECENT_LIMIT);
+});
+const recentGroups = computed(() => [
+  recentCurrentList.value.length
+    ? {
+        key: 'current',
+        label: props.context === 'edit' ? '最近调整' : '本对话',
+        hint: props.context === 'edit' ? '这次编辑里用过的底图' : '这个对话里用过的素材',
+        items: recentCurrentList.value,
+      }
+    : null,
+  recentOtherList.value.length
+    ? { key: 'others', label: '其他对话', hint: '别的对话里用过 / 生成过的素材', items: recentOtherList.value }
+    : null,
+].filter(Boolean));
+const recentList = computed(() => [...recentCurrentList.value, ...recentOtherList.value]);
 const versionPanelItem = computed(() => {
   const fid = expandedFid.value;
   if (!fid) return null;
@@ -601,6 +641,20 @@ function sizeText(version) {
   const s = sizeCache.value[version?.url];
   if (!s || !s.w || !s.h) return '';
   return `${s.w}×${s.h}`;
+}
+/** 最近使用卡片右下角的时间：昨天用过的照样算"最近"，只是排在今天后面 */
+function recentTimeText(ts) {
+  const t = Number(ts || 0);
+  if (!t) return '';
+  const diff = Date.now() - t;
+  if (diff < 60 * 1000) return '刚刚';
+  if (diff < 3600 * 1000) return `${Math.floor(diff / 60000)} 分钟前`;
+  const d = new Date(t);
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  if (diff < 24 * 3600 * 1000) return `今天 ${hm}`;
+  if (diff < 48 * 3600 * 1000) return `昨天 ${hm}`;
+  if (diff < 7 * 24 * 3600 * 1000) return `${Math.floor(diff / (24 * 3600 * 1000))} 天前`;
+  return `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
 }
 function ratioText(version) {
   return ratioLabel(sizeCache.value[version?.url]);
@@ -729,7 +783,12 @@ async function loadAssets(targetPage = 1) {
       params.category = 'music';
     } else {
       params.media_type = 'image';
-      if (sub.value !== 'all') params.category = sub.value;
+      if (sub.value === 'figure') params.section = 'figure';
+      else if (sub.value !== 'all') {
+        params.section = sub.value;
+        params.category = sub.value;
+      }
+      // 「全部图片」不能带 lane=image：后端在 lane=image 且无 section 时会默认收窄到室内外
     }
     const shelves = [];
     if (onlyRetouched.value) shelves.push('retouched');

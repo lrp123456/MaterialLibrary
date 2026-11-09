@@ -2858,8 +2858,7 @@ const MAIN_TABS = [
 const SUB_CATEGORIES_CONFIG = {
   image: [
     { key: 'interior_exterior', label: '室内外设计' },
-    { key: 'portrait', label: '空间人像' },
-    { key: 'clothing', label: '服装服饰' },
+    { key: 'figure', label: '人物穿搭' },
     { key: 'furniture', label: '单品家具' }
   ],
   video: [
@@ -3441,6 +3440,8 @@ async function onAssetFilesSelected(e) {
     uploadCategory = (activeSubCategory.value === 'vocal') ? 'voice' : 'music';
   } else if (activeMainTab.value === 'video') {
     uploadCategory = 'video';
+  } else if (activeSubCategory.value === 'figure') {
+    uploadCategory = filterState.figure_kind[0] === '穿搭' ? 'clothing' : 'portrait';
   } else {
     uploadCategory = activeSubCategory.value || 'interior';
   }
@@ -4387,7 +4388,8 @@ const filterState = reactive({
   shot_type: [],
   mood: [],
   season: [],
-  clothing_category: []
+  clothing_category: [],
+  figure_kind: []
 });
 
 // 服务端返回的动态字典与各维度频次
@@ -4446,8 +4448,7 @@ const searchPlaceholder = computed(() => {
   }
   switch (activeMainTab.value) {
     case 'image':
-      if (activeSubCategory.value === 'portrait') return '搜索人像姿态、角色、景别…';
-      if (activeSubCategory.value === 'clothing') return '搜索穿搭品类、风格、季节…';
+      if (activeSubCategory.value === 'figure') return '搜索人物姿态或穿搭品类…';
       if (activeSubCategory.value === 'furniture') return '搜索家具单品、材质、工艺…';
       return '搜索空间、风格、木系、表面材质…';
     case 'video': return '搜索漫游样片、短片、来源…';
@@ -4492,18 +4493,24 @@ const filterGroups = computed(() => {
       { id: 'color', title: '主色', dimension: 'color', kind: 'color', options: COLOR_DOTS.map((c) => ({ key: c.name, label: c.name, hex: c.hex })) }
     ];
   }
-  if (tab === 'image' && sub === 'portrait') {
-    return [
-      { id: 'pose', title: '人像姿态', dimension: 'pose', kind: 'chip', options: asOptions(['站姿', '坐姿', '行走', '倚靠', '交谈/互动']) },
-      { id: 'character', title: '人物角色', dimension: 'character', kind: 'chip', options: asOptions(['商务精英', '居家男女', '亲子家庭', '青年学生', '休闲独处']) },
-      { id: 'shot', title: '景别类型', dimension: 'shot_type', kind: 'chip', options: asOptions(['全身照', '半身特写', '面部微距']) }
+  if (tab === 'image' && sub === 'figure') {
+    const kind = filterState.figure_kind[0] || '';
+    const groups = [
+      { id: 'figure-kind', title: '看什么', dimension: 'figure_kind', kind: 'chip', options: asOptions(['人物', '穿搭']) }
     ];
-  }
-  if (tab === 'image' && sub === 'clothing') {
-    return [
-      { id: 'clothing', title: '穿搭品类', dimension: 'clothing_category', kind: 'chip', options: asOptions(['上衣外套', '裤装裙装', '西服套装', '鞋履配饰']) },
-      { id: 'season', title: '季节', dimension: 'season', kind: 'chip', options: asOptions(['春季', '夏季', '秋季', '冬季']) }
-    ];
+    if (kind === '人物') {
+      groups.push(
+        { id: 'pose', title: '人像姿态', dimension: 'pose', kind: 'chip', options: asOptions(['站姿', '坐姿', '行走', '倚靠', '交谈/互动']) },
+        { id: 'character', title: '人物角色', dimension: 'character', kind: 'chip', options: asOptions(['商务精英', '居家男女', '亲子家庭', '青年学生', '休闲独处']) },
+        { id: 'shot', title: '景别类型', dimension: 'shot_type', kind: 'chip', options: asOptions(['全身照', '半身特写', '面部微距']) }
+      );
+    } else if (kind === '穿搭') {
+      groups.push(
+        { id: 'clothing', title: '穿搭品类', dimension: 'clothing_category', kind: 'chip', options: asOptions(['上衣外套', '裤装裙装', '西服套装', '鞋履配饰']) },
+        { id: 'season', title: '季节', dimension: 'season', kind: 'chip', options: asOptions(['春季', '夏季', '秋季', '冬季']) }
+      );
+    }
+    return groups;
   }
   if (tab === 'image' && sub === 'furniture') {
     return [
@@ -4944,13 +4951,17 @@ function handleGalleryScroll() {
 
 // 当前弹窗中全部可用的衍生图列表 (包含 origin、restage_9_16、restage_3_4、精修等)
 const availableDerivatives = computed(() => {
+  let list = [];
   if (currentDetail.value?.derivatives && currentDetail.value.derivatives.length > 0) {
-    return currentDetail.value.derivatives;
+    list = currentDetail.value.derivatives;
+  } else if (activeModalAsset.value?.mainDerivative) {
+    list = [activeModalAsset.value.mainDerivative];
   }
-  if (activeModalAsset.value?.mainDerivative) {
-    return [activeModalAsset.value.mainDerivative];
+  const cat = activeModalAsset.value?.category;
+  if (cat === 'portrait' || cat === 'clothing') {
+    return list.filter(d => !String(d.kind || '').startsWith('restage_'));
   }
-  return [];
+  return list;
 });
 
 // 当前选中的衍生版本对象
@@ -4959,11 +4970,13 @@ const activeDerivativeObj = computed(() => {
   return availableDerivatives.value.find(d => d.id === activeDerivativeId.value) || availableDerivatives.value[0];
 });
 
-// 核心缺失画幅插槽 (3:4、9:16)：对没有相应衍生图的素材提供手动触发插槽
+// 核心缺失画幅插槽 (3:4、9:16)：对没有相应衍生图的素材提供手动触发插槽；人像与服装禁止重构，不展示插槽
 const missingRestageSlots = computed(() => {
   if (!activeModalAsset.value) return [];
   const kind = activeModalAsset.value.kind || activeModalAsset.value.media_type || 'image';
   if (kind !== 'image') return [];
+  const cat = activeModalAsset.value.category;
+  if (cat === 'portrait' || cat === 'clothing') return [];
   const derivs = availableDerivatives.value || [];
   const has916 = derivs.some(d => d.kind === 'restage_9_16');
   const has34 = derivs.some(d => d.kind === 'restage_3_4');
@@ -4994,6 +5007,8 @@ const restageSlotError = ref('');
 
 async function handleGenerateRestageSlot(slot) {
   if (!activeModalAsset.value?.fid || restageLoadingSlot.value) return;
+  const cat = activeModalAsset.value.category;
+  if (cat === 'portrait' || cat === 'clothing') return;
   const fid = activeModalAsset.value.fid;
   restageLoadingSlot.value = slot.ratio;
   restageSlotError.value = '';
@@ -5052,6 +5067,21 @@ function switchSubCategory(key) {
 function toggleFilter(dimension, value) {
   if (!filterState[dimension]) filterState[dimension] = [];
   const idx = filterState[dimension].indexOf(value);
+  if (dimension === 'figure_kind') {
+    filterState.figure_kind = idx > -1 ? [] : [value];
+    if (filterState.figure_kind[0] !== '人物') {
+      filterState.pose = [];
+      filterState.character = [];
+      filterState.shot_type = [];
+    }
+    if (filterState.figure_kind[0] !== '穿搭') {
+      filterState.clothing_category = [];
+      filterState.season = [];
+    }
+    reloadAssets(true);
+    loadTimelineDays();
+    return;
+  }
   if (idx > -1) {
     filterState[dimension].splice(idx, 1);
   } else {
@@ -5129,10 +5159,17 @@ function buildQueryParams(page = 1) {
     params.media_type = 'image';
     if (activeSubCategory.value === 'interior_exterior') {
       params.category = 'interior_exterior';
-    } else if (activeSubCategory.value === 'portrait') {
-      params.category = 'portrait';
-    } else if (activeSubCategory.value === 'clothing') {
-      params.category = 'clothing';
+    } else if (activeSubCategory.value === 'figure') {
+      const kind = filterState.figure_kind[0] || '';
+      if (kind === '人物') {
+        params.section = 'portrait';
+        params.category = 'portrait';
+      } else if (kind === '穿搭') {
+        params.section = 'clothing';
+        params.category = 'clothing';
+      } else {
+        params.section = 'figure';
+      }
     } else if (activeSubCategory.value === 'furniture') {
       params.category = 'furniture';
     }
@@ -5155,9 +5192,15 @@ function buildQueryParams(page = 1) {
   if (filterState.furniture_item.length) params.furniture_item = filterState.furniture_item[0];
   if (filterState.furniture_craft.length) params.furniture_craft = filterState.furniture_craft[0];
   if (filterState.video_source.length) params.video_source = filterState.video_source[0];
-  if (filterState.pose.length) params.pose = filterState.pose[0];
-  if (filterState.character.length) params.character = filterState.character[0];
-  if (filterState.shot_type.length) params.shot_type = filterState.shot_type[0];
+  const onFigure = activeSubCategory.value === 'figure';
+  const figureKind = onFigure ? (filterState.figure_kind[0] || '') : '';
+  const allowPerson = !onFigure || figureKind === '人物';
+  const allowWear = onFigure && figureKind === '穿搭';
+  if (allowPerson && filterState.pose.length) params.pose = filterState.pose[0];
+  if (allowPerson && filterState.character.length) params.character = filterState.character[0];
+  if (allowPerson && filterState.shot_type.length) params.shot_type = filterState.shot_type[0];
+  if (allowWear && filterState.clothing_category.length) params.clothing_category = filterState.clothing_category[0];
+  if (allowWear && filterState.season.length) params.season = filterState.season[0];
   if (filterState.mood.length) params.mood = filterState.mood[0];
 
   return params;
@@ -5173,7 +5216,10 @@ async function loadTimelineDays() {
     const params = {};
     if (activeMainTab.value === 'image') {
       params.media_type = 'image';
-      if (activeSubCategory.value !== 'all') {
+      if (activeSubCategory.value === 'figure') {
+        const kind = filterState.figure_kind[0] || '';
+        params.category = kind === '人物' ? 'portrait' : (kind === '穿搭' ? 'clothing' : 'figure');
+      } else if (activeSubCategory.value !== 'all') {
         params.category = activeSubCategory.value;
       }
     } else if (activeMainTab.value === 'video') {

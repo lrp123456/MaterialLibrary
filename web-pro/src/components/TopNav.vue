@@ -142,7 +142,7 @@ const laneColumns = [
   {
     title: '浏览',
     items: [
-      { key: 'image', label: '图片', desc: '室内外、人像、服装和单品' },
+      { key: 'image', label: '图片', desc: '室内外、人物穿搭和单品' },
       { key: 'video', label: '视频', desc: '漫游、展示、特写和短片' },
       { key: 'audio', label: '音频', desc: '背景乐和环境音' }
     ]
