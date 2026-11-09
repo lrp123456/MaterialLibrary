@@ -10,6 +10,8 @@ import LabView from './views/LabView.vue'
 import SettingsView from './views/SettingsView.vue'
 import AppOnlyView from './views/AppOnlyView.vue'
 import PortraitLibraryView from './views/PortraitLibraryView.vue'
+import ServiceHubView from './views/ServiceHubView.vue'
+import DictionaryView from './views/DictionaryView.vue'
 
 const routes = [
   {
@@ -26,9 +28,12 @@ const routes = [
   { path: '/models', component: ModelsView, meta: { requiresAdmin: true } },
   { path: '/ai-apps', redirect: '/models' },
   { path: '/adapters', redirect: '/models' },
+  { path: '/dictionary', component: DictionaryView, meta: { requiresAdmin: true } },
+  { path: '/dict', redirect: '/dictionary' },
   { path: '/lab', component: LabView, meta: { requiresAdmin: true } },
   { path: '/settings', component: SettingsView, meta: { requiresAdmin: true } },
   { path: '/portraits', component: PortraitLibraryView, meta: { requiresAdmin: true } },
+  { path: '/service-hub', component: ServiceHubView, meta: { requiresAdmin: true } },
   { path: '/:pathMatch(.*)*', redirect: '/' }
 ]
 

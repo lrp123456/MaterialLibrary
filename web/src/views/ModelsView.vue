@@ -353,6 +353,23 @@
 
     <!-- ================= TAB 3: 提示词与公共积木中心页签 ================= -->
     <div v-if="activeTab === 'prompts'" class="space-y-6">
+      <!-- 动态词典芯片联动条 -->
+      <div class="p-3.5 rounded-2xl bg-surface border border-outline-variant flex items-center justify-between text-xs">
+        <div class="flex items-center gap-2.5">
+          <span class="material-symbols-outlined text-cyan text-base">sell</span>
+          <div>
+            <span class="font-semibold text-white">动态标签词典与判据源：</span>
+            <span class="text-on-surface-variant">提示词支持插入 <code class="text-cyan font-mono">&#123;&#123;@dict.空间/风格/材质&#125;&#125;</code> 动态芯片，统一在标签字典中心维护。</span>
+          </div>
+        </div>
+        <router-link
+          to="/dictionary"
+          class="px-3 py-1.5 rounded-xl bg-surface-high hover:bg-surface-high/80 text-white border border-outline-variant text-[11px] font-medium transition flex items-center gap-1 cursor-pointer"
+        >
+          <span>管理词典与判据</span>
+          <span class="material-symbols-outlined text-xs">open_in_new</span>
+        </router-link>
+      </div>
       <!-- 第一区：🧱 公共提示词积木 (Prompt Snippets) -->
       <div class="rounded-2xl bg-surface border border-outline-variant p-4 space-y-3">
         <div class="flex flex-wrap items-center justify-between gap-2">
@@ -528,95 +545,25 @@
       </div>
     </div>
 
-    <!-- ================= TAB 4: 动态标签词典页签 (与 {{@dict.xxx}} 实时联动) ================= -->
-    <div v-if="activeTab === 'dictionary'" class="space-y-4">
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h3 class="text-sm font-semibold text-white">动态标签词典与视觉判据管理 (Tag Dictionary)</h3>
-          <p class="text-[11px] text-on-surface-variant">
-            在此处修改任意标签的中文名、同义别名或视觉判定标准 (criteria)，所有内嵌 <code class="text-cyan">&#123;&#123;@dict.维度名&#125;&#125;</code> 芯片的打标提示词将即时自动同步，无需手改提示词长文！
-          </p>
-        </div>
-        <div class="flex items-center gap-2">
-          <button
-            @click="openAddDictTag"
-            class="px-3 py-1.5 rounded-xl bg-primary hover:bg-primary-dim text-white text-xs font-medium flex items-center gap-1.5 transition cursor-pointer"
-          >
-            <span class="material-symbols-outlined text-sm">add</span>
-            <span>新增当前维度标签</span>
-          </button>
-        </div>
+    <!-- ================= TAB 4: 动态标签词典已升级为独立一级模块 ================= -->
+    <div v-if="activeTab === 'dictionary'" class="bg-surface-low border border-outline-variant rounded-2xl p-8 text-center max-w-xl mx-auto space-y-4 my-6">
+      <div class="w-14 h-14 rounded-2xl bg-surface border border-outline-variant flex items-center justify-center text-primary mx-auto">
+        <span class="material-symbols-outlined text-3xl">sell</span>
       </div>
-
-      <!-- 维度选择栏 -->
-      <div class="flex items-center gap-1.5 flex-wrap">
-        <button
-          v-for="dim in dictDimensions"
-          :key="dim.key"
-          @click="selectedDictDim = dim.key"
-          class="px-3 py-1.5 rounded-xl text-xs font-medium transition cursor-pointer flex items-center gap-1.5"
-          :class="selectedDictDim === dim.key ? 'bg-primary text-white' : 'bg-surface border border-outline-variant text-on-surface-variant hover:text-white'"
-        >
-          <span>{{ dim.label }}</span>
-          <span class="font-mono text-[10px] opacity-80">&#123;&#123;@dict.{{ dim.key }}&#125;&#125;</span>
-        </button>
+      <div>
+        <h2 class="text-base font-bold text-white">动态标签字典已升级为独立一级中心</h2>
+        <p class="text-xs text-on-surface-variant mt-1.5 leading-relaxed">
+          为消除词典配置在多处页面的割裂与重复，标签字典与视觉判据治理已收敛为统一的【标签字典】模块。您在其中维护的所有维度、标签、别名和判据，仍会自动实时注入至本页面的 <code class="text-cyan">&#123;&#123;@dict.xxx&#125;&#125;</code> 提示词芯片！
+        </p>
       </div>
-
-      <!-- 当前维度标签列表 -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div
-          v-for="tag in filteredDictTags"
-          :key="tag.id || tag.dir"
-          class="rounded-2xl bg-surface border border-outline-variant p-3.5 flex flex-col justify-between gap-2"
-          :class="tag.deprecated ? 'opacity-50' : ''"
+      <div class="pt-2">
+        <router-link
+          to="/dictionary"
+          class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-dim text-white text-xs font-semibold shadow-sm transition cursor-pointer"
         >
-          <div class="space-y-1.5">
-            <div class="flex items-center justify-between gap-2">
-              <div class="flex items-center gap-2">
-                <span class="text-sm font-bold text-white">{{ tag.label }}</span>
-                <span class="text-[11px] font-mono px-2 py-0.5 rounded bg-surface-low text-cyan border border-outline-variant">
-                  {{ tag.dir }}
-                </span>
-              </div>
-              <span
-                class="text-[10px] px-2 py-0.5 rounded-full"
-                :class="tag.deprecated ? 'bg-err/15 text-err' : 'bg-ok/15 text-ok'"
-              >
-                {{ tag.deprecated ? '已废弃' : '生效中' }}
-              </span>
-            </div>
-            <div v-if="tag.aliases" class="text-[11px] text-on-surface-variant">
-              别名: <span class="font-mono text-white">{{ formatAliases(tag.aliases) }}</span>
-            </div>
-            <div class="p-2 rounded-lg bg-surface-low border border-outline-variant text-xs text-on-surface-variant">
-              <span class="text-primary-dim font-semibold">视觉判据: </span>
-              <span>{{ tag.criteria || '(未设置特殊视觉判据，按标签字面义识别)' }}</span>
-            </div>
-          </div>
-
-          <div class="flex items-center justify-end gap-2 pt-2 border-t border-outline-variant text-xs">
-            <button
-              @click="openEditDictTag(tag)"
-              class="px-2.5 py-1 rounded-lg bg-surface-low hover:bg-surface-high text-white border border-outline-variant cursor-pointer"
-            >
-              编辑判据与别名
-            </button>
-            <button
-              v-if="!tag.deprecated"
-              @click="toggleDeprecateTag(tag, true)"
-              class="px-2.5 py-1 rounded-lg bg-err/10 text-err border border-err/25 cursor-pointer"
-            >
-              废弃
-            </button>
-            <button
-              v-else
-              @click="toggleDeprecateTag(tag, false)"
-              class="px-2.5 py-1 rounded-lg bg-ok/15 text-ok border border-ok/30 cursor-pointer"
-            >
-              恢复启用
-            </button>
-          </div>
-        </div>
+          <span>前往标签字典中心</span>
+          <span class="material-symbols-outlined text-sm">arrow_forward</span>
+        </router-link>
       </div>
     </div>
 
@@ -2220,6 +2167,8 @@
 </template>
 
 <script setup>
+import { useRouter } from 'vue-router'
+const router = useRouter()
 import { ref, computed, onMounted } from 'vue'
 import { api } from '../api'
 
@@ -2530,6 +2479,10 @@ const testingRewrite = ref(false)
 const testRewriteResult = ref('')
 
 function switchTab(tab) {
+  if (tab === 'dictionary') {
+    router.push('/dictionary')
+    return
+  }
   activeTab.value = tab
   refreshCurrentTab()
 }

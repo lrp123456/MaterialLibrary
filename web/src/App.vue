@@ -25,6 +25,16 @@
           </router-link>
 
           <router-link
+            to="/dictionary"
+            class="px-3 py-2.5 rounded-xl flex items-center gap-2.5 transition font-medium"
+            :class="navClass('/dictionary')"
+          >
+            <span class="material-symbols-outlined text-lg">label</span>
+            <span>标签字典</span>
+            <span class="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-surface-high text-on-surface-variant font-mono">Dict</span>
+          </router-link>
+
+          <router-link
             to="/runs"
             class="px-3 py-2.5 rounded-xl flex items-center gap-2.5 transition font-medium"
             :class="navClass('/runs')"
@@ -59,6 +69,16 @@
           >
             <span class="material-symbols-outlined text-lg">settings</span>
             <span>系统设置</span>
+          </router-link>
+
+          <router-link
+            to="/service-hub"
+            class="px-3 py-2.5 rounded-xl flex items-center gap-2.5 transition font-medium"
+            :class="navClass('/service-hub')"
+          >
+            <span class="material-symbols-outlined text-lg">dns</span>
+            <span>服务总控 (3790)</span>
+            <span class="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-surface-high text-on-surface-variant font-mono">Hub</span>
           </router-link>
         </template>
       </nav>

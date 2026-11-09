@@ -213,7 +213,7 @@
           <p v-else-if="showTagHistory" class="text-[10px] text-outline">暂无历史记录</p>
         </div>
 
-        <div v-if="isAdmin" class="space-y-3 pt-2 border-t border-outline-variant">
+        <div v-if="isAdmin && detail?.asset?.category !== 'portrait' && detail?.asset?.category !== 'clothing'" class="space-y-3 pt-2 border-t border-outline-variant">
           <p class="text-[11px] font-medium text-white">双画幅重构</p>
           <div>
             <p class="text-[10px] text-on-surface-variant mb-1.5">画幅</p>

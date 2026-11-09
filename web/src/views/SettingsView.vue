@@ -59,125 +59,25 @@
       </div>
     </div>
 
-    <!-- 1. 标签字典治理 -->
-    <div v-if="tab === 'dict'" class="space-y-4">
-      <div class="bg-surface-low border border-outline-variant rounded-2xl p-4 space-y-3 text-xs">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div class="flex flex-wrap items-center gap-2">
-            <span class="text-outline">分区:</span>
-            <button
-              v-for="g in dictGroups"
-              :key="g.key"
-              @click="activeGroup = g.key"
-              class="px-3 py-1.5 rounded-xl font-medium transition"
-              :class="activeGroup === g.key ? 'bg-primary text-white' : 'bg-surface text-on-surface-variant hover:bg-surface-high'"
-            >{{ g.label }}</button>
-            <label class="ml-2 flex items-center gap-1.5 text-on-surface-variant cursor-pointer">
-              <input type="checkbox" v-model="showDeprecated" class="accent-primary" />
-              <span>含已废弃</span>
-            </label>
-          </div>
-          <div class="flex items-center gap-2">
-            <button @click="tab === 'dict' && (dictSubTab = dictSubTab === 'audit' ? 'tags' : 'audit')" class="px-3 py-1.5 rounded-xl border border-outline-variant text-on-surface-variant hover:bg-surface-high">
-              {{ dictSubTab === 'audit' ? '返回标签列表' : '变更历史' }}
-            </button>
-            <button
-              :disabled="!activeDimMeta || activeDimMeta.readonly"
-              @click="openAddTag"
-              class="px-3 py-1.5 bg-primary text-white rounded-xl font-medium flex items-center gap-1 disabled:opacity-40"
-            >
-              <span class="material-symbols-outlined text-sm">add</span>
-              <span>新增标签枚举</span>
-            </button>
-          </div>
-        </div>
-
-        <div class="flex flex-wrap items-center gap-2">
-          <span class="text-outline">维度:</span>
-          <select v-model="activeDim" class="bg-surface border border-outline-variant rounded-xl px-3 py-1.5 text-white outline-none focus:border-primary min-w-48">
-            <option v-for="d in visibleDims" :key="d.key" :value="d.key">
-              {{ d.label }} ({{ d.key }}) · 可用 {{ d.count }}<template v-if="d.deprecatedCount"> / 废弃 {{ d.deprecatedCount }}</template>
-            </option>
-          </select>
-          <span v-if="activeDimMeta?.readonly" class="text-[10px] px-2 py-0.5 rounded bg-surface text-outline border border-outline-variant">系统只读</span>
-          <span v-if="activeDimMeta?.multi" class="text-[10px] px-2 py-0.5 rounded bg-primary/15 text-primary">多选</span>
-          <span v-else class="text-[10px] px-2 py-0.5 rounded bg-surface text-on-surface-variant border border-outline-variant">单选</span>
-        </div>
+    <!-- 1. 标签字典独立入口提示 -->
+    <div v-if="tab === 'dict'" class="bg-surface-low border border-outline-variant rounded-2xl p-8 text-center max-w-xl mx-auto space-y-4 my-6">
+      <div class="w-14 h-14 rounded-2xl bg-surface border border-outline-variant flex items-center justify-center text-primary mx-auto">
+        <span class="material-symbols-outlined text-3xl">label</span>
       </div>
-
-      <!-- 标签列表 -->
-      <div v-if="dictSubTab === 'tags'" class="space-y-2.5">
-        <div class="flex items-center justify-between text-[11px] text-outline">
-          <span>共 {{ currentDimTags.length }} 项</span>
-          <button
-            v-if="isAdmin && currentDimTags.length"
-            @click="openRetagConfirm([activeDim])"
-            class="px-2.5 py-1 rounded-lg border border-primary/40 text-primary hover:bg-primary/10"
-          >按本维重打低置信/回退项</button>
-        </div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs">
-          <div
-            v-for="t in currentDimTags"
-            :key="t.id"
-            class="bg-surface-low border rounded-xl p-3 space-y-1.5"
-            :class="t.deprecated ? 'border-error/30 opacity-70' : 'border-outline-variant'"
-          >
-            <div class="flex items-start justify-between gap-2">
-              <div class="min-w-0">
-                <p class="font-medium text-white truncate">{{ t.label }}</p>
-                <p class="text-[10px] text-outline font-mono truncate">{{ t.dir }}</p>
-              </div>
-              <div class="flex items-center gap-1 shrink-0">
-                <span class="text-[10px] px-1.5 py-0.5 rounded bg-surface text-on-surface-variant">{{ t.usage_count }} 张</span>
-                <span v-if="t.deprecated" class="text-[9px] px-1.5 py-0.5 rounded bg-error/20 text-error">已废弃</span>
-              </div>
-            </div>
-            <p v-if="isAdmin && t.criteria" class="text-[10px] text-on-surface-variant line-clamp-2">{{ t.criteria }}</p>
-            <p v-if="isAdmin && t.aliases?.length" class="text-[10px] text-outline">别名: {{ t.aliases.join(' / ') }}</p>
-            <div v-if="isAdmin && !activeDimMeta?.readonly" class="flex flex-wrap gap-1.5 pt-1">
-              <button @click="openEditTag(t)" class="px-2 py-0.5 rounded bg-surface text-on-surface-variant hover:bg-surface-high">编辑</button>
-              <button v-if="!t.deprecated" @click="deprecateTag(t)" class="px-2 py-0.5 rounded bg-error/15 text-error hover:bg-error/25">废弃</button>
-              <button v-else @click="restoreTag(t)" class="px-2 py-0.5 rounded bg-primary/15 text-primary hover:bg-primary/25">恢复</button>
-            </div>
-          </div>
-        </div>
-        <div v-if="!currentDimTags.length" class="p-6 text-center text-on-surface-variant text-xs bg-surface-low border border-outline-variant rounded-2xl">
-          当前维度暂无标签
-        </div>
+      <div>
+        <h2 class="text-base font-bold text-white">标签字典已升级为独立一级模块</h2>
+        <p class="text-xs text-on-surface-variant mt-1.5 leading-relaxed">
+          为消除配置散落与双胞胎重叠，标签字典治理已从设置和模型页中收敛，作为全站统一的标签与视觉判据治理中心。
+        </p>
       </div>
-
-      <!-- 字典变更历史 -->
-      <div v-else class="bg-surface-low border border-outline-variant rounded-2xl overflow-hidden">
-        <table class="w-full text-xs text-left">
-          <thead class="bg-surface text-outline border-b border-outline-variant text-[11px]">
-            <tr>
-              <th class="p-3">时间</th>
-              <th class="p-3">动作</th>
-              <th class="p-3">维度</th>
-              <th class="p-3">标签</th>
-              <th class="p-3">操作者</th>
-              <th class="p-3"></th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-outline-variant">
-            <tr v-for="a in auditList" :key="a.id" class="hover:bg-surface-high/30">
-              <td class="p-3 text-outline whitespace-nowrap">{{ new Date(a.created_at).toLocaleString() }}</td>
-              <td class="p-3">
-                <span class="px-1.5 py-0.5 rounded text-[10px]"
-                  :class="a.action==='create' ? 'bg-primary/15 text-primary' : a.action==='deprecate' ? 'bg-error/15 text-error' : a.action==='restore' ? 'bg-success/15 text-success' : 'bg-surface text-on-surface-variant'">
-                  {{ auditActionLabel(a.action) }}
-                </span>
-              </td>
-              <td class="p-3 font-mono text-[10px]">{{ a.dimension }}</td>
-              <td class="p-3">{{ a.dir }}</td>
-              <td class="p-3 text-outline">{{ a.actor || '—' }}</td>
-              <td class="p-3">
-                <button @click="loadAuditAssets(a)" class="text-primary hover:underline">受影响资产</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <div v-if="!auditList.length" class="p-6 text-center text-on-surface-variant text-xs">暂无字典变更记录</div>
+      <div class="pt-2">
+        <router-link
+          to="/dictionary"
+          class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-dim text-white text-xs font-semibold shadow-sm transition"
+        >
+          <span>前往标签字典中心</span>
+          <span class="material-symbols-outlined text-sm">arrow_forward</span>
+        </router-link>
       </div>
     </div>
 
