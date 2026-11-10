@@ -105,6 +105,63 @@ function enrichFetchError(e, what) {
   return err;
 }
 
+/**
+ * GPT Image VIP 上游失败 → 用户能看懂的标题/错误码。
+ * 只取上游 body 里的 error.message（原始 JSON 对用户是噪音），
+ * 并尽量抠出 request id 方便排查；「实际请求参数」不再拼进可见文案。
+ */
+function vipFailureInfo(status, bodyText) {
+  const raw = String(bodyText || '').trim();
+  let detail = raw;
+  let requestId = '';
+  try {
+    const j = JSON.parse(raw);
+    detail = String(j?.error?.message || j?.error || j?.message || '').trim() || raw;
+    requestId = String(j?.error?.request_id || j?.request_id || '') || '';
+  } catch (_) {}
+  if (!requestId) {
+    const m = /request id:\s*([A-Za-z0-9._-]+)/i.exec(detail);
+    if (m) requestId = m[1];
+  }
+  let title;
+  let code;
+  if (status === 429) {
+    title = '上游图像服务繁忙（HTTP 429）';
+    code = 'upstream_busy';
+  } else if (status === 401 || status === 403) {
+    title = `图像通道鉴权失败（HTTP ${status}）`;
+    code = 'upstream_auth';
+  } else if (status === 404) {
+    title = `图像通道找不到该模型（HTTP ${status}）`;
+    code = 'model_not_found';
+  } else if (status === 400) {
+    title = '图像通道拒绝了本次请求（HTTP 400）';
+    code = 'upstream_bad_request';
+  } else if (status >= 500) {
+    title = `上游图像服务异常（HTTP ${status}）`;
+    code = 'upstream_error';
+  } else {
+    title = `图像通道返回 HTTP ${status || '?'}`;
+    code = 'upstream_error';
+  }
+  const detailText = detail && !detail.includes('实际请求参数') ? `：${detail.slice(0, 220)}` : '';
+  return { title, code, detail: detailText, requestId };
+}
+
+/** 区分「上游可能仍在出图的应用层超时」与「连不上上游」——前者不能急着重提。 */
+function classifyVipNetworkError(e) {
+  if (!e) return 'other';
+  const causeCode = String(e?.cause?.code || '');
+  if (causeCode === 'UND_ERR_CONNECT_TIMEOUT') return 'connect';
+  if (e?.name === 'TimeoutError' || e?.name === 'AbortError'
+    || /aborted due to timeout|timed out/i.test(String(e?.message || ''))) return 'gen';
+  return 'other';
+}
+
+function vipTimeoutMessage(ms) {
+  return `图像生成等待超时（已等待 ${Math.round(ms / 1000)} 秒）。上游可能仍在出图：请先不要重复提交，1~2 分钟后回到本会话查看，或稍后再点「重试」。`;
+}
+
 /* ------------------------------------------------------------------ *
  * 火山方舟 Seedream 载荷规范化（模块级纯函数，便于单测）
  *
@@ -1305,30 +1362,66 @@ async function executeAdapterInner(services, adapter, input) {
 
       // 上游是老张的 Firefly shell 账号池，同参数会出现「一段时间连续 400、隔一阵又恢复」。
       // 实测 2026-11-06：04:49 成功 → 04:52–05:00 连续 8 次同参数 400 → 06:57 同参数成功，
-      // 所以这类拒绝不一定是我们的参数错。仅对「网关秒拒」（<8s 就回 400）做一次退避重试，
-      // 上游真跑了 20s 才拒绝的不重试（再跑大概率还是拒，白等几分钟还占额度）。
+      // 所以这类拒绝不一定是我们的参数错。
+      //  - 429（service is busy/限流）：请求未被受理，重试安全，最多 3 次、退避 8s / 20s；
+      //  - 5xx / 408：上游可能已经执行，只在网关秒拒（<8s）时保守重试一次，避免重复计费；
+      //  - 400 确定性参数错（prompt is required 等）：不重试。
+      // 高画质 VIP 出图普遍 2~4 分钟，等待上限放宽到 5 分钟，否则会在上游仍在出图时被本地掐断。
+      const vipTimeoutMs = Math.max(timeoutMs, 300000);
+      const MAX_ATTEMPTS = 3;
       let vipRes = null;
       let vipText = '';
-      for (let attempt = 1; attempt <= 2; attempt++) {
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         const t0 = Date.now();
         try {
           vipRes = await fetchNet(reqUrl, {
             method: 'POST',
             headers,
             body: JSON.stringify(vipBody)
-          }, { timeoutMs, what: `GPT Image VIP 图像生成 (${modelToUse})`, retryOn: isPreSendError, onRetry: logNetRetry });
+          }, { timeoutMs: vipTimeoutMs, what: `GPT Image VIP 图像生成 (${modelToUse})`, retryOn: isPreSendError, onRetry: logNetRetry });
         } catch (e) {
           noteVendorOutcome(input, false, e.message || '');
+          const kind = classifyVipNetworkError(e);
+          if (kind === 'gen') {
+            const err = new Error(vipTimeoutMessage(vipTimeoutMs));
+            err.code = 'upstream_timeout';
+            err.status = 504;
+            throw err;
+          }
+          if (kind === 'connect') {
+            const err = new Error('连接图像上游超时：请检查本机网络/代理（NO_PROXY）后重试；本次请求未提交成功。');
+            err.code = 'upstream_connect_timeout';
+            err.status = 504;
+            throw err;
+          }
           throw enrichFetchError(e, 'GPT Image VIP 图像生成网络请求失败');
         }
         vipText = await vipRes.text().catch(() => '');
         if (vipRes.ok) break;
 
+        const status = vipRes.status;
         const elapsed = Date.now() - t0;
-        const deterministic = /prompt is required|invalid size|unsupported/i.test(vipText);
-        if (deterministic || attempt === 2 || elapsed > 8000) break;
-        console.warn(`[gen] GPT Image VIP 网关秒拒 HTTP ${vipRes.status}（${elapsed}ms），5s 后重试一次`);
-        await new Promise((r) => setTimeout(r, 5000));
+        const deterministic = status === 400 && /prompt is required|invalid size|unsupported/i.test(vipText);
+        if (deterministic || attempt >= MAX_ATTEMPTS) break;
+
+        if (status === 429) {
+          const waitMs = attempt === 1 ? 8000 : 20000;
+          console.warn(`[gen] GPT Image VIP 上游繁忙 HTTP 429，${waitMs / 1000}s 后重试（第 ${attempt + 1}/${MAX_ATTEMPTS} 次）`);
+          await new Promise((r) => setTimeout(r, waitMs));
+          continue;
+        }
+        if ((status >= 500 || status === 408) && elapsed <= 8000) {
+          console.warn(`[gen] GPT Image VIP 网关秒拒 HTTP ${status}（${elapsed}ms），5s 后重试一次`);
+          await new Promise((r) => setTimeout(r, 5000));
+          continue;
+        }
+        if (status < 500 && elapsed <= 8000) {
+          // 其它「秒拒」状态保持原来的保守重试：上游没跑多久，重提代价小
+          console.warn(`[gen] GPT Image VIP 网关秒拒 HTTP ${status}（${elapsed}ms），5s 后重试一次`);
+          await new Promise((r) => setTimeout(r, 5000));
+          continue;
+        }
+        break;
       }
 
       if (!vipRes || !vipRes.ok) {
@@ -1343,10 +1436,15 @@ async function executeAdapterInner(services, adapter, input) {
           quality: vipBody.quality,
           background: vipBody.background,
         };
-        const hint = vipRes && vipRes.status === 400
-          ? '（上游账号池临时拒绝：同参数换时间通常能成功，可隔几分钟重试，或临时改用其它图像模型）'
-          : '';
-        throw new Error(`GPT Image VIP 图像生成失败 HTTP ${vipRes ? vipRes.status : '?'}: ${String(vipText).slice(0, 300)}${hint}｜实际请求参数 ${JSON.stringify(sent)}`);
+        // 参数只进日志，不再拼进用户可见文案（旧版会把整段 JSON 甩到错误卡上）
+        console.warn(`[gen] GPT Image VIP 失败参数: ${JSON.stringify(sent)}`);
+        const info = vipFailureInfo(vipRes ? vipRes.status : 0, vipText);
+        const err = new Error(`${info.title}${info.detail}`);
+        err.status = vipRes ? vipRes.status : 502;
+        err.code = info.code;
+        err.requestId = info.requestId || null;
+        err.requestSnapshot = sent;
+        throw err;
       }
 
       noteVendorOutcome(input, true);
@@ -2122,6 +2220,10 @@ module.exports = {
   executeAdapter,
   getNested,
   fillTemplate,
+  // 供错误文案/回归测试复用
+  vipFailureInfo,
+  vipTimeoutMessage,
+  classifyVipNetworkError,
   normalizeArkSeedreamPayload,
   normalizeArkSize,
   probeCaps,

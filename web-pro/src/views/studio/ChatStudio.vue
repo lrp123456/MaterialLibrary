@@ -9490,11 +9490,34 @@ const selectorSizeHint = computed(() => (activeModality.value === 'image' ? sele
 function friendlyErrorText(raw) {
   const text = String(raw || '').replace(/^生成遇到问题[:：]\s*/, '').trim();
   if (!text) return '请检查服务端模型配置或网络连接后重试。';
-  // 去掉内部模型前缀 [Agnes Video ...] / [Agnes Video keyframe]
-  return text.replace(/^\[[^\]]+\]\s*/, '');
+  // 去掉内部模型前缀 [Agnes Video ...] / [Agnes Video keyframe]；
+  // 旧版 VIP 错误会把整段「实际请求参数 {JSON}」拼在正文尾部，刷新历史消息时一并清掉
+  return text
+    .replace(/^\[[^\]]+\]\s*/, '')
+    .replace(/｜实际请求参数\s*\{[\s\S]*\}\s*$/, '')
+    .trim();
 }
 function errorHint(raw) {
-  const text = String(raw || '');
+  // 先剔掉旧消息尾部的参数 JSON：里面的 "ratio":"3:4" 会误触发「去改画幅」的建议
+  const text = String(raw || '').replace(/｜实际请求参数\s*\{[\s\S]*\}\s*$/, '');
+  if (/HTTP 429|service is busy|too many requests|rate limit|限流|繁忙/i.test(text)) {
+    return '上游图像服务临时繁忙（429 限流），请求未被受理、不会重复扣费。系统已自动退避重试；仍然失败就等几分钟再点「重试」，或临时换用其它图像模型。';
+  }
+  if (/aborted due to timeout|生成等待超时|TimeoutError|请求超时|timed out/i.test(text)) {
+    return '这次是本地等待超时，上游可能仍在出图：先不要连续重试，1~2 分钟后回到本会话看看结果，或稍后只重试一次。';
+  }
+  if (/连接图像上游超时/i.test(text)) {
+    return '连不上图像上游（网络/代理问题），本次请求没有提交成功；检查网络后再重试。';
+  }
+  if (/HTTP 401|HTTP 403|鉴权失败|invalid api.?key/i.test(text)) {
+    return '图像通道密钥或权限异常，请到设置页检查 NewAPI / 老张凭据是否过期。';
+  }
+  if (/HTTP 404|找不到该模型|model not found/i.test(text)) {
+    return '该图像通道暂不提供这个模型，请切换其它图像模型后重试。';
+  }
+  if (/HTTP 5\d\d|上游图像服务异常|bad gateway|service unavailable/i.test(text)) {
+    return '上游服务异常，稍后点「重试」；连续出现建议临时切换图像模型。';
+  }
   if (/显存不足|CUDA out of memory/i.test(text)) {
     return '本地 GPU 显存被生图任务占满了。等生图队列清空（通常几分钟）后点「重试」即可。';
   }

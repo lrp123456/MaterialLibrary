@@ -120,8 +120,17 @@ function main() {
   assert.ok(enqueueOwnedAt > -1 && enqueueOwnedAt < enqueueAt,
     '入队必须校验会话归属，防止往他人会话注入 assistant 消息');
 
-  // ── 后台生成不阻塞其它会话：发送按钮/进度提示只看当前会话 ──
+  // ── 生图报错：429/超时要有专门建议，旧消息里的调试 JSON 不能误触发「改画幅」──
   const chatStudio = read('web-pro/src/views/studio/ChatStudio.vue');
+  assert.ok(chatStudio.includes('HTTP 429|service is busy'), '429 繁忙必须有专门处置建议');
+  assert.ok(chatStudio.includes('aborted due to timeout'), '本地等待超时必须有专门处置建议');
+  assert.ok(chatStudio.includes('实际请求参数'), '必须清理旧错误消息尾部的调试参数');
+  const genIndex = read('src/gen/index.js');
+  assert.ok(genIndex.includes('MAX_ATTEMPTS = 3'), '429 限流应做有限次退避重试');
+  assert.ok(genIndex.includes('Math.max(timeoutMs, 300000)'), '高画质 VIP 出图等待上限应放宽到 5 分钟');
+  assert.ok(genIndex.includes('vipFailureInfo('), '上游错误应转成结构化文案');
+
+  // ── 后台生成不阻塞其它会话：发送按钮/进度提示只看当前会话 ──
   assert.ok(chatStudio.includes('const currentGenerating = computed('),
     '必须按当前会话派生生成中状态，不能用全局 generating 单例');
   assert.ok(chatStudio.includes(':disabled="currentGenerating"'),
