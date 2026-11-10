@@ -114,9 +114,9 @@ function seedance20Params() {
     contractDuration('duration', '时长', 4, 15, 5, { extra_stops: [-1], extra_labels: { '-1': '智能' } }),
     contractEnum('ratio', '画幅', RATIO_SEEDANCE, '9:16'),
     contractBool('generate_audio', '生成同步音频', true, { visibility: 'public' }),
-    contractEnum('mode', '模式', ['text_to_video', 'omni_reference', 'image_to_video', 'first_last_frame'], 'text_to_video', {
+    contractEnum('mode', '模式', ['text_to_video', 'omni_reference', 'first_last_frame'], 'omni_reference', {
       location: 'none',
-      option_labels: { text_to_video: '文生视频', omni_reference: '全能参考', image_to_video: '图生视频', first_last_frame: '首尾帧' },
+      option_labels: { text_to_video: '文生视频', omni_reference: '全能参考', first_last_frame: '首尾帧' },
     }),
     contractBool('watermark', 'AI 水印', false),
     contractNumber('seed', '种子', -1, 2147483647, -1),
@@ -133,11 +133,10 @@ function seedance25Params() {
     contractDuration('duration', '时长', 4, 30, 5, { extra_stops: [-1], extra_labels: { '-1': '智能' } }),
     contractEnum('ratio', '画幅', RATIO_SEEDANCE, '9:16'),
     contractBool('generate_audio', '生成同步音频', true, { visibility: 'public' }),
-    contractEnum('mode', '模式', ['text_to_video', 'omni_reference', 'image_to_video', 'first_last_frame', 'video_edit', 'video_extend', 'draft_to_final'], 'text_to_video', {
+    contractEnum('mode', '模式', ['text_to_video', 'omni_reference', 'first_last_frame'], 'omni_reference', {
       location: 'none',
       option_labels: {
-        text_to_video: '文生视频', omni_reference: '全能参考', image_to_video: '图生视频',
-        first_last_frame: '首尾帧', video_edit: '视频编辑', video_extend: '视频延长', draft_to_final: '样片转正片',
+        text_to_video: '文生视频', omni_reference: '全能参考', first_last_frame: '首尾帧',
       },
     }),
     contractBool('watermark', 'AI 水印', false),
@@ -159,13 +158,12 @@ function wan30Params() {
     contractEnum('resolution', '分辨率', res.options, res.default, { option_labels: res.labels }),
     contractDuration('duration', '时长', 2, 30, 5, { extra_stops: [-1], extra_labels: { '-1': '智能' } }),
     contractEnum('ratio', '画幅', ['16:9', '9:16', '1:1', '4:3', '3:4', 'adaptive'], '9:16'),
-    contractEnum('mode', '模式', ['text_to_video', 'image_to_video', 'first_last_frame', 'omni_reference'], 'text_to_video', {
+    contractEnum('mode', '模式', ['text_to_video', 'omni_reference', 'first_last_frame'], 'omni_reference', {
       location: 'none',
       option_labels: {
         text_to_video: '文生视频',
-        image_to_video: '图生视频',
+        omni_reference: '全能参考',
         first_last_frame: '首尾帧',
-        omni_reference: '参考生视频',
       },
     }),
   ];
@@ -743,7 +741,6 @@ const DEFAULT_MODEL_CONTRACTS = [
     modes: [
       { id: 'text_to_video', label: '文生视频' },
       { id: 'omni_reference', label: '全能参考' },
-      { id: 'image_to_video', label: '图生视频' },
       { id: 'first_last_frame', label: '首尾帧' },
     ],
     slots: { images: 9, videos: 3, audios: 3 },
@@ -770,10 +767,7 @@ const DEFAULT_MODEL_CONTRACTS = [
     modes: [
       { id: 'text_to_video', label: '文生视频' },
       { id: 'omni_reference', label: '全能参考' },
-      { id: 'image_to_video', label: '图生视频' },
       { id: 'first_last_frame', label: '首尾帧' },
-      { id: 'video_edit', label: '视频编辑' },
-      { id: 'video_extend', label: '视频延长' },
     ],
     slots: { images: 30, videos: 10, audios: 10 },
     enabled: 1,
@@ -796,12 +790,11 @@ const DEFAULT_MODEL_CONTRACTS = [
     vendor_model_id: 'wan3.0-video',
     capability_id: 'wan_video',
     refStyle: 'generic',
-    polishHint: '文生 / 首帧 / 首尾帧 / 参考图 · 2–30s',
+    polishHint: '文生 / 首尾帧 / 全能参考 · 2–30s',
     modes: [
       { id: 'text_to_video', label: '文生视频' },
-      { id: 'image_to_video', label: '图生视频' },
+      { id: 'omni_reference', label: '全能参考' },
       { id: 'first_last_frame', label: '首尾帧' },
-      { id: 'omni_reference', label: '参考生视频' },
     ],
     slots: { images: 5, videos: 0, audios: 0 },
     enabled: 1,
@@ -826,7 +819,7 @@ const DEFAULT_MODEL_CONTRACTS = [
     polishHint: '<Picture 1> · 仅 720P · 4–12s',
     modes: [
       { id: 'text_to_video', label: '文生视频' },
-      { id: 'image_to_video', label: '参考' },
+      { id: 'omni_reference', label: '全能参考' },
       { id: 'first_last_frame', label: '首尾帧' },
     ],
     slots: { images: 5, videos: 0, audios: 3 },
@@ -2519,6 +2512,12 @@ function videoParamsNeedRepair(modelId, params) {
   const isAgnes = (modelId === 'agnes_video_2_5_flash');
   if (!isSeedance && !isWan && !isAgnes) return false;
 
+  const modeParam = params.find((p) => p && p.key === 'mode');
+  if (modeParam) {
+    if (Array.isArray(modeParam.options) && modeParam.options.includes('image_to_video')) return true;
+    if (modeParam.default !== 'omni_reference') return true;
+  }
+
   const res = params.find((p) => p && (p.key === 'resolution' || p.key === 'size'));
   if (!res || !Array.isArray(res.options)) return true;
   const options = res.options.map(String);
@@ -2556,8 +2555,9 @@ function baselineOptimizer(mc) {
 
 /** 新行写入官方技能。已有非空技能不覆盖。已保存的显示名与非 Seedance 参数不覆盖。Seedance/Wan 仍带旧三档或 sr2x 时，修成标准六档，Agnes 修成两档。 */
 function seedStoredContract(db, insContract, mc, now) {
+  try { db.exec('ALTER TABLE model_contracts ADD COLUMN modes_json TEXT'); } catch (_) {}
   const seedOpt = baselineOptimizer(mc);
-  const existing = db.prepare('SELECT name, vendor_model_id, capability_id, optimizer_json, params_json FROM model_contracts WHERE id=?').get(mc.id);
+  const existing = db.prepare('SELECT name, vendor_model_id, capability_id, optimizer_json, params_json, modes_json FROM model_contracts WHERE id=?').get(mc.id);
   if (!existing) {
     insContract.run({
       id: mc.id,
@@ -2595,10 +2595,20 @@ function seedStoredContract(db, insContract, mc, now) {
     try { params = JSON.parse(existing.params_json); } catch { params = null; }
   }
 
+  let modes = null;
+  if (existing.modes_json != null) {
+    try { modes = JSON.parse(existing.modes_json); } catch { modes = null; }
+  }
+
   const isVideoToRepair = (mc.id === 'seedance2_0' || mc.id === 'seedance2_5' || mc.id === 'wan3_0_video' || mc.id === 'agnes_video_2_5_flash');
   const videoRepair = isVideoToRepair && videoParamsNeedRepair(mc.id, params);
   const ratioRepair = modelParamsNeedRatioRepair(params);
-  const repair = videoRepair || ratioRepair;
+  const videoModesNeedRepair = isVideoToRepair && (
+    !Array.isArray(modes) ||
+    modes.some((m) => m && (m.id === 'image_to_video' || (m.id === 'omni_reference' && m.label !== '全能参考'))) ||
+    !modes.some((m) => m && m.id === 'omni_reference')
+  );
+  const repair = videoRepair || ratioRepair || videoModesNeedRepair;
 
   if (repair) {
     if (isVideoToRepair) {
@@ -2619,11 +2629,13 @@ function seedStoredContract(db, insContract, mc, now) {
     }
     db.prepare(`
       UPDATE model_contracts
-      SET name=?, params_json=?, conditional_rules_json=?, optimizer_json=?, updated_at=?
+      SET name=?, params_json=?, conditional_rules_json=?, optimizer_json=?, modes_json=?, updated_at=?
       WHERE id=?
     `).run(
       modelName,
-      JSON.stringify(params), JSON.stringify(mc.conditional_rules || []), JSON.stringify(opt), now, mc.id
+      JSON.stringify(params), JSON.stringify(mc.conditional_rules || []), JSON.stringify(opt),
+      JSON.stringify(mc.modes || []),
+      now, mc.id
     );
     return;
   }
@@ -3291,7 +3303,19 @@ function buildSchemaForContract(c, db = null) {
   // 以前只按字段名判断，将来若有图片契约也声明 resolution 枚举，就会被 720p_sr2x 顶掉默认值。
   const isVideoContract = (Array.isArray(rawParams)
       && rawParams.some((p) => p && ['duration', 'seconds', 'Duration'].includes(p.key)))
-    || (Array.isArray(modes) && modes.some((m) => m && /video/i.test(String(m.id || ''))));
+    || (Array.isArray(modes) && modes.some((m) => m && /video/i.test(String(m.id || ''))))
+    || String(c.id || '').includes('video')
+    || String(c.id || '').includes('seedance');
+
+  let cleanModes = modes;
+  if (isVideoContract && Array.isArray(modes)) {
+    // 视频模型统一仅提供三种模式：文生视频、全能参考、首尾帧（首尾帧仅限手动去选，默认全能参考）
+    cleanModes = [
+      { id: 'text_to_video', label: '文生视频' },
+      { id: 'omni_reference', label: '全能参考' },
+      { id: 'first_last_frame', label: '首尾帧' },
+    ];
+  }
 
   for (const p of rawParams) {
     if (!p || !p.key || p.key === 'mode' || p.key === 'omni_reference_task_type') continue;
@@ -3416,7 +3440,8 @@ function buildSchemaForContract(c, db = null) {
     refStyle: c.refStyle || defC.refStyle || (c.id.includes('agnes') ? 'agnes' : (c.id.includes('seedance') ? 'seedance' : 'generic')),
     polishHint: c.polish_hint || c.polishHint || defC.polishHint || '',
     converter: c.converter || defC.converter || '',
-    modes,
+    defaultMode: isVideoContract ? 'omni_reference' : (cleanModes[0]?.id || ''),
+    modes: cleanModes,
     common,
     advanced,
     slots,

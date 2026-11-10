@@ -61,6 +61,7 @@ const MANIFEST = [
   ['unit', 'p2-browse-detail.test.js'],
   ['unit', 'p3-studio.test.js'],
   ['unit', 'video-analysis.test.js'],
+  ['unit', 'video-modes-contract.test.js'],
   ['unit', 'gate-route.test.js'],
   ['unit', 'guide-sentence.test.js'],
   ['unit', 'outpaint-layout.test.js'],

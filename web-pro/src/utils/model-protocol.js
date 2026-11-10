@@ -51,7 +51,7 @@ export const STUDIO_SKILLS_REGISTRY = [
  */
 function modeLockReason(mode, key) {
   if (key === 'ratio' || key === 'aspect_ratio') {
-    if (mode === 'first_last_frame') return '首尾帧模式的画幅由两张关键帧决定，已自动锁定；想换画幅请改用「图生视频」或「全能参考」';
+    if (mode === 'first_last_frame') return '首尾帧模式的画幅由两张关键帧决定，已自动锁定；想换画幅请改用「全能参考」';
     if (mode === 'video_edit') return '视频编辑沿用原片画幅，无法单独改比例';
     if (mode === 'video_extend') return '视频续写沿用原片画幅，无法单独改比例';
   }
@@ -733,13 +733,18 @@ export function inferOptimalWorkflowAndParams({
       if (hasMode('text_to_image')) targetGenMode = 'text_to_image';
     }
   } else if (targetModality === 'video') {
-    if (imageItems.length === 2 && hasMode('first_last_frame')) {
+    // 规则：
+    // 1. 默认选中「全能参考 (omni_reference)」；
+    // 2. 首尾帧 (first_last_frame) 只能手动去选，自动化调度绝不自动切入首尾帧（即使有 2 张图）；
+    // 3. 取消图参考模式 (image_to_video)；三种模式：文生视频、全能参考、首尾帧。
+    if (currentGenMode === 'first_last_frame' && hasMode('first_last_frame')) {
       targetGenMode = 'first_last_frame';
-      reasons.push('检测到 2 张画面关键帧，自动切入「首尾帧 (first_last_frame)」视频生成');
-    } else if (imageItems.length > 1 && hasMode('omni_reference')) {
+    } else if (imageItems.length === 0 && currentGenMode === 'text_to_video' && hasMode('text_to_video')) {
+      targetGenMode = 'text_to_video';
+    } else if (hasMode('omni_reference')) {
       targetGenMode = 'omni_reference';
-    } else if (imageItems.length === 1 && hasMode('image_to_video')) {
-      targetGenMode = 'image_to_video';
+    } else if (imageItems.length === 0 && hasMode('text_to_video')) {
+      targetGenMode = 'text_to_video';
     }
   }
 

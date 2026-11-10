@@ -229,15 +229,29 @@ class VideoAnalysisService {
       }
     }
 
+    try {
+      const { findNasOriginal } = require('../nasstore');
+      const nasHit = findNasOriginal(config, fid);
+      if (nasHit && fs.existsSync(nasHit)) return nasHit;
+    } catch {}
+
     const asset = db.prepare('SELECT * FROM assets WHERE fid=?').get(fid);
-    if (asset && asset.storage_ref) {
-      const candidates = [
-        path.isAbsolute(asset.storage_ref) ? asset.storage_ref : null,
-        path.join(config.dataDir, 'originals', asset.storage_ref),
-        path.join(config.dataDir, asset.storage_ref)
-      ].filter(Boolean);
-      for (const c of candidates) {
-        if (fs.existsSync(c)) return c;
+    if (asset) {
+      try {
+        const { ensureOriginalFile } = require('../originals');
+        const p = await ensureOriginalFile(this.services, asset);
+        if (p && fs.existsSync(p)) return p;
+      } catch {}
+
+      if (asset.storage_ref) {
+        const candidates = [
+          path.isAbsolute(asset.storage_ref) ? asset.storage_ref : null,
+          path.join(config.dataDir, 'originals', asset.storage_ref),
+          path.join(config.dataDir, asset.storage_ref)
+        ].filter(Boolean);
+        for (const c of candidates) {
+          if (fs.existsSync(c)) return c;
+        }
       }
     }
 

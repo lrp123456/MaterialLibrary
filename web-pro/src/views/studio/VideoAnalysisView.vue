@@ -319,7 +319,7 @@
                     <span>💡 跳转将新开生成会话，携带此镜头运镜句，不挂原片帧、托盘空置，由您挂入自己的图片。</span>
                   </div>
                   <div class="flex items-center gap-2">
-                    <!-- 左按钮：图生视频 -->
+                    <!-- 左按钮：全能参考视频 -->
                     <button
                       type="button"
                       @click="handleJumpToI2V(shot)"
@@ -328,7 +328,7 @@
                       <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polygon points="5 3 19 12 5 21 5 3"/>
                       </svg>
-                      <span>图生视频</span>
+                      <span>全能参考视频</span>
                     </button>
 
                     <!-- 右按钮：先生尾帧 (生图会话) -->
@@ -377,7 +377,7 @@
                         @click="handleJumpToI2V(shot)"
                         class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold cursor-pointer"
                       >
-                        图生视频
+                        全能参考视频
                       </button>
                       <button
                         type="button"
@@ -772,7 +772,7 @@ function handleJumpToI2V(shot) {
   emit('jump-to-generate', {
     target: 'recipe',
     genMode: 'video',
-    schemaMode: 'image_to_video',
+    schemaMode: 'omni_reference',
     recipePrompt: sentence,
     supplementText: ''
   });

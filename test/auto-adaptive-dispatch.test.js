@@ -261,14 +261,13 @@ async function runTests() {
     });
     assert.strictEqual(flowC.targetGenMode, 'expand_fill', '画面向外延展时必须自动切入扩边填白 (expand_fill)');
 
-    // 场景 D：视频首尾帧 (2张图片 + 视频能力模型)
+    // 场景 D：视频调度 (默认全能参考，首尾帧仅限手动去选)
     const mockVideoSchema = {
       id: 'seedance2_5',
       modes: [
         { id: 'text_to_video', label: '文生视频' },
-        { id: 'image_to_video', label: '图生视频' },
-        { id: 'first_last_frame', label: '首尾帧' },
-        { id: 'omni_reference', label: '全能参考' }
+        { id: 'omni_reference', label: '全能参考' },
+        { id: 'first_last_frame', label: '首尾帧' }
       ],
       common: [
         { key: 'ratio', options: ['16:9', '9:16', '1:1', 'adaptive'] },
@@ -281,12 +280,22 @@ async function runTests() {
       referenceTray: [frame1, frame2],
       selectedImageIndex: 0,
       currentModality: 'video',
-      currentGenMode: 'image_to_video',
+      currentGenMode: 'omni_reference',
       currentSchema: mockVideoSchema,
       currentParams: { ratio: '16:9' }
     });
-    assert.strictEqual(flowD.targetGenMode, 'first_last_frame', '2 张图片在视频板块下应自适应推荐「首尾帧」子模式');
+    assert.strictEqual(flowD.targetGenMode, 'omni_reference', '2 张图片在视频板块下默认使用全能参考，首尾帧只能手动选中');
     assert.strictEqual(flowD.targetRatio, '9:16', '视频画幅应根据首帧自动纠正为 9:16');
+
+    const flowDManual = inferOptimalWorkflowAndParams({
+      referenceTray: [frame1, frame2],
+      selectedImageIndex: 0,
+      currentModality: 'video',
+      currentGenMode: 'first_last_frame',
+      currentSchema: mockVideoSchema,
+      currentParams: { ratio: '16:9' }
+    });
+    assert.strictEqual(flowDManual.targetGenMode, 'first_last_frame', '手动选择首尾帧时保持首尾帧模式');
 
     // 场景 E：选区操作细粒度路由 (杂物消除 erase)
     const eraseRegion = {

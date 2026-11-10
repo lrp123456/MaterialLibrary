@@ -3786,6 +3786,20 @@ function syncGenModeWithReferenceTray() {
   const tray = referenceTray.value || [];
   const imgCount = tray.filter(it => !it.kind || it.kind === 'image').length;
 
+  if (activeModality.value === 'video') {
+    // 视频模式下：首尾帧模式只能手动选择，绝不自动切入；默认保持全能参考
+    if (activeGenMode.value === 'first_last_frame') {
+      dispatchSmartWorkflow({ source: 'syncGenMode' });
+      return;
+    }
+    const hasOmni = modes.some(m => m.id === 'omni_reference');
+    if (hasOmni && (activeGenMode.value !== 'omni_reference' && (!activeGenMode.value || !modes.some(m => m.id === activeGenMode.value) || activeGenMode.value === 'image_to_video'))) {
+      setGenMode('omni_reference');
+    }
+    dispatchSmartWorkflow({ source: 'syncGenMode' });
+    return;
+  }
+
   if (imgCount === 0) {
     if (activeGenMode.value !== 'text_to_image' && modes.some(m => m.id === 'text_to_image')) {
       setGenMode('text_to_image');
@@ -4247,7 +4261,7 @@ function autoSyncRatioFromImage(url, item = null) {
 }
 
 // 视频模式专属参数
-const videoSubMode = ref('first_last'); // 'first_last' | 'multi_ref' | 'prompt_only'
+const videoSubMode = ref('multi_ref'); // 'first_last' | 'multi_ref' | 'prompt_only'
 const videoModelKey = ref('seedance2_0');
 const videoDuration = ref('5');
 const videoResolution = ref('720px2（超分）');
@@ -4910,7 +4924,19 @@ function resetSchemaForModel(options = {}) {
     return;
   }
   const modes = schema.modes || [];
-  if (!modes.some((mode) => mode.id === activeGenMode.value)) activeGenMode.value = modes[0]?.id || '';
+  const isVideo = activeModality.value === 'video'
+    || (Array.isArray(modes) && modes.some((m) => m && /video/i.test(String(m.id || ''))));
+  if (isVideo) {
+    if (activeGenMode.value === 'first_last_frame' && modes.some((m) => m.id === 'first_last_frame')) {
+      // 保持手动选中的首尾帧
+    } else if (modes.some((m) => m.id === 'omni_reference')) {
+      activeGenMode.value = 'omni_reference';
+    } else if (!modes.some((mode) => mode.id === activeGenMode.value)) {
+      activeGenMode.value = modes[0]?.id || '';
+    }
+  } else if (!modes.some((mode) => mode.id === activeGenMode.value)) {
+    activeGenMode.value = modes[0]?.id || '';
+  }
   const next = schemaDefaults(schema);
   const globalRatio = studioDefaults.value?.params?.ratio || '9:16';
   const globalVideoRes = studioDefaults.value?.params?.video_resolution;
@@ -4967,7 +4993,7 @@ function autoSelectRefMode(kinds) {
   if (list.includes('video') || tray.some((item) => mediaKind(item) === 'video')) {
     if (activeModality.value !== 'video') activeModality.value = 'video';
     nextTick(() => {
-      const target = firstSupportedMode('omni_reference', 'image_to_video', 'first_last_frame');
+      const target = firstSupportedMode('omni_reference', 'text_to_video');
       if (target) setGenMode(target);
       dispatchSmartWorkflow({ source: 'autoSelectRefMode_video' });
     });
@@ -4996,10 +5022,11 @@ function autoSelectRefMode(kinds) {
     });
   } else if (activeModality.value === 'video') {
     nextTick(() => {
-      const target = imageCount > 1
-        ? firstSupportedMode('omni_reference', 'image_to_video')
-        : firstSupportedMode('image_to_video', 'omni_reference');
-      if (target) setGenMode(target);
+      // 视频模式下：如果当前是手动选中的首尾帧，保持首尾帧；否则切到全能参考，严禁自动切入首尾帧
+      if (activeGenMode.value !== 'first_last_frame') {
+        const target = firstSupportedMode('omni_reference', 'text_to_video');
+        if (target) setGenMode(target);
+      }
       dispatchSmartWorkflow({ source: 'autoSelectRefMode_video_refs' });
     });
   }
@@ -5044,7 +5071,7 @@ function modeRefError(tray) {
   if (mode === 'first_last_frame' && count !== 2) return '首尾帧需要两张图，第一张是首帧，第二张是尾帧';
   if (mode === 'expand_fill' && count !== 1) return '扩边填白模式需要一张底图';
   if (mode === 'image_edit' && count < 1) return '局部编辑模式需要至少一张底图';
-  if (['image_to_image', 'image_reference', 'image_to_video', 'omni_reference'].includes(mode) && count < 1) return '这个模式需要至少一张参考图';
+  if (['image_to_image', 'image_reference', 'omni_reference'].includes(mode) && count < 1) return '这个模式需要至少一张参考图';
   return '';
 }
 function declaredParams() {
@@ -8245,9 +8272,11 @@ function applyTemplate(tpl) {
   repairStudioModelKeys();
   suppressSchemaReset = false;
   resetSchemaForModel();
-  if (params.schemaMode) setGenMode(params.schemaMode);
-  else if (activeModality.value === 'video') {
-    setGenMode(prepared.length > 0 ? 'image_to_video' : 'text_to_video');
+  if (params.schemaMode) {
+    const targetMode = params.schemaMode === 'image_to_video' ? 'omni_reference' : params.schemaMode;
+    setGenMode(targetMode);
+  } else if (activeModality.value === 'video') {
+    setGenMode(prepared.length > 0 ? 'omni_reference' : 'text_to_video');
   } else if (activeModality.value === 'image') {
     setGenMode(prepared.length > 0 ? 'image_to_image' : 'text_to_image');
   }
