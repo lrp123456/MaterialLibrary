@@ -9500,6 +9500,50 @@ module.exports = {
     }
   }
 
+  // ── 空间创作 · 视频逆向分析 (rea-video) ──
+  if (pathname === '/studio/video-analysis' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const fid = urlObj.searchParams.get('fid');
+    if (!fid) return sendJson(res, 400, { error: '缺少 fid 参数' });
+    try {
+      const { getVideoAnalysisService } = require('./services/video-analysis');
+      const service = getVideoAnalysisService(services);
+      const data = await service.getAnalysis(fid);
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message || '查询视频拆解失败' });
+    }
+  }
+
+  if (pathname === '/studio/video-analysis' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const b = await parseBody(req);
+      const fid = b.fid;
+      if (!fid) return sendJson(res, 400, { error: '缺少 fid 参数' });
+      const { getVideoAnalysisService } = require('./services/video-analysis');
+      const service = getVideoAnalysisService(services);
+      const data = await service.queueAnalysis(fid, { reanalyze: Boolean(b.reanalyze) });
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message || '提交视频拆解失败' });
+    }
+  }
+
+  if (pathname === '/studio/video-analysis/asset' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const fid = urlObj.searchParams.get('fid');
+    const relPath = urlObj.searchParams.get('path');
+    if (!fid || !relPath) return sendJson(res, 400, { error: '缺少 fid 或 path 参数' });
+    try {
+      const { getVideoAnalysisService } = require('./services/video-analysis');
+      const service = getVideoAnalysisService(services);
+      return service.serveAsset(fid, relPath, res);
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message || '获取分析素材产物失败' });
+    }
+  }
+
   if (pathname === '/gen/images' && req.method === 'POST') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
     try {

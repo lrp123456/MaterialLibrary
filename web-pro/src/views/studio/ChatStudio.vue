@@ -5841,6 +5841,25 @@ async function consumeIncoming(payload) {
     return;
   }
 
+  // recipe 跳转：新开生成会话，携带配方提示词，切换模式，托盘空着，不自动发送
+  if (payload.target === 'recipe') {
+    await createNewSession({ forceReset: true });
+    if (payload.genMode) activeTab.value = payload.genMode;
+    if (payload.schemaMode) {
+      if (payload.schemaMode === 'first_last_frame') videoSubMode.value = 'first_last';
+      else if (payload.schemaMode === 'text_to_video') videoSubMode.value = 'prompt_only';
+      else videoSubMode.value = 'multi_ref';
+      setGenMode(payload.schemaMode);
+    }
+    if (payload.recipePrompt) {
+      recipePrompt.value = payload.recipePrompt;
+      isRecipeEditing.value = false;
+    }
+    referenceTray.value = [];
+    emit('payloadConsumed');
+    return;
+  }
+
   const editorText = richEditorRef.value ? (richEditorRef.value.innerText || '').trim() : '';
   const hasContent = messages.value.length > 0
     || referenceTray.value.length > 0

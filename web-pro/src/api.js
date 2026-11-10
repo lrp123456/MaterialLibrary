@@ -1216,3 +1216,21 @@ export function restoreAssetVersion(fid, versionId) {
   return postJson(`/api/assets/${encodeURIComponent(fid)}/restore-version`, { versionId });
 }
 
+// ===== 空间创作 · 视频逆向分析 (rea-video) =====
+
+export function getVideoAnalysis(fid) {
+  return fetchJson(`/api/studio/video-analysis?fid=${encodeURIComponent(fid)}`);
+}
+
+export function submitVideoAnalysis(fid, { reanalyze = false } = {}) {
+  return postJson('/api/studio/video-analysis', { fid, reanalyze });
+}
+
+export function getVideoAnalysisAssetUrl(fid, relPath) {
+  if (!fid || !relPath) return '';
+  const token = getToken();
+  const q = new URLSearchParams({ fid, path: relPath });
+  if (token) q.set('token', token);
+  return resolveApiUrl(`/api/studio/video-analysis/asset?${q.toString()}`);
+}
+
