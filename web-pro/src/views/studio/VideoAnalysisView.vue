@@ -25,17 +25,33 @@
           <span class="px-2.5 py-1 text-xs rounded-full bg-studio-900 border border-studio-800 text-slate-300">AI / 实拍制作判别</span>
         </div>
 
-        <button
-          type="button"
-          @click="$emit('choose-video')"
-          class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-sm flex items-center gap-2 shadow-lg shadow-indigo-600/25 transition-all cursor-pointer"
-        >
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="3" width="18" height="18" rx="2"/>
-            <path d="M12 8v8M8 12h8"/>
-          </svg>
-          <span>从素材库选择或上传参考视频</span>
-        </button>
+        <div class="flex flex-wrap items-center justify-center gap-3">
+          <button
+            type="button"
+            @click="$emit('choose-video')"
+            class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-sm flex items-center gap-2 shadow-lg shadow-indigo-600/25 transition-all cursor-pointer"
+          >
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <path d="M12 8v8M8 12h8"/>
+            </svg>
+            <span>从素材库挑选视频</span>
+          </button>
+
+          <button
+            type="button"
+            @click="triggerLocalUpload"
+            class="px-5 py-2.5 rounded-xl bg-studio-800 hover:bg-studio-700 text-slate-200 border border-studio-700 font-medium text-sm flex items-center gap-2 transition-all cursor-pointer"
+          >
+            <svg class="w-4 h-4 text-indigo-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+            <span>上传本地参考视频</span>
+          </button>
+          <input ref="localFileInput" type="file" accept="video/*" class="hidden" @change="onLocalFilePicked" />
+        </div>
       </div>
     </div>
 
@@ -100,7 +116,7 @@
       </div>
 
       <!-- 运行中 / 排队状态遮罩提示 -->
-      <div v-if="analysisStatus === 'running' || analysisStatus === 'pending'" class="flex-1 flex flex-col items-center justify-center p-8 text-center bg-studio-950/60 backdrop-blur-sm">
+      <div v-if="loading || analysisStatus === 'running' || analysisStatus === 'pending'" class="flex-1 flex flex-col items-center justify-center p-8 text-center bg-studio-950/60 backdrop-blur-sm">
         <div class="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 mb-4 animate-bounce">
           <svg class="w-7 h-7 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -108,9 +124,9 @@
           </svg>
         </div>
         <h3 class="text-base font-semibold text-slate-100 mb-1">
-          {{ analysisStatus === 'running' ? '正在逆向拆解参考视频...' : '任务已进入后台队列，等待执行...' }}
+          {{ analysisStatus === 'running' ? '正在逆向拆解参考视频...' : (analysisStatus === 'pending' ? '任务已进入后台队列，等待执行...' : '正在准备拆解...') }}
         </h3>
-        <p class="text-xs text-indigo-300 font-mono mb-4">{{ progressText || '处理中...' }}</p>
+        <p class="text-xs text-indigo-300 font-mono mb-4">{{ progressText || '正在读取视频信息与历史报告...' }}</p>
         <p class="text-xs text-slate-500 max-w-md">
           可以离开此页面或切回生成工作台。拆解完成后报告将自动保留，再次打开无需重跑。
         </p>
@@ -541,7 +557,18 @@ const props = defineProps({
   currentVideo: { type: Object, default: null }
 });
 
-const emit = defineEmits(['choose-video', 'jump-to-generate']);
+const emit = defineEmits(['choose-video', 'upload-video', 'jump-to-generate']);
+
+const localFileInput = ref(null);
+function triggerLocalUpload() {
+  localFileInput.value?.click();
+}
+function onLocalFilePicked(e) {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (!file) return;
+  emit('upload-video', file);
+}
 
 const currentFid = computed(() => props.currentVideo?.fid || props.currentVideo?.id || '');
 const videoName = computed(() => props.currentVideo?.file_name || props.currentVideo?.name || '');
@@ -646,6 +673,7 @@ async function loadExistingOrQueue(fid, { reanalyze = false } = {}) {
   if (!fid) return;
   loading.value = true;
   errorMessage.value = '';
+  progressText.value = '正在读取拆解状态...';
 
   try {
     const res = await getVideoAnalysis(fid);
@@ -660,7 +688,15 @@ async function loadExistingOrQueue(fid, { reanalyze = false } = {}) {
       return;
     }
 
+    if (data && (data.status === 'running' || data.status === 'pending') && !reanalyze) {
+      analysisStatus.value = data.status;
+      progressText.value = data.progress || '拆解进行中...';
+      startPolling(fid);
+      return;
+    }
+
     // 若无已完成报告或指定重新拆解，则触发入队
+    progressText.value = '正在加入拆解队列...';
     const queueRes = await submitVideoAnalysis(fid, { reanalyze });
     const qData = queueRes?.data;
     analysisStatus.value = qData?.status || 'running';

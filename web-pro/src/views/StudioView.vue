@@ -70,6 +70,7 @@
       <VideoAnalysisView
         :currentVideo="currentVideo"
         @choose-video="pickerVisible = true"
+        @upload-video="onVideoUpload"
         @jump-to-generate="handleJumpToGenerate"
       />
     </div>
@@ -79,19 +80,31 @@
       :visible="pickerVisible"
       :mediaTypes="['video']"
       :initialMain="'video'"
+      commit-on-version
       :uploadEnabled="true"
       :maxSelect="1"
       title="选择或上传参考视频进行逐镜拆解"
       submitLabel="开始拆解分析"
       @close="pickerVisible = false"
+      @confirm="onVideoSelected"
       @select="onVideoSelected"
+      @upload="onVideoUpload"
     />
+
+    <!-- 上传本地视频遮罩状态 -->
+    <div v-if="isUploadingVideo" class="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+      <div class="px-7 py-6 rounded-2xl bg-studio-900 border border-studio-700 text-center shadow-2xl flex flex-col items-center">
+        <div class="w-10 h-10 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin mb-3"></div>
+        <div class="text-sm font-bold text-slate-100">正在上传本地参考视频...</div>
+        <div class="text-xs text-slate-400 mt-1">上传完成后将立即入库并开启逐镜逆向拆解</div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { defineAsyncComponent, h, ref, watch } from 'vue';
-import { getAssetImageUrl } from '../api';
+import { authFetch, getAssetImageUrl } from '../api';
 import AssetPickerModal from '../components/AssetPickerModal.vue';
 
 // 懒加载组件：ChatStudio 体量大，避免拖慢其它视口
@@ -145,13 +158,63 @@ watch(() => props.initialPayload, (payload) => {
   chatTargetPayload.value = payload;
 }, { immediate: true });
 
+const isUploadingVideo = ref(false);
+
 function onVideoSelected(selected) {
   const item = Array.isArray(selected) ? selected[0] : selected;
-  if (item) {
-    currentVideo.value = item;
+  if (item && (item.fid || item.id)) {
+    const fid = item.fid || item.id;
+    currentVideo.value = {
+      fid,
+      id: fid,
+      name: item.name || item.file_name || '参考视频',
+      url: item.url || getAssetImageUrl(fid, item.mediaToken),
+      kind: 'video',
+      mediaToken: item.mediaToken
+    };
     activeSegment.value = 'analyze';
   }
   pickerVisible.value = false;
+}
+
+async function onVideoUpload(file) {
+  if (!file) return;
+  pickerVisible.value = false;
+  isUploadingVideo.value = true;
+  try {
+    const fd = new FormData();
+    fd.append('file', file, file.name);
+    fd.append('filename', file.name);
+    fd.append('category', 'video');
+    fd.append('source', 'manual');
+
+    const res = await authFetch('/api/upload', {
+      method: 'POST',
+      body: fd
+    });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      throw new Error(errJson.error || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    const fid = data.fid || data.asset?.fid;
+    if (fid) {
+      currentVideo.value = {
+        fid,
+        id: fid,
+        name: file.name,
+        url: URL.createObjectURL(file),
+        kind: 'video'
+      };
+      activeSegment.value = 'analyze';
+    } else {
+      throw new Error('未获取到入库资产编号 (fid)');
+    }
+  } catch (err) {
+    alert(`上传参考视频失败: ${err.message || err}`);
+  } finally {
+    isUploadingVideo.value = false;
+  }
 }
 
 function handleJumpToGenerate(recipe) {
