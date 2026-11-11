@@ -73,27 +73,43 @@ function srReason(err) {
   return '超分失败，已改播模型原片';
 }
 
-async function superResolveFromPreview(services, previewUrl, vendorUrl) {
+async function superResolveFromPreview(services, previewUrl, vendorUrl, { onStage } = {}) {
   // 非上海地址不能直接当 VideoUrl。vendorUrl 不交给超分，只用已经落地的本地文件。
   void vendorUrl;
   let local;
   try {
     local = await localizePreview(services, previewUrl);
   } catch (err) {
-    return { ok: false, modelVideoUrl: String(previewUrl || ''), error: srReason(err) };
+    return { ok: false, modelVideoUrl: String(previewUrl || ''), error: srReason(err), timing: null };
   }
   try {
     const sr = await processVideoSuperResolution('', {
       localPath: local.localPath,
       outputDir: path.join(services.config.dataDir, 'cache', 'temp'),
       maxWaitMs: 5 * 60 * 1000,
+      onStage,
     });
     const name = path.basename(sr.localPath || '');
     if (!name) throw new Error('超分结果没有落盘');
-    return { ok: true, modelVideoUrl: local.previewUrl, srVideoUrl: `/api/cache/temp/${name}` };
+    const t = sr.timing || {};
+    console.log(
+      `[video-sr] 超分完成 jobId=${sr.jobId || '-'} 总用时=${fmtSec(t.totalMs)}` +
+      `（上传 ${fmtSec(t.uploadMs)} / 提交 ${fmtSec(t.submitMs)} / 云端处理 ${fmtSec(t.processingMs)} / 下载 ${fmtSec(t.downloadMs)}）`
+    );
+    return {
+      ok: true,
+      modelVideoUrl: local.previewUrl,
+      srVideoUrl: `/api/cache/temp/${name}`,
+      timing: sr.timing || null,
+    };
   } catch (err) {
-    return { ok: false, modelVideoUrl: local.previewUrl, error: srReason(err) };
+    console.warn(`[video-sr] 超分失败，改播模型原片：${srReason(err)}`);
+    return { ok: false, modelVideoUrl: local.previewUrl, error: srReason(err), timing: null };
   }
+}
+
+function fmtSec(ms) {
+  return `${(Number(ms || 0) / 1000).toFixed(1)}s`;
 }
 
 module.exports = {

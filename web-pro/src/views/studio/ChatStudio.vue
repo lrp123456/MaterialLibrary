@@ -292,6 +292,15 @@
                   >
                     查看对比
                   </button>
+                  <button
+                    v-if="msg.jobId || msg.isError"
+                    type="button"
+                    class="msg-copy-all opacity-80 hover:opacity-100"
+                    title="查看任务详细生成耗时、时间戳与日志"
+                    @click="openDiagnostic(msg)"
+                  >
+                    日志
+                  </button>
                 </span>
               </div>
 
@@ -560,6 +569,10 @@
                     <StudioIcon name="edit" :size="12" />
                     编辑后再发
                   </button>
+                  <button type="button" class="gen-error-log" @click="openDiagnostic(msg)" title="查看详细返回日志、耗时与时间戳">
+                    <StudioIcon name="info" :size="12" />
+                    查看日志
+                  </button>
                 </div>
               </div>
 
@@ -580,6 +593,10 @@
                   <button type="button" class="gen-error-edit" @click="editFromError(msg)">
                     <StudioIcon name="edit" :size="12" />
                     编辑后再发
+                  </button>
+                  <button type="button" class="gen-error-log border-amber-800 text-amber-300 hover:bg-amber-900/40" @click="openDiagnostic(msg)" title="查看任务时间戳与日志">
+                    <StudioIcon name="info" :size="12" />
+                    查看日志
                   </button>
                 </div>
               </div>
@@ -1468,6 +1485,13 @@
       @close="showPreviewModal = false"
       @replace-3d-model="onReplace3dModelFromPreview"
       @send="onPreviewSend"
+    />
+
+    <!-- 任务诊断与原始日志弹窗 -->
+    <JobDiagnosticModal
+      :visible="showDiagnosticModal"
+      :msg="diagnosticTargetMsg"
+      @close="showDiagnosticModal = false"
     />
 
     <!-- ========================================================================= -->
@@ -2759,6 +2783,7 @@ import StudioEditLayer from './StudioEditLayer.vue';
 import TemplateVideoCover from './TemplateVideoCover.vue';
 import ResultActions from '../../components/ResultActions.vue';
 import RequestPreviewModal from '../../components/RequestPreviewModal.vue';
+import JobDiagnosticModal from '../../components/JobDiagnosticModal.vue';
 import {
   STUDIO_SKILLS_REGISTRY,
   evaluateClientModelRules,
@@ -3032,6 +3057,14 @@ function sanitizeSnapshotForStorage(snapshot) {
 const showPreviewModal = ref(false);
 const previewModalData = ref(null);
 const previewLoading = ref(false);
+
+const showDiagnosticModal = ref(false);
+const diagnosticTargetMsg = ref(null);
+
+function openDiagnostic(msg) {
+  diagnosticTargetMsg.value = msg || null;
+  showDiagnosticModal.value = true;
+}
 
 const targetRefTag = computed(() => {
   if (referenceTray.value.length === 0) return '@图1';
@@ -6067,6 +6100,8 @@ function formatTimer(sec) {
 }
 
 function getGeneratingStageText(msg) {
+  // 服务端 worker 经 SSE 推来的真实阶段优先；缺失时（旧服务/直连模型）退回本地时间猜阶段
+  if (msg.serverStage?.label) return msg.serverStage.label;
   const elapsed = getElapsedSec(msg);
   if (msg.modality === 'video') {
     if (elapsed < 6) return '正在解算相机运镜轨迹与空间透视...';
@@ -6083,6 +6118,8 @@ function getGeneratingStageText(msg) {
 }
 
 function getGeneratingProgressPercent(msg) {
+  // 服务端真实进度优先（worker 阶段回调，封顶 99，终态由结果卡接管）
+  if (Number.isFinite(msg.serverProgress)) return Math.min(99, Math.max(8, Number(msg.serverProgress)));
   const elapsed = getElapsedSec(msg);
   const target = msg.modality === 'video' ? 55 : 24;
   const pct = Math.min(96, Math.round((1 - Math.exp(-elapsed / (target * 0.45))) * 100));
@@ -6153,6 +6190,17 @@ onMounted(async () => {
     // 绝不在这里切会话——以前一完成就 loadSessions()→selectSession(最新)，界面会被拽到别的对话框。
     const isGenJob = task.type === 'gen_job' || Boolean(task.jobId);
     if (isGenJob) {
+      // 运行中事件：把服务端真实阶段（万相渲染/下载原片/超分处理等）灌进占位卡，
+      // 不再只靠本地秒表猜阶段。按 jobId 精确匹配，匹配不到再退回当前会话占位。
+      if (task.status === 'running') {
+        const target = messages.value.find((m) => m && m.isGenerating && m.jobId && m.jobId === task.jobId)
+          || (task.sessionId ? sessionPlaceholderMap.get(task.sessionId) : null);
+        if (target) {
+          if (task.stage && (task.stage.key || task.stage.label)) target.serverStage = task.stage;
+          if (Number.isFinite(task.progress)) target.serverProgress = Math.min(99, Math.max(8, Number(task.progress)));
+        }
+        return;
+      }
       if (task.status !== 'succeeded' && task.status !== 'failed') return;
       const sid = task.sessionId || '';
       const mine = Boolean(sid) && sid === currentSessionId.value;
@@ -6491,6 +6539,7 @@ bindOverlays({
   atMenu: showAtMenu,
   hashMenu: showHashMenu,
   previewModalV2: showPreviewModal,
+  jobDiagnostic: showDiagnosticModal,
   skillsMenu: showSkillsMenu,
   advanced: showAdvanced,
   advancedRules: showAdvancedRules
@@ -7934,11 +7983,13 @@ async function selectSession(s) {
           isGenerating: m.status === 'generating' || Boolean(m.result?.isGenerating),
           isCancelled: m.status === 'cancelled' || Boolean(m.result?.isCancelled),
           isError: m.status === 'failed' || Boolean(m.result?.isError) || String(m.prompt || m.result?.content || '').startsWith('生成遇到问题'),
-          jobId: m.run_id || (m.id && m.id.startsWith('genmsg_') ? m.id.replace('genmsg_', '') : ''),
+          jobId: m.run_id || (m.id && m.id.startsWith('genmsg_') ? m.id.replace('genmsg_', '') : '') || m.result?.jobId || '',
           startTime: m.created_at || (m.result && m.result.startTime) || Date.now(),
           genMode: m.result?.genMode || m.mode,
           assetFid: m.result?.assetFid || '',
           camera: m.result?.camera,
+          rawError: m.result?.errorDetails || m.result?.error || null,
+          result: m.result || null,
           // 重试元数据必须随消息一起还原，否则刷新后「重试」会按默认对话模式重发
           retryPrompt: m.result?.retryPrompt || '',
           retryRefs: Array.isArray(m.result?.retryRefs) ? m.result.retryRefs : [],
@@ -9338,7 +9389,9 @@ async function sendMessage() {
       retryModel,
       retryModality: currentMod,
       retryMode,
-      retryParams
+      retryParams,
+      rawError: err,
+      jobId: err?.jobId || placeholderMsg?.jobId || ''
     };
     if (placeholderMsg && messages.value.includes(placeholderMsg)) {
       Object.assign(placeholderMsg, errMsg, {
@@ -9488,18 +9541,25 @@ function resolutionLabelFor(modality, modelKey, params = {}) {
 const selectorSizeHint = computed(() => (activeModality.value === 'image' ? selectedResolution.value : ''));
 // 把后端技术性错误信息转成用户可读的一句话 + 可操作建议
 function friendlyErrorText(raw) {
-  const text = String(raw || '').replace(/^生成遇到问题[:：]\s*/, '').trim();
+  let text = String(raw || '').replace(/^生成遇到问题[:：]\s*/, '').trim();
   if (!text) return '请检查服务端模型配置或网络连接后重试。';
   // 去掉内部模型前缀 [Agnes Video ...] / [Agnes Video keyframe]；
   // 旧版 VIP 错误会把整段「实际请求参数 {JSON}」拼在正文尾部，刷新历史消息时一并清掉
-  return text
+  text = text
     .replace(/^\[[^\]]+\]\s*/, '')
     .replace(/｜实际请求参数\s*\{[\s\S]*\}\s*$/, '')
     .trim();
+  if (text.toLowerCase() === 'terminated') {
+    return '产物下载数据流中断 (terminated)';
+  }
+  return text;
 }
 function errorHint(raw) {
   // 先剔掉旧消息尾部的参数 JSON：里面的 "ratio":"3:4" 会误触发「去改画幅」的建议
   const text = String(raw || '').replace(/｜实际请求参数\s*\{[\s\S]*\}\s*$/, '');
+  if (/terminated|premature close/i.test(text)) {
+    return '云端视频已渲染完毕，但在下载高码率产物时网络数据流意外中断（已加固直连与自动重试）。点击下方「查看日志」可查阅精确生成时间戳与原始报错。';
+  }
   if (/HTTP 429|service is busy|too many requests|rate limit|限流|繁忙/i.test(text)) {
     return '上游图像服务临时繁忙（429 限流），请求未被受理、不会重复扣费。系统已自动退避重试；仍然失败就等几分钟再点「重试」，或临时换用其它图像模型。';
   }
@@ -10126,7 +10186,8 @@ function registerVideoEl(idx, el) {
   margin-top: 9px;
 }
 .gen-error-retry,
-.gen-error-edit {
+.gen-error-edit,
+.gen-error-log {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -10143,12 +10204,14 @@ function registerVideoEl(idx, el) {
   border: 1px solid transparent;
 }
 .gen-error-retry:hover { filter: brightness(1.08); }
-.gen-error-edit {
+.gen-error-edit,
+.gen-error-log {
   background: transparent;
   color: var(--theme-text-secondary);
   border: 1px solid var(--theme-border);
 }
-.gen-error-edit:hover {
+.gen-error-edit:hover,
+.gen-error-log:hover {
   background: var(--theme-bg-hover);
   color: var(--theme-text-primary);
 }

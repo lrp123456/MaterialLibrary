@@ -17,6 +17,35 @@ const WAN_IDS = new Set(['wan3_0_video', 'wan3.0-video']);
 const RATIOS = new Set(['16:9', '4:3', '1:1', '3:4', '9:16', 'adaptive']);
 let pollDelayMs = 10000;
 
+/**
+ * 百炼任务时间戳是北京时间字符串 "2026-11-11 13:47:25.452"，不带时区，
+ * 显式按 +08:00 解析，避免服务器时区不是东八区时算错渲染耗时。
+ */
+function parseWanTaskTime(value) {
+  const s = String(value || '').trim();
+  if (!s) return null;
+  const ms = Date.parse(s.replace(' ', 'T') + '+08:00');
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/**
+ * 渲染期进度曲线：15% 起步，渐近压到 82% 封顶（88% 留给下载、100% 由终态写）。
+ * 参考时间常数 240s：4 分钟约到 50%，9 分钟约 73%，与万相实测 6–10 分钟对齐。
+ */
+function renderingProgress(waitedMs) {
+  const pct = 15 + 67 * (1 - Math.exp(-Math.max(0, waitedMs) / 240000));
+  return Math.min(82, Math.round(pct));
+}
+
+function fmtSec(ms) {
+  return `${(Number(ms || 0) / 1000).toFixed(1)}s`;
+}
+
+function emitStage(onStage, stage) {
+  if (typeof onStage !== 'function') return;
+  try { onStage(stage); } catch (e) { console.warn('[wan-video] 阶段回调失败:', e.message); }
+}
+
 function isWanModel(id) {
   return WAN_IDS.has(String(id || '').trim());
 }
@@ -144,9 +173,16 @@ async function createTask(env, body, { signal } = {}) {
   return taskId;
 }
 
-async function pollTask(env, taskId, { signal } = {}) {
+const { directDispatcher } = require('../gen/net-retry');
+
+async function pollTask(env, taskId, { signal, onStage, submittedAt } = {}) {
   const url = `${env.base}/api/v1/tasks/${encodeURIComponent(taskId)}`;
   const deadline = Date.now() + 15 * 60 * 1000;
+  const waitBase = submittedAt || Date.now();
+  let consecutiveErrors = 0;
+  let lastNetworkErr = null;
+  let polls = 0;
+
   while (Date.now() < deadline) {
     if (signal && signal.aborted) throw new Error('任务已取消');
     if (pollDelayMs > 0) {
@@ -160,10 +196,25 @@ async function pollTask(env, taskId, { signal } = {}) {
         }
       });
     }
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${env.key}` },
-      signal: signal || AbortSignal.timeout(30000),
-    });
+
+    let res;
+    try {
+      res = await fetch(url, {
+        headers: { Authorization: `Bearer ${env.key}` },
+        signal: signal || AbortSignal.timeout(30000),
+      });
+      consecutiveErrors = 0;
+    } catch (e) {
+      lastNetworkErr = e;
+      consecutiveErrors++;
+      console.warn(`[wan-video] 轮询任务 ${taskId} 网络抖动 (${consecutiveErrors}/5): ${e.message}`);
+      if (consecutiveErrors >= 5) {
+        throw new Error(`万相轮询网络中断: ${e.message}`);
+      }
+      continue;
+    }
+
+    polls++;
     const json = await res.json().catch(() => ({}));
     if (!res.ok) throw gatewayError(json, res.status, '万相查询失败');
     const output = json.output || {};
@@ -171,62 +222,165 @@ async function pollTask(env, taskId, { signal } = {}) {
     if (taskStatus === 'SUCCEEDED' || taskStatus === 'SUCCESS' || taskStatus === 'COMPLETED') {
       const videoUrl = String(output.video_url || output.results?.video_url || '').trim();
       if (!videoUrl) throw new Error('万相任务完成但未返回 video_url');
-      return videoUrl;
+      const submitMs = parseWanTaskTime(output.submit_time);
+      const scheduledMs = parseWanTaskTime(output.scheduled_time);
+      const endMs = parseWanTaskTime(output.end_time);
+      return {
+        videoUrl,
+        polls,
+        detectedAt: Date.now(),
+        upstream: {
+          submit_time: output.submit_time || null,
+          scheduled_time: output.scheduled_time || null,
+          end_time: output.end_time || null,
+          submitMs,
+          scheduledMs,
+          endMs,
+          // 纯云端渲染耗时（百炼官方时间戳），拿不到时为 null，由调用方退回本地计时
+          renderMs: submitMs != null && endMs != null ? endMs - submitMs : null,
+          queueMs: submitMs != null && scheduledMs != null ? scheduledMs - submitMs : null,
+        },
+      };
     }
     if (taskStatus === 'FAILED' || taskStatus === 'CANCELED' || taskStatus === 'CANCELLED') {
       const msg = output.message || output.code || json.message || '万相生成失败';
       throw new Error(`万相生成失败: ${msg}`);
     }
+    emitStage(onStage, {
+      key: 'wan_rendering',
+      label: '万相云端渲染中',
+      progress: renderingProgress(Date.now() - waitBase),
+      detail: { polls, waitedMs: Date.now() - waitBase, taskStatus: taskStatus || 'RUNNING' },
+    });
   }
   throw new Error('万相生成超时');
 }
 
 async function downloadPublic(url, dest, { signal } = {}) {
-  const res = await fetch(url, { redirect: 'follow', signal: signal || AbortSignal.timeout(180000) });
-  if (!res.ok || !res.body) throw new Error(`万相公网视频下载失败（HTTP ${res.status}）`);
-  await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(dest));
-  if (!fs.existsSync(dest) || fs.statSync(dest).size < 100) {
-    try { fs.unlinkSync(dest); } catch { /* 半截文件丢掉 */ }
-    throw new Error('万相公网视频下载失败');
+  const attempts = 3;
+  let lastErr = null;
+
+  for (let i = 1; i <= attempts; i++) {
+    if (signal && signal.aborted) throw new Error('任务已取消');
+    // 第 1 次直连（国内 OSS 直连更稳定快），第 2 次走原默认，第 3 次直连
+    const useDirect = i !== 2;
+    try {
+      // 若上次残留未下完的半截文件，先清理干净
+      if (fs.existsSync(dest)) {
+        try { fs.unlinkSync(dest); } catch {}
+      }
+
+      const res = await fetch(url, {
+        redirect: 'follow',
+        ...(useDirect ? { dispatcher: directDispatcher() } : null),
+        signal: signal || AbortSignal.timeout(300000), // 5分钟大视频下载保护
+      });
+
+      if (!res.ok || !res.body) {
+        throw new Error(`万相公网视频下载响应异常（HTTP ${res.status}）`);
+      }
+
+      await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(dest));
+
+      if (fs.existsSync(dest) && fs.statSync(dest).size >= 100) {
+        return; // 下载成功且大小合法
+      }
+      throw new Error('万相公网视频下载未落盘或文件过小');
+    } catch (e) {
+      lastErr = e;
+      try { fs.unlinkSync(dest); } catch {}
+      console.warn(`[wan-video] 产物下载第 ${i}/${attempts} 次失败 (${useDirect ? '直连' : '代理'}): ${e.message}`);
+      if (i < attempts) {
+        await new Promise((r) => setTimeout(r, 2000 * i));
+      }
+    }
   }
+
+  throw new Error(`万相公网视频下载失败（重试 ${attempts} 次）: ${lastErr?.message || '未知传输异常'}`);
 }
 
-async function generateWanVideo(services, input = {}, { signal } = {}) {
+async function generateWanVideo(services, input = {}, { signal, onStage } = {}) {
   const env = assertWanEnv(services);
+  const t0 = Date.now();
   const prompt = String(input.prompt || '').trim();
+
+  emitStage(onStage, { key: 'wan_prepare', label: '准备参考图并上传 OSS', progress: 12 });
   const media = await buildMedia(services, input);
+  const prepareMs = Date.now() - t0;
   if (!prompt && !media.length) {
     const err = new Error('请填写提示词，或上传一张参考图');
     err.status = 400;
     throw err;
   }
   const body = buildSubmitBody(input, media);
-  const taskId = await createTask(env, body, { signal });
-  const remoteUrl = await pollTask(env, taskId, { signal });
-  if (!remoteUrl) throw new Error('万相生成失败：未获取到公网地址');
+  let taskId = '';
+  try {
+    emitStage(onStage, { key: 'wan_submit', label: '提交万相视频任务', progress: 15 });
+    const tBeforeSubmit = Date.now();
+    taskId = await createTask(env, body, { signal });
+    const tAfterSubmit = Date.now();
+    const submitMs = tAfterSubmit - tBeforeSubmit;
+    console.log(`[wan-video] 任务已提交 taskId=${taskId} 参考图=${media.length} 张 提交用时=${fmtSec(submitMs)}`);
 
-  const tempDir = path.join(services.config.dataDir, 'cache', 'temp');
-  fs.mkdirSync(tempDir, { recursive: true });
-  const name = `wan_${String(taskId).replace(/[^\w.-]/g, '').slice(0, 40) || crypto.randomBytes(4).toString('hex')}.mp4`;
-  const dest = path.join(tempDir, name);
+    const polled = await pollTask(env, taskId, { signal, onStage, submittedAt: tAfterSubmit });
+    const { videoUrl: remoteUrl, polls, detectedAt, upstream } = polled;
+    if (!remoteUrl) throw new Error('万相生成失败：未获取到公网地址');
+    if (upstream?.renderMs != null) {
+      console.log(`[wan-video] 云端渲染完成 taskId=${taskId} 上游渲染=${fmtSec(upstream.renderMs)}` +
+        `（轮询 ${polls} 次，发现延迟=${upstream.endMs != null ? fmtSec(Math.max(0, detectedAt - upstream.endMs)) : '未知'}）`);
+    } else {
+      console.log(`[wan-video] 轮询确认任务成功 taskId=${taskId} 轮询 ${polls} 次 本地等待=${fmtSec(detectedAt - tAfterSubmit)}`);
+    }
 
-  await downloadPublic(remoteUrl, dest, { signal });
+    emitStage(onStage, { key: 'wan_download', label: '下载模型原片', progress: 88 });
+    const tempDir = path.join(services.config.dataDir, 'cache', 'temp');
+    fs.mkdirSync(tempDir, { recursive: true });
+    const name = `wan_${String(taskId).replace(/[^\w.-]/g, '').slice(0, 40) || crypto.randomBytes(4).toString('hex')}.mp4`;
+    const dest = path.join(tempDir, name);
 
-  const previewUrl = `/api/cache/temp/${path.basename(dest)}`;
-  return {
-    ok: true,
-    success: true,
-    resolution: body.parameters?.resolution || mapResolution(input.resolution),
-    seconds: body.parameters?.duration !== undefined ? body.parameters.duration : mapDuration(input.duration),
-    videoUrl: previewUrl,
-    files: [{
-      previewUrl,
-      url: previewUrl,
-      localPath: dest,
-      remoteUrl,
-      mime: 'video/mp4',
-    }],
-  };
+    const tBeforeDownload = Date.now();
+    await downloadPublic(remoteUrl, dest, { signal });
+    const downloadMs = Date.now() - tBeforeDownload;
+    const sizeMb = fs.existsSync(dest) ? fs.statSync(dest).size / 1048576 : 0;
+    console.log(`[wan-video] 原片下载完成 taskId=${taskId} ${sizeMb.toFixed(1)}MB 用时=${fmtSec(downloadMs)}`);
+
+    const previewUrl = `/api/cache/temp/${path.basename(dest)}`;
+    return {
+      ok: true,
+      success: true,
+      taskId,
+      resolution: body.parameters?.resolution || mapResolution(input.resolution),
+      seconds: body.parameters?.duration !== undefined ? body.parameters.duration : mapDuration(input.duration),
+      videoUrl: previewUrl,
+      files: [{
+        previewUrl,
+        url: previewUrl,
+        localPath: dest,
+        remoteUrl,
+        mime: 'video/mp4',
+      }],
+      // 阶段计时：renderUpstreamMs 是百炼官方纯渲染耗时；renderLocalMs 含轮询发现延迟，作兜底
+      timing: {
+        prepareMs,
+        submitMs,
+        renderLocalMs: detectedAt - tAfterSubmit,
+        renderUpstreamMs: upstream?.renderMs ?? null,
+        upstreamQueueMs: upstream?.queueMs ?? null,
+        pollCount: polls,
+        pollDetectMs: upstream?.endMs != null ? Math.max(0, detectedAt - upstream.endMs) : null,
+        downloadMs,
+        totalMs: Date.now() - t0,
+        upstream: {
+          submit_time: upstream?.submit_time || null,
+          scheduled_time: upstream?.scheduled_time || null,
+          end_time: upstream?.end_time || null,
+        },
+      },
+    };
+  } catch (err) {
+    if (taskId && !err.taskId) err.taskId = taskId;
+    throw err;
+  }
 }
 
 function setPollDelay(ms) {
@@ -242,4 +396,6 @@ module.exports = {
   buildSubmitBody,
   generateWanVideo,
   setPollDelay,
+  parseWanTaskTime,
+  renderingProgress,
 };

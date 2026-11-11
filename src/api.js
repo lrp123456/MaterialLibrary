@@ -9434,14 +9434,28 @@ module.exports = {
     }
     let result = null;
     let error = null;
+    let payload = null;
     try { result = row.result_json ? JSON.parse(row.result_json) : null; } catch (_) {}
     try { error = row.error_json ? JSON.parse(row.error_json) : null; } catch (_) {}
+    try { payload = row.payload_json ? JSON.parse(row.payload_json) : null; } catch (_) {}
+    const durationMs = (row.completed_at && row.started_at)
+      ? (row.completed_at - row.started_at)
+      : (row.completed_at && row.created_at ? row.completed_at - row.created_at : null);
     return sendJson(res, 200, {
       success: true,
       job: {
         job_id: row.job_id,
         status: row.status,
+        stage: row.stage || '',
         progress: Number(row.progress || 0),
+        modality: row.modality,
+        model: row.model,
+        created_at: row.created_at,
+        started_at: row.started_at,
+        completed_at: row.completed_at,
+        duration_ms: durationMs,
+        duration_sec: durationMs ? Number((durationMs / 1000).toFixed(1)) : null,
+        payload,
         result,
         error,
       },

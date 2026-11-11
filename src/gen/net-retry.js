@@ -44,7 +44,7 @@ function isPreSendError(e) {
 function isRetryableError(e) {
   if (!e) return false;
   if (e.name === 'AbortError' || e.name === 'TimeoutError') return true;
-  return Boolean(e.cause) || /fetch failed|socket|aborted|timeout/i.test(netText(e));
+  return Boolean(e.cause) || /fetch failed|socket|aborted|timeout|terminated|premature close|ECONNRESET|EPIPE/i.test(netText(e));
 }
 
 /**

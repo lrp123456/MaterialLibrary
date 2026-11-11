@@ -7,6 +7,8 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const sharp = require('sharp');
+const { Readable } = require('stream');
+const { pipeline } = require('stream/promises');
 const { shapeVolcVideo } = require('../portrait-contract');
 const { fetchNet, describeFetchError, isPreSendError } = require('./net-retry');
 
@@ -85,18 +87,39 @@ function fillTemplate(tpl, vars) {
   return tpl;
 }
 
-async function downloadToFile(url, destPath, { timeoutMs = 60000, headers = {} } = {}) {
-  let res;
-  try {
-    res = await fetchNet(url, { headers }, { timeoutMs, what: '下载产物', onRetry: logNetRetry });
-  } catch (e) {
-    throw enrichFetchError(e, '下载产物网络失败');
-  }
-  if (!res.ok) throw new Error(`下载产物失败 HTTP ${res.status}`);
-  const buf = Buffer.from(await res.arrayBuffer());
+async function downloadToFile(url, destPath, { timeoutMs = 120000, headers = {} } = {}) {
+  let lastErr = null;
   fs.mkdirSync(path.dirname(destPath), { recursive: true });
-  fs.writeFileSync(destPath, buf);
-  return buf;
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      if (fs.existsSync(destPath)) {
+        try { fs.unlinkSync(destPath); } catch {}
+      }
+      const res = await fetchNet(url, { headers }, { timeoutMs, what: '下载产物', onRetry: logNetRetry });
+      if (!res.ok) throw new Error(`下载产物失败 HTTP ${res.status}`);
+
+      if (res.body) {
+        await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(destPath));
+      } else {
+        const buf = Buffer.from(await res.arrayBuffer());
+        fs.writeFileSync(destPath, buf);
+      }
+
+      if (fs.existsSync(destPath) && fs.statSync(destPath).size >= 100) {
+        return;
+      }
+      throw new Error('下载产物未落盘或内容为空');
+    } catch (e) {
+      lastErr = e;
+      try { fs.unlinkSync(destPath); } catch {}
+      if (attempt < 3) {
+        await new Promise((r) => setTimeout(r, 1500 * attempt));
+      }
+    }
+  }
+
+  throw enrichFetchError(lastErr, '下载产物网络失败');
 }
 
 function enrichFetchError(e, what) {
@@ -1712,7 +1735,7 @@ async function executeAdapterInner(services, adapter, input) {
         const outFileName = `gen_${Date.now()}_${crypto.randomBytes(4).toString('hex')}${outExt}`;
         const outPath = path.join(tempDir, outFileName);
 
-        await downloadToFile(resultUrl, outPath, { timeoutMs: 120000 });
+        await downloadToFile(resultUrl, outPath, { timeoutMs: 300000 });
         const previewUrl = `/api/cache/temp/${outFileName}`;
         const remoteUrl = /^https?:\/\//i.test(String(resultUrl)) ? String(resultUrl) : '';
         noteVendorOutcome(input, true);
@@ -1802,7 +1825,7 @@ async function executeAdapterInner(services, adapter, input) {
         const outExt = input.kind === 'video' ? '.mp4' : '.jpg';
         const outFileName = `gw_${Date.now()}_${crypto.randomBytes(4).toString('hex')}${outExt}`;
         const outPath = path.join(tempDir, outFileName);
-        await downloadToFile(resultUrl, outPath, { timeoutMs: 120000 });
+        await downloadToFile(resultUrl, outPath, { timeoutMs: 300000 });
         let meta = { mime: input.kind === 'video' ? 'video/mp4' : 'image/jpeg' };
         try {
           if (input.kind !== 'video') {

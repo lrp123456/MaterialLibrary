@@ -28,7 +28,11 @@ async function optimizerChat(db, config, { model, messages, temperature, max_tok
   });
 }
 
-async function runGeneration(services, payload, { signal } = {}) {
+async function runGeneration(services, payload, { signal, onStage } = {}) {
+  const emitStage = (stage) => {
+    if (typeof onStage !== 'function') return;
+    try { onStage(stage); } catch (e) { console.warn('[gen-submit] 阶段回调失败:', e.message); }
+  };
   const { db, config } = services;
   const b = payload || {};
   const rawPrompt = (b.prompt || '').trim();
@@ -114,7 +118,7 @@ async function runGeneration(services, payload, { signal } = {}) {
         firstFrame: b.firstFrame || b.first_frame,
         lastFrame: b.lastFrame || b.last_frame,
         genMode: b.genMode || b.mode,
-      }, { signal });
+      }, { signal, onStage: emitStage });
     } else {
       const vidAdapters = engines.gen?.videoAdapters || [];
       const pickedId = pickAdapterId('video', mCode, vidAdapters);
@@ -135,6 +139,7 @@ async function runGeneration(services, payload, { signal } = {}) {
         err.code = 'adapter_missing';
         throw err;
       }
+      emitStage({ key: 'video_submit', label: '提交视频生成任务', progress: 15 });
       result = await executeAdapter(services, adapterRow, {
         kind: 'video',
         contractId: modelContract?.id || '',
@@ -152,6 +157,7 @@ async function runGeneration(services, payload, { signal } = {}) {
           ...(assembled?.body || {}),
         },
       });
+      emitStage({ key: 'video_finalize', label: '视频生成完成，准备成片', progress: 88 });
     }
 
     // 超分按需执行：只有带 x2 档位才在生成后上传上海临时 OSS 发起 SuperResolveVideo
@@ -161,7 +167,7 @@ async function runGeneration(services, payload, { signal } = {}) {
     if (needSr && modelVideoUrl) {
       const { superResolveFromPreview } = require('./services/video-sr-local');
       try {
-        const srRes = await superResolveFromPreview(services, modelVideoUrl, vendorVideoUrl);
+        const srRes = await superResolveFromPreview(services, modelVideoUrl, vendorVideoUrl, { onStage: emitStage });
         if (srRes && srRes.ok && srRes.srVideoUrl) {
           result.videoUrl = srRes.srVideoUrl;
           result.modelVideoUrl = srRes.modelVideoUrl || modelVideoUrl;
@@ -170,6 +176,7 @@ async function runGeneration(services, payload, { signal } = {}) {
           result.srError = '';
           const baseName = cleanedRes.toLowerCase();
           result.resolution = `${baseName} x 2`;
+          result.timing = { ...(result.timing || {}), sr: srRes.timing || null };
         } else {
           result.videoUrl = modelVideoUrl;
           result.modelVideoUrl = modelVideoUrl;
@@ -177,6 +184,7 @@ async function runGeneration(services, payload, { signal } = {}) {
           result.srStatus = 'failed';
           result.srError = srRes?.error || '超分失败，已改播模型原片';
           result.resolution = cleanedRes.toLowerCase();
+          result.timing = { ...(result.timing || {}), sr: null, srError: srRes?.error || '超分失败' };
         }
       } catch (srErr) {
         result.videoUrl = modelVideoUrl;
@@ -185,6 +193,7 @@ async function runGeneration(services, payload, { signal } = {}) {
         result.srStatus = 'failed';
         result.srError = srErr.message || '超分失败，已改播模型原片';
         result.resolution = cleanedRes.toLowerCase();
+        result.timing = { ...(result.timing || {}), sr: null, srError: srErr.message };
       }
     } else {
       // 纯分辨率不调用超分，不显示「超分中」
@@ -193,6 +202,7 @@ async function runGeneration(services, payload, { signal } = {}) {
       result.vendorVideoUrl = vendorVideoUrl;
       result.srStatus = null;
       result.resolution = cleanedRes.toLowerCase();
+      result.timing = { ...(result.timing || {}), sr: null };
     }
 
     return result;

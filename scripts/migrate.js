@@ -1222,6 +1222,8 @@ function migrate(dataDir, { doBackup = true } = {}) {
       CREATE INDEX IF NOT EXISTS idx_gen_jobs_user_session ON gen_jobs(user_id, session_id, created_at DESC);
     `);
   } catch (e) {}
+  // 阶段文案（准备参考图/云端渲染/下载原片/超分处理等），随 WS/SSE 推给前端占位卡
+  try { db.exec('ALTER TABLE gen_jobs ADD COLUMN stage TEXT;'); } catch (e) {}
   // ===== 集中幂等增量区结束 =====
 
   console.log('[migrate] 数据库迁移升级完成');
