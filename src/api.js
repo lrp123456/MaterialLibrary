@@ -1747,6 +1747,8 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     ['DELETE', /^\/studio\/video-analysis$/],
     ['GET', /^\/studio\/video-analysis\/history$/],
     ['GET', /^\/studio\/video-analysis\/asset$/],
+    ['GET', /^\/studio\/video-analysis\/asset-file\/[^\/]+\/.+$/],
+    ['HEAD', /^\/studio\/video-analysis\/asset-file\/[^\/]+\/.+$/],
     ['POST', /^\/tools\/convert-video$/],
     ['POST', /^\/tools\/upload$/],
     ['POST', /^\/tools\/extract-frames$/],
@@ -2123,6 +2125,7 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     const isPublicMediaRoute =
       pathname === '/studio/catalog' ||
       pathname === '/studio/video-analysis/asset' ||
+      pathname.startsWith('/studio/video-analysis/asset-file/') ||
       /^\/assets\/[^\/]+\/poster$/.test(pathname) ||
       (/^\/assets\/[^\/]+\/file(?:\/[^\/]+)?$/.test(pathname) && urlObj.searchParams.get('play') === '1') ||
       /^\/base-library\/items\/[^\/]+\/(preview|scene)$/.test(pathname) ||
@@ -9580,6 +9583,20 @@ module.exports = {
     const fid = urlObj.searchParams.get('fid');
     const relPath = urlObj.searchParams.get('path');
     if (!fid || !relPath) return sendJson(res, 400, { error: '缺少 fid 或 path 参数' });
+    try {
+      const { getVideoAnalysisService } = require('./services/video-analysis');
+      const service = getVideoAnalysisService(services);
+      return service.serveAsset(fid, relPath, res);
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message || '获取分析素材产物失败' });
+    }
+  }
+
+  // RESTful 相对产物路由（供原生 report.html 嵌入 iframe 内部相对引用，如 storyboard.jpg / audio.png / shots/xxx）
+  const mAssetFile = pathname.match(/^\/studio\/video-analysis\/asset-file\/([^\/]+)\/(.+)$/);
+  if (mAssetFile && (req.method === 'GET' || req.method === 'HEAD')) {
+    const fid = decodeURIComponent(mAssetFile[1]);
+    const relPath = decodeURIComponent(mAssetFile[2]);
     try {
       const { getVideoAnalysisService } = require('./services/video-analysis');
       const service = getVideoAnalysisService(services);

@@ -252,11 +252,30 @@ class VideoAnalysisService {
     `;
 
     const rows = db.prepare(sql).all(...params, validLimit, validOffset);
+    const config = this.getConfig();
     const items = rows.map((r) => {
       let summary = {};
       try {
         summary = r.summary_json ? JSON.parse(r.summary_json) : {};
       } catch (_) {}
+
+      // 准确解析缩略图：已拆解优先用原生第一帧或故事板，否则使用视频 poster
+      const finalDir = getReaDir(config, r.fid);
+      const hasStoryboard = fs.existsSync(path.join(finalDir, 'storyboard.jpg'));
+      const hasFirstFrame = fs.existsSync(path.join(finalDir, 'shots', 'shot_001_first.jpg'))
+        || fs.existsSync(path.join(finalDir, 'shots', 'shot_001.jpg'));
+
+      let thumbUrl = '';
+      if (r.status === 'success' && hasFirstFrame) {
+        thumbUrl = `/api/studio/video-analysis/asset-file/${encodeURIComponent(r.fid)}/shots/shot_001_first.jpg`;
+      } else if (r.status === 'success' && hasStoryboard) {
+        thumbUrl = `/api/studio/video-analysis/asset-file/${encodeURIComponent(r.fid)}/storyboard.jpg`;
+      } else if (r.thumb_url && !r.thumb_url.startsWith('/api/thumbs/')) {
+        thumbUrl = r.thumb_url;
+      } else {
+        thumbUrl = `/api/viewer/assets/${encodeURIComponent(r.fid)}/poster`;
+      }
+
       return {
         fid: r.fid,
         name: r.file_name || r.fid,
@@ -265,7 +284,7 @@ class VideoAnalysisService {
         error: r.error,
         progress: r.progress,
         duration: r.duration_s || summary.duration || null,
-        thumbUrl: r.thumb_url || `/api/thumbs/${r.fid}.jpg`,
+        thumbUrl,
         shotsCount: summary.shots_count || (Array.isArray(summary.shots) ? summary.shots.length : null),
         productionMix: summary.production_mix || null,
         production: summary.production || null,
@@ -594,6 +613,27 @@ class VideoAnalysisService {
     }
 
     const ext = path.extname(targetFile).toLowerCase();
+
+    // 针对原生拆分 HTML 报告注入 base 标签，确保 iframe 内的相对图片（storyboard.jpg、audio.png 等）自动走 asset-file 端点，决不破图
+    if (ext === '.html') {
+      try {
+        let html = fs.readFileSync(targetFile, 'utf8');
+        const baseTag = `<base href="/api/studio/video-analysis/asset-file/${encodeURIComponent(fid)}/">`;
+        if (html.includes('<head>')) {
+          html = html.replace('<head>', `<head>${baseTag}`);
+        } else {
+          html = `${baseTag}${html}`;
+        }
+        const buf = Buffer.from(html, 'utf8');
+        res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Content-Length': buf.length,
+          'Cache-Control': 'public, max-age=3600'
+        });
+        return res.end(buf);
+      } catch (_) {}
+    }
+
     const mimeMap = {
       '.jpg': 'image/jpeg',
       '.jpeg': 'image/jpeg',

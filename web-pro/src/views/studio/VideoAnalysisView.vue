@@ -75,9 +75,23 @@
       <!-- 顶栏：视频信息与操作 -->
       <div class="px-5 py-3 border-b border-studio-800 bg-studio-900/70 backdrop-blur flex items-center justify-between shrink-0 gap-4">
         <div class="flex items-center gap-3 min-w-0">
-          <div class="w-12 h-8 rounded bg-black/40 overflow-hidden border border-studio-700/80 shrink-0 flex items-center justify-center">
-            <img v-if="videoThumbUrl" :src="videoThumbUrl" class="w-full h-full object-cover" />
-            <svg v-else class="w-4 h-4 text-slate-500" viewBox="0 0 24 24" fill="currentColor">
+          <div
+            @click="openOriginVideoPlayer(0)"
+            class="w-12 h-8 rounded bg-black/40 overflow-hidden border border-studio-700/80 shrink-0 flex items-center justify-center relative cursor-pointer group"
+            title="点击在线播放原视频"
+          >
+            <img
+              v-if="videoThumbUrl"
+              :src="videoThumbUrl"
+              @error="onThumbError"
+              class="w-full h-full object-cover transition-transform group-hover:scale-105"
+            />
+            <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+              <svg class="w-4 h-4 text-white drop-shadow" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M8 5v14l11-7z"/>
+              </svg>
+            </div>
+            <svg v-if="!videoThumbUrl" class="w-4 h-4 text-slate-500" viewBox="0 0 24 24" fill="currentColor">
               <path d="M8 5v14l11-7z"/>
             </svg>
           </div>
@@ -108,6 +122,19 @@
         </div>
 
         <div class="flex items-center gap-2 shrink-0 flex-wrap">
+          <!-- 播放原视频主要渠道操作 -->
+          <button
+            type="button"
+            @click="openOriginVideoPlayer(0)"
+            class="px-3 py-1.5 text-xs rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm shadow-emerald-600/30"
+            title="在线打开并播放原视频完整流"
+          >
+            <svg class="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M8 5v14l11-7z"/>
+            </svg>
+            <span>播放原视频</span>
+          </button>
+
           <!-- 视觉模型挑选 -->
           <div class="flex items-center gap-1.5 bg-studio-800/90 border border-studio-700/80 rounded-lg px-2.5 py-1 text-xs" title="挑选用于逐镜头逆向研判的多模态视觉模型">
             <span class="w-1.5 h-1.5 rounded-full bg-purple-400"></span>
@@ -281,6 +308,18 @@
                     <span class="text-xs text-slate-300 font-mono">
                       {{ formatTime(shot.start) }} – {{ formatTime(shot.end) }} ({{ shot.duration.toFixed(1) }}s)
                     </span>
+                    <!-- 定位播放此分镜 -->
+                    <button
+                      type="button"
+                      @click="openOriginVideoPlayer(shot.start)"
+                      class="px-2 py-0.5 rounded bg-studio-800 hover:bg-studio-700 text-slate-200 border border-studio-700 hover:border-emerald-500/60 text-[11px] flex items-center gap-1 transition-colors cursor-pointer group"
+                      title="定位到该分镜起始时间开始播放原视频"
+                    >
+                      <svg class="w-3 h-3 text-emerald-400 group-hover:scale-110 transition-transform" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M8 5v14l11-7z"/>
+                      </svg>
+                      <span>播放此镜</span>
+                    </button>
                     <!-- 低置信标记 -->
                     <span v-if="shot.isLowConfidence" class="px-2 py-0.5 text-[11px] rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
                       <span>⚠️ 低置信（需核实）</span>
@@ -317,6 +356,7 @@
                       <img
                         v-if="shot.firstFrameUrl"
                         :src="shot.firstFrameUrl"
+                        @error="$event.target.style.display = 'none'"
                         class="w-full h-full object-contain"
                         alt="首帧"
                       />
@@ -333,6 +373,7 @@
                       <img
                         v-if="shot.lastFrameUrl"
                         :src="shot.lastFrameUrl"
+                        @error="$event.target.style.display = 'none'"
                         class="w-full h-full object-contain"
                         alt="尾帧"
                       />
@@ -752,11 +793,26 @@
             >
               <div class="flex items-start gap-3">
                 <!-- 封面图 -->
-                <div class="w-16 h-12 rounded-lg bg-black/50 border border-studio-800 overflow-hidden shrink-0 relative flex items-center justify-center">
-                  <img v-if="item.thumbUrl" :src="item.thumbUrl" class="w-full h-full object-cover" />
+                <div
+                  class="w-16 h-12 rounded-lg bg-black/50 border border-studio-800 overflow-hidden shrink-0 relative flex items-center justify-center group/thumb"
+                  @click.stop="openOriginVideoPlayer(0, item.fid, item.name)"
+                  title="点击直接播放原视频"
+                >
+                  <img
+                    v-if="item.thumbUrl"
+                    :src="item.thumbUrl"
+                    @error="handleHistoryThumbError($event, item)"
+                    class="w-full h-full object-cover transition-transform group-hover/thumb:scale-105"
+                  />
                   <svg v-else class="w-5 h-5 text-slate-600" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M8 5v14l11-7z"/>
                   </svg>
+                  <!-- 悬停播放遮罩 -->
+                  <div class="absolute inset-0 bg-black/50 opacity-0 group-hover/thumb:opacity-100 flex items-center justify-center transition-opacity">
+                    <svg class="w-4 h-4 text-white drop-shadow" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M8 5v14l11-7z"/>
+                    </svg>
+                  </div>
                   <span v-if="item.duration" class="absolute bottom-0.5 right-0.5 px-1 py-0.2 rounded bg-black/80 text-[10px] text-slate-300 font-mono">
                     {{ item.duration }}s
                   </span>
@@ -806,6 +862,15 @@
 
                 <div class="flex items-center gap-2" @click.stop>
                   <button
+                    type="button"
+                    @click="openOriginVideoPlayer(0, item.fid, item.name)"
+                    class="px-2 py-0.5 rounded bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
+                    title="播放该原视频"
+                  >
+                    <svg class="w-3 h-3 text-emerald-400" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                    <span>播放</span>
+                  </button>
+                  <button
                     v-if="item.status === 'error'"
                     type="button"
                     @click="handleRetryHistory(item)"
@@ -838,6 +903,85 @@
         </div>
       </div>
     </transition>
+
+    <!-- 4. 原视频播放器模态窗 (Original Video Player Modal) -->
+    <transition name="drawer-fade">
+      <div
+        v-if="showVideoPlayerModal"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 sm:p-6"
+        @click.self="closeOriginVideoPlayer"
+      >
+        <div class="relative w-full max-w-4xl bg-studio-900 border border-studio-750 rounded-2xl shadow-2xl flex flex-col overflow-hidden max-h-[92vh]">
+          <!-- 播放器顶部标题栏 -->
+          <div class="px-5 py-3 border-b border-studio-800 flex items-center justify-between bg-studio-950/90 shrink-0">
+            <div class="flex items-center gap-2.5 min-w-0">
+              <div class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0"></div>
+              <h3 class="text-sm font-semibold text-slate-100 truncate" :title="playerVideoName">
+                {{ playerVideoName || '原视频回放' }}
+              </h3>
+              <span class="text-xs text-slate-400 font-mono px-2 py-0.5 bg-studio-800 rounded shrink-0">
+                FID: {{ playerVideoFid.slice(0, 10) }}...
+              </span>
+            </div>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                @click="closeOriginVideoPlayer"
+                class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-studio-800 transition-colors cursor-pointer"
+                title="关闭 (Esc)"
+              >
+                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="18" y1="6" x2="6" y2="18"/>
+                  <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- 视频播放主体视口 -->
+          <div class="relative bg-black flex items-center justify-center flex-1 min-h-[360px] max-h-[62vh] overflow-hidden">
+            <video
+              ref="originVideoRef"
+              :src="playerVideoUrl"
+              controls
+              autoplay
+              playsinline
+              @timeupdate="onVideoTimeUpdate"
+              class="w-full h-full max-h-[62vh] object-contain outline-hidden"
+            ></video>
+          </div>
+
+          <!-- 底部控制与镜头分段快速跳转 -->
+          <div class="px-5 py-3 border-t border-studio-800 bg-studio-950/90 flex flex-col gap-2 shrink-0">
+            <div class="flex items-center justify-between text-xs text-slate-400">
+              <div class="flex items-center gap-2">
+                <span class="text-slate-300 font-medium">逐镜对齐跳转：</span>
+                <span>{{ playerShots.length > 0 ? '点击对应镜头分镜卡，播放器即刻精准定位起播' : '当前回放原视频完整媒体流' }}</span>
+              </div>
+              <div class="text-[11px] text-slate-500">
+                快捷键：空格 (播放/暂停) · ←/→ (快退/快进 5s) · Esc (关闭)
+              </div>
+            </div>
+
+            <!-- 镜头定位胶囊（如果有 shots 且当前播放的是 currentFid） -->
+            <div v-if="playerShots.length > 0" class="flex items-center gap-2 overflow-x-auto py-1 scrollbar-thin">
+              <button
+                v-for="shot in playerShots"
+                :key="shot.id"
+                type="button"
+                @click="seekOriginVideo(shot.start)"
+                class="px-2.5 py-1 rounded-lg text-xs font-mono shrink-0 transition-colors flex items-center gap-1.5 cursor-pointer"
+                :class="isCurrentShot(shot) ? 'bg-emerald-600 text-white font-bold shadow-xs' : 'bg-studio-850 hover:bg-studio-750 text-slate-300 border border-studio-700/60'"
+                :title="`定位到第 ${shot.index} 镜 (${formatTime(shot.start)})`"
+              >
+                <span class="font-bold">#{{ shot.index }}</span>
+                <span class="text-[11px] opacity-80">{{ formatTime(shot.start) }}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -846,6 +990,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
   getAssetImageUrl,
   getAssetPosterUrl,
+  getAssetPlayUrl,
   getVideoAnalysis,
   getVideoAnalysisAssetUrl,
   getVideoAnalysisHistory,
@@ -874,8 +1019,114 @@ const currentFid = computed(() => props.currentVideo?.fid || props.currentVideo?
 const videoName = computed(() => props.currentVideo?.file_name || props.currentVideo?.name || '');
 const videoThumbUrl = computed(() => {
   if (!currentFid.value) return '';
+  if (analysisStatus.value === 'success') {
+    return `/api/studio/video-analysis/asset-file/${encodeURIComponent(currentFid.value)}/shots/shot_001_first.jpg`;
+  }
   return props.currentVideo?.url || getAssetPosterUrl(currentFid.value, props.currentVideo?.mediaToken);
 });
+
+// ── 原视频播放器状态与方法 ──
+const showVideoPlayerModal = ref(false);
+const originVideoRef = ref(null);
+const playerVideoFid = ref('');
+const playerVideoName = ref('');
+const playerCurrentTime = ref(0);
+
+const playerVideoUrl = computed(() => {
+  if (!playerVideoFid.value) return '';
+  return getAssetPlayUrl(playerVideoFid.value);
+});
+
+const playerShots = computed(() => {
+  if (playerVideoFid.value === currentFid.value && breakdown.value?.shots) {
+    return breakdown.value.shots;
+  }
+  return [];
+});
+
+function openOriginVideoPlayer(startTime = 0, fid = null, name = null) {
+  playerVideoFid.value = fid || currentFid.value;
+  playerVideoName.value = name || videoName.value || '原视频回放';
+  showVideoPlayerModal.value = true;
+  setTimeout(() => {
+    if (originVideoRef.value) {
+      if (typeof startTime === 'number' && startTime >= 0) {
+        originVideoRef.value.currentTime = startTime;
+      }
+      originVideoRef.value.play().catch(() => {});
+    }
+  }, 100);
+}
+
+function closeOriginVideoPlayer() {
+  if (originVideoRef.value) {
+    originVideoRef.value.pause();
+  }
+  showVideoPlayerModal.value = false;
+}
+
+function seekOriginVideo(timeInSec) {
+  if (originVideoRef.value && typeof timeInSec === 'number') {
+    originVideoRef.value.currentTime = timeInSec;
+    originVideoRef.value.play().catch(() => {});
+  }
+}
+
+function onVideoTimeUpdate() {
+  if (originVideoRef.value) {
+    playerCurrentTime.value = originVideoRef.value.currentTime || 0;
+  }
+}
+
+function isCurrentShot(shot) {
+  const cur = playerCurrentTime.value;
+  return cur >= shot.start && cur < shot.end;
+}
+
+function onThumbError(e) {
+  if (!e?.target) return;
+  if (currentFid.value) {
+    const poster = getAssetPosterUrl(currentFid.value);
+    if (e.target.src !== poster) {
+      e.target.src = poster;
+      return;
+    }
+  }
+  e.target.style.display = 'none';
+}
+
+function handleHistoryThumbError(e, item) {
+  if (!e?.target || !item) return;
+  const poster = getAssetPosterUrl(item.fid);
+  if (e.target.src !== poster) {
+    e.target.src = poster;
+    return;
+  }
+  e.target.style.display = 'none';
+}
+
+function handleGlobalKeydown(e) {
+  if (!showVideoPlayerModal.value) return;
+  if (e.key === 'Escape') {
+    closeOriginVideoPlayer();
+  } else if (e.key === ' ' && e.target === document.body) {
+    e.preventDefault();
+    if (originVideoRef.value) {
+      if (originVideoRef.value.paused) originVideoRef.value.play();
+      else originVideoRef.value.pause();
+    }
+  } else if (e.key === 'ArrowLeft' && e.target === document.body) {
+    e.preventDefault();
+    if (originVideoRef.value) {
+      originVideoRef.value.currentTime = Math.max(0, originVideoRef.value.currentTime - 5);
+    }
+  } else if (e.key === 'ArrowRight' && e.target === document.body) {
+    e.preventDefault();
+    if (originVideoRef.value) {
+      originVideoRef.value.currentTime = Math.min(originVideoRef.value.duration || 9999, originVideoRef.value.currentTime + 5);
+    }
+  }
+}
 
 // 视觉模型可选配置
 const AVAILABLE_VLM_MODELS = [
@@ -909,17 +1160,17 @@ let pollTimer = null;
 
 const storyboardUrl = computed(() => {
   if (!currentFid.value || !breakdown.value) return '';
-  return getVideoAnalysisAssetUrl(currentFid.value, 'storyboard.jpg');
+  return `/api/studio/video-analysis/asset-file/${encodeURIComponent(currentFid.value)}/storyboard.jpg`;
 });
 
 const rawReportUrl = computed(() => {
   if (!currentFid.value) return '';
-  return getVideoAnalysisAssetUrl(currentFid.value, 'report.html');
+  return `/api/studio/video-analysis/asset-file/${encodeURIComponent(currentFid.value)}/report.html`;
 });
 
 const rawJsonUrl = computed(() => {
   if (!currentFid.value) return '';
-  return getVideoAnalysisAssetUrl(currentFid.value, 'breakdown.json');
+  return `/api/studio/video-analysis/asset-file/${encodeURIComponent(currentFid.value)}/breakdown.json`;
 });
 
 const durationSec = computed(() => {
@@ -975,8 +1226,8 @@ const shotList = computed(() => {
       ...s,
       currentLabel: override,
       isLowConfidence,
-      firstFrameUrl: getVideoAnalysisAssetUrl(currentFid.value, firstFrameRel),
-      lastFrameUrl: getVideoAnalysisAssetUrl(currentFid.value, lastFrameRel)
+      firstFrameUrl: `/api/studio/video-analysis/asset-file/${encodeURIComponent(currentFid.value)}/${firstFrameRel}`,
+      lastFrameUrl: `/api/studio/video-analysis/asset-file/${encodeURIComponent(currentFid.value)}/${lastFrameRel}`
     };
   });
 });
@@ -1284,6 +1535,7 @@ function formatHistoryTime(ts) {
 }
 
 onMounted(() => {
+  window.addEventListener('keydown', handleGlobalKeydown);
   void fetchHistory();
   if (currentFid.value) {
     void loadExistingOrQueue(currentFid.value, { reanalyze: false });
@@ -1291,6 +1543,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleGlobalKeydown);
   stopPolling();
 });
 </script>

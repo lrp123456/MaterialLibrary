@@ -229,7 +229,7 @@ function onVideoHistorySelected(item) {
       fid: item.fid,
       id: item.fid,
       name: item.name || item.fileName || '参考视频',
-      url: item.thumbUrl || getAssetImageUrl(item.fid),
+      url: item.thumbUrl || getAssetPosterUrl(item.fid),
       kind: 'video',
       duration: item.duration
     };
