@@ -1681,7 +1681,7 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     // SSE (/events) 标准浏览器 EventSource 无法自定义 Header，亦允许 query token 鉴权。
     allowQuery:
       (req.method === 'GET' || req.method === 'HEAD') &&
-      /(image|poster|file|mask|temp|masks|video|audio|download|media|voice|preview|basecolor|swatch|scene|events|models)/.test(pathname || urlObj.pathname || ''),
+      /(image|poster|file|mask|temp|masks|video|audio|download|media|voice|preview|basecolor|swatch|scene|events|models|asset)/.test(pathname || urlObj.pathname || ''),
   });
   const isViewerRoute = pathname === '/viewer' || pathname.startsWith('/viewer/');
   // SEC-001：已移除 lanInternalSession 免密提权后门——会话只认真实登录 token。
@@ -1742,6 +1742,11 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     ['GET', /^\/library\/catalog$/],
     ['GET', /^\/studio\/schema$/],
     ['GET', /^\/studio\/catalog$/],
+    ['GET', /^\/studio\/video-analysis$/],
+    ['POST', /^\/studio\/video-analysis$/],
+    ['DELETE', /^\/studio\/video-analysis$/],
+    ['GET', /^\/studio\/video-analysis\/history$/],
+    ['GET', /^\/studio\/video-analysis\/asset$/],
     ['POST', /^\/tools\/convert-video$/],
     ['POST', /^\/tools\/upload$/],
     ['POST', /^\/tools\/extract-frames$/],
@@ -2113,10 +2118,19 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
   }
 
   // 鉴权拦截（临时生成预览产物同样需要会话；前端 <img> 标签走 ml_session Cookie 鉴权；或走 15min media_token）
-  // SEC-002：/tools/* 不再免鉴权直达——未登录只放行公共模型目录与合法 media_token 的媒体读取。
+  // SEC-002：/tools/* 不再免鉴权直达——未登录只放行公共模型目录、只读媒体与分析产物、或合法 media_token 的媒体读取。
   if (!isViewerOrAdmin) {
-    if (pathname === '/studio/catalog' || /^\/base-library\/items\/[^\/]+\/(preview|scene)$/.test(pathname) || /^\/base-library\/materials\/[^\/]+\/preview$/.test(pathname) || /^\/products\/(previews|models)\/[^\/]+$/.test(pathname)) {
-      // 仅允许公共模型目录与公共切片预览图直达
+    const isPublicMediaRoute =
+      pathname === '/studio/catalog' ||
+      pathname === '/studio/video-analysis/asset' ||
+      /^\/assets\/[^\/]+\/poster$/.test(pathname) ||
+      (/^\/assets\/[^\/]+\/file(?:\/[^\/]+)?$/.test(pathname) && urlObj.searchParams.get('play') === '1') ||
+      /^\/base-library\/items\/[^\/]+\/(preview|scene)$/.test(pathname) ||
+      /^\/base-library\/materials\/[^\/]+\/preview$/.test(pathname) ||
+      /^\/products\/(previews|models)\/[^\/]+$/.test(pathname);
+
+    if (isPublicMediaRoute) {
+      // 允许公共模型目录、媒体封面、流式播放与视频分析产物只读直达
     } else {
       const mImgCheck = pathname.match(/^\/assets\/([^\/]+)\/(?:image|file)(?:\/([^\/]+))?$/);
       const mMaskCheck = pathname.match(/^\/ai\/masks\/([^\/]+)$/);
@@ -9538,7 +9552,10 @@ module.exports = {
       if (!fid) return sendJson(res, 400, { error: '缺少 fid 参数' });
       const { getVideoAnalysisService } = require('./services/video-analysis');
       const service = getVideoAnalysisService(services);
-      const data = await service.queueAnalysis(fid, { reanalyze: Boolean(b.reanalyze) });
+      const data = await service.queueAnalysis(fid, {
+        reanalyze: Boolean(b.reanalyze),
+        model: b.model ? String(b.model).trim() : ''
+      });
       return sendJson(res, 200, { success: true, data });
     } catch (e) {
       return sendJson(res, 500, { error: e.message || '提交视频拆解失败' });
@@ -9560,7 +9577,6 @@ module.exports = {
   }
 
   if (pathname === '/studio/video-analysis/asset' && req.method === 'GET') {
-    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
     const fid = urlObj.searchParams.get('fid');
     const relPath = urlObj.searchParams.get('path');
     if (!fid || !relPath) return sendJson(res, 400, { error: '缺少 fid 或 path 参数' });

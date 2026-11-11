@@ -145,6 +145,7 @@ class VideoAnalysisService {
     this.queue = [];
     this.activeFid = null;
     this.childProc = null;
+    this.requestedModels = new Map();
     ensureTable(services.db);
   }
 
@@ -175,6 +176,7 @@ class VideoAnalysisService {
     } catch (_) {}
 
     let breakdown = null;
+    let actualModel = '';
     const finalDir = getReaDir(config, fid);
     const breakdownFile = path.join(finalDir, 'breakdown.json');
     if (row.status === 'success' && fs.existsSync(breakdownFile)) {
@@ -184,7 +186,13 @@ class VideoAnalysisService {
         if (breakdown && Array.isArray(breakdown.shots)) {
           breakdown.shots.forEach((shot) => {
             shot.synthesized = synthesizeCameraMovement(shot, breakdown);
+            if (!actualModel && shot.vlm?._model) {
+              actualModel = shot.vlm._model;
+            }
           });
+        }
+        if (!actualModel && breakdown.analysis?.vlm?.model) {
+          actualModel = breakdown.analysis.vlm.model.split(',')[0].trim();
         }
       } catch (e) {
         console.warn(`[video-analysis] 读取 breakdown.json 失败 (${fid}):`, e.message);
@@ -198,6 +206,7 @@ class VideoAnalysisService {
       progress: row.progress,
       summary,
       breakdown,
+      actualModel: actualModel || 'gemini-2.5-flash',
       hasReport: fs.existsSync(path.join(finalDir, 'report.html')),
       hasStoryboard: fs.existsSync(path.join(finalDir, 'storyboard.jpg')),
       createdAt: row.created_at,
@@ -283,10 +292,14 @@ class VideoAnalysisService {
     return { success: true };
   }
 
-  async queueAnalysis(fid, { reanalyze = false } = {}) {
+  async queueAnalysis(fid, { reanalyze = false, model = '' } = {}) {
     const db = this.getDb();
     const config = this.getConfig();
     ensureTable(db);
+
+    if (model) {
+      this.requestedModels.set(fid, model);
+    }
 
     const existing = db.prepare('SELECT * FROM video_analyses WHERE fid = ?').get(fid);
     const finalDir = getReaDir(config, fid);
@@ -463,8 +476,11 @@ class VideoAnalysisService {
     if (!env.REA_VLM_API_KEY && process.env.NEWAPI_API_KEY) {
       env.REA_VLM_API_KEY = process.env.NEWAPI_API_KEY;
     }
-    if (!env.REA_VLM_MODEL) {
-      env.REA_VLM_MODEL = 'gemini-4-argon,gemini-2.5-flash,gpt-4o-mini';
+    const requestedModel = (this.requestedModels && this.requestedModels.get(fid)) || '';
+    if (requestedModel) {
+      env.REA_VLM_MODEL = requestedModel;
+    } else if (!env.REA_VLM_MODEL) {
+      env.REA_VLM_MODEL = 'gemini-2.5-flash,gemini-4-argon,gpt-4o-mini';
     }
     if (!env.REA_VLM_MEDIA) {
       env.REA_VLM_MEDIA = 'frames';

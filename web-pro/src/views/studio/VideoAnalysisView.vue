@@ -107,7 +107,22 @@
           </div>
         </div>
 
-        <div class="flex items-center gap-2 shrink-0">
+        <div class="flex items-center gap-2 shrink-0 flex-wrap">
+          <!-- 视觉模型挑选 -->
+          <div class="flex items-center gap-1.5 bg-studio-800/90 border border-studio-700/80 rounded-lg px-2.5 py-1 text-xs" title="挑选用于逐镜头逆向研判的多模态视觉模型">
+            <span class="w-1.5 h-1.5 rounded-full bg-purple-400"></span>
+            <span class="text-purple-300 font-mono text-[11px] shrink-0 font-medium">模型:</span>
+            <select
+              v-model="selectedModel"
+              class="bg-transparent text-slate-100 text-xs border-none outline-hidden cursor-pointer"
+              :disabled="loading || analysisStatus === 'running'"
+            >
+              <option v-for="m in AVAILABLE_VLM_MODELS" :key="m.id" :value="m.id" class="bg-studio-900 text-slate-100">
+                {{ m.name }} ({{ m.tag }})
+              </option>
+            </select>
+          </div>
+
           <button
             type="button"
             @click="openHistoryDrawer"
@@ -127,10 +142,10 @@
             type="button"
             @click="handleReanalyze"
             :disabled="loading || analysisStatus === 'running'"
-            class="px-3 py-1.5 text-xs rounded-lg bg-studio-800 hover:bg-studio-700 disabled:opacity-50 text-slate-200 border border-studio-700 flex items-center gap-1.5 transition-colors cursor-pointer"
-            title="重新拆解该视频，完成后将覆盖现有报告"
+            class="px-3 py-1.5 text-xs rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-medium flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm shadow-indigo-600/30"
+            title="重新拆解该视频，将调用所选视觉模型覆盖现有报告"
           >
-            <svg class="w-3.5 h-3.5 text-slate-400" :class="{ 'animate-spin': loading }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg class="w-3.5 h-3.5 text-white" :class="{ 'animate-spin': loading }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
             </svg>
             <span>重新拆解</span>
@@ -190,13 +205,22 @@
             <span class="text-slate-400 font-medium">结论摘要：</span>
             <span class="text-slate-200 font-semibold">{{ summaryVerdict }}</span>
           </div>
-          <div class="flex items-center gap-3 text-slate-400 text-[11px]">
+          <div class="flex items-center gap-3 text-slate-400 text-[11px] flex-wrap">
             <span>分镜：<strong class="text-slate-200">{{ breakdown.shots?.length || 0 }}</strong> 镜</span>
             <span>置信度：<strong class="text-emerald-400">{{ (summaryConfidence * 100).toFixed(0) }}%</strong></span>
-            <span v-if="vlmUsed" class="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 flex items-center gap-1 font-normal" :title="`视觉模型辅助研判: ${vlmModelName || '默认视觉模型'}`">
+            <span v-if="vlmUsed" class="px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 flex items-center gap-1.5 font-normal shadow-sm" :title="`底层视觉配置: ${vlmModelRaw}`">
               <span class="w-1.5 h-1.5 rounded-full bg-purple-400"></span>
-              <span>视觉模型: {{ vlmModelName || '已启用' }}</span>
+              <span>视觉模型: <strong class="text-purple-200 font-semibold">{{ displayActualModel }}</strong></span>
             </span>
+            <a
+              v-if="rawReportUrl"
+              :href="rawReportUrl"
+              target="_blank"
+              class="px-2 py-0.5 rounded bg-studio-800 hover:bg-studio-700 text-indigo-300 hover:text-indigo-200 border border-studio-700 flex items-center gap-1 font-medium transition-colors cursor-pointer"
+              title="在新窗口查看 rea-video 原始完整分析大屏"
+            >
+              <span>查看原生大屏 ↗</span>
+            </a>
           </div>
         </div>
 
@@ -571,6 +595,61 @@
               </div>
             </div>
           </div>
+
+          <!-- 栏 6：原始拆分报告与数据大屏 (Raw Report) -->
+          <div v-show="activeReportTab === 'raw'" class="h-full flex flex-col space-y-3">
+            <!-- 顶部工具栏 -->
+            <div class="flex flex-wrap items-center justify-between gap-3 p-3 bg-studio-900/80 border border-studio-800 rounded-xl shrink-0">
+              <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+                <span class="text-xs font-semibold text-slate-200">rea-video 原生逆向拆解全景报告</span>
+                <span class="text-[11px] text-slate-400 hidden sm:inline">（包含底层光流曲线、音轨分频波形、视觉模型判词与时序图表）</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <a
+                  v-if="rawReportUrl"
+                  :href="rawReportUrl"
+                  target="_blank"
+                  class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium flex items-center gap-1.5 shadow transition-colors cursor-pointer"
+                  title="新窗口全屏独享查看"
+                >
+                  <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                    <polyline points="15 3 21 3 21 9"/>
+                    <line x1="10" y1="14" x2="21" y2="3"/>
+                  </svg>
+                  <span>全屏查看原生大屏 ↗</span>
+                </a>
+                <button
+                  type="button"
+                  @click="copyRawJson"
+                  class="px-3 py-1.5 rounded-lg bg-studio-800 hover:bg-studio-700 text-slate-200 border border-studio-700 text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <span>复制原始 JSON</span>
+                </button>
+                <button
+                  type="button"
+                  @click="downloadRawJson"
+                  class="px-3 py-1.5 rounded-lg bg-studio-800 hover:bg-studio-700 text-slate-200 border border-studio-700 text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <span>下载 JSON</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- 原生 report.html iframe 嵌入视口 (高保真全屏展示) -->
+            <div class="flex-1 min-h-[580px] rounded-xl overflow-hidden border border-studio-800 bg-white relative shadow-2xl">
+              <iframe
+                v-if="rawReportUrl"
+                :src="rawReportUrl"
+                class="w-full h-full border-0 absolute inset-0 bg-white"
+                loading="lazy"
+              ></iframe>
+              <div v-else class="h-full flex items-center justify-center text-xs text-slate-500">
+                暂未生成原始报告
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -766,6 +845,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
   getAssetImageUrl,
+  getAssetPosterUrl,
   getVideoAnalysis,
   getVideoAnalysisAssetUrl,
   getVideoAnalysisHistory,
@@ -794,8 +874,18 @@ const currentFid = computed(() => props.currentVideo?.fid || props.currentVideo?
 const videoName = computed(() => props.currentVideo?.file_name || props.currentVideo?.name || '');
 const videoThumbUrl = computed(() => {
   if (!currentFid.value) return '';
-  return props.currentVideo?.url || getAssetImageUrl(currentFid.value, props.currentVideo?.mediaToken, 'grid');
+  return props.currentVideo?.url || getAssetPosterUrl(currentFid.value, props.currentVideo?.mediaToken);
 });
+
+// 视觉模型可选配置
+const AVAILABLE_VLM_MODELS = [
+  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', desc: '快速精准·多模态首选', tag: '推荐' },
+  { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', desc: '深度细致·长上下文', tag: '深度' },
+  { id: 'gpt-4o-mini', name: 'GPT-4o mini', desc: '通用高性价比分析', tag: '通用' },
+  { id: 'gemini-4-argon', name: 'Gemini 4 Argon', desc: '高阶视觉实验模型', tag: '实验' }
+];
+const selectedModel = ref('gemini-2.5-flash');
+const actualModelBackend = ref('');
 
 const loading = ref(false);
 const analysisStatus = ref('idle'); // idle | pending | running | success | error
@@ -810,7 +900,8 @@ const reportTabs = [
   { id: 'lighting', label: '光与调色' },
   { id: 'audio', label: '声音包装' },
   { id: 'packaging', label: '字幕贴纸' },
-  { id: 'production', label: '制作方式与复刻指南' }
+  { id: 'production', label: '制作方式与复刻指南' },
+  { id: 'raw', label: '原始拆分报告 (Raw Report)' }
 ];
 const activeReportTab = ref('camera');
 
@@ -819,6 +910,16 @@ let pollTimer = null;
 const storyboardUrl = computed(() => {
   if (!currentFid.value || !breakdown.value) return '';
   return getVideoAnalysisAssetUrl(currentFid.value, 'storyboard.jpg');
+});
+
+const rawReportUrl = computed(() => {
+  if (!currentFid.value) return '';
+  return getVideoAnalysisAssetUrl(currentFid.value, 'report.html');
+});
+
+const rawJsonUrl = computed(() => {
+  if (!currentFid.value) return '';
+  return getVideoAnalysisAssetUrl(currentFid.value, 'breakdown.json');
 });
 
 const durationSec = computed(() => {
@@ -840,12 +941,24 @@ const summaryConfidence = computed(() => {
 });
 
 const vlmUsed = computed(() => {
-  return Boolean(breakdown.value?.analysis?.vlm?.used);
+  return Boolean(breakdown.value?.analysis?.vlm?.used || breakdown.value?.summary?.vlm);
 });
 
-const vlmModelName = computed(() => {
+const vlmModelRaw = computed(() => {
   const vlm = breakdown.value?.analysis?.vlm;
   return vlm?.model || vlm?.active_model || vlm?.engine || '';
+});
+
+const displayActualModel = computed(() => {
+  const m = actualModelBackend.value || breakdown.value?.shots?.[0]?.vlm?._model || breakdown.value?.summary?.actual_model;
+  if (!m) return 'Gemini 2.5 Flash';
+  const found = AVAILABLE_VLM_MODELS.find(opt => opt.id === m);
+  if (found) return found.name;
+  if (m === 'gemini-4-argon') return 'Gemini 4 Argon';
+  if (m.includes('gemini-2.5-flash')) return 'Gemini 2.5 Flash';
+  if (m.includes('gemini-1.5-pro')) return 'Gemini 1.5 Pro';
+  if (m.includes('gpt-4o-mini')) return 'GPT-4o mini';
+  return m;
 });
 
 const shotList = computed(() => {
@@ -908,6 +1021,7 @@ async function loadExistingOrQueue(fid, { reanalyze = false } = {}) {
       analysisStatus.value = 'success';
       breakdown.value = data.breakdown;
       updatedAt.value = data.updatedAt;
+      if (data.actualModel) actualModelBackend.value = data.actualModel;
       initOverrides(data.breakdown);
       loading.value = false;
       return;
@@ -922,7 +1036,7 @@ async function loadExistingOrQueue(fid, { reanalyze = false } = {}) {
 
     // 若无已完成报告或指定重新拆解，则触发入队
     progressText.value = '正在加入拆解队列...';
-    const queueRes = await submitVideoAnalysis(fid, { reanalyze });
+    const queueRes = await submitVideoAnalysis(fid, { reanalyze, model: selectedModel.value });
     const qData = queueRes?.data;
     analysisStatus.value = qData?.status || 'running';
     progressText.value = qData?.progress || '正在启动拆解引擎...';
@@ -958,6 +1072,7 @@ function startPolling(fid) {
       if (data.status === 'success' && data.breakdown) {
         breakdown.value = data.breakdown;
         updatedAt.value = data.updatedAt;
+        if (data.actualModel) actualModelBackend.value = data.actualModel;
         initOverrides(data.breakdown);
         loading.value = false;
         stopPolling();
@@ -979,9 +1094,27 @@ function stopPolling() {
 
 function handleReanalyze() {
   if (!currentFid.value) return;
-  if (confirm('确定要重新拆解当前视频吗？完成后将用最新结果替换现有报告。')) {
+  const modelObj = AVAILABLE_VLM_MODELS.find(m => m.id === selectedModel.value);
+  const modelName = modelObj ? modelObj.name : selectedModel.value;
+  if (confirm(`确定要使用视觉模型【${modelName}】重新拆解当前视频吗？完成后将用最新结果替换现有报告。`)) {
     void loadExistingOrQueue(currentFid.value, { reanalyze: true });
   }
+}
+
+function copyRawJson() {
+  if (!breakdown.value) return;
+  navigator.clipboard?.writeText?.(JSON.stringify(breakdown.value, null, 2));
+  alert('完整 breakdown.json 已复制到剪贴板！');
+}
+
+function downloadRawJson() {
+  if (!breakdown.value) return;
+  const blob = new Blob([JSON.stringify(breakdown.value, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `breakdown_${currentFid.value || 'video'}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 function copyText(str) {

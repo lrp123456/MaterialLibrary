@@ -1229,8 +1229,8 @@ export function getVideoAnalysis(fid) {
   return fetchJson(`/api/studio/video-analysis?fid=${encodeURIComponent(fid)}`);
 }
 
-export function submitVideoAnalysis(fid, { reanalyze = false } = {}) {
-  return postJson('/api/studio/video-analysis', { fid, reanalyze });
+export function submitVideoAnalysis(fid, { reanalyze = false, model = '' } = {}) {
+  return postJson('/api/studio/video-analysis', { fid, reanalyze, model });
 }
 
 export function getVideoAnalysisAssetUrl(fid, relPath) {
@@ -1239,6 +1239,14 @@ export function getVideoAnalysisAssetUrl(fid, relPath) {
   const q = new URLSearchParams({ fid, path: relPath });
   if (token) q.set('token', token);
   return resolveApiUrl(`/api/studio/video-analysis/asset?${q.toString()}`);
+}
+
+export function getVideoAnalysisRawReportUrl(fid) {
+  return getVideoAnalysisAssetUrl(fid, 'report.html');
+}
+
+export function getVideoAnalysisRawJsonUrl(fid) {
+  return getVideoAnalysisAssetUrl(fid, 'breakdown.json');
 }
 
 export function getVideoAnalysisHistory(params = {}) {

@@ -469,6 +469,7 @@ import {
   fetchAssets,
   fetchAssetDetail,
   getAssetImageUrl,
+  getAssetPosterUrl,
   getAssetOriginalUrl,
   getDerivativeImageUrl,
   triggerRestageDerivatives,
@@ -809,17 +810,25 @@ async function loadAssets(targetPage = 1) {
     if (Array.isArray(opts.style_atom)) filterStyles.value = opts.style_atom;
     if (Array.isArray(opts.material_kind)) filterMaterials.value = opts.material_kind.slice(0, 8);
     if (Array.isArray(opts.colors)) filterColors.value = opts.colors.slice(0, 12);
-    let mapped = items.map((it) => ({
-      id: it.fid,
-      fid: it.fid,
-      mediaToken: it.mediaToken,
-      name: it.file_name || it.fileName || it.name || '素材资产',
-      // 选择器网格缩略图走 256px grid 档；确认选择时原图/衍生图由 versionsOf 另签 URL
-      url: getAssetImageUrl(it.fid, it.mediaToken, (it.kind || it.media_type) === 'video' ? '' : 'grid'),
-      category: it.category,
-      kind: it.kind || it.media_type || 'image',
-      library_shelf: it.library_shelf || 'original',
-    }));
+    let mapped = items.map((it) => {
+      const isVideo = (it.kind || it.media_type) === 'video';
+      const isAudio = (it.kind || it.media_type) === 'audio';
+      return {
+        id: it.fid,
+        fid: it.fid,
+        mediaToken: it.mediaToken,
+        name: it.file_name || it.fileName || it.name || '素材资产',
+        // 视频走 poster 专用端点，避免尝试取不存在的 image 缩略图
+        url: isVideo
+          ? getAssetPosterUrl(it.fid, it.mediaToken)
+          : isAudio
+            ? ''
+            : getAssetImageUrl(it.fid, it.mediaToken, 'grid'),
+        category: it.category,
+        kind: isVideo ? 'video' : (isAudio ? 'audio' : (it.kind || it.media_type || 'image')),
+        library_shelf: it.library_shelf || 'original',
+      };
+    });
     libraryItems.value = mapped;
   } catch (e) {
     console.warn('加载素材库资产失败:', e);
@@ -859,9 +868,11 @@ function versionsOf(item) {
   }
   return buildVersions(item, derivativeCache.value[item.fid], {
     originUrl: (it) =>
-      it.fid && !['video', 'audio'].includes(it.kind)
-        ? getAssetOriginalUrl(it.fid, it.mediaToken)
-        : (it.url || ''),
+      it.fid && (it.kind === 'video' || it.media_type === 'video')
+        ? getAssetPosterUrl(it.fid, it.mediaToken)
+        : (it.fid && !['video', 'audio'].includes(it.kind)
+          ? getAssetOriginalUrl(it.fid, it.mediaToken)
+          : (it.url || '')),
     derivativeUrl: (it, derivativeId) => getDerivativeImageUrl(it.fid, derivativeId, it.mediaToken),
   });
 }

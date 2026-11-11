@@ -105,7 +105,7 @@
 
 <script setup>
 import { defineAsyncComponent, h, ref, watch } from 'vue';
-import { authFetch, getAssetImageUrl } from '../api';
+import { authFetch, getAssetImageUrl, getAssetPosterUrl } from '../api';
 import AssetPickerModal from '../components/AssetPickerModal.vue';
 
 // 懒加载组件：ChatStudio 体量大，避免拖慢其它视口
@@ -169,7 +169,7 @@ function onVideoSelected(selected) {
       fid,
       id: fid,
       name: item.name || item.file_name || '参考视频',
-      url: item.url || getAssetImageUrl(fid, item.mediaToken),
+      url: item.url || getAssetPosterUrl(fid, item.mediaToken),
       kind: 'video',
       mediaToken: item.mediaToken
     };
