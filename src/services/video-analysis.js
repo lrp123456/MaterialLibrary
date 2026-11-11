@@ -180,6 +180,84 @@ class VideoAnalysisService {
     };
   }
 
+  async listHistory({ limit = 30, offset = 0, status = '' } = {}) {
+    const db = this.getDb();
+    ensureTable(db);
+    const validLimit = Math.min(Math.max(Number(limit) || 30, 1), 100);
+    const validOffset = Math.max(Number(offset) || 0, 0);
+
+    let whereClause = '';
+    const params = [];
+    if (status && typeof status === 'string' && status !== 'all') {
+      whereClause = 'WHERE va.status = ?';
+      params.push(status);
+    }
+
+    const totalRow = db.prepare(`SELECT COUNT(*) as count FROM video_analyses va ${whereClause}`).get(...params);
+    const total = totalRow ? totalRow.count : 0;
+
+    const sql = `
+      SELECT
+        va.fid,
+        va.status,
+        va.error,
+        va.progress,
+        va.summary_json,
+        va.created_at,
+        va.updated_at,
+        a.file_name,
+        a.duration_s,
+        a.thumb_url,
+        a.width,
+        a.height
+      FROM video_analyses va
+      LEFT JOIN assets a ON va.fid = a.fid
+      ${whereClause}
+      ORDER BY va.updated_at DESC
+      LIMIT ? OFFSET ?
+    `;
+
+    const rows = db.prepare(sql).all(...params, validLimit, validOffset);
+    const items = rows.map((r) => {
+      let summary = {};
+      try {
+        summary = r.summary_json ? JSON.parse(r.summary_json) : {};
+      } catch (_) {}
+      return {
+        fid: r.fid,
+        name: r.file_name || r.fid,
+        fileName: r.file_name || r.fid,
+        status: r.status,
+        error: r.error,
+        progress: r.progress,
+        duration: r.duration_s || summary.duration || null,
+        thumbUrl: r.thumb_url || `/api/thumbs/${r.fid}.jpg`,
+        shotsCount: summary.shots_count || (Array.isArray(summary.shots) ? summary.shots.length : null),
+        productionMix: summary.production_mix || null,
+        production: summary.production || null,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at
+      };
+    });
+
+    return { total, items, limit: validLimit, offset: validOffset };
+  }
+
+  async deleteRecord(fid) {
+    if (!fid) return { success: false, error: '缺少 fid' };
+    const db = this.getDb();
+    const config = this.getConfig();
+    ensureTable(db);
+
+    db.prepare('DELETE FROM video_analyses WHERE fid = ?').run(fid);
+    const dir = getReaDir(config, fid);
+    try {
+      if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+    } catch (_) {}
+
+    return { success: true };
+  }
+
   async queueAnalysis(fid, { reanalyze = false } = {}) {
     const db = this.getDb();
     const config = this.getConfig();
@@ -219,40 +297,104 @@ class VideoAnalysisService {
     const db = this.getDb();
     const config = this.getConfig();
 
-    const deriv = db.prepare("SELECT * FROM derivatives WHERE asset_fid=? ORDER BY CASE kind WHEN 'origin' THEN 0 ELSE 1 END LIMIT 1").get(fid);
-    if (deriv) {
+    // 1. derivatives 表解析：优先 origin，其次任意可用衍生
+    const derivs = db.prepare("SELECT * FROM derivatives WHERE asset_fid=? ORDER BY CASE kind WHEN 'origin' THEN 0 ELSE 1 END").all(fid);
+    for (const deriv of derivs) {
       try {
         const p = await resolveDerivativeFile(this.services, deriv);
-        if (p && fs.existsSync(p)) return p;
-      } catch {
-        // 继续回退检查其它可能路径
+        if (p && fs.existsSync(p)) {
+          console.log(`[video-analysis] resolveDerivativeFile 命中 (${fid}): ${p}`);
+          return p;
+        }
+      } catch (e) {
+        // 继续尝试下一个衍生
       }
     }
 
+    // 2. nasstore 分片查找
     try {
       const { findNasOriginal } = require('../nasstore');
       const nasHit = findNasOriginal(config, fid);
-      if (nasHit && fs.existsSync(nasHit)) return nasHit;
+      if (nasHit && fs.existsSync(nasHit)) {
+        console.log(`[video-analysis] findNasOriginal 命中 (${fid}): ${nasHit}`);
+        return nasHit;
+      }
     } catch {}
 
+    // 3. assets 表及 ensureOriginalFile
     const asset = db.prepare('SELECT * FROM assets WHERE fid=?').get(fid);
     if (asset) {
       try {
         const { ensureOriginalFile } = require('../originals');
         const p = await ensureOriginalFile(this.services, asset);
-        if (p && fs.existsSync(p)) return p;
+        if (p && fs.existsSync(p)) {
+          console.log(`[video-analysis] ensureOriginalFile 命中 (${fid}): ${p}`);
+          return p;
+        }
       } catch {}
 
       if (asset.storage_ref) {
         const candidates = [
           path.isAbsolute(asset.storage_ref) ? asset.storage_ref : null,
           path.join(config.dataDir, 'originals', asset.storage_ref),
-          path.join(config.dataDir, asset.storage_ref)
+          path.join(config.dataDir, asset.storage_ref),
+          path.join(config.dataDir, 'cache', asset.storage_ref),
+          path.join(config.dataDir, 'uploads', asset.storage_ref)
         ].filter(Boolean);
         for (const c of candidates) {
-          if (fs.existsSync(c)) return c;
+          if (fs.existsSync(c)) {
+            console.log(`[video-analysis] asset.storage_ref 命中 (${fid}): ${c}`);
+            return c;
+          }
         }
       }
+    }
+
+    // 4. 深度兜底：按文件名与 hash 在常用素材目录进行扫描匹配
+    const fileName = asset?.file_name;
+    const candidatesDirs = [
+      process.platform === 'win32' ? '//wsl.localhost/smu/mnt/synology/material' : '/mnt/synology/material',
+      process.platform === 'win32' ? '//wsl$/smu/mnt/synology/material' : null,
+      path.join(config.dataDir, 'nas_material'),
+      path.join(config.dataDir, 'cache', 'originals'),
+      path.join(config.dataDir, 'originals'),
+      path.join(config.dataDir, 'uploads'),
+      path.join(config.dataDir, 'cache', 'temp_upload'),
+      path.join(config.dataDir, 'cache', 'temp')
+    ].filter(Boolean);
+
+    if (fileName) {
+      for (const d of candidatesDirs) {
+        try {
+          if (!fs.existsSync(d)) continue;
+          const direct = path.join(d, fileName);
+          if (fs.existsSync(direct)) return direct;
+        } catch (_) {}
+      }
+    }
+
+    // 5. 扫描年月目录兜底
+    if (fileName && process.platform === 'win32') {
+      try {
+        const baseUnc = '//wsl.localhost/smu/mnt/synology/material';
+        if (fs.existsSync(baseUnc)) {
+          const years = fs.readdirSync(baseUnc);
+          for (const y of years) {
+            const yPath = path.join(baseUnc, y);
+            if (!fs.statSync(yPath).isDirectory()) continue;
+            const months = fs.readdirSync(yPath);
+            for (const m of months) {
+              const mPath = path.join(yPath, m);
+              if (!fs.statSync(mPath).isDirectory()) continue;
+              const target = path.join(mPath, fileName);
+              if (fs.existsSync(target)) {
+                console.log(`[video-analysis] 年月目录扫描命中 (${fid}): ${target}`);
+                return target;
+              }
+            }
+          }
+        }
+      } catch (_) {}
     }
 
     return null;

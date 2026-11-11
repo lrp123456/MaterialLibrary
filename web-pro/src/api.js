@@ -1241,3 +1241,18 @@ export function getVideoAnalysisAssetUrl(fid, relPath) {
   return resolveApiUrl(`/api/studio/video-analysis/asset?${q.toString()}`);
 }
 
+export function getVideoAnalysisHistory(params = {}) {
+  const q = new URLSearchParams();
+  if (params.limit) q.set('limit', String(params.limit));
+  if (params.offset) q.set('offset', String(params.offset));
+  if (params.status) q.set('status', String(params.status));
+  const qs = q.toString();
+  return fetchJson(`/api/studio/video-analysis/history${qs ? '?' + qs : ''}`);
+}
+
+export function deleteVideoAnalysis(fid) {
+  return fetchJson(`/api/studio/video-analysis?fid=${encodeURIComponent(fid)}`, {
+    method: 'DELETE'
+  });
+}
+

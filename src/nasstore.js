@@ -7,10 +7,46 @@ const path = require('path');
 
 const DEFAULT_NAS = '/mnt/synology/material';
 
+/**
+ * 跨平台 WSL 路径映射：在 Windows 下将 Linux /mnt 路径转为可通过 UNC 访问的路径
+ */
+function toPlatformNasPath(p) {
+  if (!p || typeof p !== 'string') return p;
+  if (process.platform === 'win32') {
+    if (p.startsWith('/mnt/') || p.startsWith('\\mnt\\')) {
+      const normalized = p.replace(/\\/g, '/');
+      const uncCandidates = [
+        `//wsl.localhost/smu${normalized}`,
+        `//wsl$/smu${normalized}`,
+        `\\\\wsl.localhost\\smu${normalized.replace(/\//g, '\\')}`
+      ];
+      for (const unc of uncCandidates) {
+        if (fs.existsSync(unc)) return unc;
+      }
+      return uncCandidates[0];
+    }
+  }
+  return p;
+}
+
 function nasMaterialDir(config) {
-  const dir = process.env.ML_NAS_DIR
-    || config?.nasDir
-    || (config?.dataDir && path.join(config.dataDir, 'nas_material'))
+  const envDir = process.env.ML_NAS_DIR;
+  if (envDir) return toPlatformNasPath(envDir);
+
+  if (config?.nasDir) {
+    const candidate = toPlatformNasPath(config.nasDir);
+    if (fs.existsSync(candidate)) return candidate;
+    return config.nasDir;
+  }
+
+  if (process.platform === 'win32') {
+    const unc1 = '//wsl.localhost/smu/mnt/synology/material';
+    if (fs.existsSync(unc1)) return unc1;
+    const unc2 = '//wsl$/smu/mnt/synology/material';
+    if (fs.existsSync(unc2)) return unc2;
+  }
+
+  const dir = (config?.dataDir && path.join(config.dataDir, 'nas_material'))
     || DEFAULT_NAS;
   try { fs.mkdirSync(dir, { recursive: true }); } catch {}
   return dir;
@@ -94,6 +130,7 @@ function nasAvailable() {
 }
 
 module.exports = {
+  toPlatformNasPath,
   nasMaterialDir,
   nasOriginalPath,
   nasDateOriginalPath,

@@ -50,6 +50,21 @@
             </svg>
             <span>上传本地参考视频</span>
           </button>
+
+          <button
+            type="button"
+            @click="openHistoryDrawer"
+            class="px-5 py-2.5 rounded-xl bg-studio-900 hover:bg-studio-800 text-slate-300 hover:text-slate-100 border border-studio-700/80 font-medium text-sm flex items-center gap-2 transition-all cursor-pointer"
+          >
+            <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
+            </svg>
+            <span>拆解历史记录</span>
+            <span v-if="historyCount > 0" class="px-1.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 text-xs font-mono font-normal">
+              {{ historyCount }}
+            </span>
+          </button>
           <input ref="localFileInput" type="file" accept="video/*" class="hidden" @change="onLocalFilePicked" />
         </div>
       </div>
@@ -93,6 +108,21 @@
         </div>
 
         <div class="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            @click="openHistoryDrawer"
+            class="px-3 py-1.5 text-xs rounded-lg bg-studio-800 hover:bg-studio-700 text-slate-200 border border-studio-700 flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="查看所有参考视频的拆解历史记录"
+          >
+            <svg class="w-3.5 h-3.5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
+            </svg>
+            <span>拆解历史</span>
+            <span v-if="historyCount > 0" class="px-1 py-0.2 rounded-full bg-indigo-500/30 text-indigo-300 text-[10px] font-mono">
+              {{ historyCount }}
+            </span>
+          </button>
           <button
             type="button"
             @click="handleReanalyze"
@@ -541,6 +571,191 @@
         </div>
       </div>
     </div>
+
+    <!-- 3. 拆解历史抽屉 (Drawer) -->
+    <transition name="drawer-fade">
+      <div v-if="showHistoryDrawer" class="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-xs">
+        <div class="fixed inset-0" @click="closeHistoryDrawer"></div>
+        <div class="relative w-full max-w-lg bg-studio-900 border-l border-studio-800 shadow-2xl flex flex-col z-10 animate-in slide-in-from-right duration-200">
+          <!-- 抽屉顶栏 -->
+          <div class="px-5 py-4 border-b border-studio-800 flex items-center justify-between shrink-0 bg-studio-950/60">
+            <div class="flex items-center gap-2">
+              <svg class="w-5 h-5 text-indigo-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <polyline points="12 6 12 12 16 14"/>
+              </svg>
+              <h2 class="text-base font-bold text-slate-100">参考视频拆解历史</h2>
+              <span v-if="historyTotal > 0" class="px-2 py-0.5 text-xs rounded-full bg-indigo-500/20 text-indigo-300 font-mono">
+                {{ historyTotal }}
+              </span>
+            </div>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                @click="fetchHistory"
+                :disabled="historyLoading"
+                class="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-studio-800 transition-colors cursor-pointer"
+                title="刷新历史列表"
+              >
+                <svg class="w-4 h-4" :class="{ 'animate-spin': historyLoading }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                </svg>
+              </button>
+              <button
+                type="button"
+                @click="closeHistoryDrawer"
+                class="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-studio-800 transition-colors cursor-pointer"
+              >
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="18" y1="6" x2="6" y2="18"/>
+                  <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- 抽屉搜索与状态过滤 -->
+          <div class="p-4 border-b border-studio-800/80 space-y-3 bg-studio-900/40">
+            <div class="relative">
+              <input
+                v-model="historySearch"
+                type="text"
+                placeholder="搜索视频文件名或 FID..."
+                class="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg bg-studio-950 border border-studio-700/80 text-slate-200 placeholder-slate-500 focus:outline-hidden focus:border-indigo-500"
+              />
+              <svg class="w-3.5 h-3.5 text-slate-500 absolute left-3 top-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"/>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+            </div>
+
+            <div class="flex items-center gap-1.5 text-xs">
+              <button
+                v-for="tab in historyFilterTabs"
+                :key="tab.id"
+                type="button"
+                @click="historyStatusTab = tab.id"
+                class="px-2.5 py-1 rounded-md transition-colors cursor-pointer font-medium text-[11px]"
+                :class="historyStatusTab === tab.id ? 'bg-indigo-600 text-white shadow-xs' : 'bg-studio-950 hover:bg-studio-800 text-slate-400 hover:text-slate-200 border border-studio-800'"
+              >
+                {{ tab.label }}
+              </button>
+            </div>
+          </div>
+
+          <!-- 抽屉列表区 -->
+          <div class="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
+            <div v-if="historyLoading && filteredHistoryItems.length === 0" class="py-12 flex flex-col items-center justify-center text-slate-400">
+              <svg class="w-6 h-6 animate-spin text-indigo-400 mb-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+              </svg>
+              <span class="text-xs">加载历史记录...</span>
+            </div>
+
+            <div v-else-if="filteredHistoryItems.length === 0" class="py-16 text-center text-slate-500 text-xs">
+              <svg class="w-10 h-10 mx-auto text-slate-600 mb-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="8" y1="12" x2="16" y2="12"/>
+              </svg>
+              <span>{{ historySearch ? '未找到符合条件的拆解记录' : '暂无视频拆解历史' }}</span>
+            </div>
+
+            <div
+              v-for="item in filteredHistoryItems"
+              :key="item.fid"
+              class="group p-3 rounded-xl bg-studio-950/70 hover:bg-studio-800/80 border transition-all cursor-pointer flex flex-col gap-2.5"
+              :class="item.fid === currentFid ? 'border-indigo-500/80 ring-1 ring-indigo-500/30' : 'border-studio-800 hover:border-studio-700'"
+              @click="selectHistory(item)"
+            >
+              <div class="flex items-start gap-3">
+                <!-- 封面图 -->
+                <div class="w-16 h-12 rounded-lg bg-black/50 border border-studio-800 overflow-hidden shrink-0 relative flex items-center justify-center">
+                  <img v-if="item.thumbUrl" :src="item.thumbUrl" class="w-full h-full object-cover" />
+                  <svg v-else class="w-5 h-5 text-slate-600" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M8 5v14l11-7z"/>
+                  </svg>
+                  <span v-if="item.duration" class="absolute bottom-0.5 right-0.5 px-1 py-0.2 rounded bg-black/80 text-[10px] text-slate-300 font-mono">
+                    {{ item.duration }}s
+                  </span>
+                </div>
+
+                <!-- 标题与状态 -->
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center justify-between gap-1.5">
+                    <h4 class="text-xs font-semibold text-slate-200 truncate group-hover:text-indigo-300 transition-colors" :title="item.name">
+                      {{ item.name }}
+                    </h4>
+                    <!-- 状态标签 -->
+                    <span v-if="item.status === 'success'" class="px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0 font-normal">
+                      已拆解
+                    </span>
+                    <span v-else-if="item.status === 'running'" class="px-1.5 py-0.5 rounded text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 shrink-0 flex items-center gap-1 font-normal">
+                      <span class="w-1 h-1 rounded-full bg-indigo-400 animate-pulse"></span>
+                      <span>分析中</span>
+                    </span>
+                    <span v-else-if="item.status === 'pending'" class="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0 font-normal">
+                      排队中
+                    </span>
+                    <span v-else-if="item.status === 'error'" class="px-1.5 py-0.5 rounded text-[10px] bg-rose-500/20 text-rose-300 border border-rose-500/30 shrink-0 font-normal">
+                      失败
+                    </span>
+                  </div>
+
+                  <div class="text-[11px] text-slate-400 flex items-center gap-2 mt-1">
+                    <span class="font-mono text-slate-500">FID: {{ item.fid.slice(0, 8) }}...</span>
+                    <span v-if="item.shotsCount">· {{ item.shotsCount }} 镜头</span>
+                    <span v-if="item.fid === currentFid" class="px-1.5 py-0.2 rounded bg-indigo-500/30 text-indigo-200 text-[10px]">当前查看</span>
+                  </div>
+
+                  <!-- 错误信息 / 进度提示 -->
+                  <div v-if="item.status === 'error' && item.error" class="text-[11px] text-rose-400/90 mt-1 line-clamp-1" :title="item.error">
+                    {{ item.error }}
+                  </div>
+                  <div v-else-if="item.status === 'running' && item.progress" class="text-[11px] text-indigo-300/80 mt-1 line-clamp-1">
+                    {{ item.progress }}
+                  </div>
+                </div>
+              </div>
+
+              <!-- 底部操作与时间栏 -->
+              <div class="pt-2 border-t border-studio-900 flex items-center justify-between text-[11px] text-slate-500">
+                <span>{{ formatHistoryTime(item.updatedAt || item.createdAt) }}</span>
+
+                <div class="flex items-center gap-2" @click.stop>
+                  <button
+                    v-if="item.status === 'error'"
+                    type="button"
+                    @click="handleRetryHistory(item)"
+                    class="px-2 py-0.5 rounded bg-studio-800 hover:bg-studio-700 text-indigo-300 hover:text-indigo-200 transition-colors"
+                  >
+                    重试
+                  </button>
+                  <button
+                    type="button"
+                    @click="selectHistory(item)"
+                    class="px-2 py-0.5 rounded bg-studio-800 hover:bg-studio-700 text-slate-300 hover:text-white transition-colors"
+                  >
+                    {{ item.fid === currentFid ? '刷新' : '载入' }}
+                  </button>
+                  <button
+                    type="button"
+                    @click="handleDeleteHistory(item)"
+                    class="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-studio-800 transition-colors"
+                    title="删除该记录"
+                  >
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="3 6 5 6 21 6"/>
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -550,6 +765,8 @@ import {
   getAssetImageUrl,
   getVideoAnalysis,
   getVideoAnalysisAssetUrl,
+  getVideoAnalysisHistory,
+  deleteVideoAnalysis,
   submitVideoAnalysis
 } from '../../api';
 
@@ -557,7 +774,7 @@ const props = defineProps({
   currentVideo: { type: Object, default: null }
 });
 
-const emit = defineEmits(['choose-video', 'upload-video', 'jump-to-generate']);
+const emit = defineEmits(['choose-video', 'upload-video', 'jump-to-generate', 'select-history']);
 
 const localFileInput = ref(null);
 function triggerLocalUpload() {
@@ -816,7 +1033,117 @@ watch(
   { immediate: true }
 );
 
+// ── 拆解历史功能状态与方法 ──
+const showHistoryDrawer = ref(false);
+const historyItems = ref([]);
+const historyTotal = ref(0);
+const historyLoading = ref(false);
+const historySearch = ref('');
+const historyStatusTab = ref('all'); // all | success | running | error
+
+const historyCount = computed(() => historyTotal.value || historyItems.value.length || 0);
+
+const historyFilterTabs = [
+  { id: 'all', label: '全部' },
+  { id: 'success', label: '已拆解' },
+  { id: 'running', label: '分析中' },
+  { id: 'error', label: '失败' }
+];
+
+const filteredHistoryItems = computed(() => {
+  let list = historyItems.value || [];
+  if (historyStatusTab.value !== 'all') {
+    if (historyStatusTab.value === 'running') {
+      list = list.filter((i) => i.status === 'running' || i.status === 'pending');
+    } else {
+      list = list.filter((i) => i.status === historyStatusTab.value);
+    }
+  }
+  if (historySearch.value.trim()) {
+    const q = historySearch.value.trim().toLowerCase();
+    list = list.filter((i) => (i.name && i.name.toLowerCase().includes(q)) || (i.fid && i.fid.toLowerCase().includes(q)));
+  }
+  return list;
+});
+
+async function fetchHistory() {
+  historyLoading.value = true;
+  try {
+    const res = await getVideoAnalysisHistory({ limit: 100 });
+    if (res && res.items) {
+      historyItems.value = res.items;
+      historyTotal.value = res.total ?? res.items.length;
+    }
+  } catch (err) {
+    console.warn('[video-analysis] 拉取拆解历史失败:', err);
+  } finally {
+    historyLoading.value = false;
+  }
+}
+
+function openHistoryDrawer() {
+  showHistoryDrawer.value = true;
+  void fetchHistory();
+}
+
+function closeHistoryDrawer() {
+  showHistoryDrawer.value = false;
+}
+
+function selectHistory(item) {
+  if (!item || !item.fid) return;
+  emit('select-history', item);
+  closeHistoryDrawer();
+  if (item.fid === currentFid.value) {
+    void loadExistingOrQueue(item.fid, { reanalyze: false });
+  }
+}
+
+async function handleRetryHistory(item) {
+  if (!item || !item.fid) return;
+  try {
+    await submitVideoAnalysis(item.fid, { reanalyze: true });
+    item.status = 'running';
+    item.progress = '正在准备重试拆解...';
+    item.error = '';
+    void fetchHistory();
+    if (item.fid === currentFid.value) {
+      void loadExistingOrQueue(item.fid, { reanalyze: true });
+    }
+  } catch (err) {
+    alert(`重试拆解失败: ${err.message || err}`);
+  }
+}
+
+async function handleDeleteHistory(item) {
+  if (!item || !item.fid) return;
+  if (!confirm(`确认删除【${item.name || item.fid}】的拆解记录吗？`)) return;
+  try {
+    await deleteVideoAnalysis(item.fid);
+    historyItems.value = historyItems.value.filter((i) => i.fid !== item.fid);
+    historyTotal.value = Math.max(0, historyTotal.value - 1);
+    if (item.fid === currentFid.value) {
+      analysisStatus.value = 'idle';
+      breakdown.value = null;
+    }
+  } catch (err) {
+    alert(`删除失败: ${err.message || err}`);
+  }
+}
+
+function formatHistoryTime(ts) {
+  if (!ts) return '';
+  const now = Date.now();
+  const diff = now - Number(ts);
+  if (diff < 60 * 1000) return '刚刚';
+  if (diff < 3600 * 1000) return `${Math.floor(diff / 60000)} 分钟前`;
+  if (diff < 86400 * 1000) return `${Math.floor(diff / 3600000)} 小时前`;
+  const d = new Date(Number(ts));
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
 onMounted(() => {
+  void fetchHistory();
   if (currentFid.value) {
     void loadExistingOrQueue(currentFid.value, { reanalyze: false });
   }

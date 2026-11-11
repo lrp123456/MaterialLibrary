@@ -113,7 +113,32 @@ async function testVideoAnalysisService() {
   const cached = await service.queueAnalysis(testFid, { reanalyze: false });
   assert.strictEqual(cached.status, 'success', '已有成功报告时不重跑');
 
-  // 5. 路径穿越安全防护测试
+  // 5. 拆解历史列表查询测试
+  const hist = await service.listHistory({ limit: 10 });
+  assert.ok(hist && Array.isArray(hist.items), '历史列表应返回 items 数组');
+  assert.strictEqual(hist.total, 1, '历史总数应为 1');
+  assert.strictEqual(hist.items[0].fid, testFid, '历史第一项 fid 正确');
+  assert.strictEqual(hist.items[0].status, 'success', '历史第一项状态正确');
+
+  // 6. 路径解析测试 (_resolveVideoFile)
+  // 创建一个模拟衍生文件
+  const mockVideoFile = path.join(tempDir, 'mock_video.mp4');
+  fs.writeFileSync(mockVideoFile, 'fake mp4 content');
+  db.prepare(`
+    INSERT INTO derivatives (asset_fid, kind, storage_type, storage_ref, file_name, created_at)
+    VALUES (?, 'origin', 'local_cache', 'mock_video.mp4', 'mock_video.mp4', ?)
+  `).run('mock_deriv_fid', Date.now());
+  const resolved = await service._resolveVideoFile('mock_deriv_fid');
+  assert.ok(resolved && fs.existsSync(resolved), '_resolveVideoFile 应成功定位 local_cache 文件');
+
+  // 7. 删除拆解记录测试
+  const delRes = await service.deleteRecord(testFid);
+  assert.strictEqual(delRes.success, true, '应成功删除拆解记录');
+  const afterDelHist = await service.listHistory();
+  assert.strictEqual(afterDelHist.total, 0, '删除后历史记录应归零');
+  assert.strictEqual(fs.existsSync(reaDir), false, '产物目录应被清理');
+
+  // 8. 路径穿越安全防护测试
   let forbiddenCalled = false;
   const mockResForbidden = {
     writeHead(code) {

@@ -368,18 +368,36 @@ async function resolveDerivativeFile(services, derivative) {
   if (!derivative) return null;
 
   if (derivative.storage_type === 'nas') {
-    const { nasMaterialDir } = require('./nasstore');
-    const abs = path.isAbsolute(derivative.storage_ref)
-      ? derivative.storage_ref
-      : path.join(nasMaterialDir(config), derivative.storage_ref);
-    if (fs.existsSync(abs)) return abs;
+    const { nasMaterialDir, toPlatformNasPath } = require('./nasstore');
+    const base = nasMaterialDir(config);
+    const rel = String(derivative.storage_ref || '').replace(/^[\\/]+/, '');
+    const candidates = [
+      path.isAbsolute(derivative.storage_ref) ? derivative.storage_ref : null,
+      path.join(base, rel),
+      process.platform === 'win32' ? `//wsl.localhost/smu/mnt/synology/material/${rel.replace(/\\/g, '/')}` : null,
+      process.platform === 'win32' ? `//wsl$/smu/mnt/synology/material/${rel.replace(/\\/g, '/')}` : null,
+      path.join(config.dataDir, 'nas_material', rel),
+      path.join(config.dataDir, rel),
+      path.join(config.dataDir, 'cache', rel),
+      path.join(config.dataDir, 'cache', 'originals', rel),
+      path.join(config.dataDir, 'uploads', rel)
+    ].filter(Boolean);
+    for (const c of candidates) {
+      if (fs.existsSync(c)) return c;
+    }
   }
 
   if (derivative.storage_type === 'local_cache') {
-    const abs = path.isAbsolute(derivative.storage_ref)
-      ? derivative.storage_ref
-      : path.join(config.dataDir, derivative.storage_ref);
-    if (fs.existsSync(abs)) return abs;
+    const rel = String(derivative.storage_ref || '').replace(/^[\\/]+/, '');
+    const candidates = [
+      path.isAbsolute(derivative.storage_ref) ? derivative.storage_ref : null,
+      path.join(config.dataDir, rel),
+      path.join(config.dataDir, 'cache', rel),
+      path.join(config.dataDir, 'uploads', rel)
+    ].filter(Boolean);
+    for (const c of candidates) {
+      if (fs.existsSync(c)) return c;
+    }
   }
 
   if (derivative.storage_type === 'quark') {

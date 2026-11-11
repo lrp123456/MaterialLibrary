@@ -9501,6 +9501,21 @@ module.exports = {
   }
 
   // ── 空间创作 · 视频逆向分析 (rea-video) ──
+  if (pathname === '/studio/video-analysis/history' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const limit = parseInt(urlObj.searchParams.get('limit') || '30', 10);
+      const offset = parseInt(urlObj.searchParams.get('offset') || '0', 10);
+      const status = urlObj.searchParams.get('status') || '';
+      const { getVideoAnalysisService } = require('./services/video-analysis');
+      const service = getVideoAnalysisService(services);
+      const data = await service.listHistory({ limit, offset, status });
+      return sendJson(res, 200, { success: true, ...data });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message || '查询拆解历史失败' });
+    }
+  }
+
   if (pathname === '/studio/video-analysis' && req.method === 'GET') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
     const fid = urlObj.searchParams.get('fid');
@@ -9527,6 +9542,20 @@ module.exports = {
       return sendJson(res, 200, { success: true, data });
     } catch (e) {
       return sendJson(res, 500, { error: e.message || '提交视频拆解失败' });
+    }
+  }
+
+  if (pathname === '/studio/video-analysis' && req.method === 'DELETE') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const fid = urlObj.searchParams.get('fid');
+      if (!fid) return sendJson(res, 400, { error: '缺少 fid 参数' });
+      const { getVideoAnalysisService } = require('./services/video-analysis');
+      const service = getVideoAnalysisService(services);
+      const data = await service.deleteRecord(fid);
+      return sendJson(res, 200, { success: true, ...data });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message || '删除拆解记录失败' });
     }
   }
 

@@ -72,6 +72,7 @@
         @choose-video="pickerVisible = true"
         @upload-video="onVideoUpload"
         @jump-to-generate="handleJumpToGenerate"
+        @select-history="onVideoHistorySelected"
       />
     </div>
 
@@ -220,5 +221,19 @@ async function onVideoUpload(file) {
 function handleJumpToGenerate(recipe) {
   activeSegment.value = 'generate';
   chatTargetPayload.value = recipe;
+}
+
+function onVideoHistorySelected(item) {
+  if (item && item.fid) {
+    currentVideo.value = {
+      fid: item.fid,
+      id: item.fid,
+      name: item.name || item.fileName || '参考视频',
+      url: item.thumbUrl || getAssetImageUrl(item.fid),
+      kind: 'video',
+      duration: item.duration
+    };
+    activeSegment.value = 'analyze';
+  }
 }
 </script>
