@@ -448,6 +448,13 @@ export async function fetchAssetDetail(fid) {
   return json.data || json;
 }
 
+export async function fetchJson(url, options = {}) {
+  const res = await authFetch(url, options);
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.ok === false || json.success === false) throw new Error(json.error || `请求失败 ${res.status}`);
+  return json;
+}
+
 async function postJson(url, body) {
   const res = await authFetch(url, {
     method: 'POST',
@@ -455,7 +462,7 @@ async function postJson(url, body) {
     body: JSON.stringify(body || {})
   });
   const json = await res.json().catch(() => ({}));
-  if (!res.ok || json.ok === false) throw new Error(json.error || `请求失败 ${res.status}`);
+  if (!res.ok || json.ok === false || json.success === false) throw new Error(json.error || `请求失败 ${res.status}`);
   return json;
 }
 
