@@ -39,9 +39,20 @@ function testSynthesizeCameraMovement() {
     }
   };
   const syn2 = synthesizeCameraMovement(shot2);
-  assert.ok(syn2.cameraSentence.includes('镜头向右平稳横移') || syn2.cameraSentence.includes('摇/移'), '向右平移');
+  assert.ok(syn2.cameraSentence.includes('向左平稳横移') || syn2.cameraSentence.includes('向右平稳横移'), '横向平移识别');
   assert.ok(syn2.cameraSentence.includes('手持微晃真实感'), '手持识别');
   assert.ok(syn2.cameraSentence.includes('景别为特写'), '特写识别');
+
+  // 2b. 复合运镜测试（推进 + 向右平移/环绕）
+  const shotCompound = {
+    features: { zoom_per_s: 0.05, pan_px_per_s: 25.0, pan_dir_deg: 175.0, rot_deg_per_s: 0.8 },
+    aspects: {
+      camera: { result: { support_zh: '稳定器', move: '推' } },
+      framing: { result: { shot_size: '全景', camera_angle: '平视角' } }
+    }
+  };
+  const synCompound = synthesizeCameraMovement(shotCompound);
+  assert.ok(synCompound.cameraSentence.includes('推进') && (synCompound.cameraSentence.includes('向右') || synCompound.cameraSentence.includes('环绕')), '复合运镜应同时包含推进与横向环绕');
 
   // 3. 固定机位
   const shot3 = {

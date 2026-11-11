@@ -36,32 +36,57 @@ function synthesizeCameraMovement(shot, breakdown = {}) {
   const framingMeasured = shot.aspects?.framing?.measured || {};
   const feat = shot.features || {};
 
-  let moveDesc = '';
-  const move = camera.move || cameraMeasured.move;
   const zoom = Number(feat.zoom_per_s) || 0;
   const pan = Number(feat.pan_px_per_s) || 0;
   const panDir = Number(feat.pan_dir_deg) || 0;
+  const rot = Number(feat.rot_deg_per_s) || 0;
 
-  if (Math.abs(zoom) > 0.005) {
-    if (zoom > 0) {
-      moveDesc = zoom > 0.02 ? '镜头快速向前推进' : '镜头平稳向前推进';
+  // 画面像素光流向量 (flowX, flowY)，摄像机在空间中的反向位移向量 camX = -flowX, camY = -flowY
+  const rad = (panDir * Math.PI) / 180;
+  const flowX = pan * Math.cos(rad);
+  const flowY = pan * Math.sin(rad);
+  const camX = -flowX;
+  const camY = -flowY;
+
+  const hasZoom = Math.abs(zoom) >= 0.01;
+  const hasPan = pan >= 8;
+  const isOrbit = Math.abs(rot) >= 0.6 && hasPan;
+
+  let zoomText = '';
+  if (hasZoom) {
+    if (zoom > 0) zoomText = zoom > 0.035 ? '快速向前推进' : '平稳向前推进';
+    else zoomText = zoom < -0.035 ? '快速向后拉远' : '平稳向后拉远';
+  }
+
+  let panText = '';
+  if (hasPan) {
+    if (isOrbit) {
+      panText = camX >= 0 ? '向右弧线环绕' : '向左弧线环绕';
     } else {
-      moveDesc = zoom < -0.02 ? '镜头快速向后拉远' : '镜头平稳向后拉远';
+      const absX = Math.abs(camX);
+      const absY = Math.abs(camY);
+      if (absX > absY * 1.5) {
+        panText = camX > 0 ? '向右平稳横移' : '向左平稳横移';
+      } else if (absY > absX * 1.5) {
+        panText = camY > 0 ? '向上缓缓升起' : '向下俯降下沉';
+      } else {
+        const dirDesc = (camX > 0 ? '向右' : '向左') + (camY > 0 ? '上方' : '下方');
+        panText = `${dirDesc}平稳平移`;
+      }
     }
-  } else if (pan > 8) {
-    if (Math.abs(panDir) < 45) {
-      moveDesc = '镜头向右平稳横移';
-    } else if (Math.abs(panDir) > 135) {
-      moveDesc = '镜头向左平稳横移';
-    } else if (panDir > 45 && panDir <= 135) {
-      moveDesc = '镜头向上缓缓摇起';
-    } else if (panDir < -45 && panDir >= -135) {
-      moveDesc = '镜头向下缓缓下摇';
-    } else {
-      moveDesc = '镜头平稳摇移运镜';
-    }
-  } else if (move) {
-    moveDesc = `镜头${move}运镜`;
+  }
+
+  let moveDesc = '';
+  if (zoomText && panText) {
+    moveDesc = `镜头${zoomText}并${panText}`;
+  } else if (zoomText) {
+    moveDesc = `镜头${zoomText}`;
+  } else if (panText) {
+    moveDesc = `镜头${panText}`;
+  } else if (pan >= 4) {
+    moveDesc = '镜头微幅平稳摇移';
+  } else if (camera.move || cameraMeasured.move) {
+    moveDesc = `镜头${camera.move || cameraMeasured.move}运镜`;
   } else {
     moveDesc = '固定机位稳定拍摄';
   }
@@ -110,7 +135,7 @@ function synthesizeCameraMovement(shot, breakdown = {}) {
     promptFirstLastVideo,
     shotSize: size,
     cameraAngle: angle,
-    moveType: move || '移动'
+    moveType: camera.move || (hasPan ? '横移/摇镜' : (hasZoom ? '推拉' : '固定'))
   };
 }
 
