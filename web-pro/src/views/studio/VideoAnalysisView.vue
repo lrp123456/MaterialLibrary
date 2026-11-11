@@ -193,7 +193,10 @@
           <div class="flex items-center gap-3 text-slate-400 text-[11px]">
             <span>分镜：<strong class="text-slate-200">{{ breakdown.shots?.length || 0 }}</strong> 镜</span>
             <span>置信度：<strong class="text-emerald-400">{{ (summaryConfidence * 100).toFixed(0) }}%</strong></span>
-            <span v-if="vlmUsed" class="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">视觉模型辅助</span>
+            <span v-if="vlmUsed" class="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 flex items-center gap-1 font-normal" :title="`视觉模型辅助研判: ${vlmModelName || '默认视觉模型'}`">
+              <span class="w-1.5 h-1.5 rounded-full bg-purple-400"></span>
+              <span>视觉模型: {{ vlmModelName || '已启用' }}</span>
+            </span>
           </div>
         </div>
 
@@ -838,6 +841,11 @@ const summaryConfidence = computed(() => {
 
 const vlmUsed = computed(() => {
   return Boolean(breakdown.value?.analysis?.vlm?.used);
+});
+
+const vlmModelName = computed(() => {
+  const vlm = breakdown.value?.analysis?.vlm;
+  return vlm?.model || vlm?.active_model || vlm?.engine || '';
 });
 
 const shotList = computed(() => {
