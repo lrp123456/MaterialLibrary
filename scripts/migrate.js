@@ -1224,6 +1224,35 @@ function migrate(dataDir, { doBackup = true } = {}) {
   } catch (e) {}
   // 阶段文案（准备参考图/云端渲染/下载原片/超分处理等），随 WS/SSE 推给前端占位卡
   try { db.exec('ALTER TABLE gen_jobs ADD COLUMN stage TEXT;'); } catch (e) {}
+  // ===== 会话动作标题 / 侧栏两天分组 / 服务端搜索 =====
+  try { db.exec('ALTER TABLE chat_sessions ADD COLUMN action_tag TEXT;'); } catch (e) {}
+  // title_source: auto=视觉池已起名，manual=用户手改后永不再被自动覆盖，NULL=尚未成功起名
+  try { db.exec('ALTER TABLE chat_sessions ADD COLUMN title_source TEXT;'); } catch (e) {}
+  try { db.exec('ALTER TABLE chat_sessions ADD COLUMN title_attempted_at INTEGER;'); } catch (e) {}
+  try { db.exec('ALTER TABLE chat_sessions ADD COLUMN last_model TEXT;'); } catch (e) {}
+  // ===== 创作库分区 / 置顶顺序 / 私有文件 / 创作库回收 =====
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN section_id TEXT;'); } catch (e) {}
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN pin_order INTEGER;'); } catch (e) {}
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN pinned_at INTEGER;'); } catch (e) {}
+  // deleted_at 非空 = 已进创作库自己的回收；与素材库回收互不相干，不自动过期
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN deleted_at INTEGER;'); } catch (e) {}
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN trashed_section_id TEXT;'); } catch (e) {}
+  // media_dir 非空 = 源图/产物已复制到配方私有目录；NULL = 待补拷
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN media_dir TEXT;'); } catch (e) {}
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS creation_sections (
+        id TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_creation_sections_user ON creation_sections(user_id, sort_order);
+      CREATE INDEX IF NOT EXISTS idx_creation_tpl_section ON creation_templates(section_id, pin_order);
+    `);
+  } catch (e) {}
   // ===== 集中幂等增量区结束 =====
 
   console.log('[migrate] 数据库迁移升级完成');

@@ -105,6 +105,8 @@ const MANIFEST = [
   ['integration', 'portrait-music.test.js'],
   ['integration', 'admin-model.test.js'],
   ['integration', 'creation-templates-since.test.js'],
+  ['integration', 'creation-library-media.test.js'],
+  ['integration', 'chat-session-title-search.test.js'],
   ['integration', 'gen-video-payload-offline.test.js'],
   ['integration', 'clip-api.test.js'],
   ['integration', 'mlsclip.test.js'],

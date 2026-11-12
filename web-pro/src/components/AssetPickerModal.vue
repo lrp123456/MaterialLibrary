@@ -781,6 +781,11 @@ async function loadAssets(targetPage = 1) {
     } else if (main.value === 'audio') {
       params.media_type = 'music';
       params.category = 'music';
+      // 音频子类（氛围背景乐/环境音效…）走 lane=audio 分支，和视频的 video_purpose 不是同一套
+      if (sub.value && sub.value !== 'all') {
+        params.lane = 'audio';
+        params.section = sub.value;
+      }
     } else {
       params.media_type = 'image';
       if (sub.value === 'figure') params.section = 'figure';
@@ -809,17 +814,22 @@ async function loadAssets(targetPage = 1) {
     if (Array.isArray(opts.style_atom)) filterStyles.value = opts.style_atom;
     if (Array.isArray(opts.material_kind)) filterMaterials.value = opts.material_kind.slice(0, 8);
     if (Array.isArray(opts.colors)) filterColors.value = opts.colors.slice(0, 12);
-    let mapped = items.map((it) => ({
-      id: it.fid,
-      fid: it.fid,
-      mediaToken: it.mediaToken,
-      name: it.file_name || it.fileName || it.name || '素材资产',
-      // 选择器网格缩略图走 256px grid 档；确认选择时原图/衍生图由 versionsOf 另签 URL
-      url: getAssetImageUrl(it.fid, it.mediaToken, (it.kind || it.media_type) === 'video' ? '' : 'grid'),
-      category: it.category,
-      kind: it.kind || it.media_type || 'image',
-      library_shelf: it.library_shelf || 'original',
-    }));
+    let mapped = items.map((it) => {
+      // 覆盖原图后 fid 不变：用 sha 前 10 位做版本参数，缩略图/原图都不会再命中旧缓存
+      const cacheBust = String(it.sha256 || '').slice(0, 10);
+      return {
+        id: it.fid,
+        fid: it.fid,
+        mediaToken: it.mediaToken,
+        name: it.file_name || it.fileName || it.name || '素材资产',
+        // 选择器网格缩略图走 256px grid 档；确认选择时原图/衍生图由 versionsOf 另签 URL
+        url: getAssetImageUrl(it.fid, it.mediaToken, (it.kind || it.media_type) === 'video' ? '' : 'grid', cacheBust),
+        cacheBust,
+        category: it.category,
+        kind: it.kind || it.media_type || 'image',
+        library_shelf: it.library_shelf || 'original',
+      };
+    });
     libraryItems.value = mapped;
   } catch (e) {
     console.warn('加载素材库资产失败:', e);
@@ -860,7 +870,7 @@ function versionsOf(item) {
   return buildVersions(item, derivativeCache.value[item.fid], {
     originUrl: (it) =>
       it.fid && !['video', 'audio'].includes(it.kind)
-        ? getAssetOriginalUrl(it.fid, it.mediaToken)
+        ? getAssetOriginalUrl(it.fid, it.mediaToken, it.cacheBust)
         : (it.url || ''),
     derivativeUrl: (it, derivativeId) => getDerivativeImageUrl(it.fid, derivativeId, it.mediaToken),
   });

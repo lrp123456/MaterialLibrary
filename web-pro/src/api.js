@@ -192,13 +192,15 @@ export function resignAssetUrl(storedUrl) {
  * 获取素材「原始图」URL（raw=1 强制 origin 衍生，绕开默认缩略图 / main_derivative）
  * 版本选择器里的「原图」必须用它，否则可能拿到被重构过画幅的主衍生图。
  */
-export function getAssetOriginalUrl(fid, mediaToken = '') {
+export function getAssetOriginalUrl(fid, mediaToken = '', cacheBust = '') {
   if (!fid) return '';
   const token = getToken();
   const q = new URLSearchParams();
   q.set('raw', '1');
   if (token) q.set('token', token);
   if (mediaToken) q.set('media_token', mediaToken);
+  // 覆盖原图后 fid/URL 都不变，用内容指纹强制换 URL，避免预览还是旧图
+  if (cacheBust) q.set('v', String(cacheBust));
   return resolveApiUrl(`/api/viewer/assets/${encodeURIComponent(fid)}/image?${q.toString()}`);
 }
 
@@ -760,19 +762,48 @@ export async function generateAiChat(params) {
 /**
  * 获取聊天会话列表 (/chat/sessions)
  */
-export async function fetchChatSessions() {
-  const res = await authFetch('/api/chat/sessions');
+export async function fetchChatSessions(params = {}) {
+  if (!params || typeof params !== 'object') params = {};
+  const qs = new URLSearchParams();
+  if (params.q) qs.set('q', String(params.q));
+  if (params.tag) qs.set('tag', String(params.tag));
+  if (params.modality && params.modality !== 'all') qs.set('modality', String(params.modality));
+  if (params.limit) qs.set('limit', String(params.limit));
+  const query = qs.toString();
+  const res = await authFetch(`/api/chat/sessions${query ? '?' + query : ''}`);
   if (!res.ok) return [];
   const json = await res.json();
   return json.data || [];
 }
 
 /**
+ * 生成请求发出后 fire-and-forget：标题仍是占位时让视觉池起动作标题。
+ * 失败静默（下次发送服务端会再试），绝不阻塞生成。
+ */
+export async function autoTitleChatSession(sessionId, payload = {}) {
+  if (!sessionId) return { named: false };
+  const res = await authFetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}/auto-title`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      prompt: payload.prompt || '',
+      images: Array.isArray(payload.images) ? payload.images.slice(0, 2) : [],
+      mode: payload.mode || ''
+    })
+  });
+  if (!res.ok) return { named: false };
+  const json = await res.json().catch(() => ({}));
+  return json.data || { named: false };
+}
+
+/**
  * 获取会话中的消息历史 (/chat/messages?sessionId=...)
  */
-export async function fetchChatMessages(sessionId) {
+export async function fetchChatMessages(sessionId, limit = 100) {
   if (!sessionId) return [];
-  const res = await authFetch(`/api/chat/messages?sessionId=${encodeURIComponent(sessionId)}`);
+  const qs = new URLSearchParams({ sessionId: String(sessionId) });
+  if (limit && limit !== 100) qs.set('limit', String(limit));
+  const res = await authFetch(`/api/chat/messages?${qs.toString()}`);
   if (!res.ok) return [];
   const json = await res.json();
   return json.data || [];
@@ -1068,6 +1099,65 @@ export async function fetchCreationTemplatesIncremental({ since, sinceId, delete
   const qs = params.toString();
   const url = qs ? `/api/creation-templates?${qs}` : '/api/creation-templates';
   const res = await authFetch(url);
+  return res.json();
+}
+
+export async function fetchCreationSections() {
+  const res = await authFetch('/api/creation-sections');
+  if (!res.ok) return [];
+  const json = await res.json().catch(() => ({}));
+  return json.data || [];
+}
+
+export async function createCreationSection(name) {
+  const res = await authFetch('/api/creation-sections', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name })
+  });
+  return res.json();
+}
+
+export async function updateCreationSection(id, name) {
+  const res = await authFetch(`/api/creation-sections/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name })
+  });
+  return res.json();
+}
+
+export async function deleteCreationSection(id) {
+  const res = await authFetch(`/api/creation-sections/${encodeURIComponent(id)}`, {
+    method: 'DELETE'
+  });
+  return res.json();
+}
+
+export async function reorderCreationSections(ids = []) {
+  const res = await authFetch('/api/creation-sections/order', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids })
+  });
+  return res.json();
+}
+
+export async function reorderSectionTemplates(section_id, ids = []) {
+  const res = await authFetch('/api/creation-templates/section-order', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ section_id, ids })
+  });
+  return res.json();
+}
+
+export async function patchCreationTemplate(id, payload = {}) {
+  const res = await authFetch(`/api/creation-templates/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
   return res.json();
 }
 

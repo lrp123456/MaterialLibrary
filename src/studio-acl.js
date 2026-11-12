@@ -12,7 +12,9 @@
 
 const PUBLIC_MODEL_IDS = [
   // 图片
+  'gpt_image_2_6_sunburst_vip',
   'gpt_image_2_5_sunburst_vip',
+  'gemini_nano_banana_2_1',
   'gemini_3_1_flash_image',
   'seedream5pro',
   'seedream5flash',

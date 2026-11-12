@@ -31,6 +31,7 @@ const labSvc = require('./lab');
 const portraitLib = require('./portrait-library');
 const { assertSeedanceOrEmpty } = require('./portrait-contract');
 const auth = require('./auth');
+const { ensureCreationLibrarySchema } = require('./creation-library');
 const appUpdate = require('./app-update');
 const assetsDelete = require('./assets-delete');
 const tagGov = require('./tag-governance');
@@ -75,6 +76,11 @@ function ensureIsolationSchema(db) {
   if (schemaCheckedOnce(db, 'isolation_v1')) return;
   try { db.exec('ALTER TABLE users ADD COLUMN allow_all_models INTEGER DEFAULT 0;'); } catch (e) {}
   try { db.exec('ALTER TABLE chat_sessions ADD COLUMN params_json TEXT;'); } catch (e) {}
+  // 动作标题/手改标记/最后模型：新库直连（未跑 migrate）也要能写
+  try { db.exec('ALTER TABLE chat_sessions ADD COLUMN action_tag TEXT;'); } catch (e) {}
+  try { db.exec('ALTER TABLE chat_sessions ADD COLUMN title_source TEXT;'); } catch (e) {}
+  try { db.exec('ALTER TABLE chat_sessions ADD COLUMN title_attempted_at INTEGER;'); } catch (e) {}
+  try { db.exec('ALTER TABLE chat_sessions ADD COLUMN last_model TEXT;'); } catch (e) {}
   try { db.exec('ALTER TABLE creation_templates ADD COLUMN builtin INTEGER DEFAULT 0;'); } catch (e) {}
   try { db.exec('ALTER TABLE presets ADD COLUMN user_id INTEGER DEFAULT 0;'); } catch (e) {}
   // studio_presets 可能由 studio-presets.js 懒创建，先兜底建表（含新列）再补列
@@ -124,6 +130,27 @@ function ensureCreationTemplatesSchema(db) {
   try { db.exec("ALTER TABLE creation_templates ADD COLUMN use_count INTEGER DEFAULT 0;"); } catch (e) {}
   try { db.exec("ALTER TABLE creation_templates ADD COLUMN purpose TEXT DEFAULT '';"); } catch (e) {}
   try { db.exec("ALTER TABLE creation_templates ADD COLUMN channel TEXT DEFAULT 'studio';"); } catch (e) {}
+  // 分区/置顶顺序/私有文件/创作库回收（懒建库与旧库直连兜底）
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN section_id TEXT;'); } catch (e) {}
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN pin_order INTEGER;'); } catch (e) {}
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN pinned_at INTEGER;'); } catch (e) {}
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN deleted_at INTEGER;'); } catch (e) {}
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN trashed_section_id TEXT;'); } catch (e) {}
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN media_dir TEXT;'); } catch (e) {}
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS creation_sections (
+        id TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_creation_sections_user ON creation_sections(user_id, sort_order);
+      CREATE INDEX IF NOT EXISTS idx_creation_tpl_section ON creation_templates(section_id, pin_order);
+    `);
+  } catch (e) {}
   try { db.exec('CREATE INDEX IF NOT EXISTS idx_creation_tpl_sort ON creation_templates(is_pinned DESC, use_count DESC, updated_at DESC);'); } catch (e) {}
   if (!schemaCheckedOnce(db, 'base_library_schema')) {
     try {
@@ -867,8 +894,15 @@ function queryAssets(db, query = {}) {
 
   if (lane === 'image') {
     where.push("a.kind = 'image'");
+  }
+  // 图片类目过滤在 lane=image 或 media_type=image + section 时都要生效。
+  // 旧逻辑只写在 lane 分支里：素材选择器「全部图片」不带 lane（否则被默认收窄到室内外），
+  // 而「人物穿搭/单品家具」只带 section，结果 section 被静默丢弃、返回全部图片。
+  if (lane === 'image' || (mediaType === 'image' && section)) {
+    // lane 已推过 kind=image；只带 media_type+section 时这里补上，避免混进同类目的视频/音频
+    if (lane !== 'image' && mediaType === 'image') where.push("a.kind = 'image'");
     if (!section || section === 'interior_exterior') {
-      where.push("COALESCE(a.category, 'interior') IN ('interior', 'exterior')");
+      where.push("(a.kind = 'image' AND COALESCE(a.category, 'interior') IN ('interior', 'exterior'))");
     } else if (section === 'portrait') {
       where.push("a.category = 'portrait'");
     } else if (section === 'clothing') {
@@ -3896,17 +3930,53 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
 
   if (pathname === '/chat/sessions' && req.method === 'GET') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
-    const sessions = db.prepare(`
-      SELECT s.*,
-        (SELECT COUNT(*) FROM chat_messages m WHERE m.session_id = s.id AND (
-          (m.result_json IS NOT NULL AND m.result_json != '' AND m.result_json != 'null') OR
-          (m.mode IN ('text_to_image', 'image_to_image', 'omni_reference', 'text_to_video', 'video') AND m.role = 'assistant')
-        )) as product_count,
-        (SELECT m.mode FROM chat_messages m WHERE m.session_id = s.id ORDER BY m.created_at DESC LIMIT 1) as last_mode
-      FROM chat_sessions s
-      WHERE s.user_id=?
-      ORDER BY s.updated_at DESC LIMIT 100
-    `).all(sessionUser.id);
+    const q = String(urlObj.searchParams.get('q') || '').trim().slice(0, 100);
+    const tag = String(urlObj.searchParams.get('tag') || '').trim().slice(0, 20);
+    const modality = String(urlObj.searchParams.get('modality') || '').trim().toLowerCase();
+    const rawLimit = parseInt(urlObj.searchParams.get('limit') || '', 10);
+    // 搜索时放宽到 200，确保能命中侧栏默认 100 条之外的会话
+    const limit = Math.max(1, Math.min(500, Number.isFinite(rawLimit) ? rawLimit : (q ? 200 : 100)));
+
+    const params = [sessionUser.id];
+    let sql = `
+      SELECT * FROM (
+        SELECT s.*,
+          (SELECT COUNT(*) FROM chat_messages m WHERE m.session_id = s.id AND (
+            (m.result_json IS NOT NULL AND m.result_json != '' AND m.result_json != 'null') OR
+            (m.mode IN ('text_to_image', 'image_to_image', 'omni_reference', 'text_to_video', 'video') AND m.role = 'assistant')
+          )) as product_count,
+          (SELECT COUNT(*) FROM chat_messages m WHERE m.session_id = s.id) as message_count,
+          (SELECT m.mode FROM chat_messages m WHERE m.session_id = s.id ORDER BY m.created_at DESC LIMIT 1) as last_mode,
+          COALESCE(s.last_model, (SELECT m.engine FROM chat_messages m WHERE m.session_id = s.id ORDER BY m.created_at DESC LIMIT 1), '') as last_model
+        FROM chat_sessions s
+        WHERE s.user_id=?
+      ) x
+      WHERE 1=1`;
+    if (q) {
+      sql += ` AND (LOWER(COALESCE(x.title,'')) LIKE ? OR EXISTS (
+        SELECT 1 FROM chat_messages m WHERE m.session_id = x.id AND LOWER(COALESCE(m.prompt,'')) LIKE ?
+      ))`;
+      const like = `%${q.toLowerCase()}%`;
+      params.push(like, like);
+    }
+    if (tag) {
+      sql += ' AND COALESCE(x.action_tag, \'\') = ?';
+      params.push(tag);
+    }
+    if (['chat', 'image', 'video'].includes(modality)) {
+      // 与前端 getSessionModality 保持同一口径：last_mode 优先，旧数据回退标题关键词
+      sql += ` AND (CASE
+        WHEN LOWER(COALESCE(x.last_mode,'')) = 'chat' THEN 'chat'
+        WHEN LOWER(COALESCE(x.last_mode,'')) LIKE '%video%' THEN 'video'
+        WHEN LOWER(COALESCE(x.last_mode,'')) LIKE '%image%' THEN 'image'
+        WHEN COALESCE(x.title,'') LIKE '%视频%' OR COALESCE(x.title,'') LIKE '%运镜%' OR COALESCE(x.title,'') LIKE '%动画%' THEN 'video'
+        WHEN COALESCE(x.title,'') LIKE '%生图%' OR COALESCE(x.title,'') LIKE '%图%' OR COALESCE(x.title,'') LIKE '%画%' OR COALESCE(x.title,'') LIKE '%扩图%' OR COALESCE(x.title,'') LIKE '%精修%' THEN 'image'
+        ELSE 'chat' END) = ?`;
+      params.push(modality);
+    }
+    sql += ' ORDER BY x.updated_at DESC LIMIT ?';
+    params.push(limit);
+    const sessions = db.prepare(sql).all(...params);
     return sendJson(res, 200, { success: true, data: sessions });
   }
 
@@ -3950,14 +4020,82 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
       : null;
     const title = b.title != null ? String(b.title).slice(0, 50) : null;
     const touch = b.touch === true;
+    // 手改标题 = manual：此后自动起名永不再覆盖（也阻止旧客户端把标题改回提示词）
+    const markManual = title != null;
     db.prepare(`
       UPDATE chat_sessions SET
         params_json = COALESCE(?, params_json),
         title = COALESCE(?, title),
+        title_source = CASE WHEN ? = 1 THEN 'manual' ELSE title_source END,
         updated_at = CASE WHEN ? = 1 THEN ? ELSE updated_at END
       WHERE id=?
-    `).run(paramsJson, title, touch ? 1 : 0, Date.now(), pId);
-    return sendJson(res, 200, { success: true, data: { id: pId, title, params_json: paramsJson } });
+    `).run(paramsJson, title, markManual ? 1 : 0, touch ? 1 : 0, Date.now(), pId);
+    return sendJson(res, 200, { success: true, data: { id: pId, title, params_json: paramsJson, title_source: markManual ? 'manual' : null } });
+  }
+
+  // 2.2 视觉池动作起名：生成请求发出后由前端 fire-and-forget 调用
+  const mAutoTitle = pathname.match(/^\/chat\/sessions\/([^\/]+)\/auto-title$/);
+  if (mAutoTitle && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const aId = decodeURIComponent(mAutoTitle[1]);
+    if (!chatSessionOwned(aId)) return sendJson(res, 403, { error: '无权操作该会话' });
+    ensureIsolationSchema(db);
+    const row = db.prepare('SELECT * FROM chat_sessions WHERE id=?').get(aId);
+    if (!row) return sendJson(res, 404, { error: '会话不存在' });
+    const PLACEHOLDERS = ['新创作会话', '空间美学创作会话', 'AI 创作会话', ''];
+    if (row.title_source === 'manual') return sendJson(res, 200, { success: true, data: { named: false, reason: 'manual' } });
+    if (row.title_source === 'auto') return sendJson(res, 200, { success: true, data: { named: false, reason: 'already_named' } });
+    if (!PLACEHOLDERS.includes(String(row.title || ''))) {
+      return sendJson(res, 200, { success: true, data: { named: false, reason: 'already_titled' } });
+    }
+
+    const b = await parseBody(req);
+    const prompt = String(b.prompt || '').trim().slice(0, 3000);
+    if (!prompt) return sendJson(res, 200, { success: true, data: { named: false, reason: 'no_material' } });
+    const images = Array.isArray(b.images) ? b.images.filter((x) => typeof x === 'string' && x).slice(0, 2) : [];
+    // 测试与断网环境：不触网，仍允许下次发送再试
+    if (String(process.env.ML_DISABLE_AUTO_TITLE || '') === '1') {
+      return sendJson(res, 200, { success: true, data: { named: false, reason: 'disabled' } });
+    }
+
+    const now = Date.now();
+    db.prepare('UPDATE chat_sessions SET title_attempted_at=? WHERE id=?').run(now, aId);
+    let named = null;
+    try {
+      const namer = typeof services.titleNamer === 'function'
+        ? services.titleNamer
+        : async ({ prompt: p, images: imgs }) => {
+            const { defaultTitleNamer } = require('./chat-auto-title');
+            return defaultTitleNamer({
+              prompt: p,
+              images: imgs,
+              fallbackModel: services.config?.titleFallbackModel || 'gemini-flash-lite-latest',
+              call: async (model, messages, imgs2) => {
+                const data = await executeChatCompletion(db, config, {
+                  model, messages, images: imgs2, max_tokens: 200, timeoutMs: 20000,
+                });
+                return data?.choices?.[0]?.message?.content || '';
+              },
+            });
+          };
+      named = await namer({ prompt, images, mode: String(b.mode || '') , sessionId: aId });
+    } catch (e) {
+      console.warn('[chat-auto-title] 起名失败:', e.message);
+    }
+    if (!named || !named.title) {
+      return sendJson(res, 200, { success: true, data: { named: false, reason: 'failed' } });
+    }
+    const title = Array.from(String(named.title)).slice(0, 16).join('');
+    const actionTag = String(named.action_tag || '其他');
+    // 条件更新：用户如果在这期间手改了标题（title_source='manual'），自动名不覆盖
+    const info = db.prepare(`
+      UPDATE chat_sessions SET title=?, action_tag=?, title_source='auto'
+      WHERE id=? AND (title_source IS NULL OR title_source='')
+    `).run(title, actionTag, aId);
+    if (info.changes === 0) {
+      return sendJson(res, 200, { success: true, data: { named: false, reason: 'manual' } });
+    }
+    return sendJson(res, 200, { success: true, data: { named: true, title, action_tag: actionTag, title_source: 'auto' } });
   }
 
   // 3. 删除会话
@@ -4020,7 +4158,16 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     const status = b.status || 'done';
     const runId = b.runId || null;
     const engine = b.engine || null;
-    const resultJson = b.result ? JSON.stringify(b.result) : null;
+    // 终态消息不再持久化占位卡的 isGenerating:true，否则刷新后成片仍被画成「渲染中」
+    let resultForStore = b.result || null;
+    if (resultForStore && status !== 'generating') {
+      try {
+        resultForStore = { ...resultForStore };
+        delete resultForStore.isGenerating;
+      } catch (e) { resultForStore = b.result; }
+    }
+    const resultJson = resultForStore ? JSON.stringify(resultForStore) : null;
+    const lastModel = String(b.engine || (b.params && b.params.model) || b.model || '').slice(0, 120);
 
     db.prepare(`
       INSERT INTO chat_messages (id, session_id, user_id, role, mode, prompt, params_json, images_json, status, run_id, engine, result_json, created_at, updated_at)
@@ -4077,19 +4224,14 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
       }
     }
 
-    // 自动维护 session 的 updated_at
-    const sessionTitle = (prompt ? prompt.slice(0, 30) : 'AI 创作会话');
+    // 只维护最后活动时间与最后模型；标题交给视觉池动作起名（不再用提示词截断抢占占位标题）
     db.prepare(`
-      INSERT INTO chat_sessions (id, user_id, title, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO chat_sessions (id, user_id, title, last_model, created_at, updated_at)
+      VALUES (?, ?, '新创作会话', ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         updated_at=excluded.updated_at,
-        title=CASE
-          WHEN chat_sessions.title IN ('新创作会话', '空间美学创作会话', 'AI 创作会话', '')
-          THEN excluded.title
-          ELSE chat_sessions.title
-        END
-    `).run(sessionId, sessionUser?.id || 0, sessionTitle, now, now);
+        last_model=CASE WHEN excluded.last_model != '' THEN excluded.last_model ELSE chat_sessions.last_model END
+    `).run(sessionId, sessionUser?.id || 0, lastModel, now, now);
 
     return sendJson(res, 200, { success: true, data: { id: msgId, status, updated_at: now } });
   }
@@ -4188,6 +4330,211 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     }
   }
 
+    // ===== 创作库分区 (区只收已置顶作品；一件同时只在一个区) =====
+  if (pathname === '/creation-sections' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationLibrarySchema(db);
+    const rows = db.prepare(`
+      SELECT id, name, sort_order, created_at, updated_at
+      FROM creation_sections WHERE user_id=? ORDER BY sort_order ASC, id ASC
+    `).all(sessionUser.id);
+    return sendJson(res, 200, { success: true, data: rows });
+  }
+
+  if (pathname === '/creation-sections' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationLibrarySchema(db);
+    const b = await parseBody(req);
+    const name = String(b.name || '').trim().slice(0, 20);
+    if (!name) return sendJson(res, 400, { error: '区名不可为空' });
+    const dup = db.prepare('SELECT id FROM creation_sections WHERE user_id=? AND name=?').get(sessionUser.id, name);
+    if (dup) return sendJson(res, 409, { error: '同名分区已存在' });
+    const id = `sec_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+    const now = Date.now();
+    const max = db.prepare('SELECT MAX(sort_order) AS m FROM creation_sections WHERE user_id=?').get(sessionUser.id);
+    const sortOrder = Number(max?.m || 0) + 1;
+    db.prepare(`
+      INSERT INTO creation_sections (id, user_id, name, sort_order, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(id, sessionUser.id, name, sortOrder, now, now);
+    return sendJson(res, 200, { success: true, data: { id, name, sort_order: sortOrder, created_at: now, updated_at: now } });
+  }
+
+  if (pathname === '/creation-sections/order' && req.method === 'PUT') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationLibrarySchema(db);
+    const b = await parseBody(req);
+    const ids = Array.isArray(b.ids) ? b.ids.map((x) => String(x)).filter(Boolean).slice(0, 200) : [];
+    const now = Date.now();
+    const own = db.prepare('SELECT id FROM creation_sections WHERE id=? AND user_id=?');
+    const upd = db.prepare('UPDATE creation_sections SET sort_order=?, updated_at=? WHERE id=?');
+    const tx = db.transaction(() => {
+      ids.forEach((id, idx) => {
+        if (own.get(id, sessionUser.id)) upd.run(idx, now, id);
+      });
+    });
+    tx();
+    return sendJson(res, 200, { success: true });
+  }
+
+  const mSect = pathname.match(/^\/creation-sections\/([^\/]+)$/);
+  if (mSect && req.method === 'PATCH') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationLibrarySchema(db);
+    const sId = decodeURIComponent(mSect[1]);
+    const row = db.prepare('SELECT * FROM creation_sections WHERE id=?').get(sId);
+    if (!row || Number(row.user_id) !== Number(sessionUser.id)) return sendJson(res, 403, { error: '无权操作该分区' });
+    const b = await parseBody(req);
+    const name = b.name != null ? String(b.name).trim().slice(0, 20) : null;
+    if (name != null && !name) return sendJson(res, 400, { error: '区名不可为空' });
+    if (name != null) {
+      const dup = db.prepare('SELECT id FROM creation_sections WHERE user_id=? AND name=? AND id!=?').get(sessionUser.id, name, sId);
+      if (dup) return sendJson(res, 409, { error: '同名分区已存在' });
+    }
+    const now = Date.now();
+    db.prepare('UPDATE creation_sections SET name=COALESCE(?, name), updated_at=? WHERE id=?').run(name, now, sId);
+    return sendJson(res, 200, { success: true, data: { id: sId, name: name != null ? name : row.name, updated_at: now } });
+  }
+
+  if (mSect && req.method === 'DELETE') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationLibrarySchema(db);
+    const sId = decodeURIComponent(mSect[1]);
+    const row = db.prepare('SELECT * FROM creation_sections WHERE id=?').get(sId);
+    if (!row || Number(row.user_id) !== Number(sessionUser.id)) return sendJson(res, 403, { error: '无权操作该分区' });
+    const now = Date.now();
+    const tx = db.transaction(() => {
+      // 区删了，作品回未分区，仍然是置顶
+      db.prepare('UPDATE creation_templates SET section_id=NULL, updated_at=? WHERE section_id=? AND deleted_at IS NULL').run(now, sId);
+      db.prepare('DELETE FROM creation_sections WHERE id=?').run(sId);
+    });
+    tx();
+    return sendJson(res, 200, { success: true, data: { id: sId } });
+  }
+
+  // 区/未分区内整体排序：ids 按显示顺序给出，逐条写 section_id + pin_order
+  if (pathname === '/creation-templates/section-order' && req.method === 'PUT') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationLibrarySchema(db);
+    const b = await parseBody(req);
+    const sectionId = b.section_id ? String(b.section_id) : null;
+    const ids = Array.isArray(b.ids) ? b.ids.map((x) => String(x)).filter(Boolean).slice(0, 1000) : [];
+    if (sectionId) {
+      const sec = db.prepare('SELECT id FROM creation_sections WHERE id=? AND user_id=?').get(sectionId, sessionUser.id);
+      if (!sec) return sendJson(res, 404, { error: '分区不存在' });
+    }
+    const now = Date.now();
+    const own = db.prepare('SELECT id, is_pinned FROM creation_templates WHERE id=? AND user_id=? AND deleted_at IS NULL');
+    const upd = db.prepare('UPDATE creation_templates SET section_id=?, pin_order=?, is_pinned=1, updated_at=? WHERE id=?');
+    const tx = db.transaction(() => {
+      ids.forEach((id, idx) => {
+        const r = own.get(id, sessionUser.id);
+        if (r) upd.run(sectionId, idx, now, id);
+      });
+    });
+    tx();
+    return sendJson(res, 200, { success: true });
+  }
+
+  // ===== 创作库回收（不自动过期，只软删；清空才删记录与私有文件） =====
+  if (pathname === '/creation-trash' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationLibrarySchema(db);
+    const rows = db.prepare(`
+      SELECT t.id, t.title, t.prompt, t.type, t.aspect_ratio, t.origin_images, t.result_images,
+             t.is_pinned, t.pin_order, t.section_id, t.trashed_section_id, t.media_dir,
+             t.created_at, t.updated_at, t.deleted_at, s.name AS section_name
+      FROM creation_templates t
+      LEFT JOIN creation_sections s ON s.id = t.trashed_section_id
+      WHERE t.user_id=? AND t.deleted_at IS NOT NULL
+      ORDER BY t.deleted_at DESC LIMIT 500
+    `).all(sessionUser.id);
+    const data = rows.map((r) => {
+      let result_images = [];
+      let origin_images = [];
+      try { result_images = JSON.parse(r.result_images || '[]'); } catch {}
+      try { origin_images = JSON.parse(r.origin_images || '[]'); } catch {}
+      return { ...r, origin_images, result_images };
+    });
+    return sendJson(res, 200, { success: true, data });
+  }
+
+  if (pathname === '/creation-trash/restore' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationLibrarySchema(db);
+    const b = await parseBody(req);
+    const ids = Array.isArray(b.ids) ? b.ids.map((x) => String(x)).filter(Boolean).slice(0, 200) : [];
+    const maxRow = db.prepare('SELECT MAX(updated_at) AS m FROM creation_templates').get();
+    const updatedAt = Math.max(Date.now(), Number(maxRow?.m || 0) + 1);
+    const own = db.prepare('SELECT * FROM creation_templates WHERE id=? AND user_id=? AND deleted_at IS NOT NULL');
+    const secExists = db.prepare('SELECT id FROM creation_sections WHERE id=? AND user_id=?');
+    const restored = [];
+    const tx = db.transaction(() => {
+      for (const id of ids) {
+        const row = own.get(id, sessionUser.id);
+        if (!row) continue;
+        const backSection = row.trashed_section_id && secExists.get(row.trashed_section_id, sessionUser.id)
+          ? row.trashed_section_id : null;
+        db.prepare(`
+          UPDATE creation_templates
+          SET deleted_at=NULL, section_id=?, trashed_section_id=NULL, updated_at=?
+          WHERE id=?
+        `).run(backSection, updatedAt, id);
+        // 恢复后删掉墓碑：否则仍按旧删除游标同步的设备会再删一次
+        db.prepare('DELETE FROM creation_template_tombstones WHERE id=?').run(id);
+        restored.push(id);
+      }
+    });
+    tx();
+    return sendJson(res, 200, { success: true, data: { restored, updated_at: updatedAt } });
+  }
+
+  if (pathname === '/creation-trash/purge' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationLibrarySchema(db);
+    const b = await parseBody(req);
+    const all = b.all === true;
+    const ids = Array.isArray(b.ids) ? b.ids.map((x) => String(x)).filter(Boolean).slice(0, 500) : [];
+    const own = db.prepare('SELECT id FROM creation_templates WHERE id=? AND user_id=? AND deleted_at IS NOT NULL');
+    const { removeTemplateMedia } = require('./creation-library');
+    const purged = [];
+    const tx = db.transaction(() => {
+      const targets = all
+        ? db.prepare('SELECT id FROM creation_templates WHERE user_id=? AND deleted_at IS NOT NULL').all(sessionUser.id).map((r) => r.id)
+        : ids;
+      for (const id of targets) {
+        if (!all && !own.get(id, sessionUser.id)) continue;
+        db.prepare('DELETE FROM creation_templates WHERE id=?').run(id);
+        db.prepare('DELETE FROM creation_template_tombstones WHERE id=?').run(id);
+        purged.push(id);
+      }
+    });
+    tx();
+    for (const id of purged) removeTemplateMedia(services, id);
+    return sendJson(res, 200, { success: true, data: { purged } });
+  }
+
+  // 配方私有媒体：/creation-templates/:id/media/<origin|result|poster>/<idx>
+  const mTplMedia = pathname.match(/^\/creation-templates\/([^\/]+)\/media\/(origin|result|poster)\/(\d+)$/);
+  if (mTplMedia && (req.method === 'GET' || req.method === 'HEAD')) {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationLibrarySchema(db);
+    const tplId = decodeURIComponent(mTplMedia[1]);
+    const row = db.prepare('SELECT id FROM creation_templates WHERE id=?').get(tplId);
+    if (!row) return sendJson(res, 404, { error: '配方不存在' });
+    const { templateMediaFile, mimeForFile } = require('./creation-library');
+    const file = templateMediaFile(services, tplId, mTplMedia[2], Number(mTplMedia[3]));
+    if (!file) return sendJson(res, 404, { error: '媒体不存在' });
+    res.writeHead(200, {
+      'Content-Type': mimeForFile(file),
+      'Cache-Control': 'private, max-age=3600',
+      'Content-Length': fs.statSync(file).size,
+    });
+    if (req.method === 'HEAD') return res.end();
+    fs.createReadStream(file).pipe(res);
+    return;
+  }
+
     // ===== 企业级 AI 创作库 (配方模板、原图、目标图、分类筛选与参数复用) (/api/creation-templates) =====
   if (pathname === '/creation-templates' && req.method === 'GET') {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
@@ -4242,7 +4589,8 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
 
     // 读隔离：本人 + 全局 builtin（user_id=0 且 builtin=1）
     const curUid = Number(sessionUser?.id || 0);
-    let sql = 'SELECT * FROM creation_templates WHERE (user_id = ? OR (builtin = 1 AND user_id = 0))';
+    // 回收里的配方（deleted_at 非空）不参与正常列表/增量同步，只出现在 /creation-trash
+    let sql = 'SELECT * FROM creation_templates WHERE (user_id = ? OR (builtin = 1 AND user_id = 0)) AND deleted_at IS NULL';
     const params = [curUid];
 
     if (filterType && filterType !== 'all') {
@@ -4347,6 +4695,10 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
         purpose: r.purpose || '',
         channel: r.channel || 'studio',
         is_pinned: Number(r.is_pinned || 0),
+        section_id: r.section_id || null,
+        pin_order: r.pin_order !== null && r.pin_order !== undefined ? Number(r.pin_order) : null,
+        pinned_at: r.pinned_at !== null && r.pinned_at !== undefined ? Number(r.pinned_at) : null,
+        media_dir: r.media_dir || null,
         use_count: Number(r.use_count || 0),
         poster_w: r.poster_w !== null && r.poster_w !== undefined ? Number(r.poster_w) : null,
         poster_h: r.poster_h !== null && r.poster_h !== undefined ? Number(r.poster_h) : null,
@@ -4385,14 +4737,22 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
 
     const id = b.id || `tpl_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
     const aspectRatio = b.aspect_ratio || b.aspectRatio || '16:9';
-    const originImages = JSON.stringify(b.origin_images || b.originImages || []);
+    let originList = b.origin_images || b.originImages || [];
+    if (!Array.isArray(originList)) originList = [];
     const type = b.type || 'image'; // image / video / audio
     let resultList = b.result_images || b.resultImages || [];
     if (!Array.isArray(resultList)) resultList = [];
     if (type === 'video') {
       resultList = await attachLocalVideoPoster(services, resultList);
     }
+    // 源图与产物各复制一份到配方私有目录，素材库永远看不到这些副本
+    const { copyTemplateMedia } = require('./creation-library');
+    const media = await copyTemplateMedia(services, id, originList, resultList);
+    originList = media.originImages;
+    resultList = media.resultImages;
+    const originImages = JSON.stringify(originList);
     const resultImages = JSON.stringify(resultList);
+    const mediaDir = media.mediaDir;
     const paramsJson = JSON.stringify(b.params || {});
     const tagsJson = JSON.stringify(b.tags || ['用户自定义']);
     const space = (b.space || '').trim();
@@ -4402,6 +4762,17 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     const useCount = Number(b.use_count || 0);
     const posterW = b.poster_w !== undefined && b.poster_w !== null ? Number(b.poster_w) : (b.posterW !== undefined && b.posterW !== null ? Number(b.posterW) : null);
     const posterH = b.poster_h !== undefined && b.poster_h !== null ? Number(b.poster_h) : (b.posterH !== undefined && b.posterH !== null ? Number(b.posterH) : null);
+    // 新置顶出现在「未分区」第一位
+    let pinOrder = null;
+    let pinnedAt = null;
+    if (isPinned) {
+      const minRow = db.prepare(`
+        SELECT MIN(pin_order) AS m FROM creation_templates
+        WHERE user_id=? AND section_id IS NULL AND is_pinned=1 AND deleted_at IS NULL
+      `).get(sessionUser.id);
+      pinOrder = Number.isFinite(minRow?.m) ? Number(minRow.m) - 1 : 0;
+      pinnedAt = Date.now();
+    }
 
     // 严格隔离：携带已存在的他人配方 id 时不允许覆盖
     const _tplExisting = db.prepare('SELECT user_id FROM creation_templates WHERE id=?').get(id);
@@ -4417,8 +4788,8 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
       const created_at = b.createdAt || b.created_at || now;
 
       db.prepare(`
-        INSERT INTO creation_templates (id, user_id, title, prompt, aspect_ratio, origin_images, result_images, params_json, tags, type, space, style, purpose, is_pinned, use_count, created_at, updated_at, poster_w, poster_h)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO creation_templates (id, user_id, title, prompt, aspect_ratio, origin_images, result_images, params_json, tags, type, space, style, purpose, is_pinned, pin_order, pinned_at, media_dir, use_count, created_at, updated_at, poster_w, poster_h)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           title=excluded.title,
           prompt=excluded.prompt,
@@ -4432,11 +4803,16 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
           style=excluded.style,
           purpose=excluded.purpose,
           is_pinned=excluded.is_pinned,
+          pin_order=COALESCE(creation_templates.pin_order, excluded.pin_order),
+          pinned_at=COALESCE(creation_templates.pinned_at, excluded.pinned_at),
+          media_dir=COALESCE(excluded.media_dir, creation_templates.media_dir),
           use_count=excluded.use_count,
+          deleted_at=NULL,
+          trashed_section_id=NULL,
           updated_at=excluded.updated_at,
           poster_w=COALESCE(creation_templates.poster_w, excluded.poster_w),
           poster_h=COALESCE(creation_templates.poster_h, excluded.poster_h)
-      `).run(id, sessionUser.id, title, prompt, aspectRatio, originImages, resultImages, paramsJson, tagsJson, type, space, style, purpose, isPinned, useCount, created_at, updated_at, posterW, posterH);
+      `).run(id, sessionUser.id, title, prompt, aspectRatio, originImages, resultImages, paramsJson, tagsJson, type, space, style, purpose, isPinned, pinOrder, pinnedAt, mediaDir, useCount, created_at, updated_at, posterW, posterH);
 
       return updated_at;
     });
@@ -4444,7 +4820,12 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
 
     return sendJson(res, 200, {
       success: true,
-      data: { id, title, prompt, type, space, style, purpose, is_pinned: isPinned, use_count: useCount, poster_w: posterW, poster_h: posterH, aspect_ratio: aspectRatio, updated_at: finalUpdatedAt }
+      data: {
+        id, title, prompt, type, space, style, purpose, is_pinned: isPinned,
+        use_count: useCount, poster_w: posterW, poster_h: posterH,
+        aspect_ratio: aspectRatio, updated_at: finalUpdatedAt,
+        origin_images: originList, result_images: resultList, media_dir: mediaDir
+      }
     });
   }
 
@@ -4459,7 +4840,7 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     if (!existing) return sendJson(res, 404, { error: '作品配方不存在' });
     // SEC-007：仅属主或管理员可改他人配方（标常用/置顶与复用频次累加为全局交互，任何登录用户均可操作）
     const isPinOrUseOnly = (
-      (b.is_pinned !== undefined || b.action === 'use' || b.use_count !== undefined) &&
+      (b.is_pinned !== undefined || b.action === 'use' || b.use_count !== undefined || b.section_id !== undefined) &&
       b.title === undefined &&
       b.prompt === undefined &&
       b.tags === undefined &&
@@ -4476,6 +4857,7 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
       (b.poster_w !== undefined || b.poster_h !== undefined || b.aspect_ratio !== undefined) &&
       b.title === undefined &&
       b.is_pinned === undefined &&
+      b.section_id === undefined &&
       b.action !== 'use' &&
       b.use_count === undefined &&
       b.space === undefined &&
@@ -4523,6 +4905,56 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     let newPrompt = b.prompt !== undefined ? String(b.prompt).trim() : existing.prompt;
     let newTags = b.tags !== undefined ? JSON.stringify(b.tags) : existing.tags;
 
+    // 置顶/分区：区只收已置顶作品，一件同时只在一个区；新置顶进未分区第一位
+    let newSectionId = existing.section_id || null;
+    let newPinOrder = existing.pin_order !== null && existing.pin_order !== undefined ? Number(existing.pin_order) : null;
+    let newPinnedAt = existing.pinned_at !== null && existing.pinned_at !== undefined ? Number(existing.pinned_at) : null;
+    const wasPinned = Number(existing.is_pinned || 0) === 1;
+    if (b.is_pinned !== undefined) {
+      if (!b.is_pinned) {
+        newIsPinned = 0;
+        newSectionId = null;
+        newPinOrder = null;
+        newPinnedAt = null;
+      } else {
+        newIsPinned = 1;
+        if (!wasPinned) {
+          newSectionId = null;
+          const minRow = db.prepare(`
+            SELECT MIN(pin_order) AS m FROM creation_templates
+            WHERE user_id=? AND section_id IS NULL AND is_pinned=1 AND deleted_at IS NULL
+          `).get(sessionUser.id);
+          newPinOrder = Number.isFinite(minRow?.m) ? Number(minRow.m) - 1 : 0;
+          newPinnedAt = Date.now();
+        } else if (!newPinnedAt) {
+          newPinnedAt = Date.now();
+        }
+      }
+    }
+    if (b.section_id !== undefined) {
+      const target = b.section_id === null || b.section_id === '' ? null : String(b.section_id);
+      if (target) {
+        const sec = db.prepare('SELECT id FROM creation_sections WHERE id=? AND user_id=?').get(target, sessionUser.id);
+        if (!sec) return sendJson(res, 404, { error: '分区不存在' });
+        newSectionId = target;
+        const maxRow = db.prepare(`
+          SELECT MAX(pin_order) AS m FROM creation_templates
+          WHERE section_id=? AND is_pinned=1 AND deleted_at IS NULL
+        `).get(target);
+        newPinOrder = Number.isFinite(maxRow?.m) ? Number(maxRow.m) + 1 : 0;
+      } else {
+        newSectionId = null;
+        const maxRow = db.prepare(`
+          SELECT MAX(pin_order) AS m FROM creation_templates
+          WHERE user_id=? AND section_id IS NULL AND is_pinned=1 AND deleted_at IS NULL
+        `).get(sessionUser.id);
+        newPinOrder = Number.isFinite(maxRow?.m) ? Number(maxRow.m) + 1 : 0;
+      }
+      // 「放到」隐含置顶：区只收已置顶作品
+      newIsPinned = 1;
+      if (!newPinnedAt) newPinnedAt = Date.now();
+    }
+
     // 仅当 existing.poster_w 为 null 时才允许写入画幅
     let newPosterW = existing.poster_w;
     let newPosterH = existing.poster_h;
@@ -4540,10 +4972,10 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
       const updated_at = Math.max(now, maxU + 1);
 
       db.prepare(`
-        UPDATE creation_templates 
-        SET title=?, is_pinned=?, use_count=?, space=?, style=?, purpose=?, type=?, prompt=?, tags=?, poster_w=?, poster_h=?, aspect_ratio=?, updated_at=?
+        UPDATE creation_templates
+        SET title=?, is_pinned=?, section_id=?, pin_order=?, pinned_at=?, use_count=?, space=?, style=?, purpose=?, type=?, prompt=?, tags=?, poster_w=?, poster_h=?, aspect_ratio=?, updated_at=?
         WHERE id=?
-      `).run(newTitle, newIsPinned, newUseCount, newSpace, newStyle, newPurpose, newType, newPrompt, newTags, newPosterW, newPosterH, newAspectRatio, updated_at, tplId);
+      `).run(newTitle, newIsPinned, newSectionId, newPinOrder, newPinnedAt, newUseCount, newSpace, newStyle, newPurpose, newType, newPrompt, newTags, newPosterW, newPosterH, newAspectRatio, updated_at, tplId);
 
       return updated_at;
     });
@@ -4555,6 +4987,9 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
         id: tplId,
         title: newTitle,
         is_pinned: newIsPinned,
+        section_id: newSectionId,
+        pin_order: newPinOrder,
+        pinned_at: newPinnedAt,
         use_count: newUseCount,
         space: newSpace,
         style: newStyle,
@@ -4591,12 +5026,17 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
         VALUES (?, ?, ?)
       `).run(tplId, tplRow ? tplRow.user_id : (sessionUser?.id || 1), deleted_at);
 
-      db.prepare('DELETE FROM creation_templates WHERE id=?').run(tplId);
+      // 软删进创作库自己的回收：记录与私有文件都留着，恢复时整包回来
+      db.prepare(`
+        UPDATE creation_templates
+        SET deleted_at=?, trashed_section_id=COALESCE(section_id, trashed_section_id)
+        WHERE id=?
+      `).run(deleted_at, tplId);
       return deleted_at;
     });
-    delTx.immediate();
+    const deletedAt = delTx.immediate();
 
-    return sendJson(res, 200, { success: true, data: { id: tplId } });
+    return sendJson(res, 200, { success: true, data: { id: tplId, deleted_at: deletedAt } });
   }
 
   // 主动拉取/同步外部数据源创作资产 (POST /api/creation-templates/pull-external)

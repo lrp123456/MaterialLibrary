@@ -52,9 +52,9 @@ function normalizeVipSize(rawSize, ratio) {
 
   const px = raw.match(/^(\d{2,5})\s*[x×*]\s*(\d{2,5})$/);
   if (px) {
-    // 通道实测可接受 1024x1024 / 1536x1024 / 1024x1536 / 1792x1024；把越界值夹到 512–2048
-    const w = Math.min(2048, Math.max(512, Number(px[1])));
-    const h = Math.min(2048, Math.max(512, Number(px[2])));
+    // 通道可接受 1024x1024 / 1536x1024 / 1024x1536 / 1792x1024 / 4K(3840x2160 等)；把越界值夹到 512–4096
+    const w = Math.min(4096, Math.max(512, Number(px[1])));
+    const h = Math.min(4096, Math.max(512, Number(px[2])));
     return `${w}x${h}`;
   }
 
@@ -1248,6 +1248,7 @@ async function executeAdapterInner(services, adapter, input) {
     }
     const targetSize = String(vars.size || '').toUpperCase();
     if (['1K', '2K', '4K'].includes(targetSize)) {
+      generationConfig.imageConfig.imageSize = targetSize;
       generationConfig.imageConfig.outputResolution = targetSize;
     }
     if (vars.thinking_level) {
@@ -1280,6 +1281,7 @@ async function executeAdapterInner(services, adapter, input) {
     const geminiFiles = [];
     const partsList = (geminiData.candidates || []).flatMap((c) => c?.content?.parts || []);
     for (const part of partsList) {
+      if (part?.thought) continue; // 过滤思考草图，只提取最终产物图
       const b64 = part?.inlineData?.data || part?.inline_data?.data;
       if (!b64) continue;
       const mime = part.inlineData?.mimeType || part.inline_data?.mime_type || 'image/png';
@@ -1306,14 +1308,22 @@ async function executeAdapterInner(services, adapter, input) {
     return { ok: true, success: true, files: geminiFiles, raw: geminiData };
   }
 
-  // ---- NewAPI / GPT Image 2.5 (Flare VIP / Sunburst VIP / Web) 图像生成 ----
+  // ---- NewAPI / GPT Image 2.5 / 2.6 (Flare VIP / Sunburst VIP / Web) 图像生成 ----
   if (adapter.protocol === 'newapi_gpt_image' || adapter.id === 'newapi_gpt_image') {
 
     const rawModel = vars.model || cfg.defaultModel || 'gpt-image-2.5-flare-vip';
     const isVip = rawModel.includes('flare') || rawModel.includes('sunburst') || rawModel.includes('vip');
-    const modelToUse = isVip
-      ? (rawModel.includes('sunburst') ? 'gpt-image-2.5-sunburst-vip' : 'gpt-image-2.5-flare-vip')
-      : 'gpt-image-2.5-web';
+    const isV26 = rawModel.includes('2.6') || rawModel.includes('2-6') || rawModel.includes('2_6');
+    let modelToUse;
+    if (isVip) {
+      if (isV26) {
+        modelToUse = rawModel.includes('flare') ? 'gpt-image-2.6-flare-vip' : 'gpt-image-2.6-sunburst-vip';
+      } else {
+        modelToUse = rawModel.includes('sunburst') ? 'gpt-image-2.5-sunburst-vip' : 'gpt-image-2.5-flare-vip';
+      }
+    } else {
+      modelToUse = isV26 ? 'gpt-image-2.6-web' : 'gpt-image-2.5-web';
+    }
 
     // 宽高比与清晰度自然语言注入
     const targetRatio = vars.ratio || '9:16';
@@ -1368,16 +1378,33 @@ async function executeAdapterInner(services, adapter, input) {
         throw new Error('GPT Image VIP 需要提示词：这个通道不支持「只挂参考图不打字」，请补一句画面描述再生成');
       }
 
+      let safeQuality = vars.quality || 'high';
+      if (isV26 && (safeQuality === 'xhigh' || safeQuality === 'max')) {
+        // 2.6 VIP 官方渠道不支持 xhigh/max，传了会直接报 400，自动保底到 high
+        safeQuality = 'high';
+      }
+
       const vipBody = {
         model: modelToUse,
         prompt: finalPrompt,
         size,
-        quality: vars.quality || 'high',
+        quality: safeQuality,
         background: vars.background || 'auto',
         // 不指定 response_format：通道默认回 b64_json，少一次 pre-signed S3 下载就少一个失败点
         // （之前固定 url，偶发把「下载产物图」的错误算成了「图像生成失败」）
         num_images: 1
       };
+
+      if (isV26) {
+        vipBody.complexity = vars.complexity || 'high';
+      }
+      if (vars.output_format && ['png', 'gif'].includes(vars.output_format)) {
+        vipBody.output_format = vars.output_format;
+        if (vars.output_format === 'gif') {
+          if (vars.frame_count) vipBody.frame_count = Number(vars.frame_count);
+          if (vars.frame_duration_ms) vipBody.frame_duration_ms = Number(vars.frame_duration_ms);
+        }
+      }
 
       if (inlineImages.length > 0) {
         vipBody.image_url = inlineImages[0];
@@ -1560,36 +1587,45 @@ async function executeAdapterInner(services, adapter, input) {
       }
     }
 
-    // 上游（Firefly shell 通道）完全忽略 output_format：参数条选 jpeg / webp 也一律回 PNG（已实测）。
-    // 要让「输出格式」真的生效，只能本地转码；转不动就老实回退 PNG，别把错扩展名写进缓存。
+    // 上游（Firefly shell 通道）产物识别与转码：
+    // 若返回为 GIF 动图（魔数 GIF8 开头）或显式请求 gif，直接以 gif 存盘，不破坏动画帧序列；
+    // 其余静态图若指定了 jpeg / webp 则本地转码，转不动则回退 png。
     const wantFormat = String(vars.output_format || 'png').toLowerCase();
-    const targetExt = (wantFormat === 'jpeg' || wantFormat === 'jpg')
-      ? 'jpg'
-      : (wantFormat === 'webp' ? 'webp' : 'png');
+    const isGif = Boolean(imgBuf && imgBuf.length >= 4 && imgBuf.slice(0, 4).toString() === 'GIF8') || (wantFormat === 'gif');
+    let realExt = 'png';
     let finalBuf = imgBuf;
-    if (targetExt !== 'png') {
-      try {
-        const encoder = targetExt === 'jpg' ? 'jpeg' : 'webp';
-        finalBuf = await sharp(imgBuf)[encoder](targetExt === 'jpg' ? { quality: 92, mozjpeg: true } : { quality: 92 }).toBuffer();
-      } catch (e) {
-        console.warn(`[gen] output_format=${wantFormat} 本地转码失败，回退 PNG: ${e.message}`);
-        finalBuf = imgBuf;
+
+    if (isGif) {
+      realExt = 'gif';
+      finalBuf = imgBuf;
+    } else {
+      const targetExt = (wantFormat === 'jpeg' || wantFormat === 'jpg')
+        ? 'jpg'
+        : (wantFormat === 'webp' ? 'webp' : 'png');
+      if (targetExt !== 'png') {
+        try {
+          const encoder = targetExt === 'jpg' ? 'jpeg' : 'webp';
+          finalBuf = await sharp(imgBuf)[encoder](targetExt === 'jpg' ? { quality: 92, mozjpeg: true } : { quality: 92 }).toBuffer();
+        } catch (e) {
+          console.warn(`[gen] output_format=${wantFormat} 本地转码失败，回退 PNG: ${e.message}`);
+          finalBuf = imgBuf;
+        }
       }
+      realExt = finalBuf === imgBuf ? 'png' : targetExt;
     }
-    const realExt = finalBuf === imgBuf ? 'png' : targetExt;
 
     const outFileName = `gen_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.${realExt}`;
     const outPath = path.join(tempDir, outFileName);
     fs.writeFileSync(outPath, finalBuf);
 
-    let meta = { mime: 'image/png' };
+    let meta = { mime: realExt === 'gif' ? 'image/gif' : 'image/png' };
     try {
-      const info = await sharp(outPath).metadata();
+      const info = await sharp(outPath, { animated: realExt === 'gif' }).metadata();
       const fmt = info.format;
       meta = {
         width: info.width,
         height: info.height,
-        mime: fmt === 'jpeg' ? 'image/jpeg' : (fmt === 'webp' ? 'image/webp' : 'image/png'),
+        mime: fmt === 'gif' ? 'image/gif' : (fmt === 'jpeg' ? 'image/jpeg' : (fmt === 'webp' ? 'image/webp' : 'image/png')),
       };
     } catch {}
 
@@ -2249,6 +2285,7 @@ module.exports = {
   classifyVipNetworkError,
   normalizeArkSeedreamPayload,
   normalizeArkSize,
+  normalizeVipSize,
   probeCaps,
   pickAdapterId: require('../adapter-match').pickAdapterId,
   ...require('./builtin-protocols'),

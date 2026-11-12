@@ -68,47 +68,111 @@
           </button>
         </div>
 
-        <!-- 历史会话列表 (当前项左边 2px #6366F1) -->
-        <div class="flex-1 overflow-y-auto p-3 space-y-2 scrollbar-thin">
-          <div v-if="filteredSessions.length === 0" class="text-center py-12 text-xs text-slate-500">
-            暂无匹配对话
+        <!-- 搜索框 + 动作标签胶囊：查标题和消息正文，走服务端，不受 100 条限制 -->
+        <div class="px-2.5 pt-2 pb-1.5 border-b border-studio-800/80 bg-studio-950/60 space-y-1.5">
+          <div class="flex items-center bg-studio-950 px-2.5 py-1.5 rounded-lg border border-studio-750 text-xs text-slate-300">
+            <StudioIcon name="search" :size="13" class="text-slate-400 mr-1.5 shrink-0" />
+            <input
+              v-model="sessionSearchQuery"
+              type="text"
+              placeholder="搜索标题或消息提示词..."
+              class="bg-transparent outline-none text-[11px] w-full text-slate-100 placeholder-slate-500"
+            />
+            <span v-if="sessionSearchLoading" class="text-[10px] text-studio-cyan font-mono shrink-0">…</span>
+            <button v-else-if="sessionSearchQuery" @click="sessionSearchQuery = ''" class="text-slate-500 hover:text-slate-300 text-xs cursor-pointer">✕</button>
           </div>
-          <div
-            v-for="s in filteredSessions"
-            :key="s.id"
-            @click="selectSession(s)"
-            :class="[
-              'group px-3 py-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between text-xs',
-              currentSessionId === s.id
-                ? 'bg-studio-850 border-studio-700 border-l-2 !border-l-studio-accent text-white font-bold shadow-md'
-                : 'bg-studio-950/50 border-studio-800 hover:bg-studio-850 hover:border-studio-700 text-slate-300'
-            ]"
-          >
-            <div class="flex items-center space-x-2 truncate flex-1 min-w-0 mr-1.5">
-              <span
-                class="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold border shrink-0"
-                :class="getSessionModalityBadge(getSessionModality(s)).class"
-                :title="getSessionModalityBadge(getSessionModality(s)).label"
-              >
-                {{ getSessionModalityBadge(getSessionModality(s)).icon }}
-              </span>
-              <span class="truncate font-medium">{{ s.title }}</span>
+          <div class="flex flex-wrap gap-1">
+            <button
+              v-for="tag in SESSION_ACTION_TAGS"
+              :key="tag"
+              type="button"
+              @click="toggleSessionTag(tag)"
+              class="px-1.5 py-0.5 rounded text-[10px] font-bold border transition-all cursor-pointer"
+              :class="sessionTagFilter === tag
+                ? 'bg-amber-500/20 border-amber-500/60 text-amber-300'
+                : 'bg-studio-950 border-studio-750 text-slate-400 hover:text-slate-200'"
+            >
+              {{ tag }}
+            </button>
+          </div>
+        </div>
+
+        <!-- 历史会话列表：按最后活动时间按天分组，每条两行 -->
+        <div class="flex-1 overflow-y-auto p-3 space-y-3 scrollbar-thin">
+          <div v-if="sessionGroups.length === 0" class="text-center py-12 text-xs text-slate-500">
+            {{ sessionSearchActive ? '没有匹配的会话' : '暂无匹配对话' }}
+          </div>
+          <div v-for="group in sessionGroups" :key="group.key" class="space-y-1.5">
+            <div class="sticky top-0 z-10 px-1 py-1 text-[10px] font-mono font-bold text-slate-500 bg-studio-900/95 backdrop-blur">
+              {{ group.label }}
             </div>
-            <div class="flex items-center space-x-1 shrink-0">
-              <span
-                v-if="s.product_count > 0"
-                class="px-1.5 py-0.5 rounded-full text-[9px] font-mono font-bold bg-studio-800 text-studio-cyan border border-studio-700"
-                title="产物数量"
-              >
-                {{ s.product_count }}件
-              </span>
-              <button
-                @click.stop="deleteSession(s.id)"
-                class="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-rose-400 p-1 transition-opacity cursor-pointer"
-                title="删除会话"
-              >
-                <StudioIcon name="close" :size="12" />
-              </button>
+            <div
+              v-for="s in group.items"
+              :key="s.id"
+              @click="selectSession(s)"
+              :class="[
+                'group px-2.5 py-2 rounded-xl border transition-all cursor-pointer text-xs',
+                currentSessionId === s.id
+                  ? 'bg-studio-850 border-studio-700 border-l-2 !border-l-studio-accent text-white shadow-md'
+                  : 'bg-studio-950/50 border-studio-800 hover:bg-studio-850 hover:border-studio-700 text-slate-300'
+              ]"
+            >
+              <div class="flex items-start justify-between gap-1.5">
+                <div class="flex flex-col gap-0.5 flex-1 min-w-0">
+                  <div class="flex items-center gap-1.5 min-w-0">
+                    <span
+                      class="px-1 py-0.5 rounded text-[9px] font-mono font-bold border shrink-0"
+                      :class="getSessionModalityBadge(getSessionModality(s)).class"
+                      :title="getSessionModalityBadge(getSessionModality(s)).label"
+                    >
+                      {{ getSessionModalityBadge(getSessionModality(s)).icon }}
+                    </span>
+                    <input
+                      v-if="editingSessionId === s.id"
+                      v-model="editingSessionTitle"
+                      type="text"
+                      maxlength="50"
+                      @click.stop
+                      @keyup.enter="commitSessionRename(s)"
+                      @keyup.esc="cancelSessionRename"
+                      @blur="commitSessionRename(s)"
+                      class="flex-1 min-w-0 bg-studio-950 border border-studio-accent rounded px-1 py-0.5 text-[11px] text-white outline-none"
+                    />
+                    <span
+                      v-else
+                      class="truncate font-medium leading-4"
+                      :title="sessionHoverTitle(s)"
+                      @dblclick.stop="startSessionRename(s)"
+                    >{{ s.title || '新创作会话' }}</span>
+                    <button
+                      v-if="editingSessionId !== s.id"
+                      @click.stop="startSessionRename(s)"
+                      class="shrink-0 opacity-0 group-hover:opacity-100 text-slate-500 hover:text-studio-cyan transition-opacity cursor-pointer text-[10px]"
+                      title="重命名会话（手改后自动起名不再覆盖）"
+                    >✎</button>
+                  </div>
+                  <div class="flex items-center gap-1.5 min-w-0 text-[10px] text-slate-400 font-mono">
+                    <span class="truncate max-w-[130px]" :title="sessionModelLabel(s)">{{ sessionModelLabel(s) }}</span>
+                    <span class="shrink-0">{{ formatSessionActivityTime(s.updated_at) }}</span>
+                  </div>
+                </div>
+                <div class="flex items-center gap-1 shrink-0 pt-0.5">
+                  <span
+                    v-if="s.product_count > 0"
+                    class="px-1 py-0.5 rounded-full text-[9px] font-mono font-bold bg-studio-800 text-studio-cyan border border-studio-700"
+                    title="产物数量"
+                  >
+                    {{ s.product_count }}件
+                  </span>
+                  <button
+                    @click.stop="deleteSession(s.id)"
+                    class="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-rose-400 p-0.5 transition-opacity cursor-pointer"
+                    title="删除会话"
+                  >
+                    <StudioIcon name="close" :size="11" />
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -194,7 +258,7 @@
               <div class="space-y-2">
                 <!-- 顶栏：审查当时请求出站报文快照 -->
                 <div class="flex items-center justify-between text-[11px] pb-1 border-b border-white/20 opacity-80 group-hover:opacity-100 transition-opacity">
-                  <span class="text-white/80 font-mono text-[10px]">用户提示词</span>
+                  <span class="text-white/80 font-mono text-[10px]">用户提示词 · {{ formatTemplateCardTime(msg.startTime) }}</span>
                   <span class="inline-flex items-center gap-1">
                     <button
                       type="button"
@@ -276,6 +340,7 @@
                   {{ msg.model || 'Seedream 5.0 Flash' }}
                 </span>
                 <span class="flex items-center gap-2">
+                  <span class="text-slate-400 font-mono">{{ formatTemplateCardTime(msg.startTime) }}</span>
                   <span v-if="!msg.isError && !msg.isGenerating">
                     {{ msg.modality === 'video' ? `时长: ${msg.duration || '5s'} · 分辨率: ${displayResolution(msg.resolution, msg) || '—'}` : (msg.modality === 'music' ? `时长: ${msg.duration || '30s'} · 320kbps` : [msg.duration ? `耗时: ${msg.duration}` : '', displayResolution(msg.resolution, msg) ? `分辨率: ${displayResolution(msg.resolution, msg)}` : ''].filter(Boolean).join(' · ')) }}
                   </span>
@@ -306,7 +371,7 @@
 
               <!-- 情况 0：生成中占位渲染卡片 (微光骨架屏 + 阶段文字 + 秒表) -->
               <div
-                v-if="msg.isGenerating && (msg.modality === 'image' || msg.modality === 'video')"
+                v-if="msg.isGenerating && !msg.imageUrl && !msg.videoUrl && !msg.audioUrl && (msg.modality === 'image' || msg.modality === 'video')"
                 class="w-full flex justify-center py-1"
               >
                 <div
@@ -420,68 +485,29 @@
                   @reedit="reeditResult(msg)"
                 />
               </div>
-              <!-- Seedream 5.0 图层分解 (layer_decomposition) / Lite 组图连拍 交互画布图层栈 -->
-              <div
-                v-if="msg.layerStack && Array.isArray(msg.layerStack.layers) && msg.layerStack.layers.length > 1"
-                class="rounded-xl bg-studio-950 border border-studio-750 p-3 space-y-2.5"
-              >
-                <div class="flex items-center justify-between text-xs">
-                  <span class="font-bold text-studio-cyan flex items-center gap-1.5">
-                    <span>🗂️ {{ msg.layerStack.kind === 'layer_stack' ? 'Seedream 5.0 透明图层拆分栈' : '多图连拍画廊' }}</span>
-                    <span class="px-1.5 py-0.5 rounded bg-studio-850 text-[10px] font-mono text-white border border-studio-700">
-                      共 {{ msg.layerStack.layers.length }} 层
-                    </span>
-                  </span>
-                  <span class="text-[11px] text-slate-400">点击单层可切换大图预览，或一键挂载为 @图1 进行二次精修</span>
-                </div>
-                <div class="grid grid-cols-4 gap-2.5">
-                  <div
-                    v-for="layer in msg.layerStack.layers"
-                    :key="layer.index"
-                    class="group relative rounded-lg overflow-hidden border bg-studio-900 cursor-pointer transition-all"
-                    :class="msg.imageUrl === layer.url ? 'border-studio-accent ring-1 ring-studio-accent' : 'border-studio-750 hover:border-studio-cyan'"
-                    @click="msg.imageUrl = layer.url"
-                  >
-                    <div class="h-24 w-full bg-[radial-gradient(#334155_1px,transparent_1px)] [background-size:8px_8px] flex items-center justify-center">
-                      <img :src="authedMediaUrl(layer.url)" class="max-h-24 w-full object-contain" />
-                    </div>
-                    <div class="p-1.5 bg-studio-950/90 flex items-center justify-between text-[10px]">
-                      <span class="font-bold text-slate-200 truncate">{{ layer.label }}</span>
-                      <button
-                        type="button"
-                        class="px-1.5 py-0.5 rounded bg-studio-accent/20 hover:bg-studio-accent text-studio-cyan hover:text-white font-bold cursor-pointer shrink-0"
-                        @click.stop="addMediaToViewer({ url: layer.url, name: layer.label })"
-                        title="放到看图区"
-                      >
-                        +看图区
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
               <!-- 情况 B：视频产物展示 (完整高保真 HTML5 视频播放器) -->
-              <div v-else-if="!msg.isError && (msg.videoUrl || msg.srStatus || msg.modality === 'video')" class="space-y-2">
-                <div
-                  v-if="msg.srStatus === 'running'"
-                  class="rounded-xl border border-studio-750 bg-studio-950 px-3 py-10 text-center text-xs leading-relaxed text-slate-300"
-                >
-                  超分中，完成后播放
-                </div>
-                <div
-                  v-else-if="!msg.videoUrl"
-                  class="rounded-xl border border-studio-750 bg-studio-950 px-3 py-6 text-center text-xs leading-relaxed text-slate-400"
-                >
-                  这一轮没有可播放的视频产物（生成失败、超时或临时文件已清理），请查看下方原因后重试。
-                </div>
-                <div v-else class="rounded-xl overflow-hidden border border-studio-750 bg-black relative group shadow-inner">
+              <div v-else-if="!msg.isError && (msg.videoUrl || msg.modelVideoUrl || msg.srStatus || msg.modality === 'video')" class="space-y-2">
+                <div v-if="msg.videoUrl || msg.modelVideoUrl" class="rounded-xl overflow-hidden border border-studio-750 bg-black relative group shadow-inner">
                   <video
                     :ref="el => registerVideoEl(i, el)"
-                    :src="authedMediaUrl(msg.videoUrl)"
+                    :src="authedMediaUrl(msg.videoUrl || msg.modelVideoUrl)"
                     class="w-full max-h-[400px] object-contain bg-black"
                     controls
                     playsinline
                     preload="metadata"
                   ></video>
+                </div>
+                <div
+                  v-else-if="msg.srStatus === 'running'"
+                  class="rounded-xl border border-studio-750 bg-studio-950 px-3 py-10 text-center text-xs leading-relaxed text-slate-300"
+                >
+                  超分中，完成后播放
+                </div>
+                <div
+                  v-else-if="!msg.isGenerating"
+                  class="rounded-xl border border-studio-750 bg-studio-950 px-3 py-6 text-center text-xs leading-relaxed text-slate-400"
+                >
+                  这一轮没有可播放的视频产物（生成失败、超时或临时文件已清理），请查看下方原因后重试。
                 </div>
                 <div class="flex flex-wrap items-center gap-2 text-xs text-slate-400">
                   <span v-if="msg.model" class="font-bold text-slate-200">{{ msg.model }}</span>
@@ -524,6 +550,46 @@
                   @retry="openRetry(msg)"
                   @reedit="reeditResult(msg)"
                 />
+              </div>
+
+              <!-- Seedream 5.0 图层分解 / Lite 组图连拍：独立渲染，放在结果分支链之后，不能再打断 v-if 链 -->
+              <div
+                v-if="msg.modality === 'image' && msg.layerStack && Array.isArray(msg.layerStack.layers) && msg.layerStack.layers.length > 1"
+                class="rounded-xl bg-studio-950 border border-studio-750 p-3 space-y-2.5"
+              >
+                <div class="flex items-center justify-between text-xs">
+                  <span class="font-bold text-studio-cyan flex items-center gap-1.5">
+                    <span>🗂️ {{ msg.layerStack.kind === 'layer_stack' ? 'Seedream 5.0 透明图层拆分栈' : '多图连拍画廊' }}</span>
+                    <span class="px-1.5 py-0.5 rounded bg-studio-850 text-[10px] font-mono text-white border border-studio-700">
+                      共 {{ msg.layerStack.layers.length }} 层
+                    </span>
+                  </span>
+                  <span class="text-[11px] text-slate-400">点击单层可切换大图预览，或一键挂载为 @图1 进行二次精修</span>
+                </div>
+                <div class="grid grid-cols-4 gap-2.5">
+                  <div
+                    v-for="layer in msg.layerStack.layers"
+                    :key="layer.index"
+                    class="group relative rounded-lg overflow-hidden border bg-studio-900 cursor-pointer transition-all"
+                    :class="msg.imageUrl === layer.url ? 'border-studio-accent ring-1 ring-studio-accent' : 'border-studio-750 hover:border-studio-cyan'"
+                    @click="msg.imageUrl = layer.url"
+                  >
+                    <div class="h-24 w-full bg-[radial-gradient(#334155_1px,transparent_1px)] [background-size:8px_8px] flex items-center justify-center">
+                      <img :src="authedMediaUrl(layer.url)" class="max-h-24 w-full object-contain" />
+                    </div>
+                    <div class="p-1.5 bg-studio-950/90 flex items-center justify-between text-[10px]">
+                      <span class="font-bold text-slate-200 truncate">{{ layer.label }}</span>
+                      <button
+                        type="button"
+                        class="px-1.5 py-0.5 rounded bg-studio-accent/20 hover:bg-studio-accent text-studio-cyan hover:text-white font-bold cursor-pointer shrink-0"
+                        @click.stop="addMediaToViewer({ url: layer.url, name: layer.label })"
+                        title="放到看图区"
+                      >
+                        +看图区
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <!-- 模型替换 / 图片未送达等非致命问题：必须显式告知，不能静默 -->
@@ -1988,7 +2054,7 @@
     >
       <div
         :class="[
-          'bg-studio-900 border border-studio-700 shadow-2xl flex flex-col overflow-hidden animate-fade-in transition-all',
+          'bg-studio-900 border border-studio-700 shadow-2xl flex flex-col overflow-hidden animate-fade-in transition-all relative',
           isLibraryFullscreen
             ? 'w-full h-full rounded-none border-none'
             : 'w-full max-w-[97vw] 2xl:max-w-[95vw] h-[95vh] rounded-3xl'
@@ -2163,105 +2229,101 @@
 
           <!-- 按日期分节连续瀑布流 (参照素材库原生体验) -->
           <div v-else class="space-y-6">
-            <!-- 顶部折叠手风琴面板 1：⭐ 我的置顶收藏 (置顶板块) -->
-            <div v-if="pinnedTemplates.length > 0" class="rounded-2xl border border-studio-accent/40 bg-studio-accent/5 backdrop-blur overflow-hidden transition-all shadow-md">
-              <button
-                type="button"
-                @click="isPinnedOpen = !isPinnedOpen"
-                class="w-full px-4 py-3 flex items-center justify-between bg-gradient-to-r from-studio-accent/20 via-studio-accent/5 to-transparent hover:from-studio-accent/30 transition-all text-left cursor-pointer"
-              >
-                <div class="flex items-center space-x-2.5">
+            <!-- 置顶区：按区纵向排列，每区一行固定 6 个，不横向滚动；空区留着供拖入 -->
+            <div class="rounded-2xl border border-studio-accent/40 bg-studio-accent/5 backdrop-blur shadow-md overflow-visible">
+              <div class="px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 border-b border-studio-accent/20">
+                <div class="flex items-center gap-2 min-w-0">
                   <span class="text-base">⭐</span>
-                  <h3 class="text-sm font-bold text-indigo-200 tracking-wide">我的置顶收藏</h3>
-                  <span class="px-2 py-0.5 text-[10px] font-mono font-bold bg-studio-accent/20 text-studio-accent rounded-full border border-studio-accent/40">
-                    {{ pinnedTemplates.length }} 个配方
+                  <h3 class="text-sm font-bold text-indigo-200 tracking-wide shrink-0">我的置顶收藏</h3>
+                  <span class="px-2 py-0.5 text-[10px] font-mono font-bold bg-studio-accent/20 text-studio-accent rounded-full border border-studio-accent/40 shrink-0">
+                    {{ pinnedTemplates.length }} 个
                   </span>
-                  <span class="text-xs text-slate-400 hidden sm:inline">已设为置顶的专属设计模版</span>
+                  <span class="text-[11px] text-slate-400 truncate">按区排列 · 每区一行 6 个 · 点区名看全部</span>
                 </div>
-                <div class="flex items-center space-x-2 text-xs text-slate-400 font-medium">
-                  <span>{{ isPinnedOpen ? '点击收起' : '点击展开' }}</span>
-                  <span class="transition-transform duration-200" :class="isPinnedOpen ? 'rotate-180' : ''">▼</span>
+                <div class="flex items-center gap-1 shrink-0">
+                  <input
+                    v-model="newSectionName"
+                    type="text"
+                    maxlength="20"
+                    placeholder="新建区名"
+                    class="w-24 bg-studio-950 border border-studio-750 rounded px-2 py-1 text-[11px] text-slate-100 outline-none focus:border-studio-accent"
+                    @keyup.enter="createSection"
+                  />
+                  <button
+                    type="button"
+                    class="px-2 py-1 rounded-lg bg-studio-accent/20 hover:bg-studio-accent text-studio-cyan hover:text-white text-[11px] font-bold border border-studio-accent/40 cursor-pointer"
+                    @click="createSection"
+                  >+ 新建区</button>
                 </div>
-              </button>
-              <div v-show="isPinnedOpen" class="p-3.5 border-t border-studio-accent/20 overflow-x-auto scrollbar-thin">
-                <div class="flex space-x-3 min-w-max pb-1">
-                  <div
-                    v-for="tpl in pinnedTemplates"
-                    :key="'pin_' + tpl.id"
-                    class="rounded-xl bg-studio-850 border border-studio-750 hover:border-studio-accent/70 p-2.5 transition-all shadow-md hover:shadow-xl cursor-pointer group flex flex-col justify-between shrink-0"
-                    :style="templateRailCardStyle(tpl)"
-                    @click="openTemplateDetail(tpl)"
-                  >
-                    <div class="relative w-full rounded-lg overflow-hidden bg-black/40 mb-2 border border-studio-800" :style="templateRailMediaStyle(tpl)">
-                      <!-- 图片模式 -->
-                      <template v-if="!tpl.type || tpl.type === 'image'">
-                        <img
-                          v-if="tpl.result_images?.[0]?.url"
-                          :src="tpl.result_images[0].url"
-                          class="w-full h-full object-cover"
-                        />
-                        <div v-else class="w-full h-full flex items-center justify-center text-xs text-slate-600">无预览</div>
-                      </template>
-                      <!-- 视频模式 -->
-                      <template v-else-if="tpl.type === 'video'">
-                        <TemplateVideoCover
-                          class="w-full h-full"
-                          :poster-url="getVideoPosterUrl(tpl)"
-                          :video-url="templateVideoUrl(tpl)"
-                          :reference-url="templateRefUrl(tpl)"
-                          @measured="noteRailRatio(tpl, $event)"
-                        />
-                      </template>
-                      <!-- 音频模式 -->
-                      <template v-else-if="tpl.type === 'audio'">
-                        <div class="w-full h-full flex flex-col items-center justify-center bg-emerald-950/30 text-emerald-300 gap-1">
-                          <StudioIcon name="music" :size="20" />
-                          <span class="text-[10px] font-mono">空间氛围原声</span>
-                        </div>
-                      </template>
+              </div>
 
-                      <!-- 顶部模态徽章 -->
-                      <span class="absolute top-1.5 left-1.5 px-2 py-0.5 rounded text-[10px] font-bold border" :class="getTemplateTypeBadgeClass(tpl)">
-                        {{ getTemplateTypeLabel(tpl) }}
-                      </span>
-                      <!-- 右上角收藏置顶切换按钮 -->
-                      <button
-                        type="button"
-                        class="absolute top-1.5 right-1.5 w-6 h-6 rounded-full flex items-center justify-center bg-amber-500 text-black shadow-amber-500/40 transition-all cursor-pointer z-10 font-bold"
-                        title="取消置顶收藏"
-                        @click.stop="toggleTemplatePin(tpl)"
-                      >
-                        <StudioIcon name="star" :size="12" />
-                      </button>
-                      <span class="absolute bottom-1.5 right-1.5 px-2 py-0.5 rounded bg-amber-500/20 text-[10px] font-mono font-bold text-amber-300 border border-amber-500/40">
-                        ⭐ 置顶
-                      </span>
+              <!-- 拖动中：顶部贴着目标区名，松手即放入 -->
+              <div v-if="dragTplId" class="px-4 py-1.5 bg-amber-500/20 border-b border-amber-500/40 text-[11px] font-bold text-amber-200">
+                拖动中 · 松手放进「{{ dragOverSectionName || '未分区' }}」
+              </div>
+
+              <div class="p-2.5 space-y-2">
+                <div
+                  v-for="sec in pinnedSections"
+                  :key="'sec_' + (sec.id || 'unassigned')"
+                  class="rounded-xl border border-studio-800 bg-studio-950/40"
+                  @dragover.prevent="dragOverSectionId = sec.id"
+                  @drop="onSectionDrop($event, sec.id)"
+                >
+                  <div
+                    class="px-2.5 py-1.5 flex items-center justify-between gap-2 cursor-pointer hover:bg-studio-900/60 rounded-t-xl"
+                    draggable="true"
+                    @dragstart="onSectionDragStart($event, sec.id)"
+                    @click="openSectionLayer(sec.id)"
+                  >
+                    <div class="flex items-center gap-1.5 min-w-0">
+                      <span class="text-[11px] font-bold text-slate-200 truncate">{{ sec.name }}</span>
+                      <span class="text-[10px] font-mono text-amber-300 shrink-0">{{ sec.items.length }}</span>
+                      <span v-if="sec.items.length > 6" class="text-[10px] text-slate-500 shrink-0">还有 {{ sec.items.length - 6 }} 个</span>
+                      <span v-else-if="sec.items.length === 0" class="text-[10px] text-slate-500 shrink-0">空区 · 可拖入</span>
                     </div>
-                    <div class="space-y-1">
-                      <h4 class="text-xs font-bold text-slate-100 dark:text-white truncate group-hover:text-studio-accent">{{ tpl.title }}</h4>
-                      <p class="text-[11px] text-slate-400 line-clamp-2 leading-relaxed">{{ tpl.prompt }}</p>
+                    <div class="flex items-center gap-1 shrink-0">
+                      <template v-if="sec.id">
+                        <button type="button" class="text-slate-400 hover:text-white text-[10px] px-1 cursor-pointer" title="重命名区" @click.stop="startRenameSection(sec)">✎</button>
+                        <button type="button" class="text-slate-400 hover:text-rose-300 text-[10px] px-1 cursor-pointer" title="删除区（作品回未分区，仍置顶）" @click.stop="deleteSection(sec)">🗑</button>
+                      </template>
+                      <span class="text-[10px] text-slate-500">点开全部 →</span>
                     </div>
-                    <div class="pt-2 mt-2 border-t border-studio-800 flex items-center justify-between">
-                      <span class="text-[10px] text-slate-400 font-mono">{{ formatTemplateCardTime(tpl.created_at || tpl.updated_at) }}</span>
-                      <button
-                        type="button"
-                        @click.stop="applyTemplate(tpl)"
-                        class="px-2.5 py-1 rounded-lg bg-studio-accent/20 hover:bg-studio-accent text-studio-cyan hover:text-white font-bold text-xs transition-all flex items-center gap-1 cursor-pointer"
-                      >
-                        <span>🚀</span>
-                        <span>复用</span>
-                      </button>
-                    </div>
+                  </div>
+                  <input
+                    v-if="renamingSectionId === sec.id"
+                    v-model="renamingSectionName"
+                    type="text"
+                    maxlength="20"
+                    class="mx-2.5 mb-1.5 w-40 bg-studio-950 border border-studio-accent rounded px-2 py-0.5 text-[11px] text-white outline-none"
+                    @click.stop
+                    @keyup.enter="commitSectionRename(sec)"
+                    @keyup.esc="renamingSectionId = ''"
+                  />
+                  <div class="grid grid-cols-6 gap-2 px-2.5 pb-2.5">
+                    <CreationPinnedCard
+                      v-for="tpl in sec.items.slice(0, 6)"
+                      :key="'pin_' + tpl.id"
+                      :tpl="tpl"
+                      :ratio="templateRailRatio(tpl)"
+                      :sections="sections"
+                      :drag-hint="dragTplId === tpl.id ? (dragOverSectionName || '未分区') : ''"
+                      @open="openTemplateDetail"
+                      @pin="toggleTemplatePin"
+                      @place="placeTemplateInSection"
+                      @dragstart="onTemplateDragStart($event, tpl, sec.id)"
+                      @dragend="onTemplateDragEnd"
+                    />
                   </div>
                 </div>
               </div>
             </div>
 
-            <!-- 顶部折叠手风琴面板 2：🔥 常用推荐 Top 10 (常用板块) -->
-            <div v-if="topReuseTemplates.length > 0" class="rounded-2xl border border-amber-500/30 bg-amber-950/10 backdrop-blur overflow-hidden transition-all shadow-md">
+            <!-- 顶部折叠手风琴面板 2：🔥 常用推荐 Top 10 (常用板块，默认隐藏，由时间轴上方按钮触发展开) -->
+            <div v-if="topReuseTemplates.length > 0 && isTopReuseOpen" class="rounded-2xl border border-amber-500/30 bg-amber-950/10 backdrop-blur overflow-hidden transition-all shadow-md">
               <button
                 type="button"
-                @click="isTopReuseOpen = !isTopReuseOpen"
+                @click="isTopReuseOpen = false"
                 class="w-full px-4 py-3 flex items-center justify-between bg-gradient-to-r from-amber-500/15 via-amber-500/5 to-transparent hover:from-amber-500/25 transition-all text-left cursor-pointer"
               >
                 <div class="flex items-center space-x-2.5">
@@ -2273,11 +2335,11 @@
                   <span class="text-xs text-slate-400 hidden sm:inline">高频设计灵感配方</span>
                 </div>
                 <div class="flex items-center space-x-2 text-xs text-slate-400 font-medium">
-                  <span>{{ isTopReuseOpen ? '点击收起' : '点击展开' }}</span>
-                  <span class="transition-transform duration-200" :class="isTopReuseOpen ? 'rotate-180' : ''">▼</span>
+                  <span>点击收起</span>
+                  <span class="transition-transform duration-200 rotate-180">▼</span>
                 </div>
               </button>
-              <div v-show="isTopReuseOpen" class="p-3.5 border-t border-amber-500/20 overflow-x-auto scrollbar-thin">
+              <div class="p-3.5 border-t border-amber-500/20 overflow-x-auto scrollbar-thin">
                 <div class="flex space-x-3 min-w-max pb-1">
                   <div
                     v-for="tpl in topReuseTemplates"
@@ -2352,13 +2414,36 @@
             </div>
 
             <!-- 主时间轴瀑布流标题 (第三段式：常规排序) -->
-            <div class="flex items-center space-x-2 pt-2 px-1 text-slate-200 dark:text-slate-100 font-bold text-xs">
-              <span>🎨</span>
-              <span>常规创作时间轴</span>
-              <span class="text-slate-400 font-normal font-mono text-[11px]">按真实创作时间倒序呈现</span>
-              <span v-if="regularTemplates.length > 0" class="px-2 py-0.5 text-[10px] font-mono font-bold bg-studio-900 text-slate-300 rounded-full border border-studio-800">
-                共 {{ totalRegularTemplates }} {{ tplGroupDerivatives ? '组母本' : '件' }} ({{ regularTemplates.length }}件资产) · 第 {{ tplPage }} / {{ totalTplPages }} 页
-              </span>
+            <div class="flex items-center justify-between pt-2 px-1 text-slate-200 dark:text-slate-100 font-bold text-xs gap-2">
+              <div class="flex items-center space-x-2 truncate min-w-0">
+                <span>🎨</span>
+                <span class="shrink-0">常规创作时间轴</span>
+                <span class="text-slate-400 font-normal font-mono text-[11px] hidden sm:inline shrink-0">按真实创作时间倒序呈现</span>
+                <span v-if="regularTemplates.length > 0" class="px-2 py-0.5 text-[10px] font-mono font-bold bg-studio-900 text-slate-300 rounded-full border border-studio-800 shrink-0">
+                  共 {{ totalRegularTemplates }} {{ tplGroupDerivatives ? '组母本' : '件' }} ({{ regularTemplates.length }}件资产) · 第 {{ tplPage }} / {{ totalTplPages }} 页
+                </span>
+              </div>
+
+              <!-- 时间轴上方：展开/收起常用推荐按钮 -->
+              <button
+                v-if="topReuseTemplates.length > 0"
+                type="button"
+                @click="isTopReuseOpen = !isTopReuseOpen"
+                class="px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border shrink-0"
+                :class="isTopReuseOpen
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 hover:bg-amber-500/30 shadow-xs'
+                  : 'bg-studio-900 hover:bg-studio-850 text-slate-300 hover:text-amber-300 border-studio-750 hover:border-amber-500/40'"
+                title="高频复用配方快捷推荐"
+              >
+                <span>🔥</span>
+                <span>{{ isTopReuseOpen ? '收起常用推荐' : '常用推荐 Top 10' }}</span>
+                <span
+                  class="text-[10px] font-mono px-1.5 py-0.2 rounded-full border font-bold"
+                  :class="isTopReuseOpen ? 'bg-amber-500/30 text-amber-200 border-amber-500/40' : 'bg-studio-950 text-slate-400 border-studio-700'"
+                >
+                  {{ topReuseTemplates.length }}
+                </span>
+              </button>
             </div>
 
             <div
@@ -2387,7 +2472,8 @@
                 <div
                   v-for="tpl in group.items"
                   :key="tpl.id"
-                  class="break-inside-avoid mb-4 w-full inline-block rounded-2xl bg-studio-850 border border-studio-750 hover:border-studio-accent/70 transition-all shadow-md hover:shadow-2xl overflow-hidden group/card"
+                  class="break-inside-avoid mb-4 w-full inline-block rounded-2xl bg-studio-850 border transition-all shadow-md hover:shadow-2xl overflow-hidden group/card"
+                  :class="tpl.is_pinned ? 'border-amber-400/80 ring-1 ring-amber-400/30 shadow-[0_0_18px_-6px_rgba(251,191,36,0.55)]' : 'border-studio-750 hover:border-studio-accent/70'"
                   :data-tpl-id="tpl.id"
                 >
                   <!-- 卡片大预览区域 (自适应画幅，支持多版本横向切换) -->
@@ -2721,6 +2807,65 @@
             </div>
           </div>
         </div>
+
+        <!-- 第二层：某个分区的全部作品 (一行 6 个，只上下滚动，排序、「放到」与拖动) -->
+        <div
+          v-if="sectionLayer"
+          class="absolute inset-0 z-30 bg-studio-900 flex flex-col overflow-hidden animate-fade-in"
+          @click.self="sectionLayer = null"
+        >
+          <!-- 第二层顶栏 -->
+          <div class="px-6 py-4 border-b border-studio-800 flex items-center justify-between bg-studio-950/80 shrink-0">
+            <div class="flex items-center space-x-3">
+              <button
+                type="button"
+                @click="sectionLayer = null"
+                class="px-2.5 py-1.5 rounded-xl bg-studio-850 hover:bg-studio-800 border border-studio-700 text-slate-300 text-xs font-bold cursor-pointer flex items-center gap-1.5 transition-all"
+              >
+                <span>‹</span>
+                <span>返回全部区</span>
+              </button>
+              <div class="flex items-center space-x-2">
+                <span class="text-base">📁</span>
+                <h3 class="text-base font-bold text-white tracking-wide">{{ activeSectionLayerName }}</h3>
+                <span class="text-xs px-2 py-0.5 rounded-full bg-studio-800 text-amber-300 font-mono border border-studio-700">
+                  {{ activeSectionLayerItems.length }} 件作品
+                </span>
+                <span class="text-[11px] text-slate-400">一行 6 个 · 仅上下滚动 · 可拖动排序与「放到」</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              @click="sectionLayer = null"
+              class="w-8 h-8 rounded-xl bg-studio-850 hover:bg-studio-800 text-slate-400 hover:text-white flex items-center justify-center border border-studio-700 cursor-pointer transition-all"
+              title="关闭该区"
+            >
+              ✕
+            </button>
+          </div>
+
+          <!-- 第二层作品网格：仅纵向滚动，固定 6 列 -->
+          <div class="flex-1 overflow-y-auto p-6 scrollbar-thin">
+            <div v-if="activeSectionLayerItems.length === 0" class="text-center py-20 text-xs text-slate-500">
+              该分区暂无作品，可在外层将置顶作品拖入或通过「放到」移入
+            </div>
+            <div v-else class="grid grid-cols-6 gap-3">
+              <CreationPinnedCard
+                v-for="tpl in activeSectionLayerItems"
+                :key="'layer_' + tpl.id"
+                :tpl="tpl"
+                :ratio="templateRailRatio(tpl)"
+                :sections="sections"
+                :drag-hint="dragTplId === tpl.id ? (dragOverSectionName || '未分区') : ''"
+                @open="openTemplateDetail"
+                @pin="toggleTemplatePin"
+                @place="placeTemplateInSection"
+                @dragstart="onTemplateDragStart($event, tpl, sectionLayer)"
+                @dragend="onTemplateDragEnd"
+              />
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -2784,6 +2929,7 @@ import TemplateVideoCover from './TemplateVideoCover.vue';
 import ResultActions from '../../components/ResultActions.vue';
 import RequestPreviewModal from '../../components/RequestPreviewModal.vue';
 import JobDiagnosticModal from '../../components/JobDiagnosticModal.vue';
+import CreationPinnedCard from '../../components/CreationPinnedCard.vue';
 import {
   STUDIO_SKILLS_REGISTRY,
   evaluateClientModelRules,
@@ -2801,7 +2947,9 @@ import {
   getTemplatesCache,
   replaceTemplatesCache,
   mergeTemplatesCache,
-  clearTemplatesCache
+  clearTemplatesCache,
+  getSectionsCache,
+  replaceSectionsCache
 } from '../../utils/creation-library-cache';
 import { contextBudgetTokens, trimChatMessages } from '../../../../src/chat-context.mjs';
 import {
@@ -2816,6 +2964,7 @@ import {
   generateAiAudio,
   generateAiChat,
   fetchChatSessions,
+  autoTitleChatSession,
   fetchChatMessages,
   saveChatMessage,
   fetchRecentRefs,
@@ -2831,6 +2980,13 @@ import {
   fetchSuggestPrompts,
   fetchCreationTemplatesIncremental,
   pullExternalCreationTemplates,
+  fetchCreationSections,
+  createCreationSection,
+  updateCreationSection,
+  deleteCreationSection,
+  reorderCreationSections,
+  reorderSectionTemplates,
+  patchCreationTemplate,
   queryGenTask,
   cancelGenJob
 } from '../../api';
@@ -5273,7 +5429,8 @@ const MODALITY_OPTIONS = [
 ];
 
 const isPinnedOpen = ref(true);
-const isTopReuseOpen = ref(true);
+// 常用每次打开创作库都是关的（不记住），用户点时间轴上方的按钮再展开
+const isTopReuseOpen = ref(false);
 
 function sortTemplates() {
   templates.value.sort((a, b) => {
@@ -5339,7 +5496,7 @@ function startRenameTemplate(tpl) {
 }
 
 async function confirmRenameTemplate(tpl) {
-  const newTitle = (editingTemplateTitle.value || '').trim();
+  const newTitle = (editingTemplateTitle.value || tpl?.title || '').trim();
   if (!newTitle) {
     editingTemplateId.value = '';
     return;
@@ -5347,6 +5504,11 @@ async function confirmRenameTemplate(tpl) {
   const oldTitle = tpl.title;
   tpl.title = newTitle;
   editingTemplateId.value = '';
+  const realItem = templates.value.find((t) => t.id === tpl.id);
+  if (realItem && realItem !== tpl) {
+    realItem.title = newTitle;
+  }
+  templates.value = [...templates.value];
   try {
     const res = await authFetch(`/api/creation-templates/${encodeURIComponent(tpl.id)}`, {
       method: 'PATCH',
@@ -5354,38 +5516,165 @@ async function confirmRenameTemplate(tpl) {
       body: JSON.stringify({ title: newTitle })
     });
     const json = await res.json();
-    if (!json.success) {
+    if (json.success) {
+      if (json.data) {
+        Object.assign(tpl, { title: newTitle, updated_at: json.data.updated_at });
+        if (realItem) Object.assign(realItem, { title: newTitle, updated_at: json.data.updated_at });
+        templates.value = [...templates.value];
+      }
+      mergeTemplatesCache([realItem || tpl]);
+    } else {
       tpl.title = oldTitle;
+      if (realItem) realItem.title = oldTitle;
+      templates.value = [...templates.value];
       alert('修改作品名称失败: ' + (json.error || '未知错误'));
     }
   } catch (e) {
     tpl.title = oldTitle;
+    if (realItem) realItem.title = oldTitle;
+    templates.value = [...templates.value];
     alert('修改作品名称失败: ' + e.message);
   }
 }
 
 async function toggleTemplatePin(tpl) {
+  if (!tpl || !tpl.id) return;
+  const tplId = tpl.id;
   const nextPinned = tpl.is_pinned ? 0 : 1;
-  const oldPinned = tpl.is_pinned;
-  tpl.is_pinned = nextPinned;
+  const oldPinned = tpl.is_pinned ? 1 : 0;
+  const now = Date.now();
+
+  // 1. 同步内存中真实 Proxy 对象 (templates.value)
+  const realItem = templates.value.find((t) => t.id === tplId);
+  if (realItem) {
+    realItem.is_pinned = nextPinned;
+    if (nextPinned) {
+      realItem.section_id = null;
+      realItem.pinned_at = now;
+    } else {
+      realItem.section_id = null;
+      realItem.pin_order = null;
+      realItem.pinned_at = null;
+    }
+  }
+
+  // 2. 同步入参 tpl（若其为聚类脱敏克隆体或独立对象）
+  if (tpl && tpl !== realItem) {
+    tpl.is_pinned = nextPinned;
+    if (nextPinned) {
+      tpl.section_id = null;
+      tpl.pinned_at = now;
+    } else {
+      tpl.section_id = null;
+      tpl.pin_order = null;
+      tpl.pinned_at = null;
+    }
+  }
+
+  // 3. 同步 tpl.variants 中的变体子项（若当前为多版本聚合卡片）
+  if (Array.isArray(tpl?.variants)) {
+    for (const v of tpl.variants) {
+      if (v.id === tplId) {
+        v.is_pinned = nextPinned;
+        if (nextPinned) {
+          v.section_id = null;
+          v.pinned_at = now;
+        } else {
+          v.section_id = null;
+          v.pin_order = null;
+          v.pinned_at = null;
+        }
+      }
+    }
+  }
+
+  // 4. 同步详情弹窗中的状态（如果当前正打开此作品详情）
+  if (detailModal.value?.tpl?.id === tplId) {
+    detailModal.value.tpl.is_pinned = nextPinned;
+    if (nextPinned) {
+      detailModal.value.tpl.section_id = null;
+      detailModal.value.tpl.pinned_at = now;
+    } else {
+      detailModal.value.tpl.section_id = null;
+      detailModal.value.tpl.pin_order = null;
+      detailModal.value.tpl.pinned_at = null;
+    }
+  }
+  if (Array.isArray(detailModal.value?.tpl?.variants)) {
+    for (const v of detailModal.value.tpl.variants) {
+      if (v.id === tplId) {
+        v.is_pinned = nextPinned;
+        if (nextPinned) {
+          v.section_id = null;
+          v.pinned_at = now;
+        } else {
+          v.section_id = null;
+          v.pin_order = null;
+          v.pinned_at = null;
+        }
+      }
+    }
+  }
+
+  // 5. 立即重排并显式触发 Vue 响应式树全量刷新（置顶手风琴、时间轴瀑布流、常用Top10无感秒更）
   sortTemplates();
+  templates.value = [...templates.value];
+
+  // 6. 乐观请求服务端并支持失败自动回滚
+  const rollback = () => {
+    if (realItem) {
+      realItem.is_pinned = oldPinned;
+    }
+    if (tpl) {
+      tpl.is_pinned = oldPinned;
+    }
+    if (Array.isArray(tpl?.variants)) {
+      const v = tpl.variants.find((x) => x.id === tplId);
+      if (v) v.is_pinned = oldPinned;
+    }
+    if (detailModal.value?.tpl?.id === tplId) {
+      detailModal.value.tpl.is_pinned = oldPinned;
+    }
+    if (Array.isArray(detailModal.value?.tpl?.variants)) {
+      const v = detailModal.value.tpl.variants.find((x) => x.id === tplId);
+      if (v) v.is_pinned = oldPinned;
+    }
+    sortTemplates();
+    templates.value = [...templates.value];
+  };
+
   try {
-    const res = await authFetch(`/api/creation-templates/${encodeURIComponent(tpl.id)}`, {
+    const res = await authFetch(`/api/creation-templates/${encodeURIComponent(tplId)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ is_pinned: nextPinned })
     });
     const json = await res.json();
     if (json.success) {
-      mergeTemplatesCache([tpl]);
+      if (json.data) {
+        if (realItem) Object.assign(realItem, json.data);
+        if (tpl && tpl !== realItem) Object.assign(tpl, json.data);
+        if (detailModal.value?.tpl?.id === tplId) {
+          Object.assign(detailModal.value.tpl, json.data);
+        }
+        if (Array.isArray(tpl?.variants)) {
+          const v = tpl.variants.find((x) => x.id === tplId);
+          if (v) Object.assign(v, json.data);
+        }
+        if (Array.isArray(detailModal.value?.tpl?.variants)) {
+          const v = detailModal.value.tpl.variants.find((x) => x.id === tplId);
+          if (v) Object.assign(v, json.data);
+        }
+        sortTemplates();
+        templates.value = [...templates.value];
+      }
+      mergeTemplatesCache([realItem || tpl]);
     } else {
-      tpl.is_pinned = oldPinned;
-      sortTemplates();
+      rollback();
       alert('标常用操作失败: ' + (json.error || '未知错误'));
     }
   } catch (e) {
-    tpl.is_pinned = oldPinned;
-    sortTemplates();
+    rollback();
     alert('标常用操作失败: ' + e.message);
   }
 }
@@ -5419,11 +5708,146 @@ function getSessionModalityBadge(modality) {
   }
 }
 
+// ===== 动作标签 / 服务端搜索 / 按天分组 / 手改标题 =====
+const SESSION_ACTION_TAGS = ['换空间', '换表面', '换整件', '生图', '生视频', '其他'];
+const sessionSearchQuery = ref('');
+const sessionTagFilter = ref('');
+const sessionSearchResults = ref(null); // null = 用默认列表；数组 = 服务端搜索结果
+const sessionSearchLoading = ref(false);
+let sessionSearchTimer = null;
+const editingSessionId = ref('');
+const editingSessionTitle = ref('');
+
+const sessionSearchActive = computed(() => Boolean(String(sessionSearchQuery.value || '').trim() || sessionTagFilter.value));
+const baseSessionList = computed(() => (sessionSearchActive.value ? (sessionSearchResults.value || []) : sessions.value));
+
 const filteredSessions = computed(() => {
-  if (!sessions.value || !sessions.value.length) return [];
-  if (sessionModalityFilter.value === 'all') return sessions.value;
-  return sessions.value.filter(s => getSessionModality(s) === sessionModalityFilter.value);
+  const list = baseSessionList.value || [];
+  if (sessionModalityFilter.value === 'all') return list;
+  return list.filter(s => getSessionModality(s) === sessionModalityFilter.value);
 });
+
+function sessionDayKey(ts) {
+  const d = new Date(Number(ts) || 0);
+  if (isNaN(d.getTime())) return 'unknown';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function sessionDayLabel(key) {
+  if (key === 'unknown') return '更早';
+  const now = new Date();
+  const today = sessionDayKey(now.getTime());
+  const y = new Date(now.getTime() - 24 * 3600 * 1000);
+  const yesterday = sessionDayKey(y.getTime());
+  if (key === today) return '今天';
+  if (key === yesterday) return '昨天';
+  return key;
+}
+
+function formatSessionActivityTime(ts) {
+  const t = Number(ts) || 0;
+  if (!t) return '';
+  return formatTemplateCardTime(t);
+}
+
+function formatSessionFullTime(ts) {
+  const t = Number(ts) || 0;
+  return t ? formatTemplateFullTime(t) : '未知时间';
+}
+
+function sessionHoverTitle(s) {
+  const title = String(s?.title || '新创作会话');
+  return `${title}\n创建 ${formatSessionFullTime(s?.created_at)} · 更新 ${formatSessionFullTime(s?.updated_at)}`;
+}
+
+function sessionModelLabel(s) {
+  const key = String(s?.last_model || '');
+  if (!key) return '—';
+  return getModelDisplayName(key) || key;
+}
+
+const sessionGroups = computed(() => {
+  const list = filteredSessions.value || [];
+  const map = new Map();
+  for (const s of list) {
+    const key = sessionDayKey(s.updated_at);
+    let grp = map.get(key);
+    if (!grp) {
+      grp = { key, label: sessionDayLabel(key), items: [] };
+      map.set(key, grp);
+    }
+    grp.items.push(s);
+  }
+  const keys = Array.from(map.keys()).sort((a, b) => {
+    if (a === 'unknown') return 1;
+    if (b === 'unknown') return -1;
+    return b.localeCompare(a);
+  });
+  return keys.map((k) => map.get(k));
+});
+
+function toggleSessionTag(tag) {
+  sessionTagFilter.value = sessionTagFilter.value === tag ? '' : tag;
+}
+
+async function refreshSessionSearch() {
+  if (!sessionSearchActive.value) {
+    sessionSearchResults.value = null;
+    sessionSearchLoading.value = false;
+    return;
+  }
+  sessionSearchLoading.value = true;
+  try {
+    const list = await fetchChatSessions({
+      q: String(sessionSearchQuery.value || '').trim(),
+      tag: sessionTagFilter.value,
+      modality: sessionModalityFilter.value === 'all' ? '' : sessionModalityFilter.value,
+      limit: 200
+    });
+    sessionSearchResults.value = Array.isArray(list) ? list : [];
+  } catch (e) {
+    sessionSearchResults.value = [];
+  } finally {
+    sessionSearchLoading.value = false;
+  }
+}
+
+watch([sessionSearchQuery, sessionTagFilter, sessionModalityFilter], () => {
+  if (sessionSearchTimer) clearTimeout(sessionSearchTimer);
+  sessionSearchTimer = setTimeout(() => {
+    sessionSearchTimer = null;
+    refreshSessionSearch();
+  }, 250);
+});
+
+function startSessionRename(s) {
+  if (!s || !s.id) return;
+  editingSessionId.value = s.id;
+  editingSessionTitle.value = String(s.title || '');
+}
+
+function cancelSessionRename() {
+  editingSessionId.value = '';
+  editingSessionTitle.value = '';
+}
+
+async function commitSessionRename(s) {
+  if (!s || editingSessionId.value !== s.id) return;
+  const name = String(editingSessionTitle.value || '').trim().slice(0, 50);
+  const oldTitle = String(s.title || '');
+  editingSessionId.value = '';
+  editingSessionTitle.value = '';
+  if (!name || name === oldTitle) return;
+  s.title = name;
+  s.title_source = 'manual';
+  try {
+    const json = await patchChatSession(s.id, { title: name });
+    if (!json || json.success === false) throw new Error(json?.error || '重命名失败');
+  } catch (e) {
+    s.title = oldTitle;
+    alert('重命名会话失败：' + (e?.message || '未知错误'));
+  }
+}
 const promptHistory = ref([]);
 const historyIndex = ref(-1);
 let currentDraftText = '';
@@ -5581,10 +6005,267 @@ function templateRefUrl(tpl) {
 
 
 // ===== 创作库配方衍生列表与分页状态机（在 filteredTemplates 之后按序初始化，彻底消除 TDZ） =====
+const sections = ref([]);
+const newSectionName = ref('');
+const renamingSectionId = ref('');
+const renamingSectionName = ref('');
+const sectionLayer = ref(null);
+
+const dragTplId = ref('');
+const dragFromSectionId = ref(null);
+const dragOverSectionId = ref(null);
+const dragSectionId = ref('');
+
+async function loadSections() {
+  try {
+    const cached = await getSectionsCache();
+    if (Array.isArray(cached) && cached.length) {
+      sections.value = cached;
+    }
+  } catch {}
+  try {
+    const remote = await fetchCreationSections();
+    if (Array.isArray(remote)) {
+      sections.value = remote;
+      replaceSectionsCache(remote);
+    }
+  } catch (e) {
+    console.warn('[CreationSections] 加载分区失败:', e);
+  }
+}
+
+async function createSection() {
+  const name = (newSectionName.value || '').trim();
+  if (!name) return;
+  try {
+    const res = await createCreationSection(name);
+    if (res.success && res.data) {
+      sections.value.push(res.data);
+      replaceSectionsCache(sections.value);
+      newSectionName.value = '';
+    } else {
+      alert('创建分区失败: ' + (res.error || '未知错误'));
+    }
+  } catch (e) {
+    alert('创建分区失败: ' + e.message);
+  }
+}
+
+function startRenameSection(sec) {
+  renamingSectionId.value = sec.id;
+  renamingSectionName.value = sec.name;
+}
+
+async function commitSectionRename(sec) {
+  const name = (renamingSectionName.value || '').trim();
+  if (!name || name === sec.name) {
+    renamingSectionId.value = '';
+    return;
+  }
+  try {
+    const res = await updateCreationSection(sec.id, name);
+    if (res.success && res.data) {
+      sec.name = name;
+      replaceSectionsCache(sections.value);
+      renamingSectionId.value = '';
+    } else {
+      alert('重命名分区失败: ' + (res.error || '未知错误'));
+    }
+  } catch (e) {
+    alert('重命名分区失败: ' + e.message);
+  }
+}
+
+async function deleteSection(sec) {
+  if (!sec || !sec.id) return;
+  if (!confirm(`确定要删除分区「${sec.name}」吗？\n该分区内的作品将回到未分区，仍然保留置顶。`)) return;
+  try {
+    const res = await deleteCreationSection(sec.id);
+    if (res.success) {
+      sections.value = sections.value.filter((s) => s.id !== sec.id);
+      for (const t of templates.value) {
+        if (t.section_id === sec.id) {
+          t.section_id = null;
+        }
+      }
+      replaceSectionsCache(sections.value);
+      mergeTemplatesCache(templates.value.filter((t) => t.section_id === null && t.is_pinned));
+      if (sectionLayer.value === sec.id) {
+        sectionLayer.value = null;
+      }
+    } else {
+      alert('删除分区失败: ' + (res.error || '未知错误'));
+    }
+  } catch (e) {
+    alert('删除分区失败: ' + e.message);
+  }
+}
+
+function openSectionLayer(secId) {
+  sectionLayer.value = secId || 'unassigned';
+}
+
+async function placeTemplateInSection(tpl, targetSectionId) {
+  const prevSectionId = tpl.section_id;
+  const prevPinned = tpl.is_pinned;
+  const targetId = targetSectionId || null;
+  tpl.section_id = targetId;
+  tpl.is_pinned = 1;
+  const realItem = templates.value.find((t) => t.id === tpl.id);
+  if (realItem && realItem !== tpl) {
+    realItem.section_id = targetId;
+    realItem.is_pinned = 1;
+  }
+  sortTemplates();
+  templates.value = [...templates.value];
+  try {
+    const res = await patchCreationTemplate(tpl.id, { section_id: targetId });
+    if (res.success && res.data) {
+      Object.assign(tpl, res.data);
+      if (realItem) Object.assign(realItem, res.data);
+      sortTemplates();
+      templates.value = [...templates.value];
+      mergeTemplatesCache([realItem || tpl]);
+    } else {
+      tpl.section_id = prevSectionId;
+      tpl.is_pinned = prevPinned;
+      if (realItem) {
+        realItem.section_id = prevSectionId;
+        realItem.is_pinned = prevPinned;
+      }
+      sortTemplates();
+      templates.value = [...templates.value];
+      alert('移动分区失败: ' + (res.error || '未知错误'));
+    }
+  } catch (e) {
+    tpl.section_id = prevSectionId;
+    tpl.is_pinned = prevPinned;
+    if (realItem) {
+      realItem.section_id = prevSectionId;
+      realItem.is_pinned = prevPinned;
+    }
+    sortTemplates();
+    templates.value = [...templates.value];
+    alert('移动分区失败: ' + e.message);
+  }
+}
+
+const dragOverSectionName = computed(() => {
+  const sid = dragOverSectionId.value;
+  if (!sid) return '未分区';
+  const found = sections.value.find((s) => s.id === sid);
+  return found ? found.name : '未分区';
+});
+
+function onTemplateDragStart(event, tpl, sectionId) {
+  dragTplId.value = tpl.id;
+  dragFromSectionId.value = sectionId || null;
+  dragOverSectionId.value = sectionId || null;
+  if (event?.dataTransfer) {
+    event.dataTransfer.setData('text/plain', JSON.stringify({ type: 'template', id: tpl.id, sectionId: sectionId || null }));
+    event.dataTransfer.effectAllowed = 'move';
+  }
+}
+
+function onTemplateDragEnd() {
+  dragTplId.value = '';
+  dragFromSectionId.value = null;
+  dragOverSectionId.value = null;
+}
+
+function onSectionDragStart(event, sectionId) {
+  if (!sectionId) return;
+  dragSectionId.value = sectionId;
+  if (event?.dataTransfer) {
+    event.dataTransfer.setData('text/plain', JSON.stringify({ type: 'section', id: sectionId }));
+    event.dataTransfer.effectAllowed = 'move';
+  }
+}
+
+async function onSectionDrop(event, targetSectionId) {
+  const sid = targetSectionId || null;
+  dragOverSectionId.value = sid;
+  let data = null;
+  try {
+    const raw = event?.dataTransfer?.getData('text/plain');
+    if (raw) data = JSON.parse(raw);
+  } catch {}
+
+  const tplId = data?.id || dragTplId.value;
+  if (data?.type === 'template' || tplId) {
+    const tpl = templates.value.find((t) => t.id === tplId);
+    if (!tpl) return;
+    if (tpl.section_id !== sid) {
+      await placeTemplateInSection(tpl, sid);
+    }
+    onTemplateDragEnd();
+    return;
+  }
+
+  const srcSecId = data?.id || dragSectionId.value;
+  if (srcSecId && sid && srcSecId !== sid) {
+    const srcIdx = sections.value.findIndex((s) => s.id === srcSecId);
+    const targetIdx = sections.value.findIndex((s) => s.id === sid);
+    if (srcIdx >= 0 && targetIdx >= 0) {
+      const [item] = sections.value.splice(srcIdx, 1);
+      sections.value.splice(targetIdx, 0, item);
+      sections.value.forEach((s, i) => { s.sort_order = i; });
+      replaceSectionsCache(sections.value);
+      try {
+        await reorderCreationSections(sections.value.map((s) => s.id));
+      } catch (e) {
+        console.warn('重排分区失败:', e);
+      }
+    }
+  }
+  dragSectionId.value = '';
+}
+
 const pinnedTemplates = computed(() => {
   return [...filteredTemplates.value]
     .filter(t => t.is_pinned)
-    .sort((a, b) => (b.updated_at || b.created_at || 0) - (a.updated_at || a.created_at || 0));
+    .sort((a, b) => (a.pin_order ?? 999999) - (b.pin_order ?? 999999) || (b.pinned_at || b.updated_at || b.created_at || 0) - (a.pinned_at || a.updated_at || a.created_at || 0));
+});
+
+const pinnedSections = computed(() => {
+  const allPinned = pinnedTemplates.value;
+  const userSecs = (sections.value || []).map((sec) => {
+    const items = allPinned
+      .filter((t) => t.section_id === sec.id)
+      .sort((a, b) => (a.pin_order ?? 999999) - (b.pin_order ?? 999999) || (b.pinned_at || b.updated_at || b.created_at || 0) - (a.pinned_at || a.updated_at || a.created_at || 0));
+    return {
+      id: sec.id,
+      name: sec.name,
+      sort_order: sec.sort_order ?? 0,
+      items
+    };
+  });
+  const secIdSet = new Set((sections.value || []).map((s) => s.id));
+  const unassignedItems = allPinned
+    .filter((t) => !t.section_id || !secIdSet.has(t.section_id))
+    .sort((a, b) => (a.pin_order ?? 999999) - (b.pin_order ?? 999999) || (b.pinned_at || b.updated_at || b.created_at || 0) - (a.pinned_at || a.updated_at || a.created_at || 0));
+  const unassignedSec = {
+    id: null,
+    name: '未分区',
+    items: unassignedItems
+  };
+  return [unassignedSec, ...userSecs];
+});
+
+const activeSectionLayerItems = computed(() => {
+  const sid = sectionLayer.value;
+  if (!sid) return [];
+  const targetId = sid === 'unassigned' ? null : sid;
+  const found = pinnedSections.value.find((s) => s.id === targetId);
+  return found ? found.items : [];
+});
+
+const activeSectionLayerName = computed(() => {
+  const sid = sectionLayer.value;
+  if (!sid) return '';
+  if (sid === 'unassigned') return '未分区';
+  const found = sections.value.find((s) => s.id === sid);
+  return found ? found.name : '未分区';
 });
 
 const tplGroupDerivatives = ref(true);
@@ -5617,11 +6298,7 @@ const topReuseTemplates = computed(() => {
 });
 
 const regularTemplates = computed(() => {
-  const pinOrTopSet = new Set([
-    ...pinnedTemplates.value.map(t => t.id),
-    ...topReuseTemplates.value.map(t => t.id)
-  ]);
-  return filteredTemplates.value.filter(t => !pinOrTopSet.has(t.id));
+  return filteredTemplates.value;
 });
 
 // 分页切片状态
@@ -5675,13 +6352,6 @@ const clusteredRegularTemplates = computed(() => {
     } else {
       const parent = clusterMap.get(clusterKey);
       parent.variants.push(item);
-      // 保持母本卡片展示最新生成的封面结果与时间
-      if ((item.created_at || item.updated_at || 0) > (parent.created_at || parent.updated_at || 0)) {
-        parent.result_images = item.result_images;
-        parent.created_at = item.created_at;
-        parent.updated_at = item.updated_at;
-        parent.id = item.id;
-      }
     }
   }
 
@@ -5788,6 +6458,10 @@ function openCreationLibraryModal() {
   const t0 = performance.now();
   libraryMounted.value = true;
   showExpandedLibrary.value = true;
+  // 常用永远从关闭状态开始；第二层也回到最上层
+  isTopReuseOpen.value = false;
+  sectionLayer.value = null;
+  loadSections();
   const elapsed = performance.now() - t0;
   console.log(`[CreationLibrary] 打开耗时: ${elapsed.toFixed(2)}ms (20ms指标)`);
   // 打开后主动异步拉取外部最新资产（Stale-While-Revalidate，首屏秒呈无阻塞）
@@ -5800,10 +6474,11 @@ function stepCardVariant(tpl, delta) {
   const nextIdx = ((tpl.activeVariantIdx || 0) + delta + len) % len;
   tpl.activeVariantIdx = nextIdx;
   const activeVar = tpl.variants[nextIdx];
-  tpl.result_images = activeVar.result_images;
-  tpl.params = activeVar.params;
-  tpl.aspect_ratio = activeVar.aspect_ratio;
-  tpl.prompt = activeVar.prompt;
+  if (!activeVar) return;
+  const keepVariants = tpl.variants;
+  Object.assign(tpl, activeVar);
+  tpl.variants = keepVariants;
+  tpl.activeVariantIdx = nextIdx;
 }
 
 function selectModalVariant(v) {
@@ -5861,7 +6536,34 @@ watch(() => props.initialPayload, (payload) => {
   void consumeIncoming(payload);
 }, { immediate: true });
 
+// 连续从素材库跳对话时串行处理，避免两次 payload 各自判断后各开一条会话
+let incomingLock = Promise.resolve();
+
 async function consumeIncoming(payload) {
+  const prev = incomingLock;
+  let release = () => {};
+  incomingLock = new Promise((r) => { release = r; });
+  try {
+    await prev;
+    await consumeIncomingInner(payload);
+  } finally {
+    release();
+  }
+}
+
+/** 「当前会话是否已有消息」只认服务端，绝不看内存里可能还没载入的空列表 */
+async function currentSessionServerHasMessages() {
+  if (!currentSessionId.value) return false;
+  try {
+    const rows = await fetchChatMessages(currentSessionId.value, 1);
+    return Array.isArray(rows) && rows.length > 0;
+  } catch (e) {
+    // 服务端不可达时保守退回内存：内存里已有消息就当有消息，避免覆盖上一条会话
+    return messages.value.length > 0;
+  }
+}
+
+async function consumeIncomingInner(payload) {
   if (!payload) return;
   let items = Array.isArray(payload) ? payload : (Array.isArray(payload.items) ? payload.items : [payload]);
   items = items.filter(Boolean);
@@ -5874,13 +6576,9 @@ async function consumeIncoming(payload) {
     return;
   }
 
-  const editorText = richEditorRef.value ? (richEditorRef.value.innerText || '').trim() : '';
-  const hasContent = messages.value.length > 0
-    || referenceTray.value.length > 0
-    || Boolean(recipePrompt.value && recipePrompt.value.trim())
-    || Boolean(globalRecipePrompt.value && globalRecipePrompt.value.trim())
-    || Boolean(editorText);
-  if (hasContent) {
+  const hasServerMessages = await currentSessionServerHasMessages();
+  // 空会话就地挂上；已有消息（哪怕内存里还没载入）一律新开一条「新创作会话」
+  if (!currentSessionId.value || hasServerMessages) {
     await createNewSession({ forceReset: true });
   }
   mountAssetsFromLibrary(items);
@@ -6533,6 +7231,11 @@ bindOverlays({
   assetSelector: showAssetSelector,
   // 全屏看图优先于抽屉：连续返回时先退全屏、再关抽屉
   libraryFullscreen: { ref: isLibraryFullscreen, priority: 20 },
+  creationSection: {
+    ref: computed(() => !!sectionLayer.value),
+    close: () => { sectionLayer.value = null; },
+    priority: 15
+  },
   expandedLibrary: { ref: showExpandedLibrary, priority: 10 },
   rightDrawer: rightDrawerOpen,
   editModal: showEditModal,
@@ -7980,7 +8683,10 @@ async function selectSession(s) {
           images: Array.isArray(m.images) ? m.images : [],
           requestSnapshot: m.params?.requestSnapshot || m.params?.outbound || m.result?.requestSnapshot || null,
           params: m.params || null,
-          isGenerating: m.status === 'generating' || Boolean(m.result?.isGenerating),
+          // 已有可播放/可显示产物时绝不再显示骨架：旧占位卡把 isGenerating 落进 result_json，
+          // 服务端已剥离新数据；老数据在这里按「有无媒体」兜底纠正
+          isGenerating: (m.status === 'generating' || Boolean(m.result?.isGenerating))
+            && !(m.result?.imageUrl || m.result?.videoUrl || m.result?.modelVideoUrl || m.result?.audioUrl),
           isCancelled: m.status === 'cancelled' || Boolean(m.result?.isCancelled),
           isError: m.status === 'failed' || Boolean(m.result?.isError) || String(m.prompt || m.result?.content || '').startsWith('生成遇到问题'),
           jobId: m.run_id || (m.id && m.id.startsWith('genmsg_') ? m.id.replace('genmsg_', '') : '') || m.result?.jobId || '',
@@ -8030,9 +8736,7 @@ async function selectSession(s) {
         generating.value = true;
       }
 
-      // 从当前会话历史用户消息中自动充实 promptHistory
-      const firstUser = rawMsgs.find((m) => m.role === 'user' && m.prompt);
-      if (firstUser) rememberSessionTitle(firstUser.prompt);
+      // 从当前会话历史用户消息中自动充实 promptHistory（标题只由视觉池起名，不在选会话时截提示词）
       rawMsgs.forEach(m => {
         if (m.role === 'user' && (m.prompt || m.content)) {
           const userPrompt = m.prompt || m.content || '';
@@ -8823,7 +9527,6 @@ async function sendMessage() {
   // 这一轮会往这个会话写新消息，缓存立刻作废，免得切回来看到旧的列表
   messagesCache.delete(targetSessionId);
   sessionGeneratingMap.set(targetSessionId, true);
-  rememberSessionTitle(rawContent);
 
   const resolvedDeliveryList = await Promise.all(currentTray.map(async (it) => {
     return await resolveDeliveryImageForModel(it, retryModel);
@@ -8960,6 +9663,9 @@ async function sendMessage() {
   } catch (e) {
     console.warn('保存用户消息失败:', e);
   }
+
+  // 生成请求发出的同时让视觉池起动作标题；不 await，失败下次发送服务端会再试
+  void requestAutoTitle(targetSessionId, rawContent, currentTray, currentMod);
 
   try {
     if (currentMod === 'chat') {
@@ -9168,6 +9874,7 @@ async function sendMessage() {
         messages.value.push(asstMsg);
         loadNextSuggestions(asstMsg);
       }
+      collapseCompletedRenderCards(targetSessionId, imageJobId || '', placeholderMsg);
 
       // 与 worker 落库共用同一个确定性 id：两边都按该 id upsert，一张图只会有一条消息记录。
       await saveChatMessage({
@@ -9274,6 +9981,7 @@ async function sendMessage() {
         messages.value.push(asstMsg);
       }
       if (currentSessionId.value === targetSessionId) loadNextSuggestions(live);
+      collapseCompletedRenderCards(targetSessionId, videoJobId || '', placeholderMsg);
 
       await saveChatMessage({
         ...(videoJobId ? { id: `genmsg_${videoJobId}`, runId: videoJobId } : {}),
@@ -9398,6 +10106,7 @@ async function sendMessage() {
         isGenerating: false,
         isError: true
       });
+      collapseCompletedRenderCards(targetSessionId, errMsg.jobId || '', placeholderMsg);
       // 失败后把提示词与参考图恢复到输入区，用户可直接改参数重发，也避免「图槽 0/N」与实际附件不一致
       try {
         restorePromptContent(rawContent, currentTray);
@@ -9446,22 +10155,62 @@ async function sendMessage() {
 
 const SESSION_TITLE_PLACEHOLDERS = ['新创作会话', '空间美学创作会话', 'AI 创作会话', ''];
 
-function rememberSessionTitle(text) {
-  const title = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 30);
-  if (!title || !currentSessionId.value) return;
-  const hit = sessions.value.find((s) => s.id === currentSessionId.value);
-  if (!hit) {
-    sessions.value.unshift({ id: currentSessionId.value, title });
-  } else if (SESSION_TITLE_PLACEHOLDERS.includes(hit.title || '')) {
-    hit.title = title;
-  } else {
-    return;
+function applyAutoTitle(sessionId, data) {
+  if (!data || !data.named) return;
+  for (const list of [sessions.value, sessionSearchResults.value]) {
+    if (!Array.isArray(list)) continue;
+    const row = list.find((s) => s.id === sessionId);
+    if (row) {
+      row.title = data.title;
+      row.action_tag = data.action_tag || '其他';
+      row.title_source = 'auto';
+    }
   }
-  authFetch('/api/chat/sessions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: currentSessionId.value, title })
-  }).catch(() => {});
+}
+
+async function requestAutoTitle(sessionId, prompt, tray, mode) {
+  if (!sessionId || !prompt) return;
+  try {
+    const images = (Array.isArray(tray) ? tray : [])
+      .map((it) => it && it.url)
+      .filter(Boolean)
+      .slice(0, 2);
+    const data = await autoTitleChatSession(sessionId, { prompt, images, mode });
+    applyAutoTitle(sessionId, data);
+  } catch (e) {
+    // 起名失败保持原名；服务端没写 title_source，下一次发送会再试
+  }
+}
+
+/**
+ * 同一轮已经落地结果后，收起还挂着「渲染中」的旧占位卡。
+ * 带 jobId 时只处理同 job；纯骨架（没内容、没媒体）直接移除，避免一卡转圈一卡成片。
+ */
+function collapseCompletedRenderCards(sessionId, jobId, keepMsg) {
+  if (!sessionId || sessionId !== currentSessionId.value) return;
+  const list = messages.value;
+  const survivors = [];
+  let changed = false;
+  for (const m of list) {
+    if (!m || m === keepMsg || !m.isGenerating) { survivors.push(m); continue; }
+    if (jobId && m.jobId && m.jobId !== jobId) { survivors.push(m); continue; }
+    if (jobId && !m.jobId) { survivors.push(m); continue; }
+    const hasMedia = Boolean(m.imageUrl || m.videoUrl || m.modelVideoUrl || m.audioUrl);
+    if (hasMedia) {
+      m.isGenerating = false;
+      survivors.push(m);
+      changed = true;
+      continue;
+    }
+    if (!String(m.content || '').trim() && !m.isError) {
+      changed = true; // 纯骨架占位，直接移除
+      continue;
+    }
+    m.isGenerating = false;
+    survivors.push(m);
+    changed = true;
+  }
+  if (changed) messages.value = survivors;
 }
 
 function fillComposerFromError(msg) {

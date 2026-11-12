@@ -1322,6 +1322,92 @@ const DEFAULT_MODEL_CONTRACTS = [
     optimizer: {},
   },
   {
+    id: 'gpt_image_2_6_sunburst_vip',
+    name: 'GPT Image 2.6 Sunburst VIP',
+    vendor_model_id: 'gpt-image-2.6-sunburst-vip',
+    capability_id: 'newapi_gpt_image',
+    converter: 'newapi_gpt_image',
+    refStyle: 'generic',
+    polishHint: 'NewAPI / 老张 VIP 直连 · GPT Image 2.6 Sunburst · 超高精度与稳健纹理 · 机械结构与产品正式出图',
+    modes: [
+      { id: 'text_to_image', label: '文生图' },
+      { id: 'image_to_image', label: '图生图' },
+    ],
+    slots: { images: 1, videos: 0, audios: 0 },
+    enabled: 1,
+    params: [
+      {
+        key: 'ratio',
+        label: '宽高比',
+        type: 'enum',
+        default: '9:16',
+        options: ['9:16', '16:9', '1:1', '4:3', '3:4', '21:9'],
+        visibility: 'public',
+        location: 'body',
+      },
+      {
+        key: 'quality',
+        label: '清晰度/渲染质量',
+        type: 'enum',
+        default: 'high',
+        options: ['high', 'medium', 'low', 'auto'],
+        option_labels: {
+          'high': '高画质 (推荐/最高)',
+          'medium': '平衡',
+          'low': '草图速写 (快速)',
+          'auto': '模型自适应'
+        },
+        visibility: 'public',
+        location: 'body',
+      },
+      {
+        key: 'complexity',
+        label: '规划复杂度',
+        type: 'enum',
+        default: 'high',
+        options: ['high', 'medium', 'low'],
+        option_labels: {
+          'high': '高复杂度 (密集文字/复杂版面)',
+          'medium': '中等复杂度',
+          'low': '低复杂度 (局部微调/焦点聚焦)'
+        },
+        visibility: 'public',
+        location: 'body',
+      },
+      {
+        key: 'background',
+        label: '背景模式',
+        type: 'enum',
+        default: 'auto',
+        options: ['auto', 'transparent', 'opaque'],
+        option_labels: {
+          'auto': '自然背景',
+          'transparent': '透明背景 (白底零件/PNG)',
+          'opaque': '实色纯白背景'
+        },
+        visibility: 'public',
+        location: 'body',
+      },
+      {
+        key: 'output_format',
+        label: '输出格式',
+        type: 'enum',
+        default: 'png',
+        options: ['png', 'gif'],
+        option_labels: {
+          'png': '静态 PNG',
+          'gif': '动态 GIF 循环'
+        },
+        visibility: 'public',
+        location: 'body',
+      },
+    ],
+    table_mappings: {},
+    conditional_rules: [],
+    mutex_groups: [],
+    optimizer: {},
+  },
+  {
     id: 'gpt_image_2_5_web',
     name: 'GPT Image 2.5 Web (NewAPI 直连)',
     vendor_model_id: 'gpt-image-2.5-web',
@@ -1412,7 +1498,7 @@ const DEFAULT_MODEL_CONTRACTS = [
         label: '宽高比',
         type: 'enum',
         default: '9:16',
-        options: ['9:16', '16:9', '1:1', '4:3', '3:4', '2:3', '3:2', '1:2', '2:1', '4:5', '5:4', '9:21', '21:9'],
+        options: ['9:16', '16:9', '1:1', '4:3', '3:4', '2:3', '3:2', '4:5', '5:4', '21:9', '1:4', '1:8', '4:1', '8:1'],
         visibility: 'public',
         location: 'body',
       },
@@ -2644,6 +2730,15 @@ function seedStoredContract(db, insContract, mc, now) {
     params = params.concat(extra);
     db.prepare('UPDATE model_contracts SET name=?, params_json=?, updated_at=? WHERE id=?')
       .run(mc.name, JSON.stringify(params), now, mc.id);
+  }
+
+  if (mc.id === 'gemini_nano_banana_2_1' && Array.isArray(params)) {
+    const has14Ratios = (params.find((p) => p && p.key === 'ratio')?.options || []).length === 14;
+    if (!has14Ratios) {
+      params = mc.params || [];
+      db.prepare('UPDATE model_contracts SET name=?, params_json=?, updated_at=? WHERE id=?')
+        .run(mc.name, JSON.stringify(params), now, mc.id);
+    }
   }
 
   if (optChanged) {
