@@ -12,7 +12,7 @@
 set -u
 set +m  # 关闭 job control，避免 wait 时打印 "Killed" 等噪音
 
-export PATH="/home/lrp/.local/node/bin:$PATH"
+export PATH="/home/lrp/.local/node/bin:/home/naite/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
 # 代理环境：Node fetch 不读 http_proxy，但 proxy-setup 会用它作为候选并 setGlobalDispatcher。
 # watchdog 拉起的进程往往没有交互 shell 的代理变量，这里兜底注入。
@@ -26,7 +26,15 @@ export no_proxy="${no_proxy:-localhost,127.0.0.1,::1}"
 export NO_PROXY="${NO_PROXY:-$no_proxy}"
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DATA_DIR="${ML_DATA_DIR:-$HOME/.dsh-material-library}"
+if [ -z "${ML_DATA_DIR:-}" ]; then
+  if [ -d "/data/lrp" ]; then
+    DATA_DIR="/data/lrp/dsh-material-library"
+  else
+    DATA_DIR="$HOME/.dsh-material-library"
+  fi
+else
+  DATA_DIR="$ML_DATA_DIR"
+fi
 PORT="${ML_PORT:-30001}"
 WEB_PRO_PORT="${WEB_PRO_PORT:-30002}"
 LOG_DIR="$DATA_DIR/logs"

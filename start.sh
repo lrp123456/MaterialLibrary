@@ -7,7 +7,7 @@
 set -e
 
 # 基础路径配置
-export PATH="/home/lrp/.local/node/bin:$PATH"
+export PATH="/home/lrp/.local/node/bin:/home/naite/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 # 代理兜底：Node 全局 fetch 不读 http_proxy，proxy-setup 会消费这些变量做候选探测
 if [ -z "${https_proxy:-}" ] && [ -z "${HTTPS_PROXY:-}" ]; then
   export https_proxy="http://127.0.0.1:7890"
@@ -18,7 +18,15 @@ fi
 export no_proxy="${no_proxy:-localhost,127.0.0.1,::1,newapi.naite.cc,naite.cc,aliyuncs.com,aliyun.com,volces.com,volcengine.com,modelscope.cn,agnes-ai.cn,api.agnes-ai.cn,laozhang.ai}"
 export NO_PROXY="${NO_PROXY:-$no_proxy}"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DATA_DIR="${ML_DATA_DIR:-$HOME/.dsh-material-library}"
+if [ -z "${ML_DATA_DIR:-}" ]; then
+  if [ -d "/data/lrp" ]; then
+    DATA_DIR="/data/lrp/dsh-material-library"
+  else
+    DATA_DIR="$HOME/.dsh-material-library"
+  fi
+else
+  DATA_DIR="$ML_DATA_DIR"
+fi
 PORT="${ML_PORT:-30001}"
 PID_FILE="$DATA_DIR/server.pid"
 WATCHDOG_PID_FILE="$DATA_DIR/watchdog.pid"
