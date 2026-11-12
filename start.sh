@@ -297,6 +297,15 @@ stop_server() {
     kill "$pid" 2>/dev/null || true
   fi
 
+  local clash_pid
+  if [ -f "$DATA_DIR/clash.pid" ]; then
+    clash_pid=$(cat "$DATA_DIR/clash.pid" 2>/dev/null || true)
+    if [ -n "$clash_pid" ] && kill -0 "$clash_pid" 2>/dev/null; then
+      info "正在停止内置 clash (PID: $clash_pid)..."
+      kill "$clash_pid" 2>/dev/null || true
+    fi
+  fi
+
   # 等待平稳退出
   local waited=0
   while [ $waited -lt 12 ]; do
