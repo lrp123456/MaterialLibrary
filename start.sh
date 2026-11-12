@@ -27,6 +27,7 @@ if [ -z "${ML_DATA_DIR:-}" ]; then
 else
   DATA_DIR="$ML_DATA_DIR"
 fi
+export ML_DATA_DIR="$DATA_DIR"
 PORT="${ML_PORT:-30001}"
 PID_FILE="$DATA_DIR/server.pid"
 WATCHDOG_PID_FILE="$DATA_DIR/watchdog.pid"

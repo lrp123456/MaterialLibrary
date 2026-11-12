@@ -35,6 +35,7 @@ if [ -z "${ML_DATA_DIR:-}" ]; then
 else
   DATA_DIR="$ML_DATA_DIR"
 fi
+export ML_DATA_DIR="$DATA_DIR"
 PORT="${ML_PORT:-30001}"
 WEB_PRO_PORT="${WEB_PRO_PORT:-30002}"
 LOG_DIR="$DATA_DIR/logs"
