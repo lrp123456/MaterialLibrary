@@ -74,7 +74,7 @@ function initDefaultUsers(db, dataDir) {
   ensureAccount(db, 'naite', {
     password: '',
     role: 'admin',
-    locked: true,
+    locked: false,
     resetExisting: false,
   });
 

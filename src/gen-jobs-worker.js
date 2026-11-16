@@ -41,13 +41,74 @@ function modalityMode(modality) {
   return 'text_to_image';
 }
 
-function normalizeError(e) {
+function normalizeError(e, row = {}) {
   const upstreamStatus = Number(e && (e.status || e.statusCode)) || null;
+  const now = Date.now();
+  const startedAt = row.started_at || null;
+  const createdAt = row.created_at || null;
+  const durationMs = startedAt ? (now - startedAt) : (createdAt ? (now - createdAt) : null);
+
   return {
+    name: (e && e.name) || 'Error',
     message: (e && e.message) || '生成失败',
     code: (e && e.code) || 'generation_failed',
     upstreamStatus,
     requestId: (e && (e.requestId || e.request_id)) || null,
+    taskId: (e && e.taskId) || null,
+    stack: (e && e.stack) || '',
+    cause: e?.cause ? (e.cause.message || String(e.cause)) : null,
+    timing: {
+      createdAt,
+      startedAt,
+      completedAt: now,
+      durationMs,
+      durationSec: durationMs ? Number((durationMs / 1000).toFixed(1)) : null,
+    },
+  };
+}
+
+function fmtMs(ms) {
+  return ms == null ? '-' : `${(Number(ms) / 1000).toFixed(1)}s`;
+}
+
+/**
+ * 把各服务采集的原始 timing 汇总成用户要的三段账：
+ * 渲染（优先百炼官方纯渲染，缺失时退回本地计时）、超分、系统开销（排队/提交/下载等其余一切）。
+ * 纯函数，便于单测；没有任何 timing 素材时返回 null。
+ */
+function summarizeJobTiming(rawTiming, rowLike, completedAt) {
+  const t = rawTiming && typeof rawTiming === 'object' ? rawTiming : {};
+  const startedAt = rowLike?.started_at ?? null;
+  const createdAt = rowLike?.created_at ?? null;
+  const rawTotal = startedAt != null && completedAt != null ? completedAt - startedAt : (t.totalMs ?? null);
+  if (rawTotal == null && t.renderUpstreamMs == null && t.renderLocalMs == null && !t.sr) return null;
+  // 时钟回拨等异常下 totalMs 可能为负，统一钳到 0，避免日志出现 -1.9s
+  const totalMs = rawTotal != null ? Math.max(0, rawTotal) : null;
+
+  const queueMs = startedAt != null && createdAt != null ? Math.max(0, startedAt - createdAt) : null;
+  const renderMs = t.renderUpstreamMs ?? t.renderLocalMs ?? null;
+  const srMs = t.sr?.totalMs ?? null;
+  const accounted = (renderMs || 0) + (srMs || 0);
+  const systemMs = totalMs != null ? Math.max(0, totalMs - accounted) : null;
+
+  return {
+    queueMs,
+    totalMs,
+    renderMs,
+    renderUpstreamMs: t.renderUpstreamMs ?? null,
+    srMs,
+    systemMs,
+    wan: {
+      prepareMs: t.prepareMs ?? null,
+      submitMs: t.submitMs ?? null,
+      renderLocalMs: t.renderLocalMs ?? null,
+      upstreamQueueMs: t.upstreamQueueMs ?? null,
+      pollCount: t.pollCount ?? null,
+      pollDetectMs: t.pollDetectMs ?? null,
+      downloadMs: t.downloadMs ?? null,
+      upstream: t.upstream || null,
+    },
+    sr: t.sr || null,
   };
 }
 
@@ -91,7 +152,7 @@ function buildResult(result, payload) {
   };
 }
 
-function broadcast(db, row, status, result, error) {
+function broadcast(db, row, status, result, error, extra = null) {
   const payload = {
     jobId: row.job_id,
     taskId: row.job_id,
@@ -102,6 +163,7 @@ function broadcast(db, row, status, result, error) {
     sessionId: row.session_id || '',
     userId: row.user_id ?? null,
     modality: row.modality || '',
+    ...(extra || {}),
   };
   try {
     eventBus.emit(EVENTS.TASK_UPDATED, payload);
@@ -208,8 +270,32 @@ function createGenJobsWorker(services) {
     const controller = new AbortController();
     activeControllers.set(jobId, controller);
 
+    // 阶段上报：落 gen_jobs.stage/progress 并经事件总线+WS 广播给前端占位卡。
+    // 轮询类回调天然 3~10s 一次，再加 2.5s 最小间隔与同阶段去重，避免超分轮询刷库。
+    let lastStageKey = '';
+    let lastStageAt = 0;
+    let lastProgress = 10;
+    const onStage = (stage) => {
+      try {
+        if (!stage || typeof stage !== 'object') return;
+        const now = Date.now();
+        if (stage.key === lastStageKey && now - lastStageAt < 2500) return;
+        const progress = Math.max(lastProgress, Math.min(99, Number(stage.progress) || lastProgress));
+        lastStageKey = String(stage.key || '');
+        lastStageAt = now;
+        lastProgress = progress;
+        const label = String(stage.label || '');
+        const info = { key: lastStageKey, label, detail: stage.detail || null };
+        db.prepare("UPDATE gen_jobs SET stage=?, progress=?, updated_at=? WHERE job_id=? AND status='running'")
+          .run(label, progress, now, jobId);
+        broadcast(db, row, 'running', null, null, { stage: info, progress });
+      } catch (e) {
+        console.warn('[gen-jobs] 阶段上报失败:', e.message);
+      }
+    };
+
     try {
-      const raw = await runGeneration(services, payload, { signal: controller.signal });
+      const raw = await runGeneration(services, payload, { signal: controller.signal, onStage });
       activeControllers.delete(jobId);
 
       // 检查执行期间是否被取消
@@ -231,10 +317,24 @@ function createGenJobsWorker(services) {
 
       const result = buildResult(raw, payload);
       const now = Date.now();
-      db.prepare("UPDATE gen_jobs SET status='succeeded', progress=100, result_json=?, error_json=NULL, updated_at=?, completed_at=? WHERE job_id=?")
-        .run(JSON.stringify(result), now, now, jobId);
+      const timing = summarizeJobTiming(raw?.timing, row, now);
+      if (timing) {
+        result.timing = timing;
+        if (timing.renderMs != null || timing.srMs != null) {
+          console.log(
+            `[gen-jobs] 任务完成 jobId=${jobId} model=${row.model} 总耗时=${fmtMs(timing.totalMs)}` +
+            ` | 云端渲染=${fmtMs(timing.renderMs)}` +
+            ` | 超分=${timing.srMs != null ? fmtMs(timing.srMs) : '未触发'}` +
+            ` | 系统开销=${fmtMs(timing.systemMs)}（排队 ${fmtMs(timing.queueMs)}）`
+          );
+        } else {
+          console.log(`[gen-jobs] 任务完成 jobId=${jobId} model=${row.model} 总耗时=${fmtMs(timing.totalMs)}`);
+        }
+      }
+      db.prepare("UPDATE gen_jobs SET status='succeeded', stage=?, progress=100, result_json=?, error_json=NULL, updated_at=?, completed_at=? WHERE job_id=?")
+        .run('已完成', JSON.stringify(result), now, now, jobId);
       const messageId = writeAssistantMessage(db, row, result, 'done');
-      broadcast(db, row, 'succeeded', { ...result, messageId }, null);
+      broadcast(db, row, 'succeeded', { ...result, messageId }, null, { progress: 100, stage: { key: 'done', label: '已完成' } });
     } catch (e) {
       activeControllers.delete(jobId);
       const latest = getGenJob(db, jobId);
@@ -253,11 +353,15 @@ function createGenJobsWorker(services) {
         return;
       }
 
-      const errObj = normalizeError(e);
       const now = Date.now();
+      const errObj = normalizeError(e, row);
+      console.error(`[gen-jobs] 任务失败: jobId=${jobId} model=${row.model} error=${errObj.message} 耗时=${errObj.timing?.durationSec}s`);
+      if (errObj.stack) {
+        console.error(`[gen-jobs] 堆栈: ${errObj.stack.split('\n').slice(0, 5).join('\n')}`);
+      }
       try {
-        db.prepare("UPDATE gen_jobs SET status='failed', error_json=?, updated_at=?, completed_at=? WHERE job_id=?")
-          .run(JSON.stringify(errObj), now, now, jobId);
+        db.prepare("UPDATE gen_jobs SET status='failed', stage=?, error_json=?, updated_at=?, completed_at=? WHERE job_id=?")
+          .run('执行失败', JSON.stringify(errObj), now, now, jobId);
       } catch (inner) {
         console.warn('[gen-jobs] 写失败状态异常:', inner.message);
       }
@@ -273,6 +377,9 @@ function createGenJobsWorker(services) {
         retryModality: row.modality || 'image',
         retryMode: payload.genMode || payload.mode || '',
         retryParams: payload,
+        jobId: row.job_id,
+        rawError: errObj,
+        timing: errObj.timing,
       };
       writeAssistantMessage(db, row, failResult, 'failed');
       broadcast(db, row, 'failed', null, errObj);
@@ -294,8 +401,8 @@ function createGenJobsWorker(services) {
         if (!row) break;
         let claim;
         try {
-          claim = db.prepare("UPDATE gen_jobs SET status='running', progress=10, started_at=?, updated_at=? WHERE job_id=? AND status='queued'")
-            .run(Date.now(), Date.now(), row.job_id);
+          claim = db.prepare("UPDATE gen_jobs SET status='running', stage=?, progress=10, started_at=?, updated_at=? WHERE job_id=? AND status='queued'")
+            .run('开始执行', Date.now(), Date.now(), row.job_id);
         } catch (_) {
           break;
         }
@@ -318,8 +425,8 @@ function createGenJobsWorker(services) {
         if (!row) break;
         let claim;
         try {
-          claim = db.prepare("UPDATE gen_jobs SET status='running', progress=10, started_at=?, updated_at=? WHERE job_id=? AND status='queued'")
-            .run(Date.now(), Date.now(), row.job_id);
+          claim = db.prepare("UPDATE gen_jobs SET status='running', stage=?, progress=10, started_at=?, updated_at=? WHERE job_id=? AND status='queued'")
+            .run('开始执行', Date.now(), Date.now(), row.job_id);
         } catch (_) {
           break;
         }
@@ -360,6 +467,7 @@ module.exports = {
   createGenJobsWorker,
   buildResult,
   normalizeError,
+  summarizeJobTiming,
   abortJob,
   IMG_CONCURRENCY,
   VID_CONCURRENCY,

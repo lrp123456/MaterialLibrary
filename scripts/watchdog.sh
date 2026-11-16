@@ -12,7 +12,7 @@
 set -u
 set +m  # 关闭 job control，避免 wait 时打印 "Killed" 等噪音
 
-export PATH="/home/lrp/.local/node/bin:$PATH"
+export PATH="/home/lrp/.local/node/bin:/home/naite/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
 # 代理环境：Node fetch 不读 http_proxy，但 proxy-setup 会用它作为候选并 setGlobalDispatcher。
 # watchdog 拉起的进程往往没有交互 shell 的代理变量，这里兜底注入。
@@ -26,7 +26,16 @@ export no_proxy="${no_proxy:-localhost,127.0.0.1,::1}"
 export NO_PROXY="${NO_PROXY:-$no_proxy}"
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DATA_DIR="${ML_DATA_DIR:-$HOME/.dsh-material-library}"
+if [ -z "${ML_DATA_DIR:-}" ]; then
+  if [ -d "/data/lrp" ]; then
+    DATA_DIR="/data/lrp/dsh-material-library"
+  else
+    DATA_DIR="$HOME/.dsh-material-library"
+  fi
+else
+  DATA_DIR="$ML_DATA_DIR"
+fi
+export ML_DATA_DIR="$DATA_DIR"
 PORT="${ML_PORT:-30001}"
 WEB_PRO_PORT="${WEB_PRO_PORT:-30002}"
 LOG_DIR="$DATA_DIR/logs"
@@ -57,7 +66,24 @@ mkdir -p "$DATA_DIR" "$LOG_DIR" "$FAULT_DIR"
 WATCH_WEBPRO=1
 [ "${ML_WATCH_WEBPRO:-1}" = "0" ] && WATCH_WEBPRO=0
 
-declare -A child_pid=()        # [main|webpro]=pid
+# 内置独立 clash/mihomo 代理守护（自闭环生命周期，仅监听 127.0.0.1:7890，不影响系统其他网络）
+CLASH_DIR="$DATA_DIR/clash"
+CLASH_BIN="$CLASH_DIR/mihomo"
+[ ! -x "$CLASH_BIN" ] && CLASH_BIN="$CLASH_DIR/clash"
+CLASH_CONFIG="$CLASH_DIR/config.yaml"
+CLASH_LOG="$DATA_DIR/clash.log"
+CLASH_PID_FILE="$DATA_DIR/clash.pid"
+
+WATCH_CLASH=0
+if [ -x "$CLASH_BIN" ] && [ -f "$CLASH_CONFIG" ]; then
+  WATCH_CLASH=1
+  export http_proxy="http://127.0.0.1:7890"
+  export https_proxy="http://127.0.0.1:7890"
+  export HTTP_PROXY="http://127.0.0.1:7890"
+  export HTTPS_PROXY="http://127.0.0.1:7890"
+fi
+
+declare -A child_pid=()        # [main|webpro|clash]=pid
 declare -A crash_times=()      # 各服务独立的崩溃时间戳（空格分隔，只在本 shell 更新）
 declare -A child_started=()    # 拉起时刻，用来区分「没起来」和「跑起来之后崩了」
 declare -A child_log_off=()    # 拉起时日志文件的字节长度，崩溃时只读新增的一段
@@ -68,13 +94,21 @@ ts() { date '+%Y-%m-%d %H:%M:%S'; }
 # 只写 stderr：由 start.sh 的 nohup 重定向进 watchdog.log，避免 tee 双写
 wlog() { echo "[$(ts)] [watchdog] $1" >&2; }
 
+service_log() {
+  case "$1" in
+    main) echo "$LOG_FILE" ;;
+    webpro) echo "$WEBPRO_LOG_FILE" ;;
+    clash) echo "$CLASH_LOG" ;;
+  esac
+}
+
 cleanup() {
   wlog "收到退出信号，正在停止子进程..."
   rm -f "$STOP_FLAG"
   if [ -n "$PREWARM_PID" ] && kill -0 "$PREWARM_PID" 2>/dev/null; then
     kill "$PREWARM_PID" 2>/dev/null || true
   fi
-  for name in main webpro; do
+  for name in main webpro clash; do
     local pid="${child_pid[$name]:-}"
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
       kill "$pid" 2>/dev/null || true
@@ -88,7 +122,7 @@ cleanup() {
       fi
     fi
   done
-  rm -f "$SERVER_PID_FILE" "$WEBPRO_PID_FILE" "$WATCHDOG_PID_FILE"
+  rm -f "$SERVER_PID_FILE" "$WEBPRO_PID_FILE" "$WATCHDOG_PID_FILE" "$CLASH_PID_FILE"
   wlog "已退出"
   exit 0
 }
@@ -188,7 +222,9 @@ start_service() {
     off=$(stat -c %s "$log" 2>/dev/null || echo 0)
   fi
   rm -f "$FAULT_DIR/$name.hold"
-  if [ "$name" = "main" ]; then
+  if [ "$name" = "clash" ]; then
+    (cd "$CLASH_DIR" && exec "$CLASH_BIN" -d "$CLASH_DIR" -f "$CLASH_CONFIG") >> "$CLASH_LOG" 2>&1 &
+  elif [ "$name" = "main" ]; then
     if [ "${ML_WATCHDOG_SELFTEST:-}" = "1" ] && [ -n "${ML_WATCH_MAIN_CMD:-}" ]; then
       bash -c "$ML_WATCH_MAIN_CMD" >> "$log" 2>&1 &
     else
@@ -204,8 +240,10 @@ start_service() {
   held[$name]=0
   if [ "$name" = "main" ]; then
     echo "$pid" > "$SERVER_PID_FILE"
-  else
+  elif [ "$name" = "webpro" ]; then
     echo "$pid" > "$WEBPRO_PID_FILE"
+  elif [ "$name" = "clash" ]; then
+    echo "$pid" > "$CLASH_PID_FILE"
   fi
   wlog "$name 已拉起 (PID $pid)"
 }
@@ -404,6 +442,9 @@ while true; do
   if should_stop; then
     break
   fi
+  if [ "$WATCH_CLASH" = "1" ]; then
+    ensure_started clash
+  fi
   ensure_started main
   if [ "$WATCH_WEBPRO" = "1" ]; then
     ensure_started webpro
@@ -411,6 +452,6 @@ while true; do
   sleep 0.5
 done
 
-rm -f "$STOP_FLAG" "$WATCHDOG_PID_FILE" "$SERVER_PID_FILE" "$WEBPRO_PID_FILE"
+rm -f "$STOP_FLAG" "$WATCHDOG_PID_FILE" "$SERVER_PID_FILE" "$WEBPRO_PID_FILE" "$CLASH_PID_FILE"
 wlog "watchdog 正常结束"
 exit 0

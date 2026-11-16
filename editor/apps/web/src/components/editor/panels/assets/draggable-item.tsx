@@ -11,6 +11,7 @@ import {
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useEditor } from "@/editor/use-editor";
+import { useIsMobile } from "@/hooks/use-mobile";
 import type { TimelineDragData } from "@/timeline/drag";
 import { cn } from "@/utils/ui";
 import type { MediaTime } from "@/wasm";
@@ -59,6 +60,8 @@ export function DraggableItem({
 	const [dragPosition, setDragPosition] = useState({ x: 0, y: 0 });
 	const dragRef = useRef<HTMLDivElement>(null);
 	const editor = useEditor();
+	// 触屏没有 hover，也没有 HTML5 拖拽：把 + 号常驻并放大成可点目标
+	const isCompact = useIsMobile(1024);
 
 	const handleAddToTimeline = () => {
 		onAddToTimeline?.({ currentTime: editor.playback.getCurrentTime() });

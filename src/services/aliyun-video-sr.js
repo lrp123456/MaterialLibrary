@@ -248,27 +248,63 @@ function downloadFile(fileUrl, destPath) {
  * @param {number} [options.bitRate=10]
  * @param {number} [options.maxWaitMs=300000] 最大等待时间 (默认 5 分钟)
  * @param {number} [options.pollIntervalMs=3000] 轮询间隔
- * @returns {Promise<{ localPath: string, remoteUrl: string, jobId: string }>}
+ * @param {Function} [options.onStage] 阶段进度回调 ({ key, label, progress, detail? })
+ * @returns {Promise<{ localPath: string, remoteUrl: string, jobId: string, timing: object }>}
  */
 async function processVideoSuperResolution(videoUrl, options = {}) {
-  const { outputDir = os.tmpdir(), bitRate = 10, maxWaitMs = 300000, pollIntervalMs = 3000, localPath = '' } = options;
+  const {
+    outputDir = os.tmpdir(),
+    bitRate = 10,
+    maxWaitMs = 300000,
+    pollIntervalMs = 3000,
+    localPath = '',
+    onStage = null,
+  } = options;
+  const emit = (stage) => {
+    if (typeof onStage !== 'function') return;
+    try { onStage(stage); } catch (e) { console.warn('[video-sr] 阶段回调失败:', e.message); }
+  };
+  const t0 = Date.now();
   let inputUrl = String(videoUrl || '');
-  if (localPath) inputUrl = await uploadLocalForViapi(localPath);
-  else if (!isShanghaiOssUrl(inputUrl)) throw new Error('超分源文件不在本地');
+  let uploadMs = 0;
+  if (localPath) {
+    emit({ key: 'sr_upload', label: '上传超分源片到上海临时 OSS', progress: 90 });
+    const tUpload = Date.now();
+    inputUrl = await uploadLocalForViapi(localPath);
+    uploadMs = Date.now() - tUpload;
+  } else if (!isShanghaiOssUrl(inputUrl)) throw new Error('超分源文件不在本地');
+
+  const tSubmit = Date.now();
   const jobId = await submitSuperResolveVideo(inputUrl, bitRate);
+  const submitMs = Date.now() - tSubmit;
+  emit({ key: 'sr_processing', label: '阿里云视频超分处理中', progress: 93 });
 
   const startTime = Date.now();
+  let polls = 0;
   while (Date.now() - startTime < maxWaitMs) {
     await new Promise(r => setTimeout(r, pollIntervalMs));
+    polls++;
     const query = await querySuperResolveResult(jobId);
     if (classifyJobStatus(query.status) === 'success' && query.resultUrl) {
+      const processingMs = Date.now() - startTime;
       const fileName = `ali_sr_${jobId}_${Date.now()}.mp4`;
-      const localPath = path.join(outputDir, fileName);
-      await downloadFile(query.resultUrl, localPath);
+      const outPath = path.join(outputDir, fileName);
+      emit({ key: 'sr_download', label: '下载超分成片', progress: 97 });
+      const tDownload = Date.now();
+      await downloadFile(query.resultUrl, outPath);
+      const downloadMs = Date.now() - tDownload;
       return {
         jobId,
         remoteUrl: query.resultUrl,
-        localPath,
+        localPath: outPath,
+        timing: {
+          uploadMs,
+          submitMs,
+          processingMs,
+          downloadMs,
+          totalMs: Date.now() - t0,
+          pollCount: polls,
+        },
       };
     }
     if (classifyJobStatus(query.status) === 'fail') {

@@ -283,8 +283,20 @@ async function runTests() {
     assert.ok(tombRow.deleted_at > 0);
 
     const checkTplDeleted = db.prepare('SELECT * FROM creation_templates WHERE id=?').get('tpl_alpha');
-    assert.strictEqual(checkTplDeleted, undefined, '创作模板表中的记录必须已被物理删除');
-    console.log('✅ DELETE 同事务写墓碑通过');
+    assert.ok(checkTplDeleted, '软删后记录必须保留在创作库自己的回收里');
+    assert.ok(checkTplDeleted.deleted_at > 0, 'deleted_at 必须写入');
+    assert.strictEqual(String(checkTplDeleted.trashed_section_id || ''), '', '未分区配方删除后无原区');
+    // 正常列表/增量 rows 不再返回回收里的记录
+    const listAfterDelete = await request('GET', '/api/creation-templates', null, user1Token);
+    assert.ok(listAfterDelete.body.data.every((t) => t.id !== 'tpl_alpha'), '回收里的配方不得出现在正常列表');
+    // 整包恢复：标题/提示词/参数/置顶/顺序都回来，墓碑被清掉
+    const restore = await request('POST', '/api/creation-trash/restore', { ids: ['tpl_alpha'] }, user1Token);
+    if (restore.status !== 200) console.error('恢复失败响应:', restore.status, restore.raw);
+    assert.strictEqual(restore.status, 200);
+    const restoredRow = db.prepare('SELECT * FROM creation_templates WHERE id=?').get('tpl_alpha');
+    assert.strictEqual(restoredRow.deleted_at, null, '恢复后 deleted_at 必须清空');
+    assert.strictEqual(db.prepare('SELECT * FROM creation_template_tombstones WHERE id=?').get('tpl_alpha'), undefined, '恢复后墓碑必须删除');
+    console.log('✅ DELETE 软删进回收 + 整包恢复通过');
 
     console.log('=== 9. 测试同毫秒 (updated_at) 复合游标分页不丢数据 ===');
     // 构造三条相同 updated_at 的记录

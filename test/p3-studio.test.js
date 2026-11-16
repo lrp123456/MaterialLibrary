@@ -130,6 +130,14 @@ function main() {
   assert.ok(genIndex.includes('Math.max(timeoutMs, 300000)'), '高画质 VIP 出图等待上限应放宽到 5 分钟');
   assert.ok(genIndex.includes('vipFailureInfo('), '上游错误应转成结构化文案');
 
+  // ── 素材选择器筛选：section 不能只依赖 lane，子类要真的下发 ──
+  assert.ok(api.includes("(mediaType === 'image' && section)"),
+    '图片 section 过滤必须在 lane=image 或 media_type=image+section 时都生效');
+  const picker = read('web-pro/src/components/AssetPickerModal.vue');
+  assert.ok(picker.includes("params.section = 'figure'"), '人物穿搭必须下发 section');
+  assert.ok(picker.includes("params.section = sub.value"), '音频子类必须下发 section');
+  assert.ok(picker.includes('it.sha256'), '选择器缩略图必须用内容指纹破缓存');
+
   // ── 后台生成不阻塞其它会话：发送按钮/进度提示只看当前会话 ──
   assert.ok(chatStudio.includes('const currentGenerating = computed('),
     '必须按当前会话派生生成中状态，不能用全局 generating 单例');

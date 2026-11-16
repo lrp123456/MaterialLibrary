@@ -72,6 +72,7 @@ const MANIFEST = [
   ['unit', 'runtime-log.test.js'],
   ['unit', 'asset-replace-caches.test.js'],
   ['unit', 'vip-error-format.test.js'],
+  ['unit', 'gen-job-timing.test.js'],
   ['unit', 'batch-ab-regression.test.js'],
 
   // ---------- security：鉴权/凭据隔离/对抗输入 ----------
@@ -106,6 +107,8 @@ const MANIFEST = [
   ['integration', 'portrait-music.test.js'],
   ['integration', 'admin-model.test.js'],
   ['integration', 'creation-templates-since.test.js'],
+  ['integration', 'creation-library-media.test.js'],
+  ['integration', 'chat-session-title-search.test.js'],
   ['integration', 'gen-video-payload-offline.test.js'],
   ['integration', 'clip-api.test.js'],
   ['integration', 'mlsclip.test.js'],

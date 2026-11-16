@@ -7,7 +7,8 @@
  */
 
 const DB_NAME = 'mls-creation-library';
-const DB_VERSION = 1;
+// v2：新增 sections store（分区名/顺序），模板行里的 section_id/pin_order 仍随增量同步
+const DB_VERSION = 2;
 
 let dbInstance = null;
 
@@ -29,6 +30,9 @@ function openDb() {
         }
         if (!db.objectStoreNames.contains('meta')) {
           db.createObjectStore('meta', { keyPath: 'userId' });
+        }
+        if (!db.objectStoreNames.contains('sections')) {
+          db.createObjectStore('sections', { keyPath: 'id' });
         }
       };
       request.onsuccess = (e) => {
@@ -199,15 +203,50 @@ export async function mergeTemplatesCache(upsertItems = [], deletedIds = [], nex
   });
 }
 
+export async function getSectionsCache() {
+  const db = await openDb();
+  if (!db) return [];
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(['sections'], 'readonly');
+      const req = tx.objectStore('sections').getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      tx.onerror = () => resolve([]);
+    } catch (e) {
+      resolve([]);
+    }
+  });
+}
+
+export async function replaceSectionsCache(items = []) {
+  const db = await openDb();
+  if (!db) return;
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(['sections'], 'readwrite');
+      const store = tx.objectStore('sections');
+      store.clear();
+      for (const item of (items || [])) {
+        if (item && item.id) store.put(item);
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    } catch (e) {
+      resolve();
+    }
+  });
+}
+
 export async function clearTemplatesCache() {
   const db = await openDb();
   if (!db) return;
 
   return new Promise((resolve) => {
     try {
-      const tx = db.transaction(['templates', 'meta'], 'readwrite');
+      const tx = db.transaction(['templates', 'meta', 'sections'], 'readwrite');
       tx.objectStore('templates').clear();
       tx.objectStore('meta').clear();
+      tx.objectStore('sections').clear();
       tx.oncomplete = () => resolve();
       tx.onerror = () => resolve();
     } catch (e) {

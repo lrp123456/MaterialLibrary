@@ -12,7 +12,7 @@ function pickAdapterId(kind, modelCode, adapters, preferEndpointId) {
   };
 
   // 模型契约已经指明了 endpoint（如 newapi 的 Gemini 原生图像与 GPT Image 系列），必须优先走对应适配器
-  if (preferEndpointId === 'newapi' || code.includes('gpt-image') || code.includes('gpt_image') || code.includes('flare') || code.includes('sunburst')) {
+  if (preferEndpointId === 'newapi' || code.includes('gpt-image') || code.includes('gpt_image') || code.includes('flare') || code.includes('sunburst') || code.includes('banana')) {
     if (code.includes('gpt-image') || code.includes('gpt_image') || code.includes('flare') || code.includes('sunburst')) {
       return findId((a) => a.id === 'newapi_gpt_image')
         || findId((a) => a.id === 'openai_images')

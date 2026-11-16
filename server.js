@@ -111,6 +111,21 @@ try {
   console.warn('[retag-night] 启动失败:', e.message);
 }
 
+// 存量创作配方补拷私有文件：源图/产物各复制一份到配方名下，让素材库删原件也不影响配方。
+// 异步执行、不阻塞启动；ML_SKIP_CREATION_BACKFILL=1 可关闭（测试/离线环境）。
+if (String(process.env.ML_SKIP_CREATION_BACKFILL || '') !== '1') {
+  setTimeout(() => {
+    try {
+      const { backfillCreationMedia } = require('./src/creation-library');
+      backfillCreationMedia(services, { limit: 200, concurrency: 2 })
+        .then((r) => { if (r.scanned) console.log(`[creation-backfill] 扫描 ${r.scanned}，补拷 ${r.copied}`); })
+        .catch((e) => console.warn('[creation-backfill] 失败:', e.message));
+    } catch (e) {
+      console.warn('[creation-backfill] 启动失败:', e.message);
+    }
+  }, 5000).unref?.();
+}
+
 // 自动清理回收站超过 3 天（72小时）的过期文件
 try {
   const assetsDelete = require('./src/assets-delete');
