@@ -904,7 +904,7 @@ function collectPerModel() {
 
 async function loadStudioDefaultsForm() {
   try {
-    const res = await fetch('/api/studio/defaults');
+    const res = await authFetch('/api/studio/defaults');
     if (res.ok) {
       const data = await res.json();
       if (data?.data) {
@@ -921,7 +921,7 @@ async function saveStudioDefaultsForm() {
   studioDefaultsSaving.value = true;
   studioDefaultsSavedMsg.value = '';
   try {
-    const res = await fetch('/api/studio/defaults', {
+    const res = await authFetch('/api/studio/defaults', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

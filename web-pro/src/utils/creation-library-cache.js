@@ -125,8 +125,10 @@ export async function getTemplatesCache(userId = 'default') {
       };
 
       tx.oncomplete = () => {
+        const uid = String(userId);
+        const mine = (templates || []).filter((item) => !item?.userId || String(item.userId) === uid);
         resolve({
-          templates,
+          templates: mine,
           row_cursor: meta ? meta.row_cursor : null,
           tomb_cursor: meta ? meta.tomb_cursor : null
         });
@@ -143,6 +145,17 @@ export async function getTemplatesCache(userId = 'default') {
 export async function replaceTemplatesCache(items, meta, userId = 'default') {
   const db = await openDb();
   if (!db) return;
+  const uid = String(userId);
+  const existing = await new Promise((resolve) => {
+    try {
+      const tx = db.transaction(['templates'], 'readonly');
+      const req = tx.objectStore('templates').getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      tx.onerror = () => resolve([]);
+    } catch (e) {
+      resolve([]);
+    }
+  });
 
   return new Promise((resolve) => {
     try {
@@ -150,9 +163,13 @@ export async function replaceTemplatesCache(items, meta, userId = 'default') {
       const tStore = tx.objectStore('templates');
       const mStore = tx.objectStore('meta');
 
-      tStore.clear();
+      for (const item of existing) {
+        if (!item?.userId || String(item.userId) === uid) tStore.delete(item.id);
+      }
       for (const item of (items || [])) {
-        tStore.put(sanitizeTemplateForCache(item));
+        const row = sanitizeTemplateForCache(item);
+        if (row && typeof row === 'object') row.userId = uid;
+        tStore.put(row);
       }
 
       if (meta) {
@@ -185,7 +202,9 @@ export async function mergeTemplatesCache(upsertItems = [], deletedIds = [], nex
         tStore.delete(id);
       }
       for (const item of upsertItems) {
-        tStore.put(sanitizeTemplateForCache(item));
+        const row = sanitizeTemplateForCache(item);
+        if (row && typeof row === 'object') row.userId = String(userId);
+        tStore.put(row);
       }
       if (nextMeta) {
         mStore.put({
@@ -237,16 +256,42 @@ export async function replaceSectionsCache(items = []) {
   });
 }
 
-export async function clearTemplatesCache() {
+export async function clearTemplatesCache(userId) {
   const db = await openDb();
   if (!db) return;
-
+  if (!userId) {
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(['templates', 'meta', 'sections'], 'readwrite');
+        tx.objectStore('templates').clear();
+        tx.objectStore('meta').clear();
+        tx.objectStore('sections').clear();
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      } catch (e) {
+        resolve();
+      }
+    });
+  }
+  const uid = String(userId);
+  const existing = await new Promise((resolve) => {
+    try {
+      const tx = db.transaction(['templates'], 'readonly');
+      const req = tx.objectStore('templates').getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      tx.onerror = () => resolve([]);
+    } catch (e) {
+      resolve([]);
+    }
+  });
   return new Promise((resolve) => {
     try {
-      const tx = db.transaction(['templates', 'meta', 'sections'], 'readwrite');
-      tx.objectStore('templates').clear();
-      tx.objectStore('meta').clear();
-      tx.objectStore('sections').clear();
+      const tx = db.transaction(['templates', 'meta'], 'readwrite');
+      const tStore = tx.objectStore('templates');
+      for (const item of existing) {
+        if (!item?.userId || String(item.userId) === uid) tStore.delete(item.id);
+      }
+      tx.objectStore('meta').delete(uid);
       tx.oncomplete = () => resolve();
       tx.onerror = () => resolve();
     } catch (e) {

@@ -8,13 +8,13 @@
       <!-- 模态框顶栏 -->
       <div class="h-14 px-5 border-b border-studio-700 flex items-center justify-between shrink-0 bg-studio-950/70">
         <div class="flex items-center gap-2.5">
-          <span class="p-1.5 rounded-lg bg-rose-500/10 text-rose-400">
-            <StudioIcon name="warning" :size="16" />
+          <span class="p-1.5 rounded-lg" :class="isJobCancelled ? 'bg-amber-500/10 text-amber-400' : 'bg-rose-500/10 text-rose-400'">
+            <StudioIcon :name="isJobCancelled ? 'info' : 'warning'" :size="16" />
           </span>
           <div>
             <div class="flex items-center gap-2">
               <span class="font-bold text-sm text-white">生成任务诊断与原始日志</span>
-              <span class="px-2 py-0.5 rounded bg-rose-500/15 text-rose-300 font-mono text-[10px] font-bold">
+              <span class="px-2 py-0.5 rounded font-mono text-[10px] font-bold" :class="isJobCancelled ? 'bg-amber-500/15 text-amber-300' : 'bg-rose-500/15 text-rose-300'">
                 {{ jobStatusLabel }}
               </span>
             </div>
@@ -136,8 +136,75 @@
           </div>
         </div>
 
-        <!-- 块 3：根本原因与诊断分析 -->
-        <div class="rounded-xl border border-rose-900/50 bg-rose-950/20 p-4 space-y-2.5">
+        <!-- 块 3-A：任务已取消时的云端状态核验 -->
+        <div v-if="isJobCancelled" class="rounded-xl border border-amber-900/50 bg-amber-950/20 p-4 space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-amber-200 flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full" :class="cancellationRealCloudCancelled ? 'bg-emerald-400' : 'bg-amber-400'"></span>
+              云端任务状态核验（是否继续生成视频）
+            </span>
+            <span class="px-2 py-0.5 rounded font-mono text-[10px] font-bold" :class="cancellationRealCloudCancelled ? 'bg-emerald-900/60 text-emerald-300' : 'bg-amber-900/60 text-amber-200'">
+              云端状态: {{ cancellationVendorStatus }}
+            </span>
+          </div>
+
+          <!-- 核心核验结论 -->
+          <div
+            class="p-3.5 rounded-xl border font-mono text-xs leading-relaxed select-text shadow-sm"
+            :class="cancellationRealCloudCancelled ? 'bg-emerald-950/40 border-emerald-700/80 text-emerald-200' : 'bg-amber-950/60 border-amber-800/80 text-amber-200'"
+          >
+            <div class="font-bold flex items-center justify-between gap-2 mb-1.5 text-sm">
+              <span class="flex items-center gap-2">
+                <span>{{ cancellationRealCloudCancelled ? '✅ 云端已确认真实取消 (REAL CANCELLED)' : '⚠️ 前端已取消等待 · 云端在后台继续渲染' }}</span>
+              </span>
+              <span v-if="cancellationHttpStatus" class="text-[10px] px-2 py-0.5 rounded bg-black/40 font-mono">
+                接口响应 HTTP {{ cancellationHttpStatus }}
+              </span>
+            </div>
+            <div class="text-[11px] leading-relaxed opacity-90">
+              {{ cancellationSummaryText }}
+            </div>
+          </div>
+
+          <!-- 云端详细核验网格 -->
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono text-[11px]">
+            <div class="p-2.5 rounded-lg bg-studio-900 border border-studio-800">
+              <div class="text-slate-400 text-[10px] mb-1">服务商 / 任务 ID</div>
+              <div class="text-slate-200 font-semibold truncate" :title="cancellationVendorTaskId">
+                {{ cancellationVendorName }}: {{ cancellationVendorTaskId || '本地未分配' }}
+              </div>
+            </div>
+            <div class="p-2.5 rounded-lg bg-studio-900 border border-studio-800">
+              <div class="text-slate-400 text-[10px] mb-1">云端任务最新状态</div>
+              <div class="font-bold" :class="cancellationRealCloudCancelled ? 'text-emerald-300' : 'text-amber-300'">
+                {{ cancellationVendorStatus }}
+              </div>
+            </div>
+            <div class="p-2.5 rounded-lg bg-studio-900 border border-studio-800">
+              <div class="text-slate-400 text-[10px] mb-1">是否继续产生成片</div>
+              <div :class="cancellationContinued ? 'text-rose-400 font-bold' : 'text-emerald-300'">
+                {{ cancellationContinued ? '已生成 (产生算力消耗)' : '未生成 (0 算力消耗)' }}
+              </div>
+            </div>
+            <div class="p-2.5 rounded-lg bg-studio-900 border border-studio-800">
+              <div class="text-slate-400 text-[10px] mb-1">算力计费状态评估</div>
+              <div :class="cancellationRealCloudCancelled ? 'text-emerald-300 font-bold' : 'text-amber-300 font-semibold'">
+                {{ cancellationRealCloudCancelled ? '未扣费 (已成功止损)' : '已计费 (已进入深度计算)' }}
+              </div>
+            </div>
+          </div>
+
+          <!-- 若云端生成了视频，附带云端视频地址信息 -->
+          <div v-if="cancellationVendorVideoUrl" class="p-2.5 rounded-lg bg-studio-900 border border-studio-800 text-[11px] space-y-1">
+            <div class="text-slate-400 text-[10px] font-mono">云端生成的视频产物地址：</div>
+            <div class="font-mono text-cyan-300 break-all select-text text-[10px]">
+              {{ cancellationVendorVideoUrl }}
+            </div>
+          </div>
+        </div>
+
+        <!-- 块 3-B：非取消任务时的常规错误分析 -->
+        <div v-else class="rounded-xl border border-rose-900/50 bg-rose-950/20 p-4 space-y-2.5">
           <div class="flex items-center justify-between">
             <span class="font-bold text-rose-200 flex items-center gap-1.5">
               <span class="w-2 h-2 rounded-full bg-rose-400"></span>
@@ -273,6 +340,60 @@ const jobStatusLabel = computed(() => {
   return '生成未成功 (Failed)';
 });
 
+const isJobCancelled = computed(() => {
+  return Boolean(props.msg?.isCancelled || serverJob.value?.status === 'cancelled');
+});
+
+const cancellationAudit = computed(() => {
+  return serverJob.value?.cancellationAudit || props.msg?.result?.cancellationAudit || null;
+});
+
+const cancellationRealCloudCancelled = computed(() => {
+  if (cancellationAudit.value?.realCloudCancelled != null) return cancellationAudit.value.realCloudCancelled;
+  if (cancellationVendorStatus.value === 'CANCELLED') return true;
+  return false;
+});
+
+const cancellationVendorName = computed(() => {
+  return cancellationAudit.value?.vendorName || (modelName.value?.includes('wan') ? '阿里云百炼' : (modelName.value?.includes('seed') ? '火山引擎方舟' : '云端服务商'));
+});
+
+const cancellationHttpStatus = computed(() => {
+  return cancellationAudit.value?.cancelHttpStatus || null;
+});
+
+const cancellationContinued = computed(() => {
+  if (cancellationRealCloudCancelled.value) return false;
+  if (cancellationAudit.value?.cloudContinued != null) return cancellationAudit.value.cloudContinued;
+  if (cancellationAudit.value?.vendorStatus === 'SUCCEEDED') return true;
+  if (props.msg?.cloudContinued) return true;
+  if (props.msg?.vendorStatus === 'SUCCEEDED') return true;
+  return false;
+});
+
+const cancellationVendorStatus = computed(() => {
+  return cancellationAudit.value?.vendorStatus || props.msg?.vendorStatus || (cancellationContinued.value ? 'SUCCEEDED' : 'CANCELLED');
+});
+
+const cancellationVendorTaskId = computed(() => {
+  return cancellationAudit.value?.vendorTaskId || props.msg?.vendorTaskId || serverJob.value?.payload?.vendorTaskId || '';
+});
+
+const cancellationVendorVideoUrl = computed(() => {
+  return cancellationAudit.value?.vendorVideoUrl || props.msg?.vendorVideoUrl || '';
+});
+
+const cancellationSummaryText = computed(() => {
+  if (cancellationAudit.value?.auditSummary) return cancellationAudit.value.auditSummary;
+  if (cancellationRealCloudCancelled.value) {
+    return '已向服务商发送取消请求并在排队期生效（云端真取消）：云端已中止算力渲染与排期，未产生多余计费。';
+  }
+  if (cancellationContinued.value) {
+    return '该任务在本地发起了取消。经云端日志核验，云端后台已完成视频渲染解算并输出了视频地址。';
+  }
+  return '该任务已在本地手动取消，云端排期已终止，未继续消耗算力。';
+});
+
 const modelName = computed(() => {
   return serverJob.value?.model || props.msg?.modelKey || props.msg?.model || props.msg?.retryModel || '';
 });
@@ -406,12 +527,20 @@ const requestParamsSummary = computed(() => {
 const formattedFullJson = computed(() => {
   const data = {
     jobId: resolvedJobId.value,
-    status: serverJob.value?.status || (props.msg?.isError ? 'failed' : 'unknown'),
+    status: serverJob.value?.status || (props.msg?.isCancelled ? 'cancelled' : (props.msg?.isError ? 'failed' : 'unknown')),
     model: modelName.value,
     modality: modalityLabel.value,
+    isCancelled: isJobCancelled.value,
+    cancellationAudit: cancellationAudit.value || (isJobCancelled.value ? {
+      vendorTaskId: cancellationVendorTaskId.value,
+      vendorStatus: cancellationVendorStatus.value,
+      cloudContinued: cancellationContinued.value,
+      vendorVideoUrl: cancellationVendorVideoUrl.value,
+      summary: cancellationSummaryText.value
+    } : undefined),
     timestamps: timestamps.value,
     duration: formattedDuration.value,
-    error: {
+    error: isJobCancelled.value ? undefined : {
       message: rawErrorMessage.value,
       code: errorCode.value,
       upstreamStatus: serverJob.value?.error?.upstreamStatus || props.msg?.rawError?.upstreamStatus || null,

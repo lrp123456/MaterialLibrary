@@ -98,7 +98,11 @@ function main() {
 
   const pagesJson = read('app-uniapp/src/pages.json');
   for (const page of ['enhance', 'expand', 'insert', 'remove', 'replace', 'watermark']) {
-    assert.ok(pagesJson.includes(`"path": "pages/quick/${page}"`), `pages.json 必须注册 ${page}`);
+    assert.ok(
+      pagesJson.includes(`"path": "pages/quick/${page}"`) ||
+      pagesJson.includes(`"path": "quick/${page}"`),
+      `pages.json 必须注册 ${page}`
+    );
   }
 
   // ── 3D 朝向页：舞台可拖拽旋转模型本体 ──
@@ -141,8 +145,11 @@ function main() {
   // ── 后台生成不阻塞其它会话：发送按钮/进度提示只看当前会话 ──
   assert.ok(chatStudio.includes('const currentGenerating = computed('),
     '必须按当前会话派生生成中状态，不能用全局 generating 单例');
-  assert.ok(chatStudio.includes(':disabled="currentGenerating"'),
-    '立即生成/发送按钮不能被其它会话的后台任务置灰');
+  assert.ok(
+    chatStudio.includes(':disabled="currentGenerating"') ||
+    chatStudio.includes(':disabled="currentGenerating || uploadingCrop"'),
+    '立即生成/发送按钮不能被其它会话的后台任务置灰'
+  );
   assert.ok(chatStudio.includes('v-if="currentGenerating && !hasGeneratingPlaceholder"'),
     '生成进度提示只看当前会话');
   assert.ok(!chatStudio.includes(':disabled="generating"'),

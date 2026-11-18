@@ -779,11 +779,13 @@ async function executeTagSpace(services, nodeConfig, asset, runCtx = {}) {
     try { logAssetTagHistory(db, histRows); } catch (e) { console.warn('[tag] history write fail', e.message); }
   }
 
-  // 更新水印状态；资产仍处流水线中间态（原 'tagging_done' 是零数据僵尸状态，
-  // 流程末尾会统一置为 ready，这里只需标记处理中）
+  // 已经 ready 的素材重打失败也不许掉出列表。第一次入库仍可停在 processing，
+  // 直到 index 节点写成 ready。
   if (!onlyDims) {
     db.prepare(`
-      UPDATE assets SET has_watermark=?, watermark_note=?, status='processing', updated_at=?
+      UPDATE assets SET has_watermark=?, watermark_note=?,
+        status=CASE WHEN status IN ('ready', 'ready_with_flags') THEN status ELSE 'processing' END,
+        updated_at=?
       WHERE fid=?
     `).run(tags.has_watermark ? 1 : 0, tags.watermark_note || '', Date.now(), asset.fid);
   } else {
@@ -802,8 +804,9 @@ async function executeTagSpace(services, nodeConfig, asset, runCtx = {}) {
 
   try {
     const domColor = Array.isArray(colors) ? colors[0] : (colors || null);
-    db.prepare('UPDATE assets SET dominant_color = COALESCE(?, dominant_color), status = ? WHERE fid = ?')
-      .run(domColor, 'processing', asset.fid);
+    db.prepare(`UPDATE assets SET dominant_color = COALESCE(?, dominant_color),
+      status = CASE WHEN status IN ('ready', 'ready_with_flags') THEN status ELSE 'processing' END
+      WHERE fid = ?`).run(domColor, asset.fid);
   } catch (_) {}
 
   return {
@@ -967,7 +970,9 @@ async function executeTagFurniture(services, nodeConfig, asset, runCtx = {}) {
   db.prepare('UPDATE assets SET dominant_color=? WHERE fid=?').run(dominantColor, asset.fid);
 
   db.prepare(`
-    UPDATE assets SET has_watermark=?, watermark_note=?, status='processing', updated_at=?
+    UPDATE assets SET has_watermark=?, watermark_note=?,
+      status=CASE WHEN status IN ('ready', 'ready_with_flags') THEN status ELSE 'processing' END,
+      updated_at=?
     WHERE fid=?
   `).run(tags.has_watermark ? 1 : 0, tags.watermark_note || '', Date.now(), asset.fid);
 
@@ -1405,6 +1410,27 @@ async function executeClean(services, nodeConfig, asset, runCtx) {
 // ---------------- 4. Restage9x16Node ----------------
 async function executeRestage9x16(services, nodeConfig, asset, runCtx) {
   const { db, config, logger } = services;
+
+  // ★ 严格封锁自动重构：已按用户要求关闭一切自动化画幅重构！
+  // 只有人工在资产选择器或详情页主动单张点击触发（isManualRun === true），才允许执行重构；
+  // 所有工作流流水线自动流转、自动扫库、连拍补偿等非人工任务一律安全跳过，绝不调用任何生图模型消耗配额！
+  const isManualRun = Boolean(
+    runCtx?.isManual ||
+    runCtx?.trigger?.includes('manual') ||
+    runCtx?.trigger?.includes('retry') ||
+    runCtx?.prevError ||
+    nodeConfig?.isManual
+  );
+  if (!isManualRun) {
+    logger?.info?.(`[restage_9_16] 自动重构已全局关闭，跳过非人工任务 fid=${asset.fid}`);
+    return {
+      success: true,
+      skipped: true,
+      reason: 'auto_restage_disabled_manual_only',
+      output: { restaged: false, skipped: true, reason: '自动画幅重构已全局关闭，仅支持人工在界面手动点击生成' }
+    };
+  }
+
   const curCat = asset.category || runCtx?.lastOutput?.category;
   if (curCat === 'portrait' || curCat === 'clothing') {
     return {
@@ -1767,6 +1793,26 @@ async function executeRestageDual(services, nodeConfig, asset, runCtx) {
     };
   }
 
+  // ★ 严格封锁自动重构：已按用户要求关闭一切自动化画幅重构！
+  // 只有人工在资产选择器或详情页主动单张点击触发（isManualRun === true），才允许执行重构；
+  // 所有工作流流水线自动流转、自动扫库、连拍补偿等非人工任务一律安全跳过，绝不调用任何生图模型消耗配额！
+  const isManualRun = Boolean(
+    runCtx?.isManual ||
+    runCtx?.trigger?.includes('manual') ||
+    runCtx?.trigger?.includes('retry') ||
+    runCtx?.prevError ||
+    nodeConfig?.isManual
+  );
+  if (!isManualRun) {
+    logger?.info?.(`[restage_dual] 自动重构已全局关闭，跳过非人工任务 fid=${asset.fid}`);
+    return {
+      success: true,
+      skipped: true,
+      reason: 'auto_restage_disabled_manual_only',
+      output: { restaged: false, skipped: true, reason: '自动画幅重构已全局关闭，仅支持人工在界面手动点击生成' }
+    };
+  }
+
   // ── 决策 3（方案 A）：若与近 7 天同品类有效素材存在 1 <= pHash <= 6 的高相似连拍图，暂缓双画幅重构 ──
   const forceRestage = Boolean(nodeConfig?.forceRestage || runCtx?.forceRestage);
   if (!forceRestage && asset.phash && asset.phash.length >= 16) {
@@ -1832,13 +1878,6 @@ async function executeRestageDual(services, nodeConfig, asset, runCtx) {
 
   // 2. 检查适配器 —— 区分「批量自动化免费重构」与「用户手动付费重构 (seedream5.0flash)」
   const imageAdapters = db.prepare("SELECT * FROM gen_adapters WHERE kind='image' AND enabled=1").all();
-  const isManualRun = Boolean(
-    runCtx?.isManual ||
-    runCtx?.trigger?.includes('manual') ||
-    runCtx?.trigger?.includes('retry') ||
-    runCtx?.prevError ||
-    nodeConfig?.isManual
-  );
 
   const chain = [];
   const arkSeedream = imageAdapters.find(a => a.id === 'ark_seedream');

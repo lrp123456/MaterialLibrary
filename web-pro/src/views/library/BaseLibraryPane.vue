@@ -510,7 +510,7 @@
 import { ref, computed, onMounted, watch } from 'vue';
 import StudioIcon from '../../components/StudioIcon.vue';
 import BaseLibrarySearch from './BaseLibrarySearch.vue';
-import { getToken, getCurrentUser } from '../../api';
+import { getToken, getCurrentUser, authFetch } from '../../api';
 
 const props = defineProps({
   warehouse: {
@@ -898,9 +898,7 @@ function authedUrl(url) {
 
 async function loadTaxonomy() {
   try {
-    const res = await fetch(`/api/base-library/taxonomy`, {
-      headers: { 'Authorization': `Bearer ${getToken()}` }
-    });
+    const res = await authFetch(`/api/base-library/taxonomy`);
     const json = await res.json();
     if (json.success && json.data?.surfaces) {
       surfaces.value = json.data.surfaces;
@@ -912,7 +910,6 @@ async function loadTaxonomy() {
 
 async function refreshList() {
   loading.value = true;
-  const token = getToken();
   try {
     if (props.warehouse === 'material') {
       const q = new URLSearchParams();
@@ -920,9 +917,7 @@ async function refreshList() {
       if (localMatSource.value) q.set('source', localMatSource.value);
       if (localShellOnly.value) q.set('is_shell', '1');
       if (localSearchQuery.value) q.set('q', localSearchQuery.value);
-      const res = await fetch(`/api/base-library/materials?${q.toString()}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const res = await authFetch(`/api/base-library/materials?${q.toString()}`);
       const json = await res.json();
       if (json.success) materials.value = json.data || [];
     } else if (props.warehouse === 'paint') {
@@ -933,15 +928,11 @@ async function refreshList() {
       }
       if (localPinnedOnly.value) q.set('pinned', '1');
       if (localSearchQuery.value) q.set('q', localSearchQuery.value);
-      const res = await fetch(`/api/base-library/paints?${q.toString()}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const res = await authFetch(`/api/base-library/paints?${q.toString()}`);
       const json = await res.json();
       if (json.success) paints.value = json.data || [];
     } else if (props.warehouse === 'light') {
-      const res = await fetch(`/api/base-library/lights`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const res = await authFetch(`/api/base-library/lights`);
       const json = await res.json();
       if (json.success) lights.value = json.data || { directions: [], ccts: [] };
     }

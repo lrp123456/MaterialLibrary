@@ -393,6 +393,21 @@ function onVisibilityChange() {
   guardSession();
 }
 
+// 全局媒体资源 401 探活捕获器：<img>/<video>/<audio> 标签遇到 401 时不触发 fetch 错误，
+// 通过 capture 阶段的 DOM 资源加载失败事件触发一次轻量会话探活（1s 节流），
+// 避免会话失效时用户只看到满屏破图而永远弹不出登录框。
+let lastMediaVerify = 0;
+function onGlobalResourceError(event) {
+  const el = event?.target;
+  if (!el || (el.tagName !== 'IMG' && el.tagName !== 'VIDEO' && el.tagName !== 'AUDIO')) return;
+  const src = el.currentSrc || el.src;
+  if (!src || (!src.includes('/api/') && !src.includes(':30001/'))) return;
+  const now = Date.now();
+  if (now - lastMediaVerify < 1000) return;
+  lastMediaVerify = now;
+  verifySession();
+}
+
 // 监听必须建在 setup 阶段：子视图挂载早于 App 的 onMounted，
 // 它们首屏请求就会把死会话打成 401 —— 晚注册等于丢掉原因，只剩一个没有说明的登录框。
 window.addEventListener('ml_auth_required', onAuthRequired);
@@ -402,11 +417,18 @@ onMounted(() => {
   document.addEventListener('visibilitychange', onVisibilityChange);
   window.addEventListener('unhandledrejection', handleGlobalChunkError);
   window.addEventListener('error', handleGlobalChunkError);
+  // 媒体 401 捕获：资源错误不冒泡，必须在 capture 阶段捕获
+  window.addEventListener('error', onGlobalResourceError, true);
   // 统一返回入口：ESC 走 capture，先于各组件自己的 keydown 监听执行。
   ensureBackSentinel();
   window.addEventListener('popstate', onPopState);
   window.addEventListener('keydown', onGlobalKeydown, true);
-  updateTimer = setInterval(checkForUpdate, 5 * 60 * 1000);
+  // 5分钟定时心跳：同时探测新版本部署与后端会话存活状态
+  const runPeriodicTasks = () => {
+    checkForUpdate();
+    guardSession();
+  };
+  updateTimer = setInterval(runPeriodicTasks, 5 * 60 * 1000);
   // 本地有没有 token 字符串不作数：新设备没 token 要登录，有 token 也得让服务端认账。
   // 两条都走 guardSession，区别只在登录框上那行原因。
   guardSession();
@@ -417,6 +439,7 @@ onUnmounted(() => {
   document.removeEventListener('visibilitychange', onVisibilityChange);
   window.removeEventListener('unhandledrejection', handleGlobalChunkError);
   window.removeEventListener('error', handleGlobalChunkError);
+  window.removeEventListener('error', onGlobalResourceError, true);
   window.removeEventListener('popstate', onPopState);
   window.removeEventListener('keydown', onGlobalKeydown, true);
   if (updateTimer) clearInterval(updateTimer);

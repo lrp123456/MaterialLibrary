@@ -226,6 +226,25 @@ export function onStatusChange(fn) {
   return () => { listeners = listeners.filter((f) => f !== fn); };
 }
 
+let unauthorizedHandler = null;
+export function setUnauthorizedHandler(fn) {
+  unauthorizedHandler = fn;
+}
+
+function triggerUnauthorized() {
+  try {
+    if (typeof unauthorizedHandler === 'function') {
+      unauthorizedHandler();
+    } else {
+      try { localStorage.removeItem('ml_token'); } catch (_) {}
+      try { localStorage.removeItem('ml_user'); } catch (_) {}
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('ml_auth_required', { detail: 'expired' }));
+      }
+    }
+  } catch (_) {}
+}
+
 /** 把同源相对 API 路径拼成当前生效 base 下的绝对/相对 URL */
 export function resolveApiUrl(origPath) {
   const p = String(origPath || '');
@@ -318,6 +337,11 @@ export function installFetchGuard() {
       const abs = base ? `${base}${path0.startsWith('/') ? '' : '/'}${path0}` : path0;
       try {
         const resp = await doFetch(abs, norm0.init);
+        // 全局 401 拦截：任何 /api/ 请求（除登录本身外）遇到未授权时立即触发统一收口，
+        // 清理死 Token 并向全站广播 ml_auth_required，确保弹窗 100% 弹出，杜绝静默吞错
+        if (resp.status === 401 && !path0.includes('/auth/login')) {
+          triggerUnauthorized();
+        }
         if (resp.status === 502 || resp.status === 503 || resp.status === 504) {
           if (!safeToRetry) {
             // 非幂等方法：标记当前 base 链路异常供后续请求绕路，但本请求绝不重发，

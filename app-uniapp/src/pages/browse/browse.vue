@@ -654,9 +654,12 @@ export default {
     totalSelectedCount() {
       return this.activeFilterCount
     },
+    selectedFidSet() {
+      return new Set(this.selectedFids)
+    },
     selectedAssetsList() {
       if (!this.selectedFids.length) return []
-      const set = new Set(this.selectedFids)
+      const set = this.selectedFidSet
       return this.all.filter((a) => set.has(a.fid))
     },
     groups() {
@@ -1231,7 +1234,7 @@ export default {
       this.selectedFids = this.visibleItems.map((a) => a.fid)
     },
     invertSelection() {
-      const picked = new Set(this.selectedFids)
+      const picked = this.selectedFidSet
       this.selectedFids = this.visibleItems.filter((a) => !picked.has(a.fid)).map((a) => a.fid)
     },
     async reload(options = {}) {
@@ -1747,7 +1750,8 @@ export default {
       }
     },
     isSelected(fid) {
-      return this.selectedFids.includes(fid)
+      if (!fid || !this.selectedFids.length) return false
+      return this.selectedFidSet.has(fid)
     },
     toggleSelect(item) {
       const idx = this.selectedFids.indexOf(item.fid)

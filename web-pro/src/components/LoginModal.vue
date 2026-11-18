@@ -1,7 +1,7 @@
 <template>
   <div
     v-if="visible"
-    class="fixed inset-0 z-[100] bg-black/70 backdrop-blur-md flex items-center justify-center p-4 font-sans"
+    class="fixed inset-0 z-[99998] bg-black/75 backdrop-blur-md flex items-center justify-center p-4 font-sans select-none animate-in fade-in duration-150"
     @click.self="onBackdrop"
   >
     <div class="bg-studio-900 border border-studio-700 rounded-2xl max-w-sm w-full p-6 shadow-2xl space-y-5">
@@ -13,7 +13,10 @@
           <p class="text-[10px] tracking-[0.2em] text-slate-400 font-semibold uppercase">Material Studio Pro</p>
           <h2 class="text-base font-bold text-white mt-1">登录素材工作台</h2>
           <p class="text-[11px] text-slate-400 mt-1">管理员可进入全部板块，检索员仅浏览下载</p>
-          <p v-if="reason" class="text-[11px] font-bold text-amber-300 mt-2 rounded-lg bg-amber-500/10 border border-amber-500/25 px-2.5 py-1.5">{{ reason }}</p>
+          <p v-if="displayReason" class="text-[11px] font-bold text-amber-300 mt-2 rounded-lg bg-amber-500/10 border border-amber-500/25 px-2.5 py-1.5 flex items-center justify-center gap-1.5">
+            <span>🔒</span>
+            <span>{{ displayReason }}</span>
+          </p>
         </div>
       </div>
 
@@ -21,6 +24,7 @@
         <div>
           <label class="block text-[11px] text-slate-400 mb-1.5 font-semibold">用户名</label>
           <input
+            ref="usernameInput"
             v-model="username"
             type="text"
             required
@@ -33,6 +37,7 @@
         <div>
           <label class="block text-[11px] text-slate-400 mb-1.5 font-semibold">密码</label>
           <input
+            ref="passwordInput"
             v-model="password"
             type="password"
             required
@@ -47,7 +52,7 @@
         <button
           type="submit"
           :disabled="loading"
-          class="w-full py-3 bg-studio-accent text-white rounded-xl text-xs font-bold hover:brightness-110 transition disabled:opacity-50 flex items-center justify-center gap-1.5 shadow-lg"
+          class="w-full py-3 bg-studio-accent text-white rounded-xl text-xs font-bold hover:brightness-110 transition disabled:opacity-50 flex items-center justify-center gap-1.5 shadow-lg cursor-pointer"
         >
           <span v-if="loading" class="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin"></span>
           <span>{{ loading ? '登录中…' : '立即登录' }}</span>
@@ -63,13 +68,12 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue';
-import { login } from '../api.js';
+import { ref, computed, watch, nextTick } from 'vue';
+import { login, isLoggedIn } from '../api.js';
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
-  // '登录已过期，请重新登录' 之类的服务端判定；带原因时不给点背景关掉，
-  // 否则关掉又是一屏破图，等于没提醒
+  // '登录已过期，请重新登录' 之类的服务端判定
   reason: { type: String, default: '' },
 });
 const emit = defineEmits(['login-success', 'update:visible']);
@@ -78,14 +82,32 @@ const username = ref('');
 const password = ref('');
 const loading = ref(false);
 const error = ref('');
+const usernameInput = ref(null);
+const passwordInput = ref(null);
+
+const displayReason = computed(() => {
+  if (props.reason) return props.reason;
+  if (!isLoggedIn()) return '需要登录后继续访问工作台';
+  return '';
+});
 
 function onBackdrop() {
-  if (props.reason) return;
+  // 强制登录协议：会话过期或本地无有效凭证时，锁定弹窗禁止点背景关闭
+  if (props.reason || !isLoggedIn()) return;
   emit('update:visible', false);
 }
 
 watch(() => props.visible, (v) => {
-  if (v) { error.value = ''; }
+  if (v) {
+    error.value = '';
+    nextTick(() => {
+      if (!username.value) {
+        usernameInput.value?.focus();
+      } else {
+        passwordInput.value?.focus();
+      }
+    });
+  }
 });
 
 async function handleLogin() {

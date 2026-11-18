@@ -10,11 +10,11 @@ const https = require('https');
 const path = require('path');
 
 const DEFAULT_OSS_CONFIG = {
-  region: process.env.OSS_REGION || 'cn-beijing',
-  bucket: process.env.OSS_BUCKET || 'naite-mes',
-  endpoint: process.env.OSS_ENDPOINT || 'img.naite.cc',
-  accessKeyId: process.env.OSS_AK || '',
-  accessKeySecret: process.env.OSS_SK || '',
+  region: process.env.OSS_REGION || process.env.ALIYUN_OSS_REGION || process.env.ALIYUN_REGION || 'cn-beijing',
+  bucket: process.env.OSS_BUCKET || process.env.OSS_BUCKET_NAME || process.env.ALIYUN_OSS_BUCKET || 'naite-mes',
+  endpoint: process.env.OSS_ENDPOINT || process.env.ALIYUN_OSS_ENDPOINT || 'img.naite.cc',
+  accessKeyId: process.env.OSS_AK || process.env.OSS_ACCESS_KEY_ID || process.env.ALIYUN_ACCESS_KEY_ID || '',
+  accessKeySecret: process.env.OSS_SK || process.env.OSS_ACCESS_KEY_SECRET || process.env.ALIYUN_ACCESS_KEY_SECRET || '',
 };
 
 function getOssConfig(services) {

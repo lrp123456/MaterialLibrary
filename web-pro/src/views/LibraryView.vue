@@ -2802,6 +2802,8 @@ import { onAssetChange } from '../service/sse.js';
 import { bindOverlays } from '../service/overlay-stack.js';
 import {
   ensureToken,
+  isLoggedIn,
+  reportUnauthorized,
   getCurrentUser,
   fetchLibraryCatalog,
   fetchAssets,
@@ -5128,11 +5130,13 @@ function handleSelectMonth(monthKey) {
 }
 
 // 组装 API 查询请求参数
-function buildQueryParams(page = 1) {
+function buildQueryParams(page = 1, opts = {}) {
   const params = {
     page,
     pageSize
   };
+  if (!opts.facets) params.skip_facets = '1';
+  params.fields = 'card';
 
   if (keyword.value.trim()) {
     params.keyword = keyword.value.trim();
@@ -5234,17 +5238,60 @@ async function loadTimelineDays() {
   }
 }
 
+const LIB_CARD_CACHE_PREFIX = 'ml_lib_cards_v1_';
+
+function libCardCacheKey() {
+  return `${LIB_CARD_CACHE_PREFIX}${activeMainTab.value}_${activeSubCategory.value}`;
+}
+
+function readLibCardCache() {
+  if (activeMainTab.value === 'trash' || activeMainTab.value === 'clip') return null;
+  try {
+    const parsed = JSON.parse(sessionStorage.getItem(libCardCacheKey()) || 'null');
+    return Array.isArray(parsed?.items) && parsed.items.length ? parsed.items : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeLibCardCache(items) {
+  if (activeMainTab.value === 'trash' || activeMainTab.value === 'clip') return;
+  try {
+    const slim = (items || []).slice(0, 60).map((it) => ({
+      fid: it.fid,
+      file_name: it.file_name || it.fileName || '',
+      fileName: it.fileName || it.file_name || '',
+      width: it.width,
+      height: it.height,
+      kind: it.kind,
+      media_type: it.media_type,
+      category: it.category,
+      thumb_url: it.thumb_url || it.thumbUrl || '',
+      thumbUrl: it.thumbUrl || it.thumb_url || '',
+      poster_url: it.poster_url || '',
+      mediaToken: it.mediaToken || '',
+      orientation: it.orientation,
+      origin_orientation: it.origin_orientation,
+      created_at: it.created_at,
+      duration: it.duration,
+      is_ai: it.is_ai
+    }));
+    if (!slim.length) return;
+    sessionStorage.setItem(libCardCacheKey(), JSON.stringify({ items: slim, at: Date.now() }));
+  } catch { /* 配额满时继续走网络 */ }
+}
+
 // 重新加载素材列表
 async function reloadAssets(reset = true) {
   if (reset) {
     currentPage.value = 1;
     hasMore.value = true;
-    assetsList.value = [];
     selectedFids.value = [];
     for (const fid of Object.keys(selectedAssetCache)) delete selectedAssetCache[fid];
+    assetsList.value = readLibCardCache() || [];
   }
 
-  loading.value = true;
+  loading.value = assetsList.value.length === 0;
   loadError.value = '';
   try {
     await ensureToken();
@@ -5298,16 +5345,18 @@ async function reloadAssets(reset = true) {
       const items = res.items || [];
       totalAssetsCount.value = res.total || 0;
 
-      if (res.filterOptions) {
-        if (res.filterOptions.space) dynamicFilters.space = res.filterOptions.space;
-        if (res.filterOptions.style_atom) dynamicFilters.style_atom = res.filterOptions.style_atom;
-        if (res.filterOptions.wood_style) dynamicFilters.wood_style = res.filterOptions.wood_style;
-        if (res.filterOptions.material_kind) dynamicFilters.material_kind = res.filterOptions.material_kind;
-        if (res.filterOptions.colors) dynamicFilters.colors = res.filterOptions.colors;
+      applyFilterOptions(res.filterOptions);
+      if (currentPage.value === 1) {
+        const facetParams = buildQueryParams(1, { facets: true });
+        facetParams.pageSize = 1;
+        fetchAssets(facetParams).then((facetRes) => {
+          applyFilterOptions(facetRes && facetRes.filterOptions);
+        }).catch(() => {});
       }
 
       if (currentPage.value === 1) {
         assetsList.value = items;
+        writeLibCardCache(items);
       } else {
         assetsList.value.push(...items);
       }
@@ -5316,8 +5365,13 @@ async function reloadAssets(reset = true) {
     }
   } catch (err) {
     // 未登录 / 会话过期：全局登录弹窗已弹出（ensureToken/authFetch 会广播事件），
-    // 这里不展示错误面板，避免把“需要登录”误报成断线或空结果。
+    // 设置清晰明确的提示，绝不伪装成“未找到匹配的素材资产”或空列表
     if (err?.name === 'AuthRequiredError') {
+      loadError.value = '登录会话已失效，请重新登录以加载素材资产。';
+      return;
+    }
+    if (assetsList.value.length > 0) {
+      console.warn('刷新素材失败，先显示上次打开的列表', err);
       return;
     }
     console.error('加载素材失败:', err);
@@ -6108,6 +6162,14 @@ async function handleImageError(e) {
     return;
   }
 
+  // 鉴权拦截：若当前未登录或会话已失效，不盲目换 base 重发，直接触发统一鉴权弹窗
+  if (!isLoggedIn()) {
+    el.onerror = null;
+    el.src = PLACEHOLDER_IMG;
+    reportUnauthorized();
+    return;
+  }
+
   // 记录已在该元素上试过的 base，避免同一坏地址/同源反复触发
   if (!el.__mlImgTried) el.__mlImgTried = new Set();
   const curOrigin = (() => { try { return new URL(curSrc, window.location.href).origin; } catch { return ''; } })();
@@ -6432,12 +6494,22 @@ async function openCreateBaseSwatchModal() {
     console.warn('新增色卡失败:', err);
   }
 }
+function applyFilterOptions(filterOptions) {
+  if (!filterOptions) return;
+  if (filterOptions.space) dynamicFilters.space = filterOptions.space;
+  if (filterOptions.style_atom) dynamicFilters.style_atom = filterOptions.style_atom;
+  if (filterOptions.wood_style) dynamicFilters.wood_style = filterOptions.wood_style;
+  if (filterOptions.material_kind) dynamicFilters.material_kind = filterOptions.material_kind;
+  if (filterOptions.colors) dynamicFilters.colors = filterOptions.colors;
+}
+
 function applyLibraryLane(lane) {
   const key = lane || 'image';
   if (key === 'base') {
     libraryRail.value = 'items';
     sourcePlate.value = 'base';
     loadBaseCatalog();
+    loadBaseSurfaces();
     return;
   }
   libraryRail.value = 'dam';
@@ -6460,7 +6532,6 @@ let stopAssetWatch = null;
 onMounted(() => {
   applyLibraryLane(props.libraryLane);
   fetchLibraryCatalog().catch(() => {});
-  loadBaseSurfaces();
   if (libraryRail.value === 'dam') reloadAssets(true);
   loadTimelineDays();
   setTimeout(setupIntersectionObserver, 300);

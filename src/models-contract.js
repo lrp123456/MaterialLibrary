@@ -70,7 +70,7 @@ function contractNumber(key, label, min, max, def, extra) {
   }, extra || {});
 }
 
-const RATIO_SEEDANCE = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9', 'adaptive'];
+const RATIO_SEEDANCE = ['9:16', '3:4', 'adaptive'];
 
 const VIDEO_RESOLUTIONS_SIX = [
   '480p',
@@ -112,7 +112,7 @@ function seedance20Params() {
   return [
     contractEnum('resolution', '分辨率', res.options, res.default, { option_labels: res.labels }),
     contractDuration('duration', '时长', 4, 15, 5, { extra_stops: [-1], extra_labels: { '-1': '智能' } }),
-    contractEnum('ratio', '画幅', RATIO_SEEDANCE, '9:16'),
+    contractEnum('ratio', '画幅', RATIO_SEEDANCE, '9:16', { option_labels: { '9:16': '9:16', '3:4': '3:4', 'adaptive': '自适应' } }),
     contractBool('generate_audio', '生成同步音频', true, { visibility: 'public' }),
     contractEnum('mode', '模式', ['text_to_video', 'omni_reference', 'image_to_video', 'first_last_frame'], 'text_to_video', {
       location: 'none',
@@ -131,7 +131,7 @@ function seedance25Params() {
   return [
     contractEnum('resolution', '分辨率', res.options, res.default, { option_labels: res.labels }),
     contractDuration('duration', '时长', 4, 30, 5, { extra_stops: [-1], extra_labels: { '-1': '智能' } }),
-    contractEnum('ratio', '画幅', RATIO_SEEDANCE, '9:16'),
+    contractEnum('ratio', '画幅', RATIO_SEEDANCE, '9:16', { option_labels: { '9:16': '9:16', '3:4': '3:4', 'adaptive': '自适应' } }),
     contractBool('generate_audio', '生成同步音频', true, { visibility: 'public' }),
     contractEnum('mode', '模式', ['text_to_video', 'omni_reference', 'image_to_video', 'first_last_frame', 'video_edit', 'video_extend', 'draft_to_final'], 'text_to_video', {
       location: 'none',
@@ -158,7 +158,7 @@ function wan30Params() {
   return [
     contractEnum('resolution', '分辨率', res.options, res.default, { option_labels: res.labels }),
     contractDuration('duration', '时长', 2, 30, 5, { extra_stops: [-1], extra_labels: { '-1': '智能' } }),
-    contractEnum('ratio', '画幅', ['16:9', '9:16', '1:1', '4:3', '3:4', 'adaptive'], '9:16'),
+    contractEnum('ratio', '画幅', ['9:16', '3:4', 'adaptive'], '9:16', { option_labels: { '9:16': '9:16', '3:4': '3:4', 'adaptive': '自适应' } }),
     contractEnum('mode', '模式', ['text_to_video', 'image_to_video', 'first_last_frame', 'omni_reference'], 'text_to_video', {
       location: 'none',
       option_labels: {
@@ -475,8 +475,8 @@ const DEFAULT_MODEL_CONTRACTS = [
         key: 'ratio',
         label: '宽高比',
         type: 'enum',
-        default: '1:1',
-        options: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'],
+        default: '9:16',
+        options: ['9:16', '3:4'],
         visibility: 'public',
         location: 'table',
       },
@@ -594,7 +594,7 @@ const DEFAULT_MODEL_CONTRACTS = [
     polishHint: '1K/1.5K/2K · 框内替换 · 图层拆分 · 支持极速提示优化(fast)',
     params: [
       { key: 'size', label: '尺寸档', type: 'enum', default: '2K', options: ['1K', '1.5K', '2K'], visibility: 'public', location: 'table' },
-      { key: 'ratio', label: '宽高比', type: 'enum', default: '1:1', options: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'], visibility: 'public', location: 'table' },
+      { key: 'ratio', label: '宽高比', type: 'enum', default: '9:16', options: ['9:16', '3:4'], visibility: 'public', location: 'table' },
       { key: 'layer_decomposition', label: '图层拆分', type: 'boolean', default: false, visibility: 'public', location: 'body', body_field: 'layer_decomposition' },
       { key: 'background', label: '透明底', type: 'enum', default: 'opaque', options: ['opaque', 'transparent'], visibility: 'advanced', location: 'body', body_field: 'background' },
       { key: 'output_format', label: '输出格式', type: 'enum', default: 'jpeg', options: ['jpeg', 'png'], visibility: 'advanced', location: 'body', body_field: 'output_format' },
@@ -655,7 +655,7 @@ const DEFAULT_MODEL_CONTRACTS = [
     polishHint: '2K/3K/4K · 支持组图连拍(最多15张) · 支持联网生图',
     params: [
       { key: 'size', label: '尺寸档', type: 'enum', default: '2K', options: ['2K', '3K', '4K'], visibility: 'public', location: 'body', body_field: 'size' },
-      { key: 'ratio', label: '宽高比', type: 'enum', default: '1:1', options: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'], visibility: 'public', location: 'none' },
+      { key: 'ratio', label: '宽高比', type: 'enum', default: '9:16', options: ['9:16', '3:4'], visibility: 'public', location: 'none' },
       { key: 'watermark', label: '水印', type: 'boolean', default: false, visibility: 'advanced', location: 'body', body_field: 'watermark' },
       { key: 'n', label: '组图张数', type: 'number', default: 1, min: 1, max: 15, visibility: 'advanced', location: 'body', body_field: 'max_images' },
       {
@@ -1011,8 +1011,8 @@ const DEFAULT_MODEL_CONTRACTS = [
         key: 'ratio',
         label: '宽高比',
         type: 'enum',
-        default: '1:1',
-        options: ['1:1', '4:3', '3:4', '16:9', '9:16'],
+        default: '9:16',
+        options: ['9:16', '3:4'],
         visibility: 'public',
         location: 'table',
       }
@@ -1054,8 +1054,8 @@ const DEFAULT_MODEL_CONTRACTS = [
         key: 'ratio',
         label: '宽高比',
         type: 'enum',
-        default: '1:1',
-        options: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3'],
+        default: '9:16',
+        options: ['9:16', '3:4'],
         visibility: 'public',
         location: 'table',
       },
@@ -1199,7 +1199,7 @@ const DEFAULT_MODEL_CONTRACTS = [
         label: '宽高比',
         type: 'enum',
         default: '9:16',
-        options: ['9:16', '16:9', '1:1', '4:3', '3:4', '21:9'],
+        options: ['9:16', '3:4'],
         visibility: 'public',
         location: 'body',
       },
@@ -1271,7 +1271,7 @@ const DEFAULT_MODEL_CONTRACTS = [
         label: '宽高比',
         type: 'enum',
         default: '9:16',
-        options: ['9:16', '16:9', '1:1', '4:3', '3:4', '21:9'],
+        options: ['9:16', '3:4'],
         visibility: 'public',
         location: 'body',
       },
@@ -1341,7 +1341,7 @@ const DEFAULT_MODEL_CONTRACTS = [
         label: '宽高比',
         type: 'enum',
         default: '9:16',
-        options: ['9:16', '16:9', '1:1', '4:3', '3:4', '21:9'],
+        options: ['9:16', '3:4'],
         visibility: 'public',
         location: 'body',
       },
@@ -1427,7 +1427,7 @@ const DEFAULT_MODEL_CONTRACTS = [
         label: '宽高比',
         type: 'enum',
         default: '9:16',
-        options: ['9:16', '16:9', '1:1', '4:3', '3:4', '21:9'],
+        options: ['9:16', '3:4'],
         visibility: 'public',
         location: 'body',
       },
@@ -1498,7 +1498,7 @@ const DEFAULT_MODEL_CONTRACTS = [
         label: '宽高比',
         type: 'enum',
         default: '9:16',
-        options: ['9:16', '16:9', '1:1', '4:3', '3:4', '2:3', '3:2', '4:5', '5:4', '21:9', '1:4', '1:8', '4:1', '8:1'],
+        options: ['9:16', '3:4'],
         visibility: 'public',
         location: 'body',
       },
@@ -1557,7 +1557,7 @@ const DEFAULT_MODEL_CONTRACTS = [
         label: '宽高比',
         type: 'enum',
         default: '9:16',
-        options: ['9:16', '16:9', '1:1', '3:4', '4:3', '21:9'],
+        options: ['9:16', '3:4'],
         visibility: 'public',
         location: 'body',
       },
@@ -2595,7 +2595,10 @@ function modelParamsNeedRatioRepair(params) {
   if (!Array.isArray(params) || !params.length) return false;
   const r = params.find((p) => p && (p.key === 'ratio' || p.key === 'aspect_ratio'));
   if (!r) return false;
-  return r.default !== '9:16' && Array.isArray(r.options) && r.options.includes('9:16');
+  if (r.default !== '9:16') return true;
+  if (!Array.isArray(r.options)) return true;
+  const hasIllegal = r.options.some((opt) => !['9:16', '3:4', 'adaptive'].includes(opt));
+  return hasIllegal;
 }
 
 function videoParamsNeedRepair(modelId, params) {
@@ -2691,13 +2694,15 @@ function seedStoredContract(db, insContract, mc, now) {
       params = mc.params || [];
     } else if (ratioRepair && Array.isArray(params)) {
       for (const p of params) {
-        if (p && (p.key === 'ratio' || p.key === 'aspect_ratio') && Array.isArray(p.options) && p.options.includes('9:16')) {
+        if (p && (p.key === 'ratio' || p.key === 'aspect_ratio')) {
           p.default = '9:16';
-          const idx = p.options.indexOf('9:16');
-          if (idx > 0) {
-            p.options.splice(idx, 1);
-            p.options.unshift('9:16');
-          }
+          const hasAdaptive = Array.isArray(p.options) && p.options.includes('adaptive');
+          p.options = hasAdaptive ? ['9:16', '3:4', 'adaptive'] : ['9:16', '3:4'];
+          p.option_labels = Object.assign({}, p.option_labels || {}, {
+            '9:16': '9:16',
+            '3:4': '3:4',
+            'adaptive': '自适应'
+          });
         }
       }
     } else {
@@ -3276,16 +3281,18 @@ function getModelPublicCatalog(db, visibleModelIds) {
 
       if (d === 'image') {
         const sizeParam = params.find(p => p.key === 'size') || { label: '尺寸档', options: m.params?.size || ['1K', '1.5K', '2K'], default: '2K' };
-        const ratioParam = params.find(p => p.key === 'ratio') || { label: '宽高比', options: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'], default: '9:16' };
+        const ratioParam = params.find(p => p.key === 'ratio') || { label: '宽高比', options: ['9:16', '3:4'], default: '9:16' };
         commonControls = [
           { name: sizeParam.label || '尺寸档', key: 'size', options: sizeParam.options || ['1K', '1.5K', '2K'], default: sizeParam.default || '2K' },
-          { name: ratioParam.label || '宽高比', key: 'ratio', options: ratioParam.options || ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'], default: ratioParam.default || '9:16' }
+          { name: ratioParam.label || '宽高比', key: 'ratio', options: ['9:16', '3:4'], default: '9:16' }
         ];
       } else if (d === 'video') {
-        const ratioParam = params.find(p => p.key === 'ratio' || p.key === 'aspect_ratio') || { label: '画幅', options: ['9:16', '16:9', '1:1', '4:3', '3:4', '21:9'], default: '9:16' };
+        const hasAdaptive = params.some(p => (p.key === 'ratio' || p.key === 'aspect_ratio') && Array.isArray(p.options) && p.options.includes('adaptive'));
+        const vidOptions = hasAdaptive ? ['9:16', '3:4', 'adaptive'] : ['9:16', '3:4'];
+        const ratioParam = params.find(p => p.key === 'ratio' || p.key === 'aspect_ratio') || { label: '画幅', options: vidOptions, default: '9:16' };
         const durParam = params.find(p => p.key === 'duration' || p.key === 'seconds') || { label: '时长', min: 4, max: 30, default: 5 };
         commonControls = [
-          { name: ratioParam.label || '画幅', key: 'ratio', options: ratioParam.options || ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'], default: ratioParam.default || '9:16' },
+          { name: ratioParam.label || '画幅', key: 'ratio', options: vidOptions, default: '9:16' },
           { name: durParam.label || '时长', key: 'duration', min: durParam.min || 4, max: durParam.max || (String(m.id || '').includes('2_5') || String(m.id || '').includes('2.5') ? 30 : 15), default: durParam.default || 5 }
         ];
       } else if (d === 'music') {
@@ -3422,15 +3429,15 @@ function buildSchemaForContract(c, db = null) {
     } else if (p.key === 'size' && typeof p.default === 'string') {
       fieldObj.options = [p.default];
     }
-    if ((uiKey === 'ratio' || uiKey === 'aspect_ratio') && Array.isArray(fieldObj.options) && fieldObj.options.includes('9:16')) {
-      if (!fieldObj.default || fieldObj.default === '1:1') {
-        fieldObj.default = '9:16';
-      }
-      const idx916 = fieldObj.options.indexOf('9:16');
-      if (idx916 > 0) {
-        fieldObj.options.splice(idx916, 1);
-        fieldObj.options.unshift('9:16');
-      }
+    if (uiKey === 'ratio' || uiKey === 'aspect_ratio') {
+      const hasAdaptive = Array.isArray(fieldObj.options) && fieldObj.options.includes('adaptive');
+      fieldObj.options = hasAdaptive ? ['9:16', '3:4', 'adaptive'] : ['9:16', '3:4'];
+      fieldObj.default = '9:16';
+      fieldObj.labels = Object.assign({}, fieldObj.labels || {}, {
+        '9:16': '9:16',
+        '3:4': '3:4',
+        'adaptive': '自适应'
+      });
     }
     if (isVideoContract && (uiKey === 'resolution' || p.key === 'resolution') && Array.isArray(fieldObj.options)) {
       try {
@@ -3459,10 +3466,6 @@ function buildSchemaForContract(c, db = null) {
 
   // Ensure seedream models expose watermark in common and bbox/point in advanced for backward compatibility
   if (c.id === 'seedream5flash' || c.id === 'seedream5pro' || c.id === 'seedream5lite') {
-    const ratioField = common.find(f => f.key === 'ratio');
-    if (ratioField && Array.isArray(ratioField.options) && !ratioField.options.includes('auto')) {
-      ratioField.options = ['auto', ...ratioField.options];
-    }
     const wmIdx = advanced.findIndex(f => f.key === 'watermark');
     if (wmIdx >= 0 && !common.some(f => f.key === 'watermark')) {
       const [wm] = advanced.splice(wmIdx, 1);

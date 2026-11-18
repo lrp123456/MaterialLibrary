@@ -13,7 +13,7 @@
 'use strict';
 
 const { eventBus, EVENTS } = require('./events');
-const { getGenJob } = require('./gen-jobs');
+const { getGenJob, recoverStaleGenJobs } = require('./gen-jobs');
 const { runGeneration } = require('./gen-submit');
 
 const IMG_CONCURRENCY = 4;
@@ -112,9 +112,56 @@ function summarizeJobTiming(rawTiming, rowLike, completedAt) {
   };
 }
 
+/** 清理可能残留的超大原始响应与 Base64，防止撑爆数据库与 WebSocket 传输。 */
+function cleanRawUpstream(raw) {
+  if (!raw || typeof raw !== 'object') return raw;
+  try {
+    const s = JSON.stringify(raw);
+    if (s.length < 8192 && !s.includes('data:image/') && !s.includes('base64')) return raw;
+    const copy = JSON.parse(s);
+    if (Array.isArray(copy?.candidates)) {
+      for (const c of copy.candidates) {
+        for (const p of (c?.content?.parts || [])) {
+          if (p?.inlineData?.data) p.inlineData.data = `[omitted base64 ${Math.round(p.inlineData.data.length / 1024)}KB]`;
+          if (p?.inline_data?.data) p.inline_data.data = `[omitted base64 ${Math.round(p.inline_data.data.length / 1024)}KB]`;
+        }
+      }
+    }
+    if (JSON.stringify(copy).length > 10240) {
+      return { note: 'raw response omitted due to size' };
+    }
+    return copy;
+  } catch (_) {
+    return null;
+  }
+}
+
+function sanitizePayloadParams(params) {
+  if (!params || typeof params !== 'object') return params;
+  try {
+    const copy = { ...params };
+    if (Array.isArray(copy.refs)) {
+      copy.refs = copy.refs.map((r) => {
+        if (!r || typeof r !== 'object') return r;
+        if (r.wireframeUrl && String(r.wireframeUrl).startsWith('data:image/')) {
+          const { wireframeUrl, ...rest } = r;
+          return { ...rest, wireframeOmitted: true };
+        }
+        return r;
+      });
+    }
+    if (copy.requestSnapshot) delete copy.requestSnapshot;
+    if (copy.outbound) delete copy.outbound;
+    return copy;
+  } catch (_) {
+    return params;
+  }
+}
+
 /** 把执行结果归一化成前端 fetchChatMessages 能直接渲染的结果卡形状。 */
 function buildResult(result, payload) {
   const r = result && typeof result === 'object' ? result : {};
+  const cleanedRaw = cleanRawUpstream(r.raw);
   const files = Array.isArray(r.files) ? r.files : [];
   const pickUrl = (kind) => {
     for (const f of files) {
@@ -130,9 +177,10 @@ function buildResult(result, payload) {
     }
     return null;
   };
-  const p = payload || {};
+  const p = sanitizePayloadParams(payload || {});
   return {
     ...r,
+    raw: cleanedRaw,
     files,
     imageUrl: r.imageUrl || pickUrl('image'),
     videoUrl: r.videoUrl || pickUrl('video'),
@@ -144,10 +192,19 @@ function buildResult(result, payload) {
     model: r.model || p.model || '',
     modelKey: p.model || '',
     userPrompt: p.prompt || '',
-    refs: Array.isArray(p.refs) ? p.refs : (p.imageUrls || p.image ? (p.imageUrls || [p.image]) : []),
+    refs: (Array.isArray(p.refs) && p.refs.length)
+      ? p.refs
+      : ((p.imageUrls || p.image ? (p.imageUrls || [p.image]) : []).map((u, i) => (
+          typeof u === 'string' ? { url: u, name: `图${i + 1}`, tag: `@图${i + 1}`, kind: 'image', weight: 85 } : u
+        ))),
     ratio: p.ratio || (p.params && p.params.ratio) || '',
     resolution: r.resolution || p.size || p.resolution || (p.params && (p.params.resolution || p.params.size)) || '',
     duration: r.seconds || p.duration || p.durationSec || p.seconds || null,
+    content: r.content || (r.videoUrl
+      ? '影视级空间动态渲染已就绪。运镜平滑连续，空间光影与环境音效自然契合。'
+      : (r.audioUrl
+        ? '音频已生成。'
+        : '已为您完成空间视效生成。家具材质光泽与参考项深度统一，光影自然。')),
     params: p,
   };
 }
@@ -184,8 +241,20 @@ function writeAssistantMessage(db, row, result, targetStatus = 'done') {
   const now = Date.now();
   const id = 'genmsg_' + row.job_id;
   const paramsJson = JSON.stringify(result.params || {});
-  const promptText = result.content || result.prompt || '';
+  const promptText = result.content || (row.modality === 'video'
+    ? '影视级空间动态渲染已就绪。运镜平滑连续，空间光影与环境音效自然契合。'
+    : (row.modality === 'music'
+      ? '音频已生成。'
+      : '已为您完成空间视效生成。家具材质光泽与参考项深度统一，光影自然。'));
   const resultJson = JSON.stringify(result);
+
+  // 用户已经取消的消息不能再被完成/失败写回，否则切回会话又变成等待或结果卡。
+  if (targetStatus !== 'cancelled') {
+    try {
+      const cur = db.prepare('SELECT status FROM chat_messages WHERE id=?').get(id);
+      if (cur && cur.status === 'cancelled') return id;
+    } catch (_) {}
+  }
 
   try {
     db.prepare(`
@@ -234,28 +303,10 @@ function createGenJobsWorker(services) {
   let stopped = false;
 
   function recoverZombies() {
-    let rows = [];
-    try {
-      rows = db.prepare("SELECT job_id, attempt FROM gen_jobs WHERE status='running' AND started_at < ?")
-        .all(Date.now() - STALE_MS);
-    } catch (_) {
-      return;
+    const out = recoverStaleGenJobs(db, { staleMs: STALE_MS, maxAttempts: MAX_ATTEMPTS });
+    if (out.scanned) {
+      console.log(`[gen-jobs] 已回收 ${out.scanned} 个超时 running 任务（继续轮询 ${out.resumed}，重试 ${out.requeued}，失败 ${out.failed}）`);
     }
-    for (const r of rows) {
-      const nextAttempt = Number(r.attempt || 0) + 1;
-      try {
-        if (nextAttempt > MAX_ATTEMPTS) {
-          db.prepare("UPDATE gen_jobs SET status='failed', error_json=?, updated_at=?, completed_at=? WHERE job_id=? AND status='running'")
-            .run(JSON.stringify(normalizeError(new Error('任务超时重试次数过多'))), Date.now(), Date.now(), r.job_id);
-        } else {
-          db.prepare("UPDATE gen_jobs SET status='queued', attempt=?, started_at=NULL, updated_at=? WHERE job_id=? AND status='running'")
-            .run(nextAttempt, Date.now(), r.job_id);
-        }
-      } catch (e) {
-        console.warn('[gen-jobs] 僵尸回收失败:', e.message);
-      }
-    }
-    if (rows.length) console.log(`[gen-jobs] 已回收 ${rows.length} 个超时 running 任务`);
   }
 
   async function processJob(jobId) {
@@ -279,6 +330,11 @@ function createGenJobsWorker(services) {
       try {
         if (!stage || typeof stage !== 'object') return;
         const now = Date.now();
+        if (stage.vendorTaskId && payload.vendorTaskId !== stage.vendorTaskId) {
+          payload.vendorTaskId = String(stage.vendorTaskId);
+          db.prepare('UPDATE gen_jobs SET payload_json=?, updated_at=? WHERE job_id=?')
+            .run(JSON.stringify(payload), now, jobId);
+        }
         if (stage.key === lastStageKey && now - lastStageAt < 2500) return;
         const progress = Math.max(lastProgress, Math.min(99, Number(stage.progress) || lastProgress));
         lastStageKey = String(stage.key || '');
@@ -331,8 +387,12 @@ function createGenJobsWorker(services) {
           console.log(`[gen-jobs] 任务完成 jobId=${jobId} model=${row.model} 总耗时=${fmtMs(timing.totalMs)}`);
         }
       }
-      db.prepare("UPDATE gen_jobs SET status='succeeded', stage=?, progress=100, result_json=?, error_json=NULL, updated_at=?, completed_at=? WHERE job_id=?")
+      const upd = db.prepare("UPDATE gen_jobs SET status='succeeded', stage=?, progress=100, result_json=?, error_json=NULL, updated_at=?, completed_at=? WHERE job_id=? AND status IN ('queued','running')")
         .run('已完成', JSON.stringify(result), now, now, jobId);
+      if (upd.changes === 0) {
+        console.log(`[gen-jobs] 任务 ${jobId} 在完成写入时已不在 running/queued（已被取消或结束），放弃覆盖结果`);
+        return;
+      }
       const messageId = writeAssistantMessage(db, row, result, 'done');
       broadcast(db, row, 'succeeded', { ...result, messageId }, null, { progress: 100, stage: { key: 'done', label: '已完成' } });
     } catch (e) {
@@ -372,7 +432,11 @@ function createGenJobsWorker(services) {
         content: `生成遇到问题：${errObj.message || '生成失败'}`,
         model: '系统提示',
         retryPrompt: payload.prompt || '',
-        retryRefs: payload.imageUrls || payload.refs || [],
+        retryRefs: (Array.isArray(payload.refs) && payload.refs.length)
+          ? payload.refs
+          : (Array.isArray(payload.imageUrls)
+            ? payload.imageUrls.map((u, i) => ({ url: u, name: `图${i + 1}`, tag: `@图${i + 1}`, kind: 'image', weight: 85 }))
+            : []),
         retryModel: row.model || payload.model || '',
         retryModality: row.modality || 'image',
         retryMode: payload.genMode || payload.mode || '',

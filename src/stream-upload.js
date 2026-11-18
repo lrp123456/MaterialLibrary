@@ -375,6 +375,24 @@ function streamMultipartFile(req, targetFile, boundary, {
   });
 }
 
+/** 看得见的行，或用户删过、进了黑名单的行，才算「已经有了」。其余不可见行不拦截新的同步。 */
+function duplicateTargetStillHolds(db, fid, sha256) {
+  if (!fid) return false;
+  let row = null;
+  try {
+    row = db.prepare('SELECT fid, status, sha256 FROM assets WHERE fid=?').get(fid);
+  } catch (_) {
+    return false;
+  }
+  if (!row) return false;
+  if (row.status === 'ready' || row.status === 'ready_with_flags') return true;
+  try {
+    const { isBlacklisted } = require('./assets-delete');
+    if (isBlacklisted(db, { fid: row.fid, sha256: sha256 || row.sha256 })) return true;
+  } catch (_) {}
+  return false;
+}
+
 /**
  * 将已落盘的媒体文件入库、生成缩略图、注册衍生图并触发工作流
  */
@@ -411,14 +429,14 @@ async function registerMediaAsset(services, {
     }
 
     const derivHit = db.prepare('SELECT asset_fid, kind FROM derivatives WHERE sha256 = ? OR (md5 IS NOT NULL AND md5 = ?) LIMIT 1').get(sha256, sha256);
-    if (derivHit) {
+    if (derivHit && duplicateTargetStillHolds(db, derivHit.asset_fid, sha256)) {
       logger?.info?.(`[stream-upload] 衍生图绝对查重拦截 sha=${sha256.slice(0, 12)} fid=${derivHit.asset_fid}`);
       try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (_) {}
       return { fid: derivHit.asset_fid, deduped: true, reason: 'duplicate_of_derivative', sha256, matchedKind: derivHit.kind };
     }
 
     const visHit = db.prepare('SELECT fid FROM assets WHERE preview_sha256 = ? OR preview_md5 = ? OR thumb_sha256 = ? OR thumb_md5 = ? LIMIT 1').get(sha256, sha256, sha256, sha256);
-    if (visHit) {
+    if (visHit && duplicateTargetStillHolds(db, visHit.fid, sha256)) {
       logger?.info?.(`[stream-upload] 可见缓存图绝对查重拦截 sha=${sha256.slice(0, 12)} fid=${visHit.fid}`);
       try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (_) {}
       return { fid: visHit.fid, deduped: true, reason: 'visible_cache_duplicate', sha256 };
@@ -439,10 +457,11 @@ async function registerMediaAsset(services, {
   } catch (e) {
     if (e.code === 'export_registry') throw e;
   }
-  const existing = db.prepare('SELECT fid, client_asset_id FROM assets WHERE sha256 = ?').get(sha256);
+  const existing = db.prepare('SELECT fid, client_asset_id, status, sha256 FROM assets WHERE sha256 = ?').get(sha256);
+  const reuseExisting = !!(existing && duplicateTargetStillHolds(db, existing.fid, sha256));
   // 1b. 指纹去重（MD5 + pHash），覆盖已在库的 9:16/3:4 衍生
   let streamFp = null;
-  if (!existing && !isVideo && !isAudio) {
+  if (!reuseExisting && !isVideo && !isAudio) {
     try {
       const fpApi = require('./fingerprint');
       fpApi.ensureFingerprintColumns(db);
@@ -453,7 +472,7 @@ async function registerMediaAsset(services, {
         { md5: streamFp.md5, sha256: streamFp.sha256, phash: streamFp.phash },
         { exactOnly: true }
       );
-      if (fpHit && fpHit.hit) {
+      if (fpHit && fpHit.hit && duplicateTargetStillHolds(db, fpHit.fid, sha256)) {
         logger?.info?.(`[stream-upload] 指纹命中跳过入库 ${fpHit.reason} → ${fpHit.fid} (${fpHit.kind || ''})`);
         try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (_) {}
         return {
@@ -469,7 +488,7 @@ async function registerMediaAsset(services, {
       logger?.warn?.(`[stream-upload] fingerprint check failed: ${e.message}`);
     }
   }
-  if (existing) {
+  if (reuseExisting) {
     logger?.info?.(`[stream-upload] 资产已存在，直接复用 fid: ${existing.fid}`);
     // 补齐同哈希副本别名记录，终结快照对账循环重传
     try {
@@ -595,6 +614,17 @@ async function registerMediaAsset(services, {
   const isFinished = targetCategory === 'finished' || isAudio;
   // ★ 宽容入库：所有上传素材初始状态均为 ready，入库立即可见，工作流触发后再行判定
   const initialStatus = 'ready';
+
+  // 隐藏且未拉黑的哈希先置空再插入，与生成入库一致，避免隐藏死行阻挡新文件入库
+  try {
+    const { isBlacklisted } = require('./assets-delete');
+    const staleRows = db.prepare("SELECT fid, sha256 FROM assets WHERE sha256=? AND IFNULL(status,'') NOT IN ('ready', 'ready_with_flags')").all(sha256);
+    for (const sr of staleRows) {
+      if (!isBlacklisted(db, { fid: sr.fid, sha256: sr.sha256 })) {
+        db.prepare('UPDATE assets SET sha256=NULL WHERE fid=?').run(sr.fid);
+      }
+    }
+  } catch (_) {}
 
   // 3. 写入 assets 表
   db.prepare(`

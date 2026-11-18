@@ -1289,6 +1289,9 @@ async function executeAdapterInner(services, adapter, input) {
       const fileName = `gen_${Date.now()}_${crypto.randomBytes(4).toString('hex')}${ext}`;
       const filePath = path.join(tempDir, fileName);
       fs.writeFileSync(filePath, Buffer.from(b64, 'base64'));
+      // 成功落盘后立即剔除原始内存中的巨型 Base64，防止撑爆进程内存与数据库
+      if (part.inlineData) part.inlineData.data = `[saved: ${fileName}]`;
+      if (part.inline_data) part.inline_data.data = `[saved: ${fileName}]`;
       let meta = { mime };
       try {
         const info = await sharp(filePath).metadata();
@@ -1446,7 +1449,17 @@ async function executeAdapterInner(services, adapter, input) {
           }
           throw enrichFetchError(e, 'GPT Image VIP 图像生成网络请求失败');
         }
-        vipText = await vipRes.text().catch(() => '');
+        let textReadErr = null;
+        try {
+          vipText = await vipRes.text();
+        } catch (te) {
+          textReadErr = te;
+          vipText = '';
+        }
+        if (textReadErr && vipRes.ok) {
+          noteVendorOutcome(input, false, textReadErr.message || '大图数据流在接收过程中断开');
+          throw enrichFetchError(textReadErr, 'GPT Image VIP 图像数据流传输中断（通常为 3~5MB 大图在长耗时传输时被中间网络断开）');
+        }
         if (vipRes.ok) break;
 
         const status = vipRes.status;
@@ -1498,7 +1511,17 @@ async function executeAdapterInner(services, adapter, input) {
       }
 
       noteVendorOutcome(input, true);
-      const data = JSON.parse(vipText);
+      let data;
+      try {
+        data = JSON.parse(vipText);
+      } catch (parseErr) {
+        noteVendorOutcome(input, false, vipText);
+        const preview = (vipText || '').slice(0, 150);
+        const err = new Error(`GPT Image VIP 响应解析失败（数据报文残缺或未完整接收）：${preview || '(空响应体)'}`);
+        err.code = 'upstream_response_corrupted';
+        err.status = 502;
+        throw err;
+      }
       rawResponse = data;
       const firstItem = data.data?.[0];
       if (!firstItem) {
@@ -1724,6 +1747,44 @@ async function executeAdapterInner(services, adapter, input) {
       throw new Error('未解析到异步任务 ID: ' + JSON.stringify(submitData).slice(0, 200));
     }
 
+    if (typeof input.onStage === 'function') {
+      try {
+        input.onStage({
+          key: 'vendor_task_submitted',
+          label: '任务已提交到云端，开始轮询',
+          progress: 18,
+          vendorTaskId: taskId,
+        });
+      } catch (_) {}
+    }
+
+    const isVolc = (adapter.id || '').includes('seedance') || baseUrl.includes('volces.com');
+    const cancelRemoteTask = async () => {
+      try {
+        if (isVolc) {
+          const cancelUrl = resolveUrl(baseUrl, `/contents/generations/tasks/${taskId}`);
+          const res = await fetchNet(cancelUrl, { method: 'DELETE', headers }, { timeoutMs: 10000, what: '取消火山任务' });
+          console.log(`[gen] 已向火山方舟发送 DELETE 取消任务请求: taskId=${taskId} status=${res.status}`);
+        } else if (baseUrl.includes('modelscope.cn') || baseUrl.includes('aliyuncs.com')) {
+          const cancelUrl = resolveUrl(baseUrl, `/api/v1/tasks/${taskId}/cancel`);
+          const res = await fetchNet(cancelUrl, { method: 'POST', headers }, { timeoutMs: 10000, what: '取消云端任务' });
+          console.log(`[gen] 已向云端发送 POST 取消任务请求: taskId=${taskId} status=${res.status}`);
+        }
+      } catch (err) {
+        console.warn(`[gen] 取消远端异步任务异常: ${err.message}`);
+      }
+    };
+
+    if (input.signal) {
+      if (input.signal.aborted) {
+        cancelRemoteTask().catch(() => {});
+        throw new Error('任务已取消');
+      }
+      input.signal.addEventListener('abort', () => {
+        cancelRemoteTask().catch(() => {});
+      }, { once: true });
+    }
+
     // 开始轮询
     const pollInterval = cfg.pollIntervalMs || 4000;
     const startTime = Date.now();
@@ -1732,7 +1793,17 @@ async function executeAdapterInner(services, adapter, input) {
     let pollNetFailures = 0;
     let lastPollErr = null;
     while (Date.now() - startTime < timeoutMs) {
-      await new Promise(r => setTimeout(r, pollInterval));
+      if (input.signal && input.signal.aborted) throw new Error('任务已取消');
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(resolve, pollInterval);
+        if (input.signal) {
+          input.signal.addEventListener('abort', () => {
+            clearTimeout(timer);
+            reject(new Error('任务已取消'));
+          }, { once: true });
+        }
+      });
+      if (input.signal && input.signal.aborted) throw new Error('任务已取消');
       const pollUrl = resolvePollUrl(baseUrl, pollUrlTemplate, vars, taskId);
       let pollRes;
       try {
