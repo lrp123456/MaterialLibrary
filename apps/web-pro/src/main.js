@@ -1,4 +1,5 @@
 import { createApp } from 'vue';
+import { createPinia } from 'pinia';
 import App from './App.vue';
 import './style.css';
 import { installFetchGuard, ensureServerBase } from './server-resolve.js';
@@ -17,6 +18,8 @@ window.addEventListener('vite:preloadError', (event) => {
 });
 
 const app = createApp(App);
+const pinia = createPinia();
+app.use(pinia);
 // 全局注册 Morphicons 统一动效图标组件
 app.component('StudioIcon', StudioIcon);
 app.mount('#app');

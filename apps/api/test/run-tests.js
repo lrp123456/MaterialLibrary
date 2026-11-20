@@ -91,6 +91,9 @@ const MANIFEST = [
   ['unit', 'unit/ba-locked-fields.test.js'],
   ['unit', 'unit/cancel-matrix.test.js'],
   ['unit', 'unit/wysiwyg-snapshot.test.js'],
+  ['unit', 'unit/pinia-view-scanner.test.js'],
+  ['unit', 'unit/media-gateway-hmac.test.js'],
+  ['unit', 'unit/streaming-export-subprocess.test.js'],
 
   // ---------- security：鉴权/凭据隔离/对抗输入 ----------
   ['security', 'auth-audit.test.js'],

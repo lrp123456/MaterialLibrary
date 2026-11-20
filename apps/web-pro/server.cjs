@@ -9,11 +9,14 @@ const net = require('net');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 
 const PORT = Number(process.env.WEB_PRO_PORT || process.argv[2] || 30002);
 const API_TARGET = process.env.API_TARGET || 'http://127.0.0.1:30001';
 // 剪辑子应用（fork 自 OpenCut Classic），Next.js 以 basePath=/editor 启动。
 const EDITOR_TARGET = process.env.EDITOR_TARGET || 'http://127.0.0.1:3010';
+const MEDIA_SECRET = process.env.MEDIA_GATEWAY_SECRET || 'mls_media_gateway_secret_v1';
+const DATA_DIR = process.env.DATA_DIR || path.join(os.homedir(), '.dsh-material-library');
 // 通道标记：正式 30002 托管 dist；test worktree 通道在 30003 借 APP_CHANNEL=gray
 // 标记做只读联调（遗留同树灰测通道 2026-11-03 退役，见 archive/gray-retired-20261103/）
 const CHANNEL = String(process.env.APP_CHANNEL || '').toLowerCase() === 'gray' ? 'gray' : 'prod';
@@ -47,6 +50,29 @@ const MIME = {
   '.glb': 'model/gltf-binary',
   '.gltf': 'model/gltf+json',
 };
+
+function verifyMediaHmac(relPath, exp, sig) {
+  if (!relPath || !exp || !sig) {
+    return { valid: false, code: 'FORBIDDEN', error: '缺少 HMAC 签名或过期时间' };
+  }
+  const expSec = Number(exp);
+  if (!Number.isFinite(expSec)) {
+    return { valid: false, code: 'FORBIDDEN', error: '非法过期时间戳' };
+  }
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (nowSec > expSec) {
+    return { valid: false, code: 'EXPIRED', error: 'HMAC 签名已过期（超过15分钟有效窗口）' };
+  }
+  const normalizedPath = String(relPath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  const message = `${normalizedPath}:${expSec}`;
+  const expectedSig = crypto.createHmac('sha256', MEDIA_SECRET).update(message).digest('hex');
+  const sigBuf = Buffer.from(String(sig), 'hex');
+  const expBuf = Buffer.from(expectedSig, 'hex');
+  if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+    return { valid: false, code: 'FORBIDDEN', error: 'HMAC 签名校验失败' };
+  }
+  return { valid: true };
+}
 
 // 代理请求至指定后端（默认 30001）
 function proxyRequest(req, res, target = API_TARGET) {
@@ -203,6 +229,63 @@ function handleRequest(req, res) {
     return res.end();
   }
 
+  // 0c. 30002 冷热分层媒体网关 (/media-store/*)
+  //     大文件（3D .glb、高清原图、导出 MP4）直出，彻底卸载 30001
+  if (pathname.startsWith('/media-store/') || pathname === '/media-store') {
+    const relPath = decodeURIComponent(pathname.replace(/^\/media-store\/?/, ''));
+    const exp = urlObj.searchParams.get('exp');
+    const sig = urlObj.searchParams.get('sig');
+    const check = verifyMediaHmac(relPath, exp, sig);
+    if (!check.valid) {
+      res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ error: check.error, code: check.code }));
+    }
+
+    const storageRoot = path.resolve(DATA_DIR);
+    const mediaFilePath = path.resolve(storageRoot, relPath);
+    if (!mediaFilePath.startsWith(storageRoot + path.sep) && mediaFilePath !== storageRoot) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end('Media Not Found');
+    }
+
+    if (!fs.existsSync(mediaFilePath) || fs.statSync(mediaFilePath).isDirectory()) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end('Media Not Found');
+    }
+
+    const stat = fs.statSync(mediaFilePath);
+    const ext = path.extname(mediaFilePath).toLowerCase();
+    const contentType = MIME[ext] || 'application/octet-stream';
+    const rangeHeader = req.headers.range;
+
+    if (rangeHeader) {
+      const match = /^bytes=(\d+)-(\d+)?$/.exec(rangeHeader);
+      if (match) {
+        const start = Number(match[1]);
+        const end = match[2] ? Number(match[2]) : stat.size - 1;
+        if (start < stat.size && end >= start) {
+          const chunkSize = end - start + 1;
+          res.writeHead(206, {
+            'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+            'Accept-Ranges': 'bytes',
+            'Content-Length': chunkSize,
+            'Content-Type': contentType,
+            'Cache-Control': 'public, max-age=86400',
+          });
+          return fs.createReadStream(mediaFilePath, { start, end }).pipe(res);
+        }
+      }
+    }
+
+    res.writeHead(200, {
+      'Content-Length': stat.size,
+      'Accept-Ranges': 'bytes',
+      'Content-Type': contentType,
+      'Cache-Control': 'public, max-age=86400',
+    });
+    return fs.createReadStream(mediaFilePath).pipe(res);
+  }
+
   // 1. /api 与 /editor-api 路由代理到 30001
   //    剪辑工程的读写、导出帧上传、ffmpeg 合成全在 /editor-api 下；
   //    只代理 /api 会让这些请求落到 SPA fallback，返回 index.html。
@@ -259,9 +342,14 @@ function handleRequest(req, res) {
 
 function handleUpgrade(req, socket, head) {
   const pathname = String(req.url || '').split('?')[0];
-  // /api/asr/stream 是语音输入的流式通道，和 /api/push 一样必须走原始 TCP 管道，
-  // 普通 http.request 代理会毁掉 101 握手。
-  if (pathname === '/api/push' || pathname === '/ws' || pathname === '/api/asr/stream') {
+  // /api/asr/stream 是语音输入的流式通道，/editor-api/export/stream 是剪辑导出流式通道，
+  // 和 /api/push 一样必须走原始 TCP 管道，普通 http.request 代理会毁掉 101 握手。
+  if (
+    pathname === '/api/push' ||
+    pathname === '/ws' ||
+    pathname === '/api/asr/stream' ||
+    pathname === '/editor-api/export/stream'
+  ) {
     return proxyUpgrade(req, socket, head);
   }
   socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');

@@ -7,3 +7,4 @@ allowBuilds:
   core-js-pure: true
   esbuild: true
   msgpackr-extract: true
+  vue-demi: set this to true or false

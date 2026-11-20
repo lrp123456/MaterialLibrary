@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-20T11:15:44.797Z",
+  "generatedAt": "2026-11-20T13:45:52.687Z",
   "generator": "scripts/gen-contract-manifest.js",
   "counts": {
     "routes": 409,
@@ -11,7 +11,7 @@
     "whitelistDuplicated": 0,
     "clients": {
       "web": 126,
-      "web-pro": 121,
+      "web-pro": 97,
       "app-uniapp": 48,
       "harmony": 2
     },
@@ -2369,7 +2369,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10212,
+      "line": 10153,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/gen\\/jobs\\/([^\\/]+)$",
@@ -2377,7 +2377,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10318,
+      "line": 10259,
       "method": "GET",
       "kind": "exact",
       "pattern": "/gen/jobs",
@@ -2385,7 +2385,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10336,
+      "line": 10277,
       "method": "GET",
       "kind": "exact",
       "pattern": "/studio/recent-refs",
@@ -2393,7 +2393,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10349,
+      "line": 10290,
       "method": "POST",
       "kind": "exact",
       "pattern": "/studio/recent-refs",
@@ -2401,7 +2401,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10369,
+      "line": 10310,
       "method": "POST",
       "kind": "exact",
       "pattern": "/gen/images",
@@ -2409,7 +2409,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10489,
+      "line": 10430,
       "method": "POST",
       "kind": "exact",
       "pattern": "/gen/videos",
@@ -2417,7 +2417,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10630,
+      "line": 10571,
       "method": "POST",
       "kind": "exact",
       "pattern": "/video/super-resolve",
@@ -2425,7 +2425,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10644,
+      "line": 10585,
       "method": "POST",
       "kind": "exact",
       "pattern": "/video/super-resolve-local",
@@ -2433,7 +2433,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10656,
+      "line": 10597,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/video\\/super-resolve\\/tasks\\/([^\\/]+)$",
@@ -2441,7 +2441,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10670,
+      "line": 10611,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/gen\\/(?:videos\\/)?tasks\\/([^\\/]+)$",
@@ -2449,7 +2449,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10683,
+      "line": 10624,
       "method": "POST",
       "kind": "exact",
       "pattern": "/gen/audio",
@@ -2457,7 +2457,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10740,
+      "line": 10681,
       "method": "POST",
       "kind": "exact",
       "pattern": "/gen/chat",
@@ -2465,7 +2465,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10838,
+      "line": 10779,
       "method": "POST",
       "kind": "exact",
       "pattern": "/skills/create",
@@ -2473,7 +2473,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10851,
+      "line": 10792,
       "method": "GET",
       "kind": "exact",
       "pattern": "/dict",
@@ -2481,7 +2481,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10860,
+      "line": 10801,
       "method": "POST",
       "kind": "exact",
       "pattern": "/dict",
@@ -2489,7 +2489,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10870,
+      "line": 10811,
       "method": "POST",
       "kind": "exact",
       "pattern": "/dict/deprecate",
@@ -2497,7 +2497,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10880,
+      "line": 10821,
       "method": "POST",
       "kind": "exact",
       "pattern": "/dict/restore",
@@ -2505,7 +2505,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10890,
+      "line": 10831,
       "method": "POST",
       "kind": "exact",
       "pattern": "/dict/retag/estimate",
@@ -2513,7 +2513,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10901,
+      "line": 10842,
       "method": "POST",
       "kind": "exact",
       "pattern": "/dict/retag",
@@ -2521,7 +2521,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10928,
+      "line": 10869,
       "method": "GET",
       "kind": "exact",
       "pattern": "/dict/retag/jobs",
@@ -2529,7 +2529,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10932,
+      "line": 10873,
       "method": "GET",
       "kind": "exact",
       "pattern": "/dict/audit",
@@ -2537,7 +2537,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10937,
+      "line": 10878,
       "method": "POST",
       "kind": "exact",
       "pattern": "/dict/draft-criteria",
@@ -2545,7 +2545,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10942,
+      "line": 10883,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/dict\\/audit\\/(\\d+)\\/assets$",
@@ -2553,7 +2553,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10947,
+      "line": 10888,
       "method": "GET",
       "kind": "regex",
       "pattern": "^\\/assets\\/([^\\/]+)\\/tag-history$",
@@ -2561,7 +2561,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10955,
+      "line": 10896,
       "method": "GET",
       "kind": "exact",
       "pattern": "/users",
@@ -2569,7 +2569,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10961,
+      "line": 10902,
       "method": "POST",
       "kind": "exact",
       "pattern": "/users",
@@ -2577,7 +2577,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10975,
+      "line": 10916,
       "method": "POST",
       "kind": "regex",
       "pattern": "^\\/users\\/(\\d+)\\/password$",
@@ -2585,7 +2585,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10975,
+      "line": 10916,
       "method": "PUT",
       "kind": "regex",
       "pattern": "^\\/users\\/(\\d+)\\/password$",
@@ -2593,7 +2593,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10990,
+      "line": 10931,
       "method": "POST",
       "kind": "exact",
       "pattern": "/users/password",
@@ -2601,7 +2601,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 10990,
+      "line": 10931,
       "method": "PUT",
       "kind": "exact",
       "pattern": "/users/password",
@@ -2609,7 +2609,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 11009,
+      "line": 10950,
       "method": "DELETE",
       "kind": "regex",
       "pattern": "^\\/users\\/(\\d+)$",
@@ -2617,7 +2617,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 11009,
+      "line": 10950,
       "method": "PUT",
       "kind": "regex",
       "pattern": "^\\/users\\/(\\d+)$",
@@ -2625,7 +2625,7 @@
     },
     {
       "file": "src/api.js",
-      "line": 11041,
+      "line": 10982,
       "method": "POST",
       "kind": "exact",
       "pattern": "/upload",
@@ -4698,7 +4698,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/dict@src/api.js:10851"
+        "route": "exact:/dict@src/api.js:10792"
       },
       {
         "file": "web/src/api.js",
@@ -4710,7 +4710,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/dict@src/api.js:10860"
+        "route": "exact:/dict@src/api.js:10801"
       },
       {
         "file": "web/src/api.js",
@@ -4722,7 +4722,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/dict/deprecate@src/api.js:10870"
+        "route": "exact:/dict/deprecate@src/api.js:10811"
       },
       {
         "file": "web/src/api.js",
@@ -4734,7 +4734,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/dict/restore@src/api.js:10880"
+        "route": "exact:/dict/restore@src/api.js:10821"
       },
       {
         "file": "web/src/api.js",
@@ -4746,7 +4746,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/dict/draft-criteria@src/api.js:10937"
+        "route": "exact:/dict/draft-criteria@src/api.js:10878"
       },
       {
         "file": "web/src/api.js",
@@ -4758,7 +4758,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/dict/retag/estimate@src/api.js:10890"
+        "route": "exact:/dict/retag/estimate@src/api.js:10831"
       },
       {
         "file": "web/src/api.js",
@@ -4770,7 +4770,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/dict/retag@src/api.js:10901"
+        "route": "exact:/dict/retag@src/api.js:10842"
       },
       {
         "file": "web/src/api.js",
@@ -4782,7 +4782,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/dict/retag/jobs@src/api.js:10928"
+        "route": "exact:/dict/retag/jobs@src/api.js:10869"
       },
       {
         "file": "web/src/api.js",
@@ -4794,7 +4794,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/dict/audit@src/api.js:10932"
+        "route": "exact:/dict/audit@src/api.js:10873"
       },
       {
         "file": "web/src/api.js",
@@ -4806,7 +4806,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/dict\\/audit\\/(\\d+)\\/assets$@src/api.js:10942"
+        "route": "regex:^\\/dict\\/audit\\/(\\d+)\\/assets$@src/api.js:10883"
       },
       {
         "file": "web/src/api.js",
@@ -4818,7 +4818,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/assets\\/([^\\/]+)\\/tag-history$@src/api.js:10947"
+        "route": "regex:^\\/assets\\/([^\\/]+)\\/tag-history$@src/api.js:10888"
       },
       {
         "file": "web/src/api.js",
@@ -4830,7 +4830,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/users@src/api.js:10955"
+        "route": "exact:/users@src/api.js:10896"
       },
       {
         "file": "web/src/api.js",
@@ -4842,7 +4842,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "exact:/users@src/api.js:10961"
+        "route": "exact:/users@src/api.js:10902"
       },
       {
         "file": "web/src/api.js",
@@ -4854,7 +4854,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/users\\/(\\d+)\\/password$@src/api.js:10975"
+        "route": "regex:^\\/users\\/(\\d+)\\/password$@src/api.js:10916"
       },
       {
         "file": "web/src/api.js",
@@ -4866,7 +4866,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/users\\/(\\d+)$@src/api.js:11009"
+        "route": "regex:^\\/users\\/(\\d+)$@src/api.js:10950"
       },
       {
         "file": "web/src/api.js",
@@ -4878,7 +4878,7 @@
         "viewer": false,
         "via": "web",
         "matched": true,
-        "route": "regex:^\\/users\\/(\\d+)$@src/api.js:11009"
+        "route": "regex:^\\/users\\/(\\d+)$@src/api.js:10950"
       },
       {
         "file": "web/src/api.js",
@@ -5648,7 +5648,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/video/super-resolve-local@src/api.js:10644"
+        "route": "exact:/video/super-resolve-local@src/api.js:10585"
       },
       {
         "file": "../web-pro/src/api.js",
@@ -5804,7 +5804,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/gen/audio@src/api.js:10683"
+        "route": "exact:/gen/audio@src/api.js:10624"
       },
       {
         "file": "../web-pro/src/api.js",
@@ -5816,7 +5816,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "regex:^\\/gen\\/(?:videos\\/)?tasks\\/([^\\/]+)$@src/api.js:10670"
+        "route": "regex:^\\/gen\\/(?:videos\\/)?tasks\\/([^\\/]+)$@src/api.js:10611"
       },
       {
         "file": "../web-pro/src/api.js",
@@ -5828,7 +5828,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/gen/chat@src/api.js:10740"
+        "route": "exact:/gen/chat@src/api.js:10681"
       },
       {
         "file": "../web-pro/src/api.js",
@@ -5900,7 +5900,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/studio/recent-refs@src/api.js:10336"
+        "route": "exact:/studio/recent-refs@src/api.js:10277"
       },
       {
         "file": "../web-pro/src/api.js",
@@ -5912,7 +5912,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/studio/recent-refs@src/api.js:10349"
+        "route": "exact:/studio/recent-refs@src/api.js:10290"
       },
       {
         "file": "../web-pro/src/api.js",
@@ -6032,7 +6032,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/users/password@src/api.js:10990"
+        "route": "exact:/users/password@src/api.js:10931"
       },
       {
         "file": "../web-pro/src/api.js",
@@ -6260,7 +6260,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "regex:^\\/gen\\/jobs\\/([^\\/]+)$@src/api.js:10212"
+        "route": "regex:^\\/gen\\/jobs\\/([^\\/]+)$@src/api.js:10153"
       },
       {
         "file": "../web-pro/src/api.js",
@@ -6272,7 +6272,7 @@
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "exact:/gen/jobs@src/api.js:10318"
+        "route": "exact:/gen/jobs@src/api.js:10259"
       },
       {
         "file": "../web-pro/src/api.js",
@@ -6419,8 +6419,8 @@
         "route": "exact:/asr/status@src/api.js:2156"
       },
       {
-        "file": "../web-pro/src/views/library/BaseLibraryPane.vue",
-        "line": 901,
+        "file": "../web-pro/src/stores/assetMasonry.js",
+        "line": 91,
         "method": "GET",
         "pattern": "^/api/base-library/taxonomy$",
         "example": "/base-library/taxonomy",
@@ -6431,8 +6431,8 @@
         "route": "exact:/base-library/taxonomy@src/base-library/routes.js:270"
       },
       {
-        "file": "../web-pro/src/views/library/BaseLibraryPane.vue",
-        "line": 920,
+        "file": "../web-pro/src/stores/assetMasonry.js",
+        "line": 96,
         "method": "GET",
         "pattern": "^/api/base-library/materials\\$",
         "example": "/base-library/materials",
@@ -6443,8 +6443,8 @@
         "route": "exact:/base-library/materials@src/base-library/routes.js:439"
       },
       {
-        "file": "../web-pro/src/views/library/BaseLibraryPane.vue",
-        "line": 931,
+        "file": "../web-pro/src/stores/assetMasonry.js",
+        "line": 101,
         "method": "GET",
         "pattern": "^/api/base-library/paints\\$",
         "example": "/base-library/paints",
@@ -6455,8 +6455,8 @@
         "route": "exact:/base-library/paints@src/base-library/routes.js:802"
       },
       {
-        "file": "../web-pro/src/views/library/BaseLibraryPane.vue",
-        "line": 935,
+        "file": "../web-pro/src/stores/assetMasonry.js",
+        "line": 106,
         "method": "GET",
         "pattern": "^/api/base-library/lights$",
         "example": "/base-library/lights",
@@ -6467,16 +6467,136 @@
         "route": "exact:/base-library/lights@src/base-library/routes.js:961"
       },
       {
-        "file": "../web-pro/src/views/library/BaseLibraryPane.vue",
-        "line": 1004,
-        "method": "PATCH",
-        "pattern": "^/api/base-library/paints/[^/]+$",
-        "example": "/base-library/paints/example",
+        "file": "../web-pro/src/stores/assetMasonry.js",
+        "line": 111,
+        "method": "POST",
+        "pattern": "^/api/upload$",
+        "example": "/upload",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/upload@src/api.js:10982"
+      },
+      {
+        "file": "../web-pro/src/stores/assetMasonry.js",
+        "line": 119,
+        "method": "POST",
+        "pattern": "^/api/assets/[^/]+/replace-image$",
+        "example": "/assets/example/replace-image",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "regex:^\\/assets\\/([^\\/]+)\\/replace-image$@src/api.js:3129"
+      },
+      {
+        "file": "../web-pro/src/stores/assetMasonry.js",
+        "line": 134,
+        "method": "POST",
+        "pattern": "^/api/base-library/schemes/[^/]+/compile$",
+        "example": "/base-library/schemes/example/compile",
         "concrete": false,
         "viewer": false,
         "via": "web-pro",
         "matched": true,
         "route": "prefix:/base-library/@src/api.js:5454"
+      },
+      {
+        "file": "../web-pro/src/stores/studioSession.js",
+        "line": 105,
+        "method": "POST",
+        "pattern": "^/api/chat/optimize-prompt$",
+        "example": "/chat/optimize-prompt",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/chat/optimize-prompt@src/api.js:4644"
+      },
+      {
+        "file": "../web-pro/src/stores/studioSession.js",
+        "line": 114,
+        "method": "GET",
+        "pattern": "^/api/creation-templates/[^/]+$",
+        "example": "/creation-templates/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "regex:^\\/creation-templates\\/([^\\/]+)$@src/api.js:5188"
+      },
+      {
+        "file": "../web-pro/src/stores/studioSession.js",
+        "line": 119,
+        "method": "GET",
+        "pattern": "^/api/creation-templates$",
+        "example": "/creation-templates",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/creation-templates@src/api.js:4934"
+      },
+      {
+        "file": "../web-pro/src/stores/studioSession.js",
+        "line": 124,
+        "method": "POST",
+        "pattern": "^/api/ai/upload$",
+        "example": "/ai/upload",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/ai/upload@src/api.js:6142"
+      },
+      {
+        "file": "../web-pro/src/stores/studioSession.js",
+        "line": 132,
+        "method": "POST",
+        "pattern": "^/api/asr/transcribe\\$",
+        "example": "/asr/transcribe",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/asr/transcribe@src/api.js:2156"
+      },
+      {
+        "file": "../web-pro/src/stores/studioSession.js",
+        "line": 140,
+        "method": "GET",
+        "pattern": "^/api/assets/[^/]+$",
+        "example": "/assets/example",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "regex:^\\/assets\\/([^\\/]+)$@src/api.js:6757"
+      },
+      {
+        "file": "../web-pro/src/stores/studioSession.js",
+        "line": 145,
+        "method": "GET",
+        "pattern": "^/api/tag-vocab$",
+        "example": "/tag-vocab",
+        "concrete": true,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/tag-vocab@src/api.js:8733"
+      },
+      {
+        "file": "../web-pro/src/views/library/BaseLibraryPane.vue",
+        "line": 86,
+        "method": "GET",
+        "pattern": "^/api/base-library/items\\$",
+        "example": "/base-library/items",
+        "concrete": false,
+        "viewer": false,
+        "via": "web-pro",
+        "matched": true,
+        "route": "exact:/base-library/items@src/base-library/routes.js:57"
       },
       {
         "file": "../web-pro/src/views/library/BaseLibrarySearch.vue",
@@ -6527,424 +6647,16 @@
         "route": "exact:/base-library/paints/mirror@src/base-library/routes.js:921"
       },
       {
-        "file": "../web-pro/src/views/library/CatalogIngestPanel.vue",
-        "line": 501,
-        "method": "GET",
-        "pattern": "^/api/base-library/catalog/sources$",
-        "example": "/base-library/catalog/sources",
-        "concrete": true,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "exact:/base-library/catalog/sources@src/base-library/routes.js:1156"
-      },
-      {
-        "file": "../web-pro/src/views/library/CatalogIngestPanel.vue",
-        "line": 513,
-        "method": "POST",
-        "pattern": "^/api/base-library/catalog/pull$",
-        "example": "/base-library/catalog/pull",
-        "concrete": true,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "exact:/base-library/catalog/pull@src/base-library/routes.js:1162"
-      },
-      {
-        "file": "../web-pro/src/views/library/CatalogIngestPanel.vue",
-        "line": 581,
-        "method": "POST",
-        "pattern": "^/api/base-library/catalog/distill-preview$",
-        "example": "/base-library/catalog/distill-preview",
-        "concrete": true,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "exact:/base-library/catalog/distill-preview@src/base-library/routes.js:1283"
-      },
-      {
-        "file": "../web-pro/src/views/library/CatalogIngestPanel.vue",
-        "line": 601,
-        "method": "POST",
-        "pattern": "^/api/base-library/catalog/distill$",
-        "example": "/base-library/catalog/distill",
-        "concrete": true,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "exact:/base-library/catalog/distill@src/base-library/routes.js:1306"
-      },
-      {
-        "file": "../web-pro/src/views/library/CatalogIngestPanel.vue",
-        "line": 626,
-        "method": "POST",
-        "pattern": "^/api/base-library/schemes/draft$",
-        "example": "/base-library/schemes/draft",
-        "concrete": true,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "exact:/base-library/schemes/draft@src/base-library/routes.js:1361"
-      },
-      {
-        "file": "../web-pro/src/views/library/CatalogIngestPanel.vue",
-        "line": 645,
-        "method": "POST",
-        "pattern": "^/api/base-library/schemes$",
-        "example": "/base-library/schemes",
-        "concrete": true,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "exact:/base-library/schemes@src/base-library/routes.js:1369"
-      },
-      {
         "file": "../web-pro/src/views/LibraryView.vue",
-        "line": 3343,
-        "method": "POST",
-        "pattern": "^/api/tools/upload$",
-        "example": "/tools/upload",
-        "concrete": true,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "exact:/tools/upload@src/api.js:2420"
-      },
-      {
-        "file": "../web-pro/src/views/LibraryView.vue",
-        "line": 3352,
-        "method": "POST",
-        "pattern": "^/api/tools/convert-video$",
-        "example": "/tools/convert-video",
-        "concrete": true,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "exact:/tools/convert-video@src/api.js:2774"
-      },
-      {
-        "file": "../web-pro/src/views/LibraryView.vue",
-        "line": 3461,
-        "method": "POST",
-        "pattern": "^/api/upload$",
-        "example": "/upload",
-        "concrete": true,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "exact:/upload@src/api.js:11041"
-      },
-      {
-        "file": "../web-pro/src/views/LibraryView.vue",
-        "line": 3543,
+        "line": 100,
         "method": "GET",
-        "pattern": "^/api/base-library/schemes/[^/]+/compile$",
-        "example": "/base-library/schemes/example/compile",
+        "pattern": "^/api/assets\\$",
+        "example": "/assets",
         "concrete": false,
         "viewer": false,
         "via": "web-pro",
         "matched": true,
-        "route": "prefix:/base-library/@src/api.js:5454"
-      },
-      {
-        "file": "../web-pro/src/views/LibraryView.vue",
-        "line": 5562,
-        "method": "POST",
-        "pattern": "^/api/assets/[^/]+/replace-image$",
-        "example": "/assets/example/replace-image",
-        "concrete": false,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "regex:^\\/assets\\/([^\\/]+)\\/replace-image$@src/api.js:3129"
-      },
-      {
-        "file": "../web-pro/src/views/SettingsView.vue",
-        "line": 908,
-        "method": "GET",
-        "pattern": "^/api/studio/defaults$",
-        "example": "/studio/defaults",
-        "concrete": true,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "exact:/studio/defaults@src/api.js:2815"
-      },
-      {
-        "file": "../web-pro/src/views/SettingsView.vue",
-        "line": 925,
-        "method": "POST",
-        "pattern": "^/api/studio/defaults$",
-        "example": "/studio/defaults",
-        "concrete": true,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "exact:/studio/defaults@src/api.js:2815"
-      },
-      {
-        "file": "../web-pro/src/views/SettingsView.vue",
-        "line": 1107,
-        "method": "GET",
-        "pattern": "^/api/providers/newapi/models$",
-        "example": "/providers/newapi/models",
-        "concrete": true,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "exact:/providers/newapi/models@src/api.js:8417"
-      },
-      {
-        "file": "../web-pro/src/views/studio/ChatStudio.vue",
-        "line": 4440,
-        "method": "POST",
-        "pattern": "^/api/ai/upload$",
-        "example": "/ai/upload",
-        "concrete": true,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "exact:/ai/upload@src/api.js:6142"
-      },
-      {
-        "file": "../web-pro/src/views/studio/ChatStudio.vue",
-        "line": 4713,
-        "method": "POST",
-        "pattern": "^/api/asr/transcribe\\$",
-        "example": "/asr/transcribe",
-        "concrete": true,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "exact:/asr/transcribe@src/api.js:2156"
-      },
-      {
-        "file": "../web-pro/src/views/studio/ChatStudio.vue",
-        "line": 8946,
-        "method": "GET",
-        "pattern": "^/api/tag-vocab$",
-        "example": "/tag-vocab",
-        "concrete": true,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "exact:/tag-vocab@src/api.js:8733"
-      },
-      {
-        "file": "../web-pro/src/views/studio/ChatStudio.vue",
-        "line": 9542,
-        "method": "GET",
-        "pattern": "^/api/chat/sessions/[^/]+$",
-        "example": "/chat/sessions/example",
-        "concrete": false,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "regex:^\\/chat\\/sessions\\/([^\\/]+)$@src/api.js:4314"
-      },
-      {
-        "file": "../web-pro/src/views/studio/ChatStudio.vue",
-        "line": 9596,
-        "method": "POST",
-        "pattern": "^/api/chat/sessions$",
-        "example": "/chat/sessions",
-        "concrete": true,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "exact:/chat/sessions@src/api.js:4288"
-      },
-      {
-        "file": "../web-pro/src/views/studio/ChatStudio.vue",
-        "line": 10076,
-        "method": "GET",
-        "pattern": "^/api/creation-templates/[^/]+$",
-        "example": "/creation-templates/example",
-        "concrete": false,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "regex:^\\/creation-templates\\/([^\\/]+)$@src/api.js:5188"
-      },
-      {
-        "file": "../web-pro/src/views/studio/ChatStudio.vue",
-        "line": 10613,
-        "method": "POST",
-        "pattern": "^/api/chat/optimize-prompt$",
-        "example": "/chat/optimize-prompt",
-        "concrete": true,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "exact:/chat/optimize-prompt@src/api.js:4644"
-      },
-      {
-        "file": "../web-pro/src/views/studio/ChatStudio.vue",
-        "line": 11899,
-        "method": "GET",
-        "pattern": "^/api/assets/[^/]+$",
-        "example": "/assets/example",
-        "concrete": false,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "regex:^\\/assets\\/([^\\/]+)$@src/api.js:6757"
-      },
-      {
-        "file": "../web-pro/src/views/studio/ChatStudio.vue",
-        "line": 11923,
-        "method": "POST",
-        "pattern": "^/api/creation-templates$",
-        "example": "/creation-templates",
-        "concrete": true,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "exact:/creation-templates@src/api.js:5085"
-      },
-      {
-        "file": "../web-pro/src/views/studio/ChatStudio.vue",
-        "line": 12436,
-        "method": "DELETE",
-        "pattern": "^/api/creation-templates/[^/]+$",
-        "example": "/creation-templates/example",
-        "concrete": false,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "regex:^\\/creation-templates\\/([^\\/]+)$@src/api.js:5378"
-      },
-      {
-        "file": "../web-pro/src/views/studio/QuickStudio.vue",
-        "line": 1780,
-        "method": "POST",
-        "pattern": "^/api/base-library/classify-region$",
-        "example": "/base-library/classify-region",
-        "concrete": true,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "exact:/base-library/classify-region@src/base-library/routes.js:1015"
-      },
-      {
-        "file": "../web-pro/src/views/studio/StudioEditLayer.vue",
-        "line": 2094,
-        "method": "GET",
-        "pattern": "^/api/base-library/guides$",
-        "example": "/base-library/guides",
-        "concrete": true,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "exact:/base-library/guides@src/base-library/routes.js:234"
-      },
-      {
-        "file": "../web-pro/src/views/studio/StudioEditLayer.vue",
-        "line": 2109,
-        "method": "POST",
-        "pattern": "^/api/base-library/guides$",
-        "example": "/base-library/guides",
-        "concrete": true,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "exact:/base-library/guides@src/base-library/routes.js:239"
-      },
-      {
-        "file": "../web-pro/src/views/studio/StudioEditLayer.vue",
-        "line": 2153,
-        "method": "DELETE",
-        "pattern": "^/api/base-library/guides/[^/]+$",
-        "example": "/base-library/guides/example",
-        "concrete": false,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "prefix:/base-library/@src/api.js:5454"
-      },
-      {
-        "file": "../web-pro/src/views/studio/StudioEditLayer.vue",
-        "line": 2163,
-        "method": "GET",
-        "pattern": "^/api/base-library/styles$",
-        "example": "/base-library/styles",
-        "concrete": true,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "exact:/base-library/styles@src/base-library/routes.js:135"
-      },
-      {
-        "file": "../web-pro/src/views/studio/StudioEditLayer.vue",
-        "line": 2187,
-        "method": "GET",
-        "pattern": "^/api/base-library/schemes\\$",
-        "example": "/base-library/schemes",
-        "concrete": false,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "exact:/base-library/schemes@src/base-library/routes.js:126"
-      },
-      {
-        "file": "../web-pro/src/views/studio/StudioEditLayer.vue",
-        "line": 4503,
-        "method": "POST",
-        "pattern": "^/api/base-library/compile$",
-        "example": "/base-library/compile",
-        "concrete": true,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "exact:/base-library/compile@src/base-library/routes.js:1447"
-      },
-      {
-        "file": "../web-pro/src/views/studio/StudioEditLayer.vue",
-        "line": 4544,
-        "method": "PUT",
-        "pattern": "^/api/base-library/bindings/[^/]+$",
-        "example": "/base-library/bindings/example",
-        "concrete": false,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "prefix:/base-library/@src/api.js:5454"
-      },
-      {
-        "file": "../web-pro/src/views/studio/StudioGlobalDrawer.vue",
-        "line": 714,
-        "method": "GET",
-        "pattern": "^/api/base-library/schemes/[^/]+/compile\\$",
-        "example": "/base-library/schemes/example/compile",
-        "concrete": false,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "prefix:/base-library/@src/api.js:5454"
-      },
-      {
-        "file": "../web-pro/src/views/studio/StudioGlobalDrawer.vue",
-        "line": 781,
-        "method": "POST",
-        "pattern": "^/api/base-library/space/extract$",
-        "example": "/base-library/space/extract",
-        "concrete": true,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "exact:/base-library/space/extract@src/base-library/routes.js:203"
-      },
-      {
-        "file": "../web-pro/src/views/studio/StudioGlobalDrawer.vue",
-        "line": 823,
-        "method": "GET",
-        "pattern": "^/api/base-library/space/recommend\\$",
-        "example": "/base-library/space/recommend",
-        "concrete": false,
-        "viewer": false,
-        "via": "web-pro",
-        "matched": true,
-        "route": "exact:/base-library/space/recommend@src/base-library/routes.js:222"
+        "route": "exact:/assets@src/api.js:3536"
       }
     ],
     "app-uniapp": [
@@ -7246,7 +6958,7 @@
         "viewer": true,
         "via": "app-uniapp",
         "matched": true,
-        "route": "exact:/gen/chat@src/api.js:10740"
+        "route": "exact:/gen/chat@src/api.js:10681"
       },
       {
         "file": "../app-uniapp/src/service/ViewerApi.js",

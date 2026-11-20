@@ -423,6 +423,13 @@ try {
   console.warn('[asr] 语音通道启动失败:', e.message);
 }
 
+// 剪辑工程 WebSocket 二进制流式导出通道：/editor-api/export/stream
+try {
+  require('./src/editor-projects').attachExportWebSocket(server, services);
+} catch (e) {
+  console.warn('[editor-export] 流式导出通道启动失败:', e.message);
+}
+
 // ---- 发布自重启：只用文件标记兜底，HTTP 重启走 /api/system/restart ----
 // 为什么需要它：Windows 侧被安全策略禁止调用 wsl.exe，没法从灰测通道重启正式服务。
 // 正式端自己盯着数据目录里的 restart.request，一旦发现比进程启动时间新就退出，

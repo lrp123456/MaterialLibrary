@@ -748,4 +748,148 @@ async function handleEditorApi(services, req, res) {
   }
 }
 
-module.exports = { handleEditorApi, filmsUsing, ensureTables };
+/**
+ * WebSocket 二进制分片流剪辑导出 (/editor-api/export/stream)
+ * 直喂 FFmpeg stdin (image2pipe)，杜绝逐帧 HTTP 请求与磁盘碎文件开销。
+ */
+function attachExportWebSocket(httpServer, services) {
+  if (!httpServer || httpServer.__editorExportAttached) return;
+  httpServer.__editorExportAttached = true;
+  const { acceptWebSocket, OP_TEXT, OP_BIN } = require('./ws-server');
+  const { killProcessTree } = require('./lib/async-proc');
+  const { spawn } = require('child_process');
+  const { generateSignedMediaUrl } = require('./lib/media-hmac');
+
+  httpServer.on('upgrade', (req, socket, head) => {
+    let url;
+    try {
+      url = new URL(req.url, 'http://127.0.0.1');
+    } catch {
+      return;
+    }
+    if (url.pathname !== '/editor-api/export/stream') return;
+
+    let ffmpegChild = null;
+    let outPath = null;
+    let outName = null;
+    let exportMeta = null;
+    let isFinished = false;
+
+    const cleanup = () => {
+      if (ffmpegChild && !isFinished) {
+        killProcessTree(ffmpegChild, true);
+        ffmpegChild = null;
+        if (outPath && fs.existsSync(outPath)) {
+          try { fs.unlinkSync(outPath); } catch (_) {}
+        }
+      }
+    };
+
+    const conn = acceptWebSocket(req, socket, head, {
+      onMessage: async (payload, opcode) => {
+        try {
+          if (opcode === OP_TEXT || typeof payload === 'string' || (Buffer.isBuffer(payload) && payload.length > 0 && payload[0] === 0x7B)) {
+            const str = Buffer.isBuffer(payload) ? payload.toString('utf8') : String(payload);
+            const msg = JSON.parse(str);
+
+            if (msg.action === 'init') {
+              const { root } = dirs(services.config);
+              const fpsN = Number(msg.fps) || 24;
+              const outExt = 'mp4';
+              const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+              outName = `stream-export-${stamp}-${crypto.randomBytes(2).toString('hex')}.${outExt}`;
+              outPath = path.join(root, outName);
+              exportMeta = { ...msg, outName, outPath, fpsN };
+
+              const args = [
+                '-y', '-v', 'error',
+                '-framerate', String(fpsN),
+                '-f', 'image2pipe',
+                '-vcodec', 'mjpeg',
+                '-i', 'pipe:0',
+                '-r', String(fpsN),
+                '-c:v', 'libx264',
+                '-preset', 'veryfast',
+                '-crf', '20',
+                '-pix_fmt', 'yuv420p',
+                '-movflags', '+faststart',
+                outPath,
+              ];
+
+              ffmpegChild = spawn(bin('ffmpeg', FFMPEG), args, {
+                detached: process.platform !== 'win32',
+                stdio: ['pipe', 'pipe', 'pipe'],
+              });
+
+              ffmpegChild.on('error', (err) => {
+                console.error('[export:stream] FFmpeg spawn error:', err.message);
+                conn.send(JSON.stringify({ error: err.message }), OP_TEXT);
+              });
+
+              conn.send(JSON.stringify({ status: 'ready', outName }), OP_TEXT);
+              return;
+            }
+
+            if (msg.action === 'finish') {
+              if (!ffmpegChild || !ffmpegChild.stdin) {
+                conn.send(JSON.stringify({ error: 'FFmpeg 未初始化' }), OP_TEXT);
+                return;
+              }
+
+              await new Promise((resolve, reject) => {
+                ffmpegChild.on('close', (code) => {
+                  if (code === 0) resolve();
+                  else reject(new Error(`FFmpeg 退出码异常: ${code}`));
+                });
+                ffmpegChild.stdin.end();
+              });
+
+              isFinished = true;
+              const probe = await probeFile(outPath);
+              const filed = await fileFinishedCut(services, {
+                filePath: outPath,
+                projectId: exportMeta?.projectId || 'stream_proj',
+                projectName: exportMeta?.projectName || '流式导出工程',
+                width: probe.width || 1280,
+                height: probe.height || 720,
+                duration: probe.duration || 1,
+              });
+
+              const signedUrl = generateSignedMediaUrl(path.basename(outPath));
+              conn.send(JSON.stringify({
+                ok: true,
+                meta: {
+                  file: outName,
+                  url: signedUrl,
+                  directMediaUrl: `/media-store/${encodeURIComponent(path.basename(outPath))}`,
+                  fid: filed.fid,
+                  duration: probe.duration,
+                  fps: exportMeta.fpsN,
+                },
+              }), OP_TEXT);
+              return;
+            }
+          }
+
+          // 二进制分片：直接写入 FFmpeg stdin
+          if (ffmpegChild && ffmpegChild.stdin && ffmpegChild.stdin.writable) {
+            const chunk = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
+            const canWrite = ffmpegChild.stdin.write(chunk);
+            if (!canWrite) {
+              ffmpegChild.stdin.once('drain', () => {});
+            }
+          }
+        } catch (err) {
+          console.error('[export:stream] 处理错误:', err.message);
+          conn.send(JSON.stringify({ error: err.message }), OP_TEXT);
+          cleanup();
+        }
+      },
+      onClose: () => {
+        cleanup();
+      },
+    });
+  });
+}
+
+module.exports = { handleEditorApi, filmsUsing, ensureTables, attachExportWebSocket };

@@ -24,9 +24,9 @@
         @sendToClip="handleSendToClip"
       />
 
-      <!-- 2. AI 创作板块 (对话生成 + 6大精准模式编辑) -->
+      <!-- 2. AI 创作板块 (对话生成 + 6大精准模式编辑，支持 /studio-v2 灰度路由) -->
       <StudioView
-        v-else-if="activeTab === 'studio'"
+        v-else-if="activeTab === 'studio' || activeTab === 'studio-v2'"
         :key="'studio-' + sessionTick"
         :initialPayload="studioPayload"
         @sendToClip="handleSendToClip"
@@ -413,6 +413,9 @@ function onGlobalResourceError(event) {
 window.addEventListener('ml_auth_required', onAuthRequired);
 
 onMounted(() => {
+  if (typeof window !== 'undefined' && (window.location.pathname === '/studio-v2' || window.location.hash.includes('studio-v2'))) {
+    activeTab.value = 'studio';
+  }
   loadedEntry = entryHash(Array.from(document.querySelectorAll('script[src]')).map((s) => s.getAttribute('src')).join(' '));
   document.addEventListener('visibilitychange', onVisibilityChange);
   window.addEventListener('unhandledrejection', handleGlobalChunkError);
