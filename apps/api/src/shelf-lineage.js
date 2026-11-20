@@ -338,9 +338,9 @@ async function registerGenerated(services, input = {}) {
       db.prepare(`
         INSERT INTO assets (
           fid, kind, category, file_name, size, width, height, orientation, duration_s,
-          status, is_ai, source, source_asset_id, parent_fid,
+          status, visibility, pipeline_status, source_type, is_ai, source, source_asset_id, parent_fid,
           sha256, library_shelf, lineage_json, created_at, discovered_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', 1, 'ai', ?, ?, ?, 'retouched', ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', 'visible', 'done', 'studio_save', 1, 'ai', ?, ?, ?, 'retouched', ?, ?, ?, ?)
       `).run(
         fid,
         kind,
@@ -456,7 +456,7 @@ function requeueRetag(db, fid) {
     DELETE FROM asset_tags
     WHERE asset_fid=? AND (source IS NULL OR source NOT IN ('human', 'manual', 'job'))
   `).run(fid);
-  db.prepare("UPDATE assets SET status='discovered', updated_at=? WHERE fid=?").run(Date.now(), fid);
+  db.prepare("UPDATE assets SET status='discovered', pipeline_status='queued', visibility='visible', updated_at=? WHERE fid=?").run(Date.now(), fid);
   return { fid, categoryLocked: !!hit.category_locked };
 }
 

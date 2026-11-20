@@ -51,11 +51,12 @@ function openProductionDb(targetPath) {
       external_id TEXT,
       hue TEXT,
       name_status TEXT,
-      origin TEXT,
+      origin TEXT DEFAULT 'crawler',
       gloss TEXT,
       pattern TEXT,
       scene_rel TEXT,
-      images_json TEXT
+      images_json TEXT,
+      locked_fields TEXT DEFAULT '[]'
     );
     CREATE TABLE IF NOT EXISTS ba_item_mounts (
       item_id TEXT NOT NULL,
@@ -66,6 +67,13 @@ function openProductionDb(targetPath) {
     CREATE INDEX IF NOT EXISTS idx_ba_items_brand ON ba_items(brand);
     CREATE INDEX IF NOT EXISTS idx_ba_item_mounts_mount ON ba_item_mounts(mount);
   `);
+
+  try {
+    const cols = db.prepare('PRAGMA table_info(ba_items)').all().map((r) => r.name);
+    if (!cols.includes('locked_fields')) {
+      db.exec("ALTER TABLE ba_items ADD COLUMN locked_fields TEXT DEFAULT '[]'");
+    }
+  } catch (_) {}
 
   return db;
 }
@@ -100,29 +108,29 @@ async function run() {
         INSERT INTO ba_items (
           id, kind, kind_key, name_zh, prompt_name, hex, family, lightness, role_hint, zone,
           preview_rel, external_sku, created_at, updated_at, brand, source_url, external_id,
-          hue, name_status, origin, gloss, pattern, scene_rel, images_json
+          hue, name_status, origin, gloss, pattern, scene_rel, images_json, locked_fields
         ) VALUES (
           @id, @kind, @kind_key, @name_zh, @prompt_name, @hex, @family, @lightness, @role_hint, @zone,
           @preview_rel, @external_sku, @created_at, @updated_at, @brand, @source_url, @external_id,
-          @hue, @name_status, @origin, @gloss, @pattern, @scene_rel, @images_json
+          @hue, @name_status, COALESCE(@origin, 'crawler'), @gloss, @pattern, @scene_rel, @images_json, COALESCE(@locked_fields, '[]')
         )
         ON CONFLICT(id) DO UPDATE SET
-          kind = excluded.kind,
-          kind_key = excluded.kind_key,
-          name_zh = excluded.name_zh,
-          prompt_name = excluded.prompt_name,
-          hex = excluded.hex,
-          family = excluded.family,
-          lightness = excluded.lightness,
-          role_hint = excluded.role_hint,
-          preview_rel = excluded.preview_rel,
+          kind = CASE WHEN instr(COALESCE(ba_items.locked_fields, '[]'), '"kind"') > 0 THEN ba_items.kind ELSE excluded.kind END,
+          kind_key = CASE WHEN instr(COALESCE(ba_items.locked_fields, '[]'), '"kind_key"') > 0 THEN ba_items.kind_key ELSE excluded.kind_key END,
+          name_zh = CASE WHEN instr(COALESCE(ba_items.locked_fields, '[]'), '"name_zh"') > 0 THEN ba_items.name_zh ELSE excluded.name_zh END,
+          prompt_name = CASE WHEN instr(COALESCE(ba_items.locked_fields, '[]'), '"prompt_name"') > 0 THEN ba_items.prompt_name ELSE excluded.prompt_name END,
+          hex = CASE WHEN instr(COALESCE(ba_items.locked_fields, '[]'), '"hex"') > 0 THEN ba_items.hex ELSE excluded.hex END,
+          family = CASE WHEN instr(COALESCE(ba_items.locked_fields, '[]'), '"family"') > 0 THEN ba_items.family ELSE excluded.family END,
+          lightness = CASE WHEN instr(COALESCE(ba_items.locked_fields, '[]'), '"lightness"') > 0 THEN ba_items.lightness ELSE excluded.lightness END,
+          role_hint = CASE WHEN instr(COALESCE(ba_items.locked_fields, '[]'), '"role_hint"') > 0 THEN ba_items.role_hint ELSE excluded.role_hint END,
+          preview_rel = CASE WHEN instr(COALESCE(ba_items.locked_fields, '[]'), '"preview_rel"') > 0 THEN ba_items.preview_rel ELSE excluded.preview_rel END,
           updated_at = excluded.updated_at,
-          brand = excluded.brand,
-          hue = excluded.hue,
-          gloss = excluded.gloss,
-          pattern = excluded.pattern,
-          scene_rel = excluded.scene_rel,
-          images_json = excluded.images_json
+          brand = CASE WHEN instr(COALESCE(ba_items.locked_fields, '[]'), '"brand"') > 0 THEN ba_items.brand ELSE excluded.brand END,
+          hue = CASE WHEN instr(COALESCE(ba_items.locked_fields, '[]'), '"hue"') > 0 THEN ba_items.hue ELSE excluded.hue END,
+          gloss = CASE WHEN instr(COALESCE(ba_items.locked_fields, '[]'), '"gloss"') > 0 THEN ba_items.gloss ELSE excluded.gloss END,
+          pattern = CASE WHEN instr(COALESCE(ba_items.locked_fields, '[]'), '"pattern"') > 0 THEN ba_items.pattern ELSE excluded.pattern END,
+          scene_rel = CASE WHEN instr(COALESCE(ba_items.locked_fields, '[]'), '"scene_rel"') > 0 THEN ba_items.scene_rel ELSE excluded.scene_rel END,
+          images_json = CASE WHEN instr(COALESCE(ba_items.locked_fields, '[]'), '"images_json"') > 0 THEN ba_items.images_json ELSE excluded.images_json END
       `);
 
       const insertMount = db.prepare('INSERT OR IGNORE INTO ba_item_mounts (item_id, mount) VALUES (?, ?)');
@@ -168,7 +176,14 @@ async function run() {
   db.close();
 }
 
-run().catch((err) => {
-  console.error('[build-base-library] 失败:', err);
-  process.exit(1);
-});
+if (require.main === module) {
+  run().catch((err) => {
+    console.error('[build-base-library] 失败:', err);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  openProductionDb,
+  run
+};

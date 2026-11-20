@@ -129,7 +129,8 @@ function ensureItemSchema(db) {
     ['brand_series', 'TEXT'],
     ['lab_l', 'REAL'],
     ['lab_a', 'REAL'],
-    ['lab_b', 'REAL']
+    ['lab_b', 'REAL'],
+    ['locked_fields', "TEXT DEFAULT '[]'"]
   ];
   for (const [name, type] of add) {
     if (!columns.includes(name)) db.exec(`ALTER TABLE ba_items ADD COLUMN ${name} ${type}`);
@@ -226,6 +227,19 @@ function upsertCatalogItem(db, item) {
     return inferredWood[key] !== undefined ? inferredWood[key] : null;
   };
   if (existing) {
+    let locked = [];
+    try {
+      locked = JSON.parse(existing.locked_fields || '[]');
+      if (!Array.isArray(locked)) locked = [];
+    } catch (_) {
+      locked = [];
+    }
+    const isLocked = (k) => locked.includes(k);
+    const val = (k, newVal, fallbackVal) => {
+      if (isLocked(k)) return existing[k];
+      return newVal !== undefined && newVal !== null ? newVal : fallbackVal;
+    };
+
     db.prepare(`
       UPDATE ba_items
       SET name_zh = ?, prompt_name = ?, hex = ?, family = ?, lightness = ?, hue = ?,
@@ -236,16 +250,31 @@ function upsertCatalogItem(db, item) {
           lab_l = ?, lab_a = ?, lab_b = ?
       WHERE id = ?
     `).run(
-      item.name_zh, item.prompt_name || item.name_zh, item.hex || existing.hex, family, lightnessOf(item.hex || existing.hex), hue || existing.hue,
-      item.preview_rel || existing.preview_rel, item.brand || existing.brand, item.source_url || existing.source_url, item.name_status || existing.name_status || 'page', now,
-      item.gloss || existing.gloss || (isWood ? 'matte' : null),
-      item.pattern || existing.pattern || (isWood ? 'wood' : null),
-      item.brand_series || existing.brand_series,
-      woodValue('wood_species'), woodValue('wood_species_source'), woodValue('wood_tone'), woodValue('grain_type'),
-      woodValue('grain_scale'), woodValue('grain_direction'), woodValue('wood_layout'), woodValue('surface_finish'),
-      item.lab_l !== undefined ? item.lab_l : (existing.lab_l !== undefined ? existing.lab_l : woodValue('lab_l')),
-      item.lab_a !== undefined ? item.lab_a : (existing.lab_a !== undefined ? existing.lab_a : woodValue('lab_a')),
-      item.lab_b !== undefined ? item.lab_b : (existing.lab_b !== undefined ? existing.lab_b : woodValue('lab_b')),
+      val('name_zh', item.name_zh, existing.name_zh),
+      val('prompt_name', item.prompt_name || item.name_zh, existing.prompt_name),
+      val('hex', item.hex, existing.hex),
+      val('family', family, existing.family),
+      val('lightness', lightnessOf(item.hex || existing.hex), existing.lightness),
+      val('hue', hue, existing.hue),
+      val('preview_rel', item.preview_rel, existing.preview_rel),
+      val('brand', item.brand, existing.brand),
+      val('source_url', item.source_url, existing.source_url),
+      val('name_status', item.name_status, existing.name_status || 'page'),
+      now,
+      val('gloss', item.gloss, existing.gloss || (isWood ? 'matte' : null)),
+      val('pattern', item.pattern, existing.pattern || (isWood ? 'wood' : null)),
+      val('brand_series', item.brand_series, existing.brand_series),
+      val('wood_species', woodValue('wood_species'), existing.wood_species),
+      val('wood_species_source', woodValue('wood_species_source'), existing.wood_species_source),
+      val('wood_tone', woodValue('wood_tone'), existing.wood_tone),
+      val('grain_type', woodValue('grain_type'), existing.grain_type),
+      val('grain_scale', woodValue('grain_scale'), existing.grain_scale),
+      val('grain_direction', woodValue('grain_direction'), existing.grain_direction),
+      val('wood_layout', woodValue('wood_layout'), existing.wood_layout),
+      val('surface_finish', woodValue('surface_finish'), existing.surface_finish),
+      val('lab_l', item.lab_l !== undefined ? item.lab_l : (existing.lab_l !== undefined ? existing.lab_l : woodValue('lab_l')), existing.lab_l),
+      val('lab_a', item.lab_a !== undefined ? item.lab_a : (existing.lab_a !== undefined ? existing.lab_a : woodValue('lab_a')), existing.lab_a),
+      val('lab_b', item.lab_b !== undefined ? item.lab_b : (existing.lab_b !== undefined ? existing.lab_b : woodValue('lab_b')), existing.lab_b),
       existing.id
     );
     return { id: existing.id, updated: true };
@@ -612,6 +641,21 @@ function updateItem(db, id, patch = {}) {
   const existing = db.prepare('SELECT * FROM ba_items WHERE id = ?').get(id);
   if (!existing) return null;
 
+  let currentLocked = [];
+  try {
+    currentLocked = JSON.parse(existing.locked_fields || '[]');
+    if (!Array.isArray(currentLocked)) currentLocked = [];
+  } catch (_) {
+    currentLocked = [];
+  }
+
+  const patchKeys = Object.keys(patch).filter((k) => k !== 'action' && k !== 'updated_at' && k !== 'id');
+  const newLockedSet = new Set(currentLocked);
+  for (const k of patchKeys) {
+    newLockedSet.add(k);
+  }
+  const lockedFieldsJson = JSON.stringify([...newLockedSet]);
+
   let isPinned = existing.is_pinned !== undefined && existing.is_pinned !== null ? Number(existing.is_pinned) : 0;
   if (patch.is_pinned !== undefined) {
     isPinned = patch.is_pinned ? 1 : 0;
@@ -625,11 +669,30 @@ function updateItem(db, id, patch = {}) {
   }
 
   const now = Date.now();
+  const allowedCols = [
+    'name_zh', 'prompt_name', 'hex', 'family', 'lightness', 'role_hint', 'zone',
+    'preview_rel', 'external_sku', 'brand', 'source_url', 'external_id', 'hue',
+    'name_status', 'gloss', 'pattern', 'scene_rel', 'images_json', 'wood_species',
+    'wood_species_source', 'wood_tone', 'grain_type', 'grain_scale', 'grain_direction',
+    'wood_layout', 'surface_finish', 'brand_series', 'lab_l', 'lab_a', 'lab_b'
+  ];
+
+  const updateFields = ['is_pinned = ?', 'use_count = ?', 'origin = ?', 'locked_fields = ?', 'updated_at = ?'];
+  const updateValues = [isPinned, useCount, 'manual', lockedFieldsJson, now];
+
+  for (const col of allowedCols) {
+    if (patch[col] !== undefined) {
+      updateFields.push(`${col} = ?`);
+      updateValues.push(patch[col]);
+    }
+  }
+
+  updateValues.push(id);
   db.prepare(`
     UPDATE ba_items 
-    SET is_pinned = ?, use_count = ?, updated_at = ? 
+    SET ${updateFields.join(', ')}
     WHERE id = ?
-  `).run(isPinned, useCount, now, id);
+  `).run(...updateValues);
 
   // 同名变体联动：如果同一材质名有多款工艺规格，置顶状态与使用次数联动同步
   if (existing.name_zh) {
@@ -643,8 +706,11 @@ function updateItem(db, id, patch = {}) {
     }
   }
 
-  return {
+  return db.prepare('SELECT * FROM ba_items WHERE id = ?').get(id) || {
     ...existing,
+    ...patch,
+    origin: 'manual',
+    locked_fields: lockedFieldsJson,
     is_pinned: isPinned,
     use_count: useCount,
     updated_at: now

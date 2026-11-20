@@ -8847,7 +8847,7 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
       if (idx?.config?.embeddingProvider) embeddingProvider = idx.config.embeddingProvider;
     } catch { /* defaults */ }
     const assets = db.prepare(`
-      SELECT fid, file_name FROM assets WHERE status = 'ready'
+      SELECT fid, file_name FROM assets WHERE (visibility = 'visible' OR (visibility IS NULL AND status = 'ready'))
     `).all();
     // PERF-08：一次性批量取标签，避免逐素材 N+1 查询。
     const allTagRows = db.prepare(`

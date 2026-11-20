@@ -6,8 +6,60 @@
  */
 const { AUTH_VISIBLE_SQL } = require('./governance');
 const { HARD_MATERIALS, SOFT_MATERIALS } = require('./tags-seed');
+const { deltaE } = require('./colors');
 
 const VECTOR_MODEL = 'local_feature_v2';
+const ENABLE_VECTOR_EMBEDDING = String(process.env.ENABLE_VECTOR_EMBEDDING || '').toLowerCase() === 'true';
+
+function hammingDistance64(hashA, hashB) {
+  if (!hashA || !hashB || typeof hashA !== 'string' || typeof hashB !== 'string') return 64;
+  const minLen = Math.min(hashA.length, hashB.length);
+  let dist = Math.abs(hashA.length - hashB.length) * 4;
+  for (let i = 0; i < minLen; i++) {
+    const v1 = parseInt(hashA[i], 16) || 0;
+    const v2 = parseInt(hashB[i], 16) || 0;
+    const xor = v1 ^ v2;
+    dist += (xor & 1) + ((xor >> 1) & 1) + ((xor >> 2) & 1) + ((xor >> 3) & 1);
+  }
+  return dist;
+}
+
+function phashSimilarity(hashA, hashB) {
+  if (!hashA || !hashB) return 0;
+  const dist = hammingDistance64(hashA, hashB);
+  return Math.max(0, 1 - dist / 64);
+}
+
+function calculateThreeFactorScore(target, cand) {
+  // 1. pHash 汉明相似度
+  const phashSim = phashSimilarity(target.phash, cand.phash);
+
+  // 2. 色彩相似度 (Lab DeltaE 优先，兜底 dominant_color)
+  let colorSim = 0;
+  if (target.hex && cand.hex) {
+    try {
+      const dE = deltaE(target.hex, cand.hex);
+      colorSim = Math.max(0, 1 - dE / 45);
+    } catch (_) {}
+  }
+  if (!colorSim && target.dominant_color && cand.dominant_color) {
+    if (target.dominant_color === cand.dominant_color) colorSim = 1.0;
+    else if (
+      (['米/奶油', '原木/木色', '黄', '橙'].includes(target.dominant_color) && ['米/奶油', '原木/木色', '黄', '橙'].includes(cand.dominant_color)) ||
+      (['蓝', '绿', '灰'].includes(target.dominant_color) && ['蓝', '绿', '灰'].includes(cand.dominant_color))
+    ) {
+      colorSim = 0.4;
+    }
+  }
+
+  // 3. 结构化标签 Jaccard (空间 + 风格 + 材质)
+  const targetTags = new Set(target.tags || []);
+  const candTags = new Set(cand.tags || []);
+  const tagJaccard = jaccard(targetTags, candTags);
+
+  // 综合权重: pHash(0.40) + 色彩(0.35) + 标签(0.25)
+  return +(0.40 * phashSim + 0.35 * colorSim + 0.25 * tagJaccard).toFixed(4);
+}
 
 const COLORS = ['白', '米/奶油', '原木/木色', '灰', '黑', '红', '粉', '橙', '黄', '绿', '蓝', '紫'];
 const STYLES = [
@@ -480,6 +532,10 @@ function getVectorStatus(db, { configuredModel = 'text-embedding-3-small', confi
 module.exports = {
   cosineSimilarity,
   jaccard,
+  hammingDistance64,
+  phashSimilarity,
+  calculateThreeFactorScore,
+  ENABLE_VECTOR_EMBEDDING,
   buildStructuredVector,
   extractAssetVector,
   rebuildStructuredVectors,

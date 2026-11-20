@@ -49,9 +49,13 @@ CREATE TABLE IF NOT EXISTS assets (
     thumb_md5 VARCHAR(64),
     sharpness REAL,
     favorited_at BIGINT,
-    source_type VARCHAR(64),
+    visibility VARCHAR(32) NOT NULL DEFAULT 'visible',
+    pipeline_status VARCHAR(32) NOT NULL DEFAULT 'done',
+    source_type VARCHAR(64) DEFAULT 'web_upload',
     source_note TEXT
 );
+
+CREATE INDEX IF NOT EXISTS idx_assets_visibility_browse ON assets(visibility, auth_state, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_assets_browse ON assets(status, auth_state, created_at DESC, fid DESC);
 CREATE INDEX IF NOT EXISTS idx_assets_md5 ON assets(md5);
@@ -275,6 +279,8 @@ CREATE TABLE IF NOT EXISTS ba_items (
     prompt_name VARCHAR(128),
     is_pinned SMALLINT DEFAULT 0,
     attributes_json TEXT DEFAULT '{}',
+    origin VARCHAR(32) NOT NULL DEFAULT 'crawler',
+    locked_fields TEXT DEFAULT '[]',
     created_at BIGINT,
     updated_at BIGINT
 );

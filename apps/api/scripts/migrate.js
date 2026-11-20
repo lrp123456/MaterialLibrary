@@ -717,6 +717,11 @@ function migrate(dataDir, { doBackup = true } = {}) {
     } catch (e) {
       console.warn('[migrate] system_error_events 迁移失败:', e.message);
     }
+    try {
+      require('./migrations/002-fail-open-ingest-and-locks').up(db);
+    } catch (e) {
+      console.warn('[migrate] fail-open-ingest-and-locks 迁移失败:', e.message);
+    }
 
     // 5. 存量视频冻结（P2 已移除：视频改为分批解冻进管线）
     const jobsTableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='jobs'").get();

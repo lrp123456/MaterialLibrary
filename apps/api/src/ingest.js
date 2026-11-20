@@ -446,16 +446,8 @@ async function backupAsset(services, asset) {
 
   const quarkFid = resolveQuarkBackupFid(settings, config);
   if (quarkFid) {
-    try {
-      const { Quark } = require('./quark');
-      const quark = new Quark(config.cliPath);
-      const res = await quark.upload(src, quarkFid);
-      out.quark = res;
-      out.quarkFid = quarkFid;
-    } catch (e) {
-      logger?.warn?.(`[backup] 夸克上传失败: ${e.message}`);
-      out.quarkError = e.message;
-    }
+    out.quark = { skipped: true, decommissioned: true };
+    out.quarkFid = quarkFid;
   }
 
   if (!settings.nasDir && !quarkFid) {
