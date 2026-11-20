@@ -259,71 +259,72 @@
           <div class="flex-1 overflow-y-auto scrollbar-thin p-4">
             <div v-if="derivativeLoading[versionPanelItem.fid]" class="h-32 flex items-center justify-center text-xs text-slate-400">读取衍生版本…</div>
             <div v-else class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-              <div
-                v-for="version in versionsOf(versionPanelItem)"
-                :key="version.key"
-                class="rounded-xl overflow-hidden border bg-studio-950 text-left transition-all flex flex-col"
-                :class="isSelected(version.key) ? 'border-studio-cyan ring-2 ring-studio-cyan/30' : 'border-studio-750 hover:border-slate-500'"
-              >
-                <button
-                  type="button"
-                  class="relative w-full h-28 bg-black/40 cursor-zoom-in group/ver"
-                  :title="`查看大图 · ${version.label}`"
-                  @click="openPreview(version)"
-                >
-                  <img :src="version.url" class="w-full h-full object-contain" :alt="version.label" />
-                  <span v-if="version.derivativeId" class="absolute top-1 left-1 px-1 py-0.5 rounded bg-black/75 text-[9px] font-bold text-sky-300">衍生</span>
-                  <span v-if="version.geometry" class="absolute top-1 right-1 px-1 py-0.5 rounded bg-amber-400/95 text-[9px] font-bold text-slate-950">画幅变更</span>
-                  <span class="on-media absolute inset-0 flex items-center justify-center bg-black/45 text-[11px] font-bold text-white opacity-0 group-hover/ver:opacity-100 transition-opacity">🔍 查看大图</span>
-                </button>
-                <div class="px-2 py-1.5 flex-1">
-                  <div class="text-[11px] font-bold truncate" :class="isSelected(version.key) ? 'text-studio-cyan' : 'text-slate-200'">{{ version.label }}</div>
-                  <div class="text-[9px] text-slate-500 font-mono truncate">{{ versionBadge(version) || '读取尺寸…' }}</div>
-                </div>
-                <button
-                  type="button"
-                  class="px-2 py-1.5 text-[10px] font-bold border-t border-studio-800 cursor-pointer transition-colors"
-                  :class="isSelected(version.key) ? 'bg-studio-cyan/15 text-studio-cyan' : 'bg-studio-850/60 text-slate-300 hover:bg-studio-800 hover:text-white'"
-                  @click="pick(versionPanelItem, version)"
-                >
-                  {{ isSelected(version.key) ? '✓ 已选中 · 取消' : '选择此版本' }}
-                </button>
-              </div>
-
-              <!-- 缺失画幅插槽：这类图片默认就该有这一档，缺的就地补出来 -->
-              <button
-                v-for="slot in versionPanelSlots"
-                :key="'slot-' + slot.kind"
-                type="button"
-                class="rounded-xl overflow-hidden border-2 border-dashed text-left transition-all flex flex-col cursor-pointer"
-                :class="slotStatus(slot) === 'failed'
-                  ? 'border-rose-400/70 bg-studio-950/70 hover:border-rose-300'
-                  : 'border-sky-400/60 bg-studio-950/70 hover:border-sky-300'"
-                :disabled="!!slotBusyFid || slotStatus(slot) === 'queued'"
-                :title="`${slot.label} 是这张图的默认规格，点一下现场生成`"
-                @click="generateSlots([slot])"
-              >
-                <div class="relative w-full h-28 flex flex-col items-center justify-center gap-1 bg-sky-400/5">
-                  <span
-                    v-if="slotStatus(slot) === 'running' || slotStatus(slot) === 'queued'"
-                    class="w-6 h-6 rounded-full border-2 border-sky-300 border-t-transparent animate-spin"
-                  ></span>
-                  <span
-                    v-else
-                    class="text-[13px] font-black"
-                    :class="slotStatus(slot) === 'failed' ? 'text-rose-300' : 'text-sky-200'"
-                  >{{ slotHeadline(slot) }}</span>
-                  <span class="px-1.5 py-0.5 rounded bg-black/40 border border-sky-400/40 text-[9px] font-bold text-sky-300 font-mono">{{ slot.ratio }}</span>
-                </div>
-                <div class="px-2 py-1.5 flex-1">
-                  <div class="text-[11px] font-bold text-slate-200 truncate">{{ slot.label }}</div>
-                  <div class="text-[9px] text-slate-500">默认挂载规格 · Seedream 5.0 Flash</div>
-                </div>
+              <template v-for="entry in versionPanelEntries" :key="entry.key">
+                <!-- 已有版本卡片 -->
                 <div
-                  class="px-2 py-1.5 text-[10px] font-bold border-t border-studio-800 text-center"
-                  :class="slotStatus(slot) === 'failed' ? 'bg-rose-500/10 text-rose-300' : 'bg-sky-400/10 text-sky-300'"
-                >{{ slotActionText(slot) }}</div>
-              </button>
+                  v-if="entry.type === 'version'"
+                  class="rounded-xl overflow-hidden border bg-studio-950 text-left transition-all flex flex-col"
+                  :class="isSelected(entry.version.key) ? 'border-studio-cyan ring-2 ring-studio-cyan/30' : 'border-studio-750 hover:border-slate-500'"
+                >
+                  <button
+                    type="button"
+                    class="relative w-full h-28 bg-black/40 cursor-zoom-in group/ver"
+                    :title="`查看大图 · ${entry.version.label}`"
+                    @click="openPreview(entry.version)"
+                  >
+                    <img :src="entry.version.url" class="w-full h-full object-contain" :alt="entry.version.label" />
+                    <span v-if="entry.version.derivativeId" class="absolute top-1 left-1 px-1 py-0.5 rounded bg-black/75 text-[9px] font-bold text-sky-300">衍生</span>
+                    <span v-if="entry.version.geometry" class="absolute top-1 right-1 px-1 py-0.5 rounded bg-amber-400/95 text-[9px] font-bold text-slate-950">画幅变更</span>
+                    <span class="on-media absolute inset-0 flex items-center justify-center bg-black/45 text-[11px] font-bold text-white opacity-0 group-hover/ver:opacity-100 transition-opacity">🔍 查看大图</span>
+                  </button>
+                  <div class="px-2 py-1.5 flex-1">
+                    <div class="text-[11px] font-bold truncate" :class="isSelected(entry.version.key) ? 'text-studio-cyan' : 'text-slate-200'">{{ entry.version.label }}</div>
+                    <div class="text-[9px] text-slate-500 font-mono truncate">{{ versionBadge(entry.version) || '读取尺寸…' }}</div>
+                  </div>
+                  <button
+                    type="button"
+                    class="px-2 py-1.5 text-[10px] font-bold border-t border-studio-800 cursor-pointer transition-colors"
+                    :class="isSelected(entry.version.key) ? 'bg-studio-cyan/15 text-studio-cyan' : 'bg-studio-850/60 text-slate-300 hover:bg-studio-800 hover:text-white'"
+                    @click="pick(versionPanelItem, entry.version)"
+                  >
+                    {{ isSelected(entry.version.key) ? '✓ 已选中 · 取消' : '选择此版本' }}
+                  </button>
+                </div>
+
+                <!-- 缺失画幅插槽：这类图片默认就该有这一档，缺的就地补出来 -->
+                <button
+                  v-else-if="entry.type === 'slot'"
+                  type="button"
+                  class="rounded-xl overflow-hidden border-2 border-dashed text-left transition-all flex flex-col cursor-pointer"
+                  :class="slotStatus(entry.slot) === 'failed'
+                    ? 'border-rose-400/70 bg-studio-950/70 hover:border-rose-300'
+                    : 'border-sky-400/60 bg-studio-950/70 hover:border-sky-300'"
+                  :disabled="!!slotBusyFid || slotStatus(entry.slot) === 'queued'"
+                  :title="`${entry.slot.label} 是这张图的默认规格，点一下现场生成`"
+                  @click="generateSlots([entry.slot])"
+                >
+                  <div class="relative w-full h-28 flex flex-col items-center justify-center gap-1 bg-sky-400/5">
+                    <span
+                      v-if="slotStatus(entry.slot) === 'running' || slotStatus(entry.slot) === 'queued'"
+                      class="w-6 h-6 rounded-full border-2 border-sky-300 border-t-transparent animate-spin"
+                    ></span>
+                    <span
+                      v-else
+                      class="text-[13px] font-black"
+                      :class="slotStatus(entry.slot) === 'failed' ? 'text-rose-300' : 'text-sky-200'"
+                    >{{ slotHeadline(entry.slot) }}</span>
+                    <span class="px-1.5 py-0.5 rounded bg-black/40 border border-sky-400/40 text-[9px] font-bold text-sky-300 font-mono">{{ entry.slot.ratio }}</span>
+                  </div>
+                  <div class="px-2 py-1.5 flex-1">
+                    <div class="text-[11px] font-bold text-slate-200 truncate">{{ entry.slot.label }}</div>
+                    <div class="text-[9px] text-slate-500">默认挂载规格 · Seedream 5.0 Flash</div>
+                  </div>
+                  <div
+                    class="px-2 py-1.5 text-[10px] font-bold border-t border-studio-800 text-center"
+                    :class="slotStatus(entry.slot) === 'failed' ? 'bg-rose-500/10 text-rose-300' : 'bg-sky-400/10 text-sky-300'"
+                  >{{ slotActionText(entry.slot) }}</div>
+                </button>
+              </template>
             </div>
             <div
               v-if="slotErrorText"
@@ -669,7 +670,13 @@ function versionBadge(version) {
   return parts.join(' · ');
 }
 
-const previewList = computed(() => (versionPanelItem.value ? versionsOf(versionPanelItem.value) : []));
+const previewList = computed(() => {
+  if (!versionPanelItem.value) return [];
+  // 保持与版本面板统一的常规顺序：原图 -> 9:16 -> 3:4 -> 其余衍生
+  return versionPanelEntries.value
+    .filter((e) => e.type === 'version')
+    .map((e) => e.version);
+});
 const previewOrigin = computed(() => previewList.value.find((v) => !v.derivativeId) || null);
 const previewIndex = computed(() => {
   if (!previewVersion.value) return -1;
@@ -918,6 +925,51 @@ const versionPanelSlots = computed(() => {
   const cached = derivativeCache.value[item.fid];
   if (!cached) return [];
   return missingSlotPresets(item.category, cached, slotPrefs.value);
+});
+
+/**
+ * 版本面板完整条目列表（已有版本 + 缺失插槽）。
+ * 用户常规规范顺序：原图首位；9:16 次之；3:4 第三；其余衍生版本排在最后。
+ */
+const versionPanelEntries = computed(() => {
+  const item = versionPanelItem.value;
+  if (!item) return [];
+  const versions = versionsOf(item);
+  const slots = versionPanelSlots.value || [];
+
+  const getRank = (entry) => {
+    if (entry.type === 'version') {
+      const v = entry.version;
+      const kind = String(v.derivativeKind || '');
+      // 1. 原图最优先，常规首位
+      if (kind === 'origin' || !v.derivativeId) return 0;
+      // 2. 9:16 画幅衍生版本
+      if (kind === 'restage_9_16') return 10;
+      const badge = String(versionBadge(v) || '');
+      if (badge.startsWith('9:16')) return 11;
+      // 3. 3:4 画幅衍生版本
+      if (kind === 'restage_3_4') return 20;
+      if (badge.startsWith('3:4')) return 21;
+      // 4. 其余已有衍生版本
+      return 30;
+    }
+    if (entry.type === 'slot') {
+      // 2. 9:16 待生成插槽
+      if (entry.slot.ratio === '9:16' || entry.slot.kind === 'restage_9_16') return 12;
+      // 3. 3:4 待生成插槽
+      if (entry.slot.ratio === '3:4' || entry.slot.kind === 'restage_3_4') return 22;
+      // 4. 其余待生成插槽
+      return 35;
+    }
+    return 50;
+  };
+
+  const list = [
+    ...versions.map((version) => ({ type: 'version', version, key: version.key })),
+    ...slots.map((slot) => ({ type: 'slot', slot, key: 'slot-' + slot.kind }))
+  ];
+
+  return list.sort((a, b) => getRank(a) - getRank(b));
 });
 
 /** 本页正在跑的请求优先，其次才是后端队列状态。 */

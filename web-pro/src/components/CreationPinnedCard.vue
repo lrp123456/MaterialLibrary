@@ -1,15 +1,39 @@
 <template>
   <div
-    class="relative rounded-xl bg-studio-850 border p-2 transition-all shadow-md hover:shadow-xl cursor-pointer group flex flex-col justify-between"
-    :class="tpl?.is_pinned ? 'border-amber-400/80 ring-1 ring-amber-400/30 shadow-[0_0_18px_-6px_rgba(251,191,36,0.55)]' : 'border-studio-750 hover:border-studio-accent/70'"
+    class="relative rounded-xl bg-studio-850 border p-2 transition-all duration-150 shadow-md hover:shadow-xl cursor-pointer group flex flex-col justify-between"
+    :class="[
+      tpl?.is_pinned ? 'border-amber-400/80 ring-1 ring-amber-400/30 shadow-[0_0_18px_-6px_rgba(251,191,36,0.55)]' : 'border-studio-750 hover:border-studio-accent/70',
+      isDragging ? 'opacity-30 scale-95 border-dashed border-amber-400 ring-2 ring-amber-400/30' : '',
+      dragOverPos ? 'ring-2 ring-amber-400/90 scale-[1.02] shadow-amber-400/20' : ''
+    ]"
     draggable="true"
     @click="$emit('open', tpl)"
     @dragstart="$emit('dragstart', $event, tpl)"
     @dragend="$emit('dragend', $event)"
+    @dragover.prevent.stop="$emit('card-dragover', $event, tpl)"
+    @dragleave.stop="$emit('card-dragleave', $event, tpl)"
+    @drop.prevent.stop="$emit('card-drop', $event, tpl)"
   >
+    <!-- 拖拽插入高光指示线 (前 / 后) -->
+    <div
+      v-if="dragOverPos === 'before'"
+      class="absolute -left-2 top-0 bottom-0 w-1.5 rounded-full bg-gradient-to-b from-amber-300 via-amber-400 to-amber-500 shadow-[0_0_14px_rgba(251,191,36,0.95)] z-40 flex items-center justify-center pointer-events-none animate-pulse"
+    >
+      <div class="absolute -top-3.5 left-1/2 -translate-x-1/2 px-1.5 py-0.2 rounded bg-amber-400 text-black text-[9px] font-black shadow-lg whitespace-nowrap">
+        ◀ 插在此前
+      </div>
+    </div>
+    <div
+      v-if="dragOverPos === 'after'"
+      class="absolute -right-2 top-0 bottom-0 w-1.5 rounded-full bg-gradient-to-b from-amber-300 via-amber-400 to-amber-500 shadow-[0_0_14px_rgba(251,191,36,0.95)] z-40 flex items-center justify-center pointer-events-none animate-pulse"
+    >
+      <div class="absolute -top-3.5 left-1/2 -translate-x-1/2 px-1.5 py-0.2 rounded bg-amber-400 text-black text-[9px] font-black shadow-lg whitespace-nowrap">
+        插在此后 ▶
+      </div>
+    </div>
     <div class="relative w-full rounded-lg overflow-hidden bg-black/40 mb-2 border border-studio-800" :style="{ aspectRatio: String(ratio || 1) }">
       <template v-if="!tpl.type || tpl.type === 'image'">
-        <img v-if="imageUrl" :src="imageUrl" class="w-full h-full object-cover" />
+        <img v-if="imageUrl" :src="imageUrl" class="w-full h-full object-cover" decoding="async" />
         <div v-else class="w-full h-full flex items-center justify-center text-xs text-slate-600">无预览</div>
       </template>
       <template v-else-if="tpl.type === 'video'">
@@ -83,15 +107,26 @@
 import { computed, ref } from 'vue';
 import StudioIcon from './StudioIcon.vue';
 import TemplateVideoCover from '../views/studio/TemplateVideoCover.vue';
-import { getToken } from '../api';
+import { getToken, getAssetImageUrl } from '../api';
 
 const props = defineProps({
   tpl: { type: Object, default: () => ({}) },
   ratio: { type: Number, default: 1 },
   sections: { type: Array, default: () => [] },
   dragHint: { type: String, default: '' },
+  isDragging: { type: Boolean, default: false },
+  dragOverPos: { type: String, default: null }, // 'before' | 'after' | null
 });
-const emit = defineEmits(['open', 'pin', 'place', 'dragstart', 'dragend']);
+const emit = defineEmits([
+  'open',
+  'pin',
+  'place',
+  'dragstart',
+  'dragend',
+  'card-dragover',
+  'card-dragleave',
+  'card-drop'
+]);
 
 const menuOpen = ref(false);
 
@@ -104,11 +139,35 @@ function authedMedia(raw) {
   return token ? `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}` : url;
 }
 
-const imageUrl = computed(() => authedMedia(props.tpl?.result_images?.[0]?.url || ''));
+function smallCover(media) {
+  if (!media) return '';
+  if (media.fid) return getAssetImageUrl(media.fid, '', 'grid');
+  const raw = String(media.url || '');
+  if (!raw) return '';
+  if (raw.includes('/api/cache/temp/')) {
+    const next = raw.includes('preview=1') ? raw : `${raw}${raw.includes('?') ? '&' : '?'}preview=1`;
+    return authedMedia(next);
+  }
+  if (/\/api\/(?:viewer\/)?assets\/[^/?#]+\/image/.test(raw)) {
+    try {
+      const parsed = new URL(raw, 'http://local');
+      parsed.searchParams.set('tier', 'grid');
+      return authedMedia(parsed.pathname + parsed.search);
+    } catch {
+      return authedMedia(raw);
+    }
+  }
+  return authedMedia(raw);
+}
+
+const imageUrl = computed(() => smallCover(props.tpl?.result_images?.[0]));
 const videoUrl = computed(() => authedMedia(props.tpl?.result_images?.[0]?.url || ''));
 const posterUrl = computed(() => {
   const r0 = props.tpl?.result_images?.[0];
-  return authedMedia(r0?.poster || r0?.poster_url || props.tpl?.poster_url || '');
+  const stored = r0?.poster || r0?.poster_url || props.tpl?.poster_url || '';
+  if (stored) return authedMedia(stored);
+  if (r0?.fid) return authedMedia(`/api/viewer/assets/${encodeURIComponent(r0.fid)}/poster`);
+  return '';
 });
 const refUrl = computed(() => authedMedia(props.tpl?.origin_images?.[0]?.url || ''));
 

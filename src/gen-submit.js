@@ -118,6 +118,7 @@ async function runGeneration(services, payload, { signal, onStage } = {}) {
         firstFrame: b.firstFrame || b.first_frame,
         lastFrame: b.lastFrame || b.last_frame,
         genMode: b.genMode || b.mode,
+        vendorTaskId: b.vendorTaskId || '',
       }, { signal, onStage: emitStage });
     } else {
       const vidAdapters = engines.gen?.videoAdapters || [];
@@ -156,6 +157,8 @@ async function runGeneration(services, payload, { signal, onStage } = {}) {
           ...(b.extras || b.params || {}),
           ...(assembled?.body || {}),
         },
+        signal,
+        onStage: emitStage,
       });
       emitStage({ key: 'video_finalize', label: '视频生成完成，准备成片', progress: 88 });
     }

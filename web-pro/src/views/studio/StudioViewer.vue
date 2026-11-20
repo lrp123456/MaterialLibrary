@@ -2,11 +2,11 @@
   <div
     class="studio-viewer relative flex-1 min-h-[380px] bg-studio-950 p-4 flex flex-col select-none overflow-hidden transition-colors"
     :class="{ 'ring-2 ring-studio-accent bg-studio-900/60': isDragging }"
-    @dragover.prevent="isDragging = true"
-    @dragleave.prevent="isDragging = false"
-    @drop.prevent="onDropFiles"
+    @dragover.prevent="onViewerContainerDragOver"
+    @dragleave.prevent="onViewerContainerDragLeave"
+    @drop.prevent="onViewerContainerDrop"
   >
-    <!-- 拖拽高亮遮罩 -->
+    <!-- 拖拽高亮遮罩（仅从外部桌面/系统拖入新文件时显示添加；内部拖拽已有参考图严格为调整顺序） -->
     <div
       v-if="isDragging"
       class="absolute inset-0 z-30 bg-studio-accent/20 backdrop-blur-xs border-2 border-dashed border-studio-accent rounded-2xl m-3 flex flex-col items-center justify-center pointer-events-none"
@@ -82,7 +82,7 @@
             :style="getImageContainerStyle(0)"
           >
             <img
-              :src="images[0].url || images[0].imgUrl"
+              :src="resolveViewerImageUrl(images[0])"
               class="w-full h-full object-contain block transition-transform duration-200 group-hover/img:scale-[1.01]"
               :alt="`图1`"
               @load="onImgLoad($event, 0)"
@@ -197,7 +197,7 @@
                   :style="getPolygonClipPathStyle(reg, images[0])"
                 >
                   <img
-                    :src="reg.params.snapshotUrl"
+                    :src="resolveViewerImageUrl(reg.params.snapshotUrl)"
                     class="w-full h-full object-contain pointer-events-none drop-shadow"
                     alt="3D家具"
                   />
@@ -211,7 +211,7 @@
                 >
                   <img
                     v-if="reg.params?.materialTextureUrl"
-                    :src="reg.params.materialTextureUrl"
+                    :src="resolveViewerImageUrl(reg.params.materialTextureUrl)"
                     class="w-full h-full object-cover mix-blend-multiply opacity-80"
                     alt="材质贴图"
                   />
@@ -238,8 +238,8 @@
             <span class="px-2 py-0.5 rounded bg-studio-cyan/15 text-studio-cyan font-mono text-xs font-bold shrink-0">
               图1
             </span>
-            <span class="text-xs font-mono text-slate-400 truncate max-w-[280px]">
-              {{ images[0].name || images[0].filename || 'ARCH_REFERENCE_01' }}
+            <span v-if="getFriendlyImageName(images[0], 0)" class="text-xs font-mono text-slate-400 truncate max-w-[280px]">
+              {{ getFriendlyImageName(images[0], 0) }}
             </span>
           </div>
 
@@ -296,26 +296,39 @@
       <div
         v-for="(img, idx) in images"
         :key="img.url || idx"
+        draggable="true"
+        @dragstart.stop="onViewerDragStart($event, idx)"
+        @dragend="onViewerDragEnd"
         @click="$emit('select', idx)"
         @dragover.prevent.stop="onViewerDragOver($event, idx)"
         @dragleave="onViewerDragLeave(idx)"
         @drop.prevent.stop="onViewerDrop($event, idx)"
         :class="[
           'relative flex flex-col h-full rounded-2xl border p-3 transition-all cursor-pointer bg-studio-850',
-          dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx ? 'ring-2 ring-amber-400 border-amber-400 scale-[1.01] bg-amber-500/10' : '',
-          draggingIdx === idx ? 'opacity-40 border-dashed border-studio-500' : '',
+          dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx ? 'ring-2 ring-amber-400 border-amber-400 scale-[1.01] bg-amber-500/10 shadow-[0_0_20px_rgba(251,191,36,0.25)]' : '',
+          draggingIdx === idx ? 'opacity-40 border-dashed border-amber-400 scale-[0.98]' : '',
           isSubRefImage(img, idx)
             ? 'w-[340px] max-w-[380px] shrink-0'
             : (images.length === 2 && isSubRefImage(images[1], 1) ? 'flex-1 min-w-[480px]' : (aspectDiff2.verticalIdx === idx ? 'w-[32%] min-w-[240px] max-w-[380px]' : 'flex-1 min-w-0')),
           getSubRefBorderClass(img, idx)
         ]"
       >
-        <!-- 拖放换位视觉覆盖层 -->
+        <!-- 精准插入光束指示 (插在此前 / 插在此后) -->
         <div
-          v-if="dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx"
-          class="absolute inset-0 z-40 bg-amber-500/20 backdrop-blur-xs flex items-center justify-center font-bold text-amber-200 border-2 border-dashed border-amber-400 rounded-2xl pointer-events-none text-sm shadow-xl"
+          v-if="dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx && viewerInsertPos === 'before'"
+          class="absolute -left-2 top-2 bottom-2 w-1.5 rounded-full bg-gradient-to-b from-amber-300 via-amber-400 to-amber-500 shadow-[0_0_14px_rgba(251,191,36,0.95)] z-40 flex items-center justify-center pointer-events-none animate-pulse"
         >
-          ⇄ 释放以与图{{ idx + 1 }}调换顺序
+          <div class="absolute -top-3.5 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded bg-amber-400 text-black text-[10px] font-black shadow-lg whitespace-nowrap">
+            ◀ 移至图{{ idx + 1 }}前
+          </div>
+        </div>
+        <div
+          v-if="dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx && viewerInsertPos === 'after'"
+          class="absolute -right-2 top-2 bottom-2 w-1.5 rounded-full bg-gradient-to-b from-amber-300 via-amber-400 to-amber-500 shadow-[0_0_14px_rgba(251,191,36,0.95)] z-40 flex items-center justify-center pointer-events-none animate-pulse"
+        >
+          <div class="absolute -top-3.5 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded bg-amber-400 text-black text-[10px] font-black shadow-lg whitespace-nowrap">
+            移至图{{ idx + 1 }}后 ▶
+          </div>
         </div>
         <div
           @click.stop="onImageClick(idx)"
@@ -327,7 +340,7 @@
             :style="getImageContainerStyle(idx)"
           >
             <img
-              :src="img.url || img.imgUrl"
+              :src="resolveViewerImageUrl(img)"
               class="w-full h-full object-contain block transition-transform duration-200 group-hover/img:scale-[1.01]"
               :alt="`图${idx + 1}`"
               @load="onImgLoad($event, idx)"
@@ -439,7 +452,7 @@
                   :class="reg.params?.transparentBg !== false ? 'bg-transparent' : 'bg-[#F8FAFC]'"
                   :style="getPolygonClipPathStyle(reg, img)"
                 >
-                  <img :src="reg.params.snapshotUrl" class="w-full h-full object-contain pointer-events-none drop-shadow" alt="" />
+                  <img :src="resolveViewerImageUrl(reg.params.snapshotUrl)" class="w-full h-full object-contain pointer-events-none drop-shadow" alt="" />
                 </div>
 
                 <!-- 基础属性：智能平铺材质贴图与色彩预览 -->
@@ -450,7 +463,7 @@
                 >
                   <img
                     v-if="reg.params?.materialTextureUrl"
-                    :src="reg.params.materialTextureUrl"
+                    :src="resolveViewerImageUrl(reg.params.materialTextureUrl)"
                     class="w-full h-full object-cover mix-blend-multiply opacity-80"
                     alt="材质贴图"
                   />
@@ -496,7 +509,7 @@
               <span>对调</span>
             </button>
 
-            <span class="text-xs font-mono text-slate-400 truncate">{{ img.name || `ARCH_REF_0${idx+1}` }}</span>
+            <span v-if="getFriendlyImageName(img, idx)" class="text-xs font-mono text-slate-400 truncate">{{ getFriendlyImageName(img, idx) }}</span>
           </div>
           <div class="flex items-center gap-1 shrink-0">
             <button
@@ -536,22 +549,36 @@
       <div
         v-for="(img, idx) in images"
         :key="img.url || idx"
+        draggable="true"
+        @dragstart.stop="onViewerDragStart($event, idx)"
+        @dragend="onViewerDragEnd"
         @click="$emit('select', idx)"
         @dragover.prevent.stop="onViewerDragOver($event, idx)"
         @dragleave="onViewerDragLeave(idx)"
         @drop.prevent.stop="onViewerDrop($event, idx)"
         :class="[
           'relative flex-1 min-w-0 flex flex-col h-full rounded-2xl border p-3 transition-all cursor-pointer bg-studio-850',
-          dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx ? 'ring-2 ring-amber-400 border-amber-400 scale-[1.01] bg-amber-500/10' : '',
-          draggingIdx === idx ? 'opacity-40 border-dashed border-studio-500' : '',
+          dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx ? 'ring-2 ring-amber-400 border-amber-400 scale-[1.01] bg-amber-500/10 shadow-[0_0_20px_rgba(251,191,36,0.25)]' : '',
+          draggingIdx === idx ? 'opacity-40 border-dashed border-amber-400 scale-[0.98]' : '',
           selectedIndex === idx ? 'border-studio-accent ring-1 ring-studio-accent' : 'border-studio-700 hover:border-studio-600'
         ]"
       >
+        <!-- 精准插入光束指示 (插在此前 / 插在此后) -->
         <div
-          v-if="dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx"
-          class="absolute inset-0 z-40 bg-amber-500/20 backdrop-blur-xs flex items-center justify-center font-bold text-amber-200 border-2 border-dashed border-amber-400 rounded-2xl pointer-events-none text-sm shadow-xl"
+          v-if="dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx && viewerInsertPos === 'before'"
+          class="absolute -left-2 top-2 bottom-2 w-1.5 rounded-full bg-gradient-to-b from-amber-300 via-amber-400 to-amber-500 shadow-[0_0_14px_rgba(251,191,36,0.95)] z-40 flex items-center justify-center pointer-events-none animate-pulse"
         >
-          ⇄ 释放以与图{{ idx + 1 }}调换顺序
+          <div class="absolute -top-3.5 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded bg-amber-400 text-black text-[10px] font-black shadow-lg whitespace-nowrap">
+            ◀ 移至图{{ idx + 1 }}前
+          </div>
+        </div>
+        <div
+          v-if="dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx && viewerInsertPos === 'after'"
+          class="absolute -right-2 top-2 bottom-2 w-1.5 rounded-full bg-gradient-to-b from-amber-300 via-amber-400 to-amber-500 shadow-[0_0_14px_rgba(251,191,36,0.95)] z-40 flex items-center justify-center pointer-events-none animate-pulse"
+        >
+          <div class="absolute -top-3.5 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded bg-amber-400 text-black text-[10px] font-black shadow-lg whitespace-nowrap">
+            移至图{{ idx + 1 }}后 ▶
+          </div>
         </div>
         <div
           @click.stop="onImageClick(idx)"
@@ -563,7 +590,7 @@
             :style="getImageContainerStyle(idx)"
           >
             <img
-              :src="img.url || img.imgUrl"
+              :src="resolveViewerImageUrl(img)"
               class="w-full h-full object-contain block transition-transform duration-200 group-hover/img:scale-[1.01]"
               :alt="`图${idx + 1}`"
               @load="onImgLoad($event, idx)"
@@ -673,7 +700,7 @@
                   :class="reg.params?.transparentBg !== false ? 'bg-transparent' : 'bg-[#F8FAFC]'"
                   :style="getPolygonClipPathStyle(reg, img)"
                 >
-                  <img :src="reg.params.snapshotUrl" class="w-full h-full object-contain pointer-events-none drop-shadow" alt="" />
+                  <img :src="resolveViewerImageUrl(reg.params.snapshotUrl)" class="w-full h-full object-contain pointer-events-none drop-shadow" alt="" />
                 </div>
                 <!-- 基础属性：智能平铺材质贴图与色彩预览 -->
                 <div
@@ -683,7 +710,7 @@
                 >
                   <img
                     v-if="reg.params?.materialTextureUrl"
-                    :src="reg.params.materialTextureUrl"
+                    :src="resolveViewerImageUrl(reg.params.materialTextureUrl)"
                     class="w-full h-full object-cover mix-blend-multiply opacity-80"
                     alt="材质贴图"
                   />
@@ -707,7 +734,7 @@
         <div class="mt-2.5 flex items-center justify-between shrink-0 px-1">
           <div class="flex items-center gap-2 min-w-0">
             <span class="px-2 py-0.5 rounded bg-studio-cyan/15 text-studio-cyan font-mono text-xs font-bold">图{{ idx + 1 }}</span>
-            <span class="text-xs font-mono text-slate-400 truncate">{{ img.name || `ARCH_REF_0${idx+1}` }}</span>
+            <span v-if="getFriendlyImageName(img, idx)" class="text-xs font-mono text-slate-400 truncate">{{ getFriendlyImageName(img, idx) }}</span>
           </div>
           <div class="flex items-center gap-1 shrink-0">
             <button
@@ -736,22 +763,36 @@
       <div
         v-for="(img, idx) in images"
         :key="img.url || idx"
+        draggable="true"
+        @dragstart.stop="onViewerDragStart($event, idx)"
+        @dragend="onViewerDragEnd"
         @click="$emit('select', idx)"
         @dragover.prevent.stop="onViewerDragOver($event, idx)"
         @dragleave="onViewerDragLeave(idx)"
         @drop.prevent.stop="onViewerDrop($event, idx)"
         :class="[
           'relative flex flex-col w-[300px] shrink-0 h-full rounded-2xl border p-3 transition-all cursor-pointer bg-studio-850',
-          dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx ? 'ring-2 ring-amber-400 border-amber-400 scale-[1.01] bg-amber-500/10' : '',
-          draggingIdx === idx ? 'opacity-40 border-dashed border-studio-500' : '',
+          dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx ? 'ring-2 ring-amber-400 border-amber-400 scale-[1.01] bg-amber-500/10 shadow-[0_0_20px_rgba(251,191,36,0.25)]' : '',
+          draggingIdx === idx ? 'opacity-40 border-dashed border-amber-400 scale-[0.98]' : '',
           selectedIndex === idx ? 'border-studio-accent ring-1 ring-studio-accent' : 'border-studio-700 hover:border-studio-600'
         ]"
       >
+        <!-- 精准插入光束指示 (插在此前 / 插在此后) -->
         <div
-          v-if="dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx"
-          class="absolute inset-0 z-40 bg-amber-500/20 backdrop-blur-xs flex items-center justify-center font-bold text-amber-200 border-2 border-dashed border-amber-400 rounded-2xl pointer-events-none text-sm shadow-xl"
+          v-if="dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx && viewerInsertPos === 'before'"
+          class="absolute -left-2 top-2 bottom-2 w-1.5 rounded-full bg-gradient-to-b from-amber-300 via-amber-400 to-amber-500 shadow-[0_0_14px_rgba(251,191,36,0.95)] z-40 flex items-center justify-center pointer-events-none animate-pulse"
         >
-          ⇄ 释放以与图{{ idx + 1 }}调换顺序
+          <div class="absolute -top-3.5 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded bg-amber-400 text-black text-[10px] font-black shadow-lg whitespace-nowrap">
+            ◀ 移至图{{ idx + 1 }}前
+          </div>
+        </div>
+        <div
+          v-if="dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx && viewerInsertPos === 'after'"
+          class="absolute -right-2 top-2 bottom-2 w-1.5 rounded-full bg-gradient-to-b from-amber-300 via-amber-400 to-amber-500 shadow-[0_0_14px_rgba(251,191,36,0.95)] z-40 flex items-center justify-center pointer-events-none animate-pulse"
+        >
+          <div class="absolute -top-3.5 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded bg-amber-400 text-black text-[10px] font-black shadow-lg whitespace-nowrap">
+            移至图{{ idx + 1 }}后 ▶
+          </div>
         </div>
         <div
           @click.stop="onImageClick(idx)"
@@ -763,7 +804,7 @@
             :style="getImageContainerStyle(idx)"
           >
             <img
-              :src="img.url || img.imgUrl"
+              :src="resolveViewerImageUrl(img)"
               class="w-full h-full object-contain block transition-transform duration-200 group-hover/img:scale-[1.01]"
               :alt="`图${idx + 1}`"
               @load="onImgLoad($event, idx)"
@@ -873,7 +914,7 @@
                   :class="reg.params?.transparentBg !== false ? 'bg-transparent' : 'bg-[#F8FAFC]'"
                   :style="getPolygonClipPathStyle(reg, img)"
                 >
-                  <img :src="reg.params.snapshotUrl" class="w-full h-full object-contain pointer-events-none drop-shadow" alt="" />
+                  <img :src="resolveViewerImageUrl(reg.params.snapshotUrl)" class="w-full h-full object-contain pointer-events-none drop-shadow" alt="" />
                 </div>
                 <!-- 基础属性：智能平铺材质贴图与色彩预览 -->
                 <div
@@ -883,7 +924,7 @@
                 >
                   <img
                     v-if="reg.params?.materialTextureUrl"
-                    :src="reg.params.materialTextureUrl"
+                    :src="resolveViewerImageUrl(reg.params.materialTextureUrl)"
                     class="w-full h-full object-cover mix-blend-multiply opacity-80"
                     alt="材质贴图"
                   />
@@ -907,7 +948,7 @@
         <div class="mt-2.5 flex items-center justify-between shrink-0 px-1">
           <div class="flex items-center gap-2 min-w-0">
             <span class="px-2 py-0.5 rounded bg-studio-cyan/15 text-studio-cyan font-mono text-xs font-bold">图{{ idx + 1 }}</span>
-            <span class="text-xs font-mono text-slate-400 truncate">{{ img.name || `ARCH_REF_0${idx+1}` }}</span>
+            <span v-if="getFriendlyImageName(img, idx)" class="text-xs font-mono text-slate-400 truncate">{{ getFriendlyImageName(img, idx) }}</span>
           </div>
           <div class="flex items-center gap-1 shrink-0">
             <button
@@ -956,9 +997,13 @@ const emit = defineEmits([
 const isDragging = ref(false);
 const draggingIdx = ref(null);
 const dragOverIdx = ref(null);
+const viewerInsertPos = ref(null); // 'before' | 'after'
 
 function onViewerDragStart(e, idx) {
   draggingIdx.value = idx;
+  if (typeof window !== 'undefined') {
+    window.__studioRefDragging = true;
+  }
   e.dataTransfer.effectAllowed = 'move';
   e.dataTransfer.setData('application/x-studio-tray-idx', String(idx));
   e.dataTransfer.setData('text/plain', `tray:${idx}`);
@@ -966,6 +1011,9 @@ function onViewerDragStart(e, idx) {
 
 function onViewerDragOver(e, idx) {
   if (draggingIdx.value !== null && draggingIdx.value !== idx) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const relX = e.clientX - rect.left;
+    viewerInsertPos.value = relX < rect.width / 2 ? 'before' : 'after';
     dragOverIdx.value = idx;
     e.dataTransfer.dropEffect = 'move';
   }
@@ -974,6 +1022,7 @@ function onViewerDragOver(e, idx) {
 function onViewerDragLeave(idx) {
   if (dragOverIdx.value === idx) {
     dragOverIdx.value = null;
+    viewerInsertPos.value = null;
   }
 }
 
@@ -981,8 +1030,16 @@ function onViewerDrop(e, targetIdx) {
   const rawIdx = e.dataTransfer.getData('application/x-studio-tray-idx');
   if (rawIdx !== '') {
     const fromIdx = Number(rawIdx);
-    if (!Number.isNaN(fromIdx) && fromIdx !== targetIdx) {
-      emit('reorder', { from: fromIdx, to: targetIdx });
+    if (!Number.isNaN(fromIdx)) {
+      const pos = viewerInsertPos.value || 'before';
+      let finalTo = pos === 'before' ? targetIdx : targetIdx + 1;
+      if (fromIdx < finalTo) {
+        finalTo -= 1;
+      }
+      finalTo = Math.max(0, Math.min(finalTo, props.images.length - 1));
+      if (fromIdx !== finalTo) {
+        emit('reorder', { from: fromIdx, to: finalTo });
+      }
     }
     resetViewerDragState();
     return;
@@ -998,11 +1055,32 @@ function onViewerDragEnd() {
   resetViewerDragState();
 }
 
-function onDropFiles(e) {
+function onViewerContainerDragOver(e) {
+  // 核心：若为内部参考图拖动（看图区内或右侧托盘），严禁开启全屏添加遮罩
+  if (typeof window !== 'undefined' && window.__studioRefDragging) {
+    isDragging.value = false;
+    return;
+  }
+  const isFiles = e.dataTransfer?.types?.includes('Files');
+  if (isFiles) {
+    isDragging.value = true;
+  }
+}
+
+function onViewerContainerDragLeave(e) {
+  if (!e.relatedTarget || !e.currentTarget.contains(e.relatedTarget)) {
+    isDragging.value = false;
+  }
+}
+
+function onViewerContainerDrop(e) {
   isDragging.value = false;
-  // 核心：若为看图区内部卡片拖拽，不触发外部文件重复挂载
-  const rawIdx = e.dataTransfer.getData('application/x-studio-tray-idx');
-  if (rawIdx !== '') {
+  if (typeof window !== 'undefined' && window.__studioRefDragging) {
+    resetViewerDragState();
+    return;
+  }
+  const rawIdx = e.dataTransfer?.getData('application/x-studio-tray-idx');
+  if (rawIdx) {
     resetViewerDragState();
     return;
   }
@@ -1013,9 +1091,13 @@ function onDropFiles(e) {
 }
 
 function resetViewerDragState() {
+  if (typeof window !== 'undefined') {
+    window.__studioRefDragging = false;
+  }
   isDragging.value = false;
   draggingIdx.value = null;
   dragOverIdx.value = null;
+  viewerInsertPos.value = null;
 }
 
 function quickSwap(fromIdx, toIdx) {
@@ -1295,6 +1377,35 @@ function getSubRefLabel(img, idx) {
     return `3D参考 (图${idx + 1})`;
   }
   return `图${idx + 1}`;
+}
+
+function resolveViewerImageUrl(img) {
+  if (!img) return '';
+  let raw = '';
+  if (typeof img === 'string') {
+    raw = img;
+  } else if (typeof img === 'object') {
+    raw = img.url || img.imgUrl || img.imageUrl || img.previewUrl || img.thumbUrl || img.displayUrl || img.fullUrl || img.path || '';
+  }
+  raw = String(raw || '').trim();
+  if (!raw || raw === 'undefined' || raw === 'null') return '';
+  if (raw.startsWith('/api/') || /^https?:\/\/[^/]+\/api\//i.test(raw)) {
+    const token = typeof window !== 'undefined' ? (localStorage.getItem('token') || localStorage.getItem('ml_token') || '') : '';
+    if (token && !/[?&]token=/.test(raw)) {
+      return `${raw}${raw.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
+    }
+  }
+  return raw;
+}
+
+function getFriendlyImageName(img, idx) {
+  if (!img || typeof img !== 'object') return '';
+  const raw = String(img.name || img.filename || '').trim();
+  // 彻底过滤长 hash、uuid、生硬的 ARCH_ 代号以及与"图N"相同的重复名或带文件后缀的冗余名称
+  if (!raw || /^[0-9a-f]{16,}/i.test(raw) || /ARCH_REF/i.test(raw) || raw === `图${idx + 1}` || raw === `@图${idx + 1}` || raw.includes('.')) {
+    return '';
+  }
+  return raw;
 }
 
 function getSubRefBorderClass(img, idx) {

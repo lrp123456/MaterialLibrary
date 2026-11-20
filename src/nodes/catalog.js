@@ -97,7 +97,7 @@ function buildDefaultWorkflowGraph(db) {
   const specs = ['materialize', 'gate', 'defect', 'qc', 'tag', 'cluster', 'restage_dual', 'index', 'backup'];
   const nodes = specs.map((type, i) => {
     const n = defaultNode(type, { x: 64 + i * 200, y: 150, db });
-    if (type === 'backup') n.enabled = false;
+    if (type === 'backup' || type === 'restage_dual') n.enabled = false;
     if (type === 'tag') n.config.skipCluster = true;
     return n;
   });

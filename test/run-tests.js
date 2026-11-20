@@ -71,8 +71,13 @@ const MANIFEST = [
   ['unit', 'qwenimage-local.test.js'],
   ['unit', 'runtime-log.test.js'],
   ['unit', 'asset-replace-caches.test.js'],
+  ['unit', 'revive-ref-url.test.js'],
   ['unit', 'vip-error-format.test.js'],
   ['unit', 'gen-job-timing.test.js'],
+  ['unit', 'chat-playback-cache.test.mjs'],
+  ['unit', 'chat-loss-remediation.test.js'],
+  ['unit', 'open-fast-card.test.mjs'],
+  ['unit', 'mode-and-audit-fixes.test.js'],
   ['unit', 'batch-ab-regression.test.js'],
 
   // ---------- security：鉴权/凭据隔离/对抗输入 ----------

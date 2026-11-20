@@ -542,8 +542,8 @@ function convertArkSeedanceVideoRequest({
     body.resolution = '480p';
   }
 
-  // 画幅 ratio
-  let ratio = merged.ratio || (isSeedance25 ? 'adaptive' : '16:9');
+  // 画幅 ratio（默认必须为 9:16，除非特定模式强制 adaptive）
+  let ratio = merged.ratio || '9:16';
   if (isSeedance25 && ['first_last_frame', 'video_edit', 'video_extend'].includes(mode)) {
     ratio = 'adaptive';
   }

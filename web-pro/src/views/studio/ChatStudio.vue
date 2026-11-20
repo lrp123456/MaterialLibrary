@@ -1,5 +1,15 @@
 <template>
-  <div class="chat-root flex-1 min-h-0 flex overflow-hidden bg-studio-950 font-sans text-slate-100 text-sm">
+  <div class="chat-root flex-1 min-h-0 flex overflow-hidden bg-studio-950 font-sans text-slate-100 text-sm relative">
+    <!-- 全局操作反馈浮层 Toast -->
+    <transition name="fade">
+      <div
+        v-if="studioToast"
+        class="fixed top-14 left-1/2 -translate-x-1/2 z-[100] px-4 py-2.5 rounded-xl bg-studio-850/95 border border-studio-600 text-slate-100 text-xs font-bold shadow-2xl flex items-center gap-2.5 backdrop-blur pointer-events-none"
+      >
+        <span class="text-amber-400">✨</span>
+        <span>{{ studioToast }}</span>
+      </div>
+    </transition>
     <!-- ========================================================================= -->
     <!-- 1. 左侧抽屉栏：豆包/千问双模式（会话历史 / 我的创作库） -->
     <!-- ========================================================================= -->
@@ -175,6 +185,88 @@
               </div>
             </div>
           </div>
+
+          <!-- 展开早期归档列表 -->
+          <div v-if="archivedDrawerOpen" class="pt-2 border-t border-studio-800/80 space-y-1.5">
+            <div class="px-1 py-1 text-[10px] font-mono font-bold text-slate-500 flex items-center justify-between">
+              <span>早期历史（3天前）</span>
+              <span v-if="archivedLoading" class="text-studio-accent animate-spin text-[10px]">◌</span>
+            </div>
+            <div v-if="!archivedLoading && archivedSessions.length === 0" class="text-center py-3 text-[11px] text-slate-500">
+              无早期归档
+            </div>
+            <div
+              v-for="s in archivedSessions"
+              :key="s.id"
+              @click="selectSession(s)"
+              :class="[
+                'group px-2.5 py-2 rounded-xl border transition-all cursor-pointer text-xs',
+                currentSessionId === s.id
+                  ? 'bg-studio-850 border-studio-700 border-l-2 !border-l-studio-accent text-white shadow-md'
+                  : 'bg-studio-950/40 border-studio-800/80 hover:bg-studio-850 hover:border-studio-700 text-slate-400'
+              ]"
+            >
+              <div class="flex items-start justify-between gap-1.5">
+                <div class="flex flex-col gap-0.5 flex-1 min-w-0">
+                  <div class="flex items-center gap-1.5 min-w-0">
+                    <span
+                      class="px-1 py-0.5 rounded text-[9px] font-mono font-bold border shrink-0 opacity-70"
+                      :class="getSessionModalityBadge(getSessionModality(s)).class"
+                      :title="getSessionModalityBadge(getSessionModality(s)).label"
+                    >
+                      {{ getSessionModalityBadge(getSessionModality(s)).icon }}
+                    </span>
+                    <span class="truncate font-medium leading-4" :title="sessionHoverTitle(s)">{{ s.title || '早期创作会话' }}</span>
+                  </div>
+                  <div class="flex items-center gap-1.5 min-w-0 text-[10px] text-slate-500 font-mono">
+                    <span class="truncate max-w-[130px]">{{ sessionModelLabel(s) }}</span>
+                    <span class="shrink-0">{{ formatSessionActivityTime(s.updated_at) }}</span>
+                  </div>
+                </div>
+                <div class="flex items-center gap-1 shrink-0 pt-0.5">
+                  <span
+                    v-if="s.product_count > 0"
+                    class="px-1 py-0.5 rounded-full text-[9px] font-mono font-bold bg-studio-850 text-studio-cyan/80 border border-studio-700/80"
+                    title="产物数量"
+                  >
+                    {{ s.product_count }}件
+                  </span>
+                  <button
+                    @click.stop="deleteSession(s.id)"
+                    class="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-rose-400 p-0.5 transition-opacity cursor-pointer"
+                    title="删除会话"
+                  >
+                    <StudioIcon name="close" :size="11" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 早期归档与清理待移除条 -->
+        <div v-if="sessionMeta.archived_count > 0" class="px-3 py-1.5 bg-studio-950/90 border-t border-studio-800 flex items-center justify-between text-[11px] select-none">
+          <button
+            type="button"
+            @click="toggleArchivedDrawer"
+            class="flex items-center gap-1 text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
+            :title="archivedDrawerOpen ? '收起早期归档' : '展开查看 3 天前的早期会话'"
+          >
+            <span>📦</span>
+            <span class="font-medium">早期归档 ({{ sessionMeta.archived_count }})</span>
+            <span class="text-[9px] text-slate-500 ml-0.5 transition-transform" :class="{ 'rotate-180': archivedDrawerOpen }">▾</span>
+          </button>
+          <button
+            v-if="sessionMeta.stale_empty_count > 0"
+            type="button"
+            @click="handleCleanStaleEmpty"
+            :disabled="cleaningStale"
+            class="flex items-center gap-1 text-[10px] text-amber-400/90 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded border border-amber-500/30 transition-all cursor-pointer disabled:opacity-50"
+            :title="`一键清理 3 天前无生成产物的 ${sessionMeta.stale_empty_count} 个废弃会话（保留作品）`"
+          >
+            <span>🧹</span>
+            <span>清理废弃({{ sessionMeta.stale_empty_count }})</span>
+          </button>
         </div>
 
         <!-- 底部固定栏：新对话与创作库直达入口 -->
@@ -244,11 +336,16 @@
         class="chat-scroll flex-1 overflow-y-auto px-4 py-2 space-y-3 scrollbar-thin"
         @scroll.passive="onChatScroll"
       >
-        <div v-if="messages.length > 0" class="text-center py-1 text-[11px] text-slate-500 font-medium">
-          ↑ 向上滚动查看更早记录
+        <!-- 会话加载骨架过渡态，杜绝空文案误导 -->
+        <div v-if="messagesLoading" class="h-full flex flex-col items-center justify-center text-xs text-slate-400 gap-2.5 py-12">
+          <div class="w-6 h-6 border-2 border-studio-accent border-t-transparent rounded-full animate-spin"></div>
+          <span>正在加载会话消息…</span>
         </div>
-        <div v-if="messages.length === 0" class="h-full flex items-center justify-center text-xs text-slate-500">
+        <div v-else-if="messages.length === 0" class="h-full flex items-center justify-center text-xs text-slate-500">
           暂无更早记录，请在下方看图区选定参考图开始创作
+        </div>
+        <div v-else class="text-center py-1 text-[11px] text-slate-500 font-medium">
+          ↑ 向上滚动查看更早记录
         </div>
         <!-- 真实消息流列表 -->
         <div v-for="(msg, i) in messages" :key="i" class="flex flex-col space-y-2">
@@ -312,8 +409,11 @@
                       class="block cursor-zoom-in"
                       @click="openMediaPreview(item)"
                     >
-                      <img v-if="mediaKind(item) === 'image'" :src="authedMediaUrl(item.url)" :alt="item.name || '图片'" class="h-16 w-16 object-cover" />
-                      <video v-else-if="mediaKind(item) === 'video'" :src="authedMediaUrl(item.url)" class="h-16 w-24 object-cover" muted></video>
+                      <img v-if="mediaKind(item) === 'image'" :src="attachmentPreviewSrc(item)" :alt="item.name || '图片'" class="h-16 w-16 object-cover" loading="lazy" decoding="async" />
+                      <span v-else-if="mediaKind(item) === 'video'" class="relative flex h-16 w-24 items-center justify-center bg-black/50">
+                        <img v-if="attachmentPosterSrc(item)" :src="attachmentPosterSrc(item)" alt="" class="h-16 w-24 object-cover" loading="lazy" />
+                        <span class="absolute text-white text-xs">▶</span>
+                      </span>
                       <span v-else class="flex h-16 w-28 items-center px-2 text-left text-[11px] font-bold text-white">音频 {{ item.name || '附件' }}</span>
                     </button>
                     <button
@@ -337,11 +437,14 @@
               <div class="flex items-center justify-between text-[11px] text-slate-400 font-mono pb-2 border-b border-studio-800">
                 <span class="flex items-center gap-1.5 text-studio-accent font-medium">
                   <StudioIcon :name="msg.modality === 'video' ? 'video' : (msg.modality === 'music' ? 'music' : 'sparkles')" :size="14" />
-                  {{ msg.model || 'Seedream 5.0 Flash' }}
+                  {{ msg.model || (msg.modality === 'video' ? '万相 3.0' : (msg.modality === 'music' ? 'AI 配乐' : 'Seedream 5.0 Flash')) }}
                 </span>
                 <span class="flex items-center gap-2">
                   <span class="text-slate-400 font-mono">{{ formatTemplateCardTime(msg.startTime) }}</span>
-                  <span v-if="!msg.isError && !msg.isGenerating">
+                  <span v-if="msg.isCancelled" class="px-2 py-0.5 rounded-full bg-amber-950/80 border border-amber-800/60 text-amber-300 text-[10px] font-bold">
+                    已取消
+                  </span>
+                  <span v-else-if="!msg.isError && !msg.isGenerating">
                     {{ msg.modality === 'video' ? `时长: ${msg.duration || '5s'} · 分辨率: ${displayResolution(msg.resolution, msg) || '—'}` : (msg.modality === 'music' ? `时长: ${msg.duration || '30s'} · 320kbps` : [msg.duration ? `耗时: ${msg.duration}` : '', displayResolution(msg.resolution, msg) ? `分辨率: ${displayResolution(msg.resolution, msg)}` : ''].filter(Boolean).join(' · ')) }}
                   </span>
                   <span v-else-if="msg.isGenerating" class="flex items-center gap-1.5 text-studio-cyan font-bold font-mono">
@@ -349,7 +452,7 @@
                     <span>渲染中 · {{ formatTimer(getElapsedSec(msg)) }}</span>
                   </span>
                   <button
-                    v-if="!msg.isError && !msg.isGenerating && msg.modality === 'video' && (msg.videoUrl || msg.modelVideoUrl)"
+                    v-if="!msg.isError && !msg.isGenerating && !msg.isCancelled && msg.modality === 'video' && (msg.videoUrl || msg.modelVideoUrl)"
                     type="button"
                     class="msg-copy-all"
                     title="在大预览里看模型原片和超分后"
@@ -358,7 +461,7 @@
                     查看对比
                   </button>
                   <button
-                    v-if="msg.jobId || msg.isError"
+                    v-if="msg.jobId || msg.isError || msg.isCancelled"
                     type="button"
                     class="msg-copy-all opacity-80 hover:opacity-100"
                     title="查看任务详细生成耗时、时间戳与日志"
@@ -443,7 +546,7 @@
                         <span>{{ getGeneratingStageText(msg) }}</span>
                       </div>
                       <div class="text-[11px] text-slate-400 font-mono">
-                        画幅 {{ msg.ratio || '16:9' }}<template v-if="msg.resolution"> · {{ msg.resolution }}</template> · {{ msg.model || 'Seedream 5.0' }}
+                        画幅 {{ msg.ratio || '16:9' }}<template v-if="msg.resolution"> · {{ msg.resolution }}</template> · {{ msg.model || (msg.modality === 'video' ? '万相 3.0' : (msg.modality === 'music' ? 'AI 配乐' : 'Seedream 5.0')) }}
                       </div>
                     </div>
 
@@ -465,7 +568,7 @@
               <!-- 情况 A：生图产物。按钮在图下方，避免被大图裁掉。 -->
               <div v-else-if="msg.imageUrl && msg.modality === 'image'" class="space-y-2">
                 <div class="relative rounded-xl overflow-hidden border border-studio-750 bg-studio-950">
-                  <img :src="resultImageSrc(msg)" @error="onResultImgError(msg)" @load="onResultImgLoad(msg)" @click="openMediaPreview(resultImageSrc(msg), 'image')" class="w-full max-h-[460px] object-contain cursor-zoom-in hover:brightness-105 transition-all" title="点击查看高清大图" />
+                  <img :src="resultImageCardSrc(msg)" loading="lazy" @error="onResultImgError(msg)" @load="onResultImgLoad(msg)" @click="openMediaPreview(resultImageSrc(msg), 'image')" class="w-full max-h-[460px] object-contain cursor-zoom-in hover:brightness-105 transition-all" title="点击查看高清大图" />
                   <div v-if="msg.imgFailed" class="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-studio-950/88 px-4 text-center">
                     <p v-if="msg.imgAuth" class="text-xs text-amber-300 leading-relaxed">登录已过期，服务器不认当前会话。重新登录后这张图会自动出来。</p>
                     <p v-else class="text-xs text-amber-300 leading-relaxed">这张产物取不到了{{ msg.imgErr ? `：${msg.imgErr}` : '（临时文件被清理，或服务器不可达）' }}。</p>
@@ -474,7 +577,7 @@
                   </div>
                 </div>
                 <ResultActions
-                  :created="!!msg.creationSaved"
+                  :created="!!msg.creationSaved || (msg.id && savedCreationSet.has(msg.id))"
                   :creating="!!msg.savingCreation"
                   :saved="!!msg.librarySaved"
                   :saving="!!msg.savingToLibrary"
@@ -487,15 +590,41 @@
               </div>
               <!-- 情况 B：视频产物展示 (完整高保真 HTML5 视频播放器) -->
               <div v-else-if="!msg.isError && (msg.videoUrl || msg.modelVideoUrl || msg.srStatus || msg.modality === 'video')" class="space-y-2">
-                <div v-if="msg.videoUrl || msg.modelVideoUrl" class="rounded-xl overflow-hidden border border-studio-750 bg-black relative group shadow-inner">
-                  <video
-                    :ref="el => registerVideoEl(i, el)"
-                    :src="authedMediaUrl(msg.videoUrl || msg.modelVideoUrl)"
-                    class="w-full max-h-[400px] object-contain bg-black"
-                    controls
-                    playsinline
-                    preload="metadata"
-                  ></video>
+                <div v-if="msg.videoUrl || msg.modelVideoUrl" class="flex">
+                  <div
+                    class="rounded-xl overflow-hidden border border-studio-750 bg-black relative shadow-inner"
+                    :style="videoFrameStyle(msg)"
+                  >
+                    <img
+                      v-if="!msg._videoArmed && !msg.videoExpired && chatVideoPosterUrl(msg)"
+                      :src="chatVideoPosterUrl(msg)"
+                      class="absolute inset-0 h-full w-full object-contain bg-black"
+                      alt=""
+                      @load="onChatPosterLoad(msg)"
+                    />
+                    <video
+                      v-show="msg._videoArmed && !msg.videoExpired"
+                      :ref="el => registerVideoEl(i, el)"
+                      :src="msg._videoArmed ? chatVideoPlayUrl(msg) : undefined"
+                      class="h-full w-full object-contain bg-black"
+                      controls
+                      playsinline
+                      preload="none"
+                      @error="onChatVideoError(msg)"
+                    ></video>
+                    <button
+                      v-if="!msg._videoArmed && !msg.videoExpired"
+                      type="button"
+                      class="absolute inset-0 flex items-center justify-center cursor-pointer"
+                      title="播放"
+                      @click="armChatVideo(msg, i)"
+                    >
+                      <span class="inline-flex h-12 w-12 items-center justify-center rounded-full border border-white/30 bg-black/55 text-lg text-white">▶</span>
+                    </button>
+                    <div v-if="msg.videoExpired" class="absolute inset-0 flex items-center justify-center px-4 text-center text-xs text-amber-200">
+                      未入素材库，预览已过期
+                    </div>
+                  </div>
                 </div>
                 <div
                   v-else-if="msg.srStatus === 'running'"
@@ -514,7 +643,7 @@
                   <span v-if="displayResolution(msg.resolution, msg)" class="font-mono">{{ displayResolution(msg.resolution, msg) }}</span>
                 </div>
                 <ResultActions
-                  :created="!!msg.creationSaved"
+                  :created="!!msg.creationSaved || (msg.id && savedCreationSet.has(msg.id))"
                   :creating="!!msg.savingCreation"
                   :saved="!!msg.librarySaved"
                   :saving="!!msg.savingToLibrary"
@@ -540,7 +669,7 @@
                   <audio :src="authedMediaUrl(msg.audioUrl)" controls class="w-full h-10"></audio>
                 </div>
                 <ResultActions
-                  :created="!!msg.creationSaved"
+                  :created="!!msg.creationSaved || (msg.id && savedCreationSet.has(msg.id))"
                   :creating="!!msg.savingCreation"
                   :saved="!!msg.librarySaved"
                   :saving="!!msg.savingToLibrary"
@@ -649,8 +778,14 @@
                     <StudioIcon name="info" :size="15" />
                   </span>
                   <span class="gen-error-title text-amber-200">生成已取消</span>
+                  <span v-if="msg.cloudContinued || msg.vendorStatus === 'SUCCEEDED'" class="ml-auto text-[10px] px-2 py-0.5 rounded bg-amber-900/40 text-amber-300 font-mono">
+                    云端已生成视频
+                  </span>
                 </div>
-                <p class="gen-error-body text-slate-300">该任务已手动取消，未消耗进一步算力与时间。</p>
+                <p v-if="msg.cloudContinued || msg.vendorStatus === 'SUCCEEDED'" class="gen-error-body text-amber-200/90 text-xs">
+                  该任务在本地发起了取消。经云端日志核验，云端后台已跑完算力并生成视频。点击「查看日志」可查看云端任务详情与产物地址。
+                </p>
+                <p v-else class="gen-error-body text-slate-300">该任务已手动取消，未消耗进一步算力与时间。</p>
                 <div class="gen-error-actions">
                   <button type="button" class="gen-error-retry border-amber-800 text-amber-300 hover:bg-amber-900/40" @click="openRetry(msg)">
                     <StudioIcon name="refresh" :size="12" />
@@ -666,7 +801,7 @@
                   </button>
                 </div>
               </div>
-              <div v-else-if="!msg.isGenerating" class="space-y-2">
+              <div v-else-if="shouldRenderCardContent(msg)" class="space-y-2">
                 <div class="chat-md select-text" v-html="renderMarkdown(msg.content)" @click="onMdClick" @mouseup="handleChatTextSelection"></div>
 
                 <!-- 对话模型回答快捷迁移为创作提示词 (生图 / 生视频) -->
@@ -866,8 +1001,9 @@
                 v-model="schemaParams"
                 v-model:showAdvanced="showAdvanced"
                 :refCounts="currentRefCounts"
-                @select-mode="setGenMode"
+                @select-mode="onUserPickMode"
                 @param-change="onParamBarChange"
+                @reset-default-mode="resetToDefaultGenMode"
               />
             </div>
             <p v-if="catalogError" class="basis-full text-xs text-amber-300">
@@ -893,6 +1029,10 @@
             <p v-else-if="!currentSchema" class="basis-full text-xs text-slate-300">这个模型的参数表还没接入，这次只提交提示词。</p>
             <p v-if="oldRecipeNote" class="basis-full text-xs text-slate-300">这是旧配方，模型未记录，已改用 Agnes Image 2.5 Flash。</p>
             <p v-if="composerNotice" class="basis-full text-xs text-amber-300">{{ composerNotice }}</p>
+            <p v-if="isAdaptiveForced" class="basis-full text-xs font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 animate-in fade-in duration-200">
+              <span class="inline-block w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+              <span>⚠️ 当前模式（如首尾帧）要求画幅强制为「自适应」，生成将按参考图比例输出</span>
+            </p>
             <p v-if="autoAdaptiveNotice" class="basis-full text-xs font-medium text-emerald-400 flex items-center gap-1.5 animate-in fade-in duration-200">
               <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
               <span>{{ autoAdaptiveNotice }}</span>
@@ -1055,7 +1195,7 @@
                 :video-url="templateVideoUrl(tpl)"
                 :reference-url="templateRefUrl(tpl)"
               />
-              <img v-else-if="tpl.result_images?.[0]?.url" :src="authedMediaUrl(tpl.result_images[0].url)" class="w-8 h-8 rounded object-cover border border-white/10 shrink-0" />
+              <img v-else-if="templateCoverSrc(tpl)" :src="templateCoverSrc(tpl)" class="w-8 h-8 rounded object-cover border border-white/10 shrink-0" />
               <div class="flex-1 min-w-0">
                 <div class="font-bold text-white truncate flex items-center gap-1.5">
                   <span v-if="tpl.is_pinned" class="text-amber-400 text-[10px]" title="置顶收藏">⭐</span>
@@ -1308,7 +1448,9 @@
               class="rich-prompt-editor text-slate-100 text-sm leading-relaxed font-medium min-h-[44px] max-h-36 overflow-y-auto outline-none"
               :class="activeModality === 'chat' ? 'pr-3' : (optimizeUndo ? 'pr-48' : 'pr-32')"
               data-placeholder="例如：沙发换成深灰色布艺，百叶窗拉上一半，阳光只洒在地毯上..."
-              @input="onEditorInput"
+              @input="onUserEditorInput"
+              @compositionstart="onEditorCompositionStart"
+              @compositionend="onEditorCompositionEnd"
               @keyup="onEditorKeyup"
               @keydown="onEditorKeydown"
               @click="saveEditorSelection"
@@ -1478,11 +1620,11 @@
             <!-- 立即生成/发送按钮 -->
             <button
               @click="sendMessage"
-              :disabled="currentGenerating"
+              :disabled="currentGenerating || uploadingCrop"
               class="px-5 py-2 rounded-xl bg-gradient-to-r from-studio-accent to-studio-cyan hover:brightness-110 text-white text-xs font-extrabold flex items-center space-x-2 shadow-lg shadow-studio-accent/25 transition-all disabled:opacity-40 cursor-pointer ml-1"
             >
               <span>{{ getSendButtonText() }}</span>
-              <StudioIcon name="send" :size="13" />
+              <StudioIcon :name="uploadingCrop ? 'sliders' : 'send'" :size="13" :class="{ 'animate-spin': uploadingCrop }" />
             </button>
           </div>
         </div>
@@ -1836,7 +1978,7 @@
                 >
                   <img
                     v-if="refImg.url"
-                    :src="refImg.url"
+                    :src="authedMediaUrl(refImg.url)"
                     class="w-full h-full object-contain"
                     @load="noteDetailRatio('ref:' + rIdx, $event.target)"
                   />
@@ -1856,7 +1998,7 @@
                 >
                   <video
                     v-if="detailModal.tpl.type === 'video' && detailModal.tpl.result_images?.[0]?.url"
-                    :src="detailModal.tpl.result_images[0].url"
+                    :src="authedMediaUrl(detailModal.tpl.result_images[0].url)"
                     controls
                     autoplay
                     loop
@@ -1866,7 +2008,7 @@
                   ></video>
                   <div v-else-if="detailModal.tpl.type === 'audio' && detailModal.tpl.result_images?.[0]?.url" class="flex flex-col items-center gap-2 p-3">
                     <StudioIcon name="music" :size="28" />
-                    <audio :src="detailModal.tpl.result_images[0].url" controls class="max-w-full"></audio>
+                    <audio :src="authedMediaUrl(detailModal.tpl.result_images[0].url)" controls class="max-w-full"></audio>
                   </div>
                   <button
                     v-else-if="detailModal.tpl.result_images?.[0]?.url"
@@ -1876,7 +2018,7 @@
                     @click="openMediaPreview(detailModal.tpl.result_images[0], 'image')"
                   >
                     <img
-                      :src="detailModal.tpl.result_images[0].url"
+                      :src="authedMediaUrl(detailModal.tpl.result_images[0].url)"
                       class="w-full h-full object-contain"
                       @load="noteDetailRatio('result', $event.target)"
                     />
@@ -1998,8 +2140,8 @@
                   :class="detailModal.tpl.id === v.id ? 'border-studio-accent bg-studio-accent/20 ring-1 ring-studio-accent' : 'border-studio-800 hover:border-studio-700 bg-studio-900'"
                 >
                   <img
-                    v-if="v.result_images?.[0]?.url"
-                    :src="v.result_images[0].url"
+                    v-if="templateCoverSrc(v)"
+                    :src="templateCoverSrc(v)"
                     class="w-full h-14 object-cover rounded"
                   />
                   <div class="text-[10px] text-slate-300 font-mono truncate w-full text-center">
@@ -2176,8 +2318,7 @@
               :class="tplGroupDerivatives ? 'bg-studio-accent/20 border-studio-accent/60 text-studio-cyan shadow-sm shadow-studio-accent/20' : 'bg-studio-950 border-studio-750 text-slate-400 hover:text-white'"
               title="将同源参考图或同一母本的多次衍生版本折叠聚合，避免平铺冗余"
             >
-              <span>🗂️</span>
-              <span>聚合衍生版本</span>
+              <span>{{ tplGroupDerivatives ? '🗂️ 已聚合衍生版本' : '📄 平铺全部版本' }}</span>
             </button>
           </div>
 
@@ -2308,11 +2449,16 @@
                       :ratio="templateRailRatio(tpl)"
                       :sections="sections"
                       :drag-hint="dragTplId === tpl.id ? (dragOverSectionName || '未分区') : ''"
+                      :is-dragging="dragTplId === tpl.id"
+                      :drag-over-pos="dragOverTplId === tpl.id ? dragInsertPos : null"
                       @open="openTemplateDetail"
                       @pin="toggleTemplatePin"
                       @place="placeTemplateInSection"
                       @dragstart="onTemplateDragStart($event, tpl, sec.id)"
                       @dragend="onTemplateDragEnd"
+                      @card-dragover="onPinnedCardDragOver($event, tpl, sec.id)"
+                      @card-dragleave="onPinnedCardDragLeave($event, tpl)"
+                      @card-drop="onPinnedCardDrop($event, tpl, sec.id)"
                     />
                   </div>
                 </div>
@@ -2352,9 +2498,10 @@
                       <!-- 图片模式 -->
                       <template v-if="!tpl.type || tpl.type === 'image'">
                         <img
-                          v-if="tpl.result_images?.[0]?.url"
-                          :src="tpl.result_images[0].url"
+                          v-if="templateCoverSrc(tpl)"
+                          :src="templateCoverSrc(tpl)"
                           class="w-full h-full object-cover"
+                          decoding="async"
                         />
                         <div v-else class="w-full h-full flex items-center justify-center text-xs text-slate-600">无预览</div>
                       </template>
@@ -2530,8 +2677,8 @@
                     <!-- 图片模式：展示成果大图 + 角标原图 -->
                     <template v-if="!tpl.type || tpl.type === 'image'">
                       <img
-                        v-if="tpl.result_images?.[0]?.url"
-                        :src="tpl.result_images[0].url"
+                        v-if="templateCoverSrc(tpl)"
+                        :src="templateCoverSrc(tpl)"
                         class="w-full h-full object-cover group-hover/card:scale-105 transition-transform duration-300"
                         loading="lazy"
                         decoding="async"
@@ -2542,13 +2689,13 @@
 
                       <!-- 原图画中画浮窗 -->
                       <div
-                        v-if="tpl.origin_images?.[0]?.url"
+                        v-if="templateOriginCoverSrc(tpl)"
                         class="absolute bottom-2 left-2 flex items-center space-x-1.5 bg-black/75 backdrop-blur-xs p-1 rounded-lg border border-white/10 hover:border-studio-accent transition-colors z-10"
                         title="点击查看原图"
                         @click.stop="openMediaPreview(tpl.origin_images[0], 'image')"
                       >
                         <span class="text-[9px] text-slate-400 font-bold px-1">原图</span>
-                        <img :src="tpl.origin_images[0].url" class="w-8 h-8 rounded object-cover border border-white/20" />
+                        <img :src="templateOriginCoverSrc(tpl)" class="w-8 h-8 rounded object-cover border border-white/20" />
                       </div>
                     </template>
 
@@ -2563,13 +2710,13 @@
                           @measured="noteRailRatio(tpl, $event)"
                         />
                         <div
-                          v-if="tpl.origin_images?.[0]?.url"
+                          v-if="templateOriginCoverSrc(tpl)"
                           class="absolute bottom-2 left-2 flex items-center space-x-1.5 bg-black/75 backdrop-blur-xs p-1 rounded-lg border border-white/10 hover:border-studio-accent transition-colors z-10"
                           title="点击查看输入参考原图"
                           @click.stop="openMediaPreview(tpl.origin_images[0], 'image')"
                         >
                           <span class="text-[9px] text-slate-400 font-bold px-1">原图</span>
-                          <img :src="authedMediaUrl(tpl.origin_images[0].url)" class="w-8 h-8 rounded object-cover border border-white/20" />
+                          <img :src="templateOriginCoverSrc(tpl)" class="w-8 h-8 rounded object-cover border border-white/20" />
                         </div>
                       </div>
                     </template>
@@ -2582,7 +2729,7 @@
                         </div>
                         <audio
                           v-if="tpl.result_images?.[0]?.url"
-                          :src="tpl.result_images[0].url"
+                          :src="authedMediaUrl(tpl.result_images[0].url)"
                           controls
                           class="w-full h-9"
                         ></audio>
@@ -2857,11 +3004,16 @@
                 :ratio="templateRailRatio(tpl)"
                 :sections="sections"
                 :drag-hint="dragTplId === tpl.id ? (dragOverSectionName || '未分区') : ''"
+                :is-dragging="dragTplId === tpl.id"
+                :drag-over-pos="dragOverTplId === tpl.id ? dragInsertPos : null"
                 @open="openTemplateDetail"
                 @pin="toggleTemplatePin"
                 @place="placeTemplateInSection"
                 @dragstart="onTemplateDragStart($event, tpl, sectionLayer)"
                 @dragend="onTemplateDragEnd"
+                @card-dragover="onPinnedCardDragOver($event, tpl, sectionLayer)"
+                @card-dragleave="onPinnedCardDragLeave($event, tpl)"
+                @card-drop="onPinnedCardDrop($event, tpl, sectionLayer)"
               />
             </div>
           </div>
@@ -2882,6 +3034,63 @@
       <div class="w-full max-w-md rounded-2xl bg-studio-900 border border-studio-700 p-5 space-y-4">
         <p class="text-sm text-slate-100">已重新提交。视频队列满时可能还会失败，可以稍后再试。</p>
         <button type="button" class="w-full py-2 rounded-lg bg-studio-accent text-white text-xs font-bold cursor-pointer" @click="retryNotice = false">知道了</button>
+      </div>
+    </div>
+    <!-- 发送确认弹窗（非默认模式或清空参考图自动转文生模式） -->
+    <div
+      v-if="sendConfirmModal.open"
+      class="fixed inset-0 z-[96] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-in fade-in duration-150"
+      @click.self="handleSendModalAction(sendConfirmModal.type === 'non_default' ? 'cancel' : false)"
+    >
+      <div class="w-full max-w-md rounded-2xl bg-studio-900 border border-studio-700/90 p-5 shadow-2xl flex flex-col gap-4 text-slate-100">
+        <div class="flex items-center gap-2.5">
+          <span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
+          <h3 class="text-sm font-bold text-white">{{ sendConfirmModal.title }}</h3>
+        </div>
+        <p class="text-xs text-slate-300 leading-relaxed">{{ sendConfirmModal.description }}</p>
+
+        <!-- 3 选择按钮（非默认模式） -->
+        <div v-if="sendConfirmModal.type === 'non_default'" class="flex items-center justify-end gap-2 pt-2 border-t border-studio-800">
+          <button
+            type="button"
+            class="px-3 py-1.5 rounded-lg border border-studio-700 text-xs font-semibold text-slate-300 hover:bg-studio-800 cursor-pointer transition-colors"
+            @click="handleSendModalAction('cancel')"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            class="px-3 py-1.5 rounded-lg bg-studio-800 hover:bg-studio-700 border border-studio-600 text-xs font-semibold text-amber-300 cursor-pointer transition-colors"
+            @click="handleSendModalAction('send_current')"
+          >
+            仍按当前模式发送
+          </button>
+          <button
+            type="button"
+            class="px-3 py-1.5 rounded-lg bg-studio-accent hover:opacity-90 text-xs font-bold text-white cursor-pointer transition-colors"
+            @click="handleSendModalAction('switch_default')"
+          >
+            改回{{ sendConfirmModal.defaultModeLabel }}并发送
+          </button>
+        </div>
+
+        <!-- 2 选择按钮（删光参考图自动文生） -->
+        <div v-else class="flex items-center justify-end gap-2 pt-2 border-t border-studio-800">
+          <button
+            type="button"
+            class="px-3.5 py-1.5 rounded-lg border border-studio-700 text-xs font-semibold text-slate-300 hover:bg-studio-800 cursor-pointer transition-colors"
+            @click="handleSendModalAction(false)"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            class="px-3.5 py-1.5 rounded-lg bg-studio-accent hover:opacity-90 text-xs font-bold text-white cursor-pointer transition-colors"
+            @click="handleSendModalAction(true)"
+          >
+            确定发送
+          </button>
+        </div>
       </div>
     </div>
     <!-- 划词选中快速迁移浮动气泡 -->
@@ -2919,6 +3128,7 @@ import StudioIcon from '../../components/StudioIcon.vue';
 import { onTaskUpdate, onAssetChange } from '../../service/sse.js';
 import { bindOverlays } from '../../service/overlay-stack.js';
 import { resolveParams, buildSessionSnapshot, snapshotFromMessage } from '../../utils/studio-params.js';
+import { reviveRefUrl as decideReviveRefUrl, adoptEditedPixels, revertEditedPixels } from '../../utils/revive-ref-url.js';
 import DynamicModelParamBar from '../../components/DynamicModelParamBar.vue';
 import AssetPickerModal from '../../components/AssetPickerModal.vue';
 import StudioViewer from './StudioViewer.vue';
@@ -2940,6 +3150,8 @@ import {
   getNearestCanonicalRatio,
   detectMediaSemantics,
   inferOptimalWorkflowAndParams,
+  resolveVideoGenMode,
+  resolveDefaultMode,
   extractDominantScenePalette,
   REGION_COLORS
 } from '../../utils/model-protocol';
@@ -2952,9 +3164,12 @@ import {
   replaceSectionsCache
 } from '../../utils/creation-library-cache';
 import { contextBudgetTokens, trimChatMessages } from '../../../../src/chat-context.mjs';
+import { chipSubmitText, isFileLikeBracket, paintChipFinalTag } from '../../../../src/prompt-chip-text.mjs';
 import {
   getAssetImageUrl,
   getAssetDownloadUrl,
+  getAssetPlayUrl,
+  getAssetPosterUrl,
   resignAssetUrl,
   getToken,
   getCurrentUser,
@@ -2964,6 +3179,7 @@ import {
   generateAiAudio,
   generateAiChat,
   fetchChatSessions,
+  cleanStaleChatSessions,
   autoTitleChatSession,
   fetchChatMessages,
   saveChatMessage,
@@ -2988,7 +3204,8 @@ import {
   reorderSectionTemplates,
   patchCreationTemplate,
   queryGenTask,
-  cancelGenJob
+  cancelGenJob,
+  fetchGenJob
 } from '../../api';
 
 const props = defineProps({
@@ -3003,11 +3220,26 @@ const leftCollapsed = ref(false);
 const rightDrawerOpen = ref(false);
 const viewerCollapsed = ref(false);
 const referenceTray = ref([]); // 真实参考托盘（提前声明，消除下文所有 TDZ 隐患）
+const uploadingCrop = ref(false); // 裁剪/编辑后 Base64 异步持久化转存过渡态
+const messagesLoading = ref(false); // 会话消息加载过渡态
+const savedCreationSet = reactive(new Set()); // 已入创作库卡片集合
+const studioToast = ref('');
+let studioToastTimer = null;
+function showToast(text, duration = 3000) {
+  studioToast.value = text;
+  if (studioToastTimer) clearTimeout(studioToastTimer);
+  studioToastTimer = setTimeout(() => { studioToast.value = ''; }, duration);
+}
 
 // 媒体类型感知与鉴权基础设施（置于顶部，消除下文所有 watch / computed / 模板渲染 TDZ 隐患）
 function mediaKind(item) {
+  if (typeof item === 'string') {
+    if (/\.(mp4|mov|webm)(\?|$)/i.test(item)) return 'video';
+    if (/\.(mp3|wav|m4a|aac|flac|ogg)(\?|$)/i.test(item)) return 'audio';
+    return 'image';
+  }
   const kind = String(item?.kind || item?.media_type || '').toLowerCase();
-  const url = String(item?.url || '');
+  const url = String(item?.url || item?.imageUrl || item?.previewUrl || item?.path || '');
   if (kind === 'video' || kind === 'audio' || kind === 'music') return kind === 'music' ? 'audio' : kind;
   if (/\.(mp4|mov|webm)(\?|$)/i.test(url)) return 'video';
   if (/\.(mp3|wav|m4a|aac|flac|ogg)(\?|$)/i.test(url)) return 'audio';
@@ -3021,15 +3253,27 @@ function bumpMediaAuth() { mediaAuthTick.value += 1; }
 
 // <img>/<video> 不会带 Authorization 头，/api 媒体一律补 token 查询串，避免 401 变成破图
 // 绝对地址（切了 base 后的 http://host:30001/api/...）同样要补，否则换源后立刻掉鉴权
+// 换登录/重签时，若 URL 已存在旧 token，必须动态替换为最新 token，避免旧凭据导致持续 401
 function authedMediaUrl(raw) {
   void mediaAuthTick.value;
   const url = String(raw || '');
   if (!url || url.startsWith('data:') || url.startsWith('blob:')) return url;
   const isApiPath = url.startsWith('/api/') || /^https?:\/\/[^/]+\/api\//i.test(url);
-  if (!isApiPath || /[?&]token=/.test(url)) return url;
+  if (!isApiPath) return url;
   const token = getToken();
-  if (!token) return url;
-  return `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
+  try {
+    const u = new URL(url, window.location.origin);
+    if (token) {
+      u.searchParams.set('token', token);
+    } else {
+      u.searchParams.delete('token');
+    }
+    return url.startsWith('http') ? u.toString() : `${u.pathname}${u.search}${u.hash}`;
+  } catch (_) {
+    if (!token) return url;
+    if (/[?&]token=/.test(url)) return url.replace(/([?&]token=)[^&]*/, `$1${encodeURIComponent(token)}`);
+    return `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
+  }
 }
 
 const selectedImageIndex = ref(0);
@@ -3913,6 +4157,10 @@ const AUTO_ADAPT_RATIO = false;
 const AUTO_ADAPT_SIZE = false;
 
 function dispatchSmartWorkflow({ force = false, fromTemplate = null, source = 'general' } = {}) {
+  // 关键防抖与竞态守卫：复用配方时处于会话重置、模型切换、清空托盘的中间阶段，
+  // 必须忽略中间事件，只在最后 source 为 apply_template 或 select_hash_template 时执行！
+  if (isApplyingTemplate && source !== 'apply_template' && source !== 'select_hash_template') return;
+
   const result = inferOptimalWorkflowAndParams({
     referenceTray: referenceTray.value,
     selectedImageIndex: selectedImageIndex.value,
@@ -3923,15 +4171,14 @@ function dispatchSmartWorkflow({ force = false, fromTemplate = null, source = 'g
     templateMeta: fromTemplate,
   });
 
-  // 1. 模态调度：挂载媒体素材或复用配方时自动切换至最合适板块
-  if (result.targetModality && result.targetModality !== activeModality.value) {
+  // 用户手选过的模式，挂图、换模型、切会话都不再改。
+  // 图像子模式完全不自动切。视频未手选时才按张数取文生 / 图生 / 全能参考。
+  // 文生视频在已挂参考图时除外：该模式不会把图发给模型，不能继续留着。
+  if (!modeUserLocked.value && result.targetModality && result.targetModality !== activeModality.value && result.targetModality !== 'image') {
     activeModality.value = result.targetModality;
   }
 
-  // 2. 子模式自适应调度
-  if (result.targetGenMode && result.targetGenMode !== activeGenMode.value) {
-    setGenMode(result.targetGenMode);
-  }
+  if (activeModality.value === 'video') applyResolvedVideoMode(trayImageCount());
 
   // 3. 画幅比例自适应调度 (Ratio)：优先保护底图真实比例，杜绝 9:16 / 3:4 竖屏被 16:9 / 1:1 压扁
   //    但用户在参数条上手选过画幅后不再自动顶回去（force 仅用于复用配方这类显式覆盖场景）
@@ -3967,63 +4214,90 @@ function dispatchSmartWorkflow({ force = false, fromTemplate = null, source = 'g
   }
 }
 
-function syncGenModeWithReferenceTray() {
-  if (isApplyingTemplate) return;
-  const schema = currentSchema.value;
-  if (!schema || !schema.modes || !schema.modes.length) return;
-  const modes = schema.modes;
-  const tray = referenceTray.value || [];
-  const imgCount = tray.filter(it => !it.kind || it.kind === 'image').length;
+function trayImageCount(list = referenceTray.value) {
+  return (list || []).filter((it) => mediaKind(it) === 'image').length;
+}
+
+function syncGenModeWithReferenceTray(opts = {}) {
+  const forceDefault = Boolean(opts && opts.forceDefault);
+  const imgCount = trayImageCount();
+  const vidCount = (referenceTray.value || []).filter((it) => mediaKind(it) === 'video').length;
+  const totalRefs = imgCount + vidCount;
+
+  if (totalRefs > 0) {
+    hadReferencesInTray.value = true;
+    hadReferencesClearedAutoText.value = false;
+  } else if (hadReferencesInTray.value) {
+    // 这一轮曾经有过参考，后来被删光，芯片自动变成文生
+    hadReferencesClearedAutoText.value = true;
+  }
 
   if (activeModality.value === 'video') {
-    // 视频模式下：首尾帧模式只能手动选择，绝不自动切入；默认保持全能参考
-    if (activeGenMode.value === 'first_last_frame') {
-      dispatchSmartWorkflow({ source: 'syncGenMode' });
-      return;
+    applyResolvedVideoMode(imgCount, vidCount, forceDefault);
+  } else if (activeModality.value === 'image') {
+    applyResolvedImageMode(imgCount, forceDefault);
+  }
+}
+
+function applyResolvedVideoMode(imageCount, videoCount = 0, forceDefault = false) {
+  if (isApplyingTemplate || activeModality.value !== 'video') return;
+  const modeIds = (currentSchema.value?.modes || []).map((mode) => mode.id);
+  if (!modeIds.length) return;
+  const count = (Number(imageCount) || 0) + (Number(videoCount) || 0);
+
+  if (count <= 0) {
+    modeUserLocked.value = false;
+    if (modeIds.includes('text_to_video') && activeGenMode.value !== 'text_to_video') {
+      setGenMode('text_to_video');
     }
-    const hasOmni = modes.some(m => m.id === 'omni_reference');
-    if (hasOmni && (activeGenMode.value !== 'omni_reference' && (!activeGenMode.value || !modes.some(m => m.id === activeGenMode.value) || activeGenMode.value === 'image_to_video'))) {
-      setGenMode('omni_reference');
-    }
-    dispatchSmartWorkflow({ source: 'syncGenMode' });
     return;
   }
 
-  if (imgCount === 0) {
-    if (activeGenMode.value !== 'text_to_image' && modes.some(m => m.id === 'text_to_image')) {
+  if (forceDefault) {
+    modeUserLocked.value = false;
+  }
+
+  const picked = resolveVideoGenMode({
+    modeIds,
+    imageCount,
+    videoCount,
+    activeMode: activeGenMode.value,
+    userLocked: modeUserLocked.value
+  });
+  if (picked.unlock) modeUserLocked.value = false;
+  if (picked.mode && picked.mode !== activeGenMode.value) setGenMode(picked.mode);
+}
+
+function applyResolvedImageMode(imageCount, forceDefault = false) {
+  if (isApplyingTemplate || activeModality.value !== 'image') return;
+  const modeIds = (currentSchema.value?.modes || []).map((mode) => mode.id);
+  if (!modeIds.length) return;
+  const count = Number(imageCount) || 0;
+
+  if (count <= 0) {
+    modeUserLocked.value = false;
+    if (modeIds.includes('text_to_image') && activeGenMode.value !== 'text_to_image') {
       setGenMode('text_to_image');
     }
     return;
   }
 
-  // 有图状态下：禁止停留在文生图
-  const hasRegions = tray.some(img => Array.isArray(img.regions) && img.regions.length > 0)
-    || Boolean(recipePrompt.value?.trim())
-    || Boolean(globalRecipePrompt.value?.trim());
-  const hasOutpaint = tray.some(img => img.outpainted);
-
-  if (hasOutpaint && modes.some(m => m.id === 'expand_fill')) {
-    setGenMode('expand_fill');
-  } else if (hasRegions && modes.some(m => m.id === 'image_edit')) {
-    setGenMode('image_edit');
-  } else if (imgCount === 1) {
-    const target = modes.some(m => m.id === 'image_to_image')
-      ? 'image_to_image'
-      : (modes.some(m => m.id === 'image_reference') ? 'image_reference' : modes.find(m => m.id !== 'text_to_image')?.id);
-    if (target && (activeGenMode.value === 'text_to_image' || !modes.some(m => m.id === activeGenMode.value))) {
-      setGenMode(target);
-    }
-  } else if (imgCount > 1) {
-    const target = hasRegions && modes.some(m => m.id === 'image_edit')
-      ? 'image_edit'
-      : (modes.some(m => m.id === 'image_reference') ? 'image_reference' : (modes.some(m => m.id === 'image_to_image') ? 'image_to_image' : modes[0]?.id));
-    if (target && (activeGenMode.value === 'text_to_image' || !modes.some(m => m.id === activeGenMode.value))) {
-      setGenMode(target);
-    }
+  if (forceDefault) {
+    modeUserLocked.value = false;
   }
 
-  // 执行自适应联动
-  dispatchSmartWorkflow({ source: 'syncGenMode' });
+  const textOnly = activeGenMode.value === 'text_to_image';
+  if (modeUserLocked.value && activeGenMode.value && modeIds.includes(activeGenMode.value) && !textOnly) {
+    return;
+  }
+
+  let next = '';
+  if (modeIds.includes('image_to_image')) next = 'image_to_image';
+  else if (modeIds.includes('image_reference')) next = 'image_reference';
+  else next = modeIds.find((id) => id !== 'text_to_image') || modeIds[0] || '';
+
+  if (textOnly) modeUserLocked.value = false;
+  if (next && next !== activeGenMode.value) setGenMode(next);
 }
 
 function onEditApplyRegionsToImage({ imageIndex, regions, recipe, silentRefs, annotations, wireframeDataUrl, baseAttrRefs, newRefs, naturalWidth, naturalHeight, canonicalRatio }) {
@@ -4093,14 +4367,8 @@ function onEditApplyRegionsToImage({ imageIndex, regions, recipe, silentRefs, an
     }
   }
 
-  // 画幅不再跟随底图自动改写：默认严格 9:16，只有用户手动改才变。
-  // naturalWidth / naturalHeight 仍由 autoSyncRatioFromImage 记录，供提示词编译与选区使用。
-  if (activeModality.value !== 'image') activeModality.value = 'image';
-  nextTick(() => {
-    setGenMode('image_edit');
-    syncAggregatedRecipePrompt();
-    dispatchSmartWorkflow({ force: true, source: 'edit_apply_regions' });
-  });
+  // 选区、扩边不改模式，也不把板块从视频拉到图像。
+  syncAggregatedRecipePrompt();
 }
 
 function onEditApplyRecipeWithRefs({ recipe, newRefs }) {
@@ -4137,33 +4405,116 @@ function onEditApplyRecipeWithRefs({ recipe, newRefs }) {
 
 function onEditApplyOutpaintedImage({ imageIndex, url }) {
   const target = referenceTray.value[imageIndex];
-  if (target) {
-    if (!target.originalUrl) {
-      target.originalUrl = target.url;
+  if (!target || !url) return;
+  // 扩图是新像素。留下 fid 会在发送时被重签回库原图。
+  Object.assign(target, adoptEditedPixels(target, url, { outpainted: true }));
+}
+
+// 裁剪/标绘 Base64 异步转存为持久化 URL
+async function uploadCropBase64(dataUrl) {
+  try {
+    let blob;
+    if (typeof fetch === 'function') {
+      try {
+        const res = await fetch(dataUrl);
+        blob = await res.blob();
+      } catch (_) {}
     }
-    target.url = url;
-    target.outpainted = true;
+    if (!blob) {
+      const parts = dataUrl.split(',');
+      const mimeMatch = (parts[0] || '').match(/:(.*?);/);
+      const mime = mimeMatch ? mimeMatch[1] : 'image/png';
+      const bstr = atob(parts[1] || '');
+      let n = bstr.length;
+      const u8arr = new Uint8Array(n);
+      while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+      }
+      blob = new Blob([u8arr], { type: mime });
+    }
+    const ext = blob.type === 'image/jpeg' ? '.jpg' : '.png';
+    const formData = new FormData();
+    formData.append('file', blob, `crop_${Date.now()}${ext}`);
+
+    const res = await authFetch('/api/ai/upload', {
+      method: 'POST',
+      body: formData
+    });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const json = await res.json().catch(() => ({}));
+    if (json && json.success && json.data && json.data.url) {
+      return json.data.url;
+    }
+    throw new Error(json.error || '上传接口未返回持久化 URL');
+  } catch (err) {
+    console.warn('[ChatStudio] 裁剪 Base64 转存持久化 URL 失败，保留本地 dataUrl 兜底:', err);
+    return null;
   }
 }
 
-function onEditApplyCustomImage({ imageIndex, dataUrl }) {
+async function onEditApplyCustomImage({ imageIndex, dataUrl }) {
   const target = referenceTray.value[imageIndex];
-  if (target) {
-    if (!target.originalUrl) {
-      target.originalUrl = target.url;
+  if (!target || !dataUrl) return;
+  const originalAssetUrl = target.url;
+  const originalAssetFid = target.fid;
+  // 裁剪/标绘合成是新像素。thumbUrl 不更新的话，输入区缩略图仍显示原图。
+  Object.assign(target, adoptEditedPixels(target, dataUrl, { annotated: true }));
+  target.isCustomEdited = true;
+  modeUserLocked.value = false;
+  syncGenModeWithReferenceTray({ forceDefault: true });
+
+  const targetTag = target.tag || `@图${imageIndex + 1}`;
+  const updateEditorChips = (nextUrl) => {
+    if (!richEditorRef.value) return;
+    const chips = [...richEditorRef.value.querySelectorAll('.inline-asset-chip')];
+    chips.forEach((chip, cIdx) => {
+      const cUrl = chip.getAttribute('data-url') || '';
+      const cFid = chip.getAttribute('data-fid') || '';
+      const cTag = chip.getAttribute('data-tag') || '';
+      const matched = cTag === targetTag
+        || (cIdx === imageIndex && cTag.includes(String(imageIndex + 1)))
+        || (originalAssetUrl && cUrl === originalAssetUrl)
+        || (originalAssetFid && cFid === originalAssetFid)
+        || cUrl === dataUrl;
+      if (matched) {
+        chip.setAttribute('data-url', nextUrl);
+        // 关键：清空胶囊的 data-fid，防止发送时自愈机制又按原始素材 fid 重新签发回原图
+        chip.setAttribute('data-fid', '');
+        if (target.sourceFid || originalAssetFid) {
+          chip.setAttribute('data-source-fid', target.sourceFid || originalAssetFid);
+        }
+      }
+    });
+  };
+  updateEditorChips(dataUrl);
+
+  // 异步将 base64 dataUrl 转存为持久化 URL
+  if (typeof dataUrl === 'string' && dataUrl.startsWith('data:')) {
+    uploadingCrop.value = true;
+    try {
+      const persistentUrl = await uploadCropBase64(dataUrl);
+      if (persistentUrl) {
+        if (target.url === dataUrl || target.thumbUrl === dataUrl) {
+          target.url = persistentUrl;
+          target.thumbUrl = persistentUrl;
+          updateEditorChips(persistentUrl);
+          rememberSessionRefs([target], 'upload', { persist: true });
+        }
+      }
+    } catch (e) {
+      console.warn('[ChatStudio] 转存裁剪图像异常:', e);
+    } finally {
+      uploadingCrop.value = false;
     }
-    target.url = dataUrl;
-    target.annotated = true;
   }
 }
 
 function onRevertAnnotation(imageIndex) {
   const target = referenceTray.value[imageIndex];
-  if (target && target.originalUrl) {
-    target.url = target.originalUrl;
-    target.annotated = false;
-    target.outpainted = false;
-  }
+  if (!target || !target.originalUrl) return;
+  Object.assign(target, revertEditedPixels(target));
 }
 
 function onTraySelect(idx) {
@@ -4232,12 +4583,15 @@ function selectAtRegionMention(item, idx, reg) {
 }
 
 const sidebarTab = ref('history'); // 'history' | 'library'
-// 严格隔离后不能让所有账号共用 default_session：非 admin 账号用带用户名的默认会话 id，
-// 否则第二个用户登录时会撞上属于 admin 的会话而 403。
+// 避免无条件落入 default_session 导致吞没新消息：优先恢复上次停驻的会话，无缓存时由 loadSessions 自动选定
 const currentSessionId = ref((() => {
-  const u = getCurrentUser();
-  const who = String(u?.username || u?.id || '');
-  return (who && who !== 'admin') ? `default_${who}` : 'default_session';
+  let remembered = '';
+  try {
+    const u = getCurrentUser();
+    const key = `ml_studio_active_session_${String(u?.username || u?.id || 'anon')}`;
+    remembered = localStorage.getItem(key) || '';
+  } catch (_) {}
+  return remembered || '';
 })());
 const tplSearch = ref('');
 const generating = ref(false);
@@ -4642,6 +4996,25 @@ function buildMdUnits(root) {
 }
 
 const mdHtmlCache = new Map();
+function shouldRenderCardContent(msg) {
+  if (!msg || msg.isGenerating || msg.isError || msg.isCancelled) return false;
+  const content = String(msg.content || '').trim();
+  if (!content) return false;
+  const userPrompt = String(msg.userPrompt || '').trim();
+  // 严禁将用户提示词作为回复语句在卡片下方重复渲染
+  if (userPrompt && (content === userPrompt || content.includes(userPrompt) || userPrompt.includes(content))) {
+    return false;
+  }
+  if (content.startsWith('@图') || content.startsWith('【全局') || content.startsWith('帮我生成')) {
+    return false;
+  }
+  // 若消息已有可播放视频或可见图片，卡片主体已完整表达，不再在下方重复堆砌套话说明，保持页面干净高质感
+  if ((msg.imageUrl || msg.videoUrl || msg.modelVideoUrl || msg.audioUrl) && (msg.modality === 'video' || msg.modality === 'image')) {
+    return false;
+  }
+  return true;
+}
+
 function renderMarkdown(src) {
   const text = typeof src === 'string' ? src : '';
   if (!text) return '';
@@ -4716,10 +5089,83 @@ function onMdClick(event) {
   copyText(btn.getAttribute('data-copy'), btn);
 }
 const activeGenMode = ref('');
+// 用户在参数条上点过模式之后，挂图、换模型、切会话都不再改它。新建对话会清掉。
+const modeUserLocked = ref(false);
+const hadReferencesInTray = ref(false);
+const hadReferencesClearedAutoText = ref(false);
+
+const sendConfirmModal = ref({
+  open: false,
+  type: '', // 'non_default' | 'cleared_refs'
+  title: '',
+  description: '',
+  currentModeLabel: '',
+  defaultModeLabel: '',
+  defaultModeId: '',
+  modalityLabel: '',
+  resolve: null
+});
+
+function promptNonDefaultModeConfirm({ currentModeLabel, defaultModeLabel, defaultModeId }) {
+  return new Promise((resolve) => {
+    sendConfirmModal.value = {
+      open: true,
+      type: 'non_default',
+      title: '模式确认',
+      description: `当前选中的是「${currentModeLabel}」，系统默认推荐为「${defaultModeLabel}」。`,
+      currentModeLabel,
+      defaultModeLabel,
+      defaultModeId,
+      modalityLabel: '',
+      resolve
+    };
+  });
+}
+
+function promptClearedRefsConfirm({ modalityLabel }) {
+  return new Promise((resolve) => {
+    sendConfirmModal.value = {
+      open: true,
+      type: 'cleared_refs',
+      title: '纯文本生成确认',
+      description: `本轮参考图已清空，将自动使用「${modalityLabel}」模式发送。是否继续？`,
+      currentModeLabel: '',
+      defaultModeLabel: '',
+      defaultModeId: '',
+      modalityLabel,
+      resolve
+    };
+  });
+}
+
+function handleSendModalAction(action) {
+  const fn = sendConfirmModal.value.resolve;
+  sendConfirmModal.value.open = false;
+  sendConfirmModal.value.resolve = null;
+  if (typeof fn === 'function') fn(action);
+}
+// 用户改过输入框之后，切会话和新建对话都留着这串字，不恢复别的草稿。
+const composerPromptDirty = ref(false);
 const schemaParams = ref({});
 // 用户手动在参数条上选过画幅后，自适应调度不得再用「底图自然比例」把它顶回去。
 // 只切模型 / 切模态 / 复用配方时才重置（否则视频板块挂一张竖图就永远调不成 16:9）。
 const ratioUserLocked = ref(false);
+
+const isAdaptiveForced = computed(() => {
+  const schema = currentSchema.value;
+  const mode = activeGenMode.value;
+  if (['first_last_frame', 'video_edit', 'video_extend'].includes(mode)) return true;
+  const mc = schema && schema.modeConstraints && schema.modeConstraints[mode];
+  if (mc && Array.isArray(mc.lock) && (mc.lock.includes('ratio') || mc.lock.includes('aspect_ratio'))) {
+    if (mc.set && (mc.set.ratio === 'adaptive' || mc.set.aspect_ratio === 'adaptive')) return true;
+  }
+  const evalRes = evaluateClientModelRules(schema, mode, schemaParams.value || {}, currentRefCounts.value);
+  if (Array.isArray(evalRes?.lockedKeys) && (evalRes.lockedKeys.includes('ratio') || evalRes.lockedKeys.includes('aspect_ratio'))) {
+    const rVal = schemaParams.value?.ratio || schemaParams.value?.aspect_ratio;
+    if (rVal === 'adaptive') return true;
+  }
+  return false;
+});
 
 // ===== 参数三层优先级：会话快照 > 模型专属默认 > 全局默认 =====
 // sessionParamsMap 在阶段 2 之前是内存态（阶段 2 后端 chat_sessions.params_json 落库后优先读后端）。
@@ -4937,13 +5383,21 @@ function refineRecentItem(item) {
 function scheduleRecentPush(items) {
   const payload = (items || [])
     .filter((item) => item && (item.fid || (item.url && !item.url.startsWith('blob:'))))
-    .map((item) => ({
-      fid: item.fid || '',
-      url: item.url || '',
-      name: item.name || '',
-      kind: item.kind || 'image',
-      origin: item.origin || 'upload'
-    }));
+    .map((item) => {
+      // 裁剪/标绘的 data URL 不是可复用地址，也不能整段塞进最近使用。
+      // 有 fid 时只上报素材身份，展示时再重签；纯 data URL 不上报。
+      const url = String(item.url || '');
+      const storedUrl = url.startsWith('data:') || url.startsWith('blob:') ? '' : url;
+      if (!item.fid && !storedUrl) return null;
+      return {
+        fid: item.fid || '',
+        url: storedUrl,
+        name: item.name || '',
+        kind: item.kind || 'image',
+        origin: item.origin || 'upload'
+      };
+    })
+    .filter(Boolean);
   if (!payload.length) return;
   recentPushQueue.push(...payload);
   if (recentPushTimer) return;
@@ -5113,18 +5567,15 @@ function resetSchemaForModel(options = {}) {
     return;
   }
   const modes = schema.modes || [];
-  const isVideo = activeModality.value === 'video'
-    || (Array.isArray(modes) && modes.some((m) => m && /video/i.test(String(m.id || ''))));
-  if (isVideo) {
-    if (activeGenMode.value === 'first_last_frame' && modes.some((m) => m.id === 'first_last_frame')) {
-      // 保持手动选中的首尾帧
-    } else if (modes.some((m) => m.id === 'omni_reference')) {
-      activeGenMode.value = 'omni_reference';
-    } else if (!modes.some((mode) => mode.id === activeGenMode.value)) {
-      activeGenMode.value = modes[0]?.id || '';
+  if (modeUserLocked.value) {
+    if (!modes.some((mode) => mode.id === activeGenMode.value)) {
+      modeUserLocked.value = false;
+      const def = resolveDefaultMode({ schema, modality: activeModality.value, refCounts: currentRefCounts.value });
+      activeGenMode.value = def.id;
     }
-  } else if (!modes.some((mode) => mode.id === activeGenMode.value)) {
-    activeGenMode.value = modes[0]?.id || '';
+  } else {
+    const def = resolveDefaultMode({ schema, modality: activeModality.value, refCounts: currentRefCounts.value });
+    activeGenMode.value = def.id;
   }
   const next = schemaDefaults(schema);
   const globalRatio = studioDefaults.value?.params?.ratio || '9:16';
@@ -5161,9 +5612,41 @@ function resetSchemaForModel(options = {}) {
   // 关键自适应兜底：防止模型切换把底图的真实 9:16 / 3:4 比例粗暴重置为默认 1:1 或 16:9
   dispatchSmartWorkflow({ source: 'reset_schema' });
 }
+function onUserPickMode(id) {
+  modeUserLocked.value = true;
+  if (id === 'text_to_video' || id === 'text_to_image') {
+    hadReferencesClearedAutoText.value = false;
+  }
+  setGenMode(id);
+}
+function resetToDefaultGenMode(targetDefaultId) {
+  modeUserLocked.value = false;
+  if (targetDefaultId) {
+    setGenMode(targetDefaultId);
+  } else {
+    syncGenModeWithReferenceTray({ forceDefault: true });
+  }
+}
+function onUserEditorInput(e) {
+  if (e?.isTrusted) composerPromptDirty.value = true;
+  onEditorInput();
+}
+function applyUntouchedModeDefault() {
+  if (modeUserLocked.value) return;
+  syncGenModeWithReferenceTray();
+}
 function setGenMode(id) {
   const modes = currentSchema.value?.modes || [];
   if (modes.length && !modes.some((mode) => mode.id === id)) return;
+  const imgCount = trayImageCount();
+  const vidCount = (referenceTray.value || []).filter((it) => mediaKind(it) === 'video').length;
+  const hasRefs = imgCount > 0 || vidCount > 0;
+  if (hasRefs && (id === 'text_to_video' || id === 'text_to_image')) {
+    const def = resolveDefaultMode({ schema: currentSchema.value, modality: activeModality.value, refCounts: { images: imgCount, videos: vidCount } });
+    activeGenMode.value = def.id;
+    applyModeLocks();
+    return;
+  }
   activeGenMode.value = id;
   applyModeLocks();
   if (id === 'first_last_frame') videoSubMode.value = 'first_last';
@@ -5174,16 +5657,17 @@ function firstSupportedMode(...ids) {
   const modes = currentSchema.value?.modes || [];
   return ids.find((id) => modes.some((mode) => mode.id === id)) || '';
 }
-// 挂上参考素材即切到对应生成模式：图片→图生图/多参考，视频→全能多参考
+// 挂上参考素材即切到对应生成模式：图片→图生图，视频→全能参考（若无则模型参考/图生视频）
 function autoSelectRefMode(kinds) {
+  // 用户在动托盘（挂载新参考）：立刻拉回默认，并清掉「手点保持」
+  modeUserLocked.value = false;
   const list = (kinds || []).filter((kind) => kind === 'image' || kind === 'video' || kind === 'audio');
   if (!list.length) return;
   const tray = referenceTray.value || [];
   if (list.includes('video') || tray.some((item) => mediaKind(item) === 'video')) {
     if (activeModality.value !== 'video') activeModality.value = 'video';
     nextTick(() => {
-      const target = firstSupportedMode('omni_reference', 'text_to_video');
-      if (target) setGenMode(target);
+      syncGenModeWithReferenceTray({ forceDefault: true });
       dispatchSmartWorkflow({ source: 'autoSelectRefMode_video' });
     });
     return;
@@ -5193,32 +5677,20 @@ function autoSelectRefMode(kinds) {
     dispatchSmartWorkflow({ source: 'autoSelectRefMode_music' });
     return;
   }
-  const imageCount = tray.filter((item) => mediaKind(item) === 'image').length || list.filter((kind) => kind === 'image').length;
+
   // 零配置智能调度：若当前在 chat 纯对话，自动切入 image 图像生成板块
   if (activeModality.value === 'chat') {
     activeModality.value = 'image';
   }
 
-  if (activeModality.value === 'image') {
-    nextTick(() => {
-      // 若当前处于局部编辑且有选区，保护模式不被粗暴冲掉
-      if (activeGenMode.value === 'image_edit' && tray.some(img => Array.isArray(img.regions) && img.regions.length > 0)) return;
-      const target = imageCount > 1
-        ? firstSupportedMode('image_reference', 'image_to_image')
-        : firstSupportedMode('image_to_image', 'image_reference');
-      if (target) setGenMode(target);
+  nextTick(() => {
+    if (activeModality.value === 'image' && activeGenMode.value === 'image_edit' && tray.some((img) => Array.isArray(img.regions) && img.regions.length > 0)) {
       dispatchSmartWorkflow({ source: 'autoSelectRefMode_image' });
-    });
-  } else if (activeModality.value === 'video') {
-    nextTick(() => {
-      // 视频模式下：如果当前是手动选中的首尾帧，保持首尾帧；否则切到全能参考，严禁自动切入首尾帧
-      if (activeGenMode.value !== 'first_last_frame') {
-        const target = firstSupportedMode('omni_reference', 'text_to_video');
-        if (target) setGenMode(target);
-      }
-      dispatchSmartWorkflow({ source: 'autoSelectRefMode_video_refs' });
-    });
-  }
+      return;
+    }
+    syncGenModeWithReferenceTray({ forceDefault: true });
+    dispatchSmartWorkflow({ source: 'autoSelectRefMode_refs' });
+  });
 }
 function setSchemaParam(key, value) {
   if (isFieldLocked(key)) return;
@@ -5281,6 +5753,10 @@ function recipeIsLegacy(tpl) {
   const hasResult = Array.isArray(tpl?.result_images) && tpl.result_images.some((item) => item && item.url);
   return !mode && !modelKey && hasResult;
 }
+watch(activeModality, () => {
+  // 切到另一个板块再回来，按当时有没有参考重新取默认，不保留走之前点的首尾帧
+  modeUserLocked.value = false;
+});
 watch([activeModality, imageModelKey, videoModelKey, musicType], () => {
   if (suppressSchemaReset) return;
   resetSchemaForModel();
@@ -5466,15 +5942,12 @@ function sortTemplates() {
     const pinB = b.is_pinned ? 1 : 0;
     if (pinB !== pinA) return pinB - pinA;
 
-    // 2. 常用/复用频次 (use_count) 优先
-    const useA = Number(a.use_count || 0);
-    const useB = Number(b.use_count || 0);
-    if (useB !== useA) return useB - useA;
-
-    // 3. 常规按最新创建/更新时间倒序
+    // 2. 真实创作时间倒序：新入库与新创作的资产绝对排在时间轴最前面
     const tsA = a.created_at || a.updated_at || 0;
     const tsB = b.created_at || b.updated_at || 0;
-    return tsB - tsA;
+    if (tsB !== tsA) return tsB - tsA;
+
+    return (b.id || '').localeCompare(a.id || '');
   });
 }
 
@@ -6030,6 +6503,62 @@ function templateRefUrl(tpl) {
   return url ? authedMediaUrl(url) : '';
 }
 
+function withSmallMediaUrl(url) {
+  const raw = String(url || '');
+  if (!raw) return '';
+  if (raw.includes('/api/cache/temp/')) {
+    if (raw.includes('preview=1')) return authedMediaUrl(raw);
+    return authedMediaUrl(raw + (raw.includes('?') ? '&' : '?') + 'preview=1');
+  }
+  if (/\/api\/(?:viewer\/)?assets\/[^/?#]+\/image/.test(raw)) {
+    try {
+      const parsed = new URL(raw, 'http://local');
+      parsed.searchParams.set('tier', 'grid');
+      return authedMediaUrl(parsed.pathname + parsed.search);
+    } catch {
+      return authedMediaUrl(raw);
+    }
+  }
+  return authedMediaUrl(raw);
+}
+
+function templateCoverSrc(tpl) {
+  if (!tpl) return '';
+  const media = tpl.result_images?.[0];
+  const video = tpl.type === 'video' || String(media?.url || '').endsWith('.mp4');
+  if (video) return getVideoPosterUrl(tpl);
+  if (media?.fid) return getAssetImageUrl(media.fid, '', 'grid');
+  if (media?.poster) return authedMediaUrl(media.poster);
+  if (media?.url) return withSmallMediaUrl(media.url);
+  return '';
+}
+
+function templateOriginCoverSrc(tpl) {
+  const media = tpl?.origin_images?.[0];
+  if (!media) return '';
+  if (media.fid) return getAssetImageUrl(media.fid, '', 'grid');
+  if (media.url) return withSmallMediaUrl(media.url);
+  return '';
+}
+
+function attachmentPreviewSrc(item) {
+  if (!item) return '';
+  if (item.fid && !String(item.url || '').includes('/api/cache/temp/')) return getAssetImageUrl(item.fid, '', 'grid');
+  return withSmallMediaUrl(item.url);
+}
+
+function attachmentPosterSrc(item) {
+  if (!item) return '';
+  if (item.poster) return authedMediaUrl(item.poster);
+  const fid = item.fid || fidFromMediaUrl(item.url);
+  if (fid) return authedMediaUrl(`/api/viewer/assets/${encodeURIComponent(fid)}/poster`);
+  const url = String(item.url || '');
+  if (url.includes('/api/cache/temp/') && /\.(mp4|mov|webm|m4v)(\?|$)/i.test(url)) {
+    return authedMediaUrl(url.split('?')[0] + '.poster.jpg');
+  }
+  return '';
+}
+
 
 // ===== 创作库配方衍生列表与分页状态机（在 filteredTemplates 之后按序初始化，彻底消除 TDZ） =====
 const sections = ref([]);
@@ -6042,6 +6571,8 @@ const dragTplId = ref('');
 const dragFromSectionId = ref(null);
 const dragOverSectionId = ref(null);
 const dragSectionId = ref('');
+const dragOverTplId = ref(null);
+const dragInsertPos = ref(null); // 'before' | 'after'
 
 async function loadSections() {
   try {
@@ -6198,6 +6729,82 @@ function onTemplateDragEnd() {
   dragTplId.value = '';
   dragFromSectionId.value = null;
   dragOverSectionId.value = null;
+  dragOverTplId.value = null;
+  dragInsertPos.value = null;
+}
+
+function onPinnedCardDragOver(event, targetTpl, sectionId) {
+  if (!dragTplId.value || dragTplId.value === targetTpl.id) {
+    dragOverTplId.value = null;
+    dragInsertPos.value = null;
+    return;
+  }
+  const rect = event.currentTarget.getBoundingClientRect();
+  const relX = event.clientX - rect.left;
+  dragInsertPos.value = relX < rect.width / 2 ? 'before' : 'after';
+  dragOverTplId.value = targetTpl.id;
+  dragOverSectionId.value = sectionId || null;
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'move';
+  }
+}
+
+function onPinnedCardDragLeave(event, targetTpl) {
+  if (dragOverTplId.value === targetTpl.id) {
+    dragOverTplId.value = null;
+    dragInsertPos.value = null;
+  }
+}
+
+async function onPinnedCardDrop(event, targetTpl, targetSectionId) {
+  const srcId = dragTplId.value;
+  if (!srcId || srcId === targetTpl.id) {
+    onTemplateDragEnd();
+    return;
+  }
+  const sid = targetSectionId || null;
+  const insertPos = dragInsertPos.value || 'before';
+
+  const srcTpl = templates.value.find(t => t.id === srcId);
+  if (!srcTpl) {
+    onTemplateDragEnd();
+    return;
+  }
+
+  // 获取目标分区现有的所有置顶卡片（排除当前被移动的卡片）
+  const secIdSet = new Set((sections.value || []).map(s => s.id));
+  const targetSecItems = pinnedTemplates.value
+    .filter(t => {
+      if (sid === null) return !t.section_id || !secIdSet.has(t.section_id);
+      return t.section_id === sid;
+    })
+    .filter(t => t.id !== srcId);
+
+  const targetIdx = targetSecItems.findIndex(t => t.id === targetTpl.id);
+  const insertIdx = targetIdx < 0 ? targetSecItems.length : (insertPos === 'before' ? targetIdx : targetIdx + 1);
+
+  // 插入到新位置
+  targetSecItems.splice(insertIdx, 0, srcTpl);
+
+  // 立即在前端更新每一个 item 的 section_id 与 pin_order，给用户 0 延迟响应
+  srcTpl.section_id = sid;
+  srcTpl.is_pinned = 1;
+  targetSecItems.forEach((item, idx) => {
+    item.pin_order = idx;
+    item.section_id = sid;
+  });
+
+  templates.value = [...templates.value];
+  onTemplateDragEnd();
+
+  // 原子持久化到 SQLite 数据库
+  try {
+    const ids = targetSecItems.map(t => t.id);
+    await reorderSectionTemplates(sid, ids);
+    mergeTemplatesCache(targetSecItems);
+  } catch (e) {
+    console.warn('持久化置顶卡片排序失败:', e);
+  }
 }
 
 function onSectionDragStart(event, sectionId) {
@@ -6221,11 +6828,34 @@ async function onSectionDrop(event, targetSectionId) {
   const tplId = data?.id || dragTplId.value;
   if (data?.type === 'template' || tplId) {
     const tpl = templates.value.find((t) => t.id === tplId);
-    if (!tpl) return;
-    if (tpl.section_id !== sid) {
-      await placeTemplateInSection(tpl, sid);
+    if (!tpl) {
+      onTemplateDragEnd();
+      return;
     }
+    // 移入目标分区并追加到末尾
+    tpl.section_id = sid;
+    tpl.is_pinned = 1;
+    const secIdSet = new Set((sections.value || []).map(s => s.id));
+    const targetSecItems = pinnedTemplates.value
+      .filter(t => {
+        if (sid === null) return !t.section_id || !secIdSet.has(t.section_id);
+        return t.section_id === sid;
+      })
+      .filter(t => t.id !== tpl.id);
+    targetSecItems.push(tpl);
+    targetSecItems.forEach((item, idx) => {
+      item.pin_order = idx;
+      item.section_id = sid;
+    });
+    templates.value = [...templates.value];
     onTemplateDragEnd();
+    try {
+      const ids = targetSecItems.map(t => t.id);
+      await reorderSectionTemplates(sid, ids);
+      mergeTemplatesCache(targetSecItems);
+    } catch (e) {
+      console.warn('移动分区并重排失败:', e);
+    }
     return;
   }
 
@@ -6295,31 +6925,12 @@ const activeSectionLayerName = computed(() => {
   return found ? found.name : '未分区';
 });
 
-const tplGroupDerivatives = ref(true);
+const tplGroupDerivatives = ref(false);
 
 const topReuseTemplates = computed(() => {
-  const pool = [...filteredTemplates.value].filter(t => !t.is_pinned && (t.use_count || 0) > 0);
-  const groupMap = new Map();
-  for (const t of pool) {
-    const key = String(t.prompt || t.title || '').trim().replace(/\s+/g, ' ').toLowerCase();
-    if (!groupMap.has(key)) {
-      groupMap.set(key, {
-        ...t,
-        use_count: t.use_count || 0,
-        variants: [t]
-      });
-    } else {
-      const existing = groupMap.get(key);
-      existing.use_count = Math.max(existing.use_count || 0, t.use_count || 0) + 1;
-      existing.variants.push(t);
-      if ((t.created_at || 0) > (existing.created_at || 0)) {
-        existing.result_images = t.result_images;
-        existing.created_at = t.created_at;
-        existing.id = t.id;
-      }
-    }
-  }
-  return Array.from(groupMap.values())
+  // 规范：复用次数仅与常用配方栏目相关，复用强度最高的十个复制展示于此
+  const pool = [...templates.value].filter(t => (t.use_count || 0) > 0);
+  return pool
     .sort((a, b) => (b.use_count || 0) - (a.use_count || 0) || (b.created_at || 0) - (a.created_at || 0))
     .slice(0, 10);
 });
@@ -6379,6 +6990,18 @@ const clusteredRegularTemplates = computed(() => {
     } else {
       const parent = clusterMap.get(clusterKey);
       parent.variants.push(item);
+      // 关键修复：母本默认展示最新沉淀的成果产物，确保刚入库的图片立即可见
+      const itemTime = item.created_at || item.updated_at || 0;
+      const parentTime = parent.created_at || parent.updated_at || 0;
+      if (itemTime > parentTime) {
+        parent.id = item.id;
+        parent.title = item.title;
+        parent.result_images = item.result_images;
+        parent.created_at = item.created_at;
+        parent.updated_at = item.updated_at;
+        parent.params = item.params;
+        parent.activeVariantIdx = parent.variants.length - 1;
+      }
     }
   }
 
@@ -6436,16 +7059,15 @@ function jumpToTplPage(val) {
 }
 
 // 极速预览图预热（在后台提前异步解码，确保开窗 20ms 内图片即见即得）
-function prewarmPreviewImages(list, count = 36) {
+function prewarmPreviewImages(list, count = 6) {
   if (!Array.isArray(list) || typeof Image === 'undefined') return;
   const slice = list.slice(0, count);
   for (const item of slice) {
-    const rawUrl = item.result_images?.[0]?.url || item.origin_images?.[0]?.url;
-    if (rawUrl) {
-      const img = new Image();
-      img.decoding = 'async';
-      img.src = authedMediaUrl(rawUrl);
-    }
+    const src = templateCoverSrc(item);
+    if (!src) continue;
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = src;
   }
 }
 
@@ -6489,10 +7111,13 @@ function openCreationLibraryModal() {
   isTopReuseOpen.value = false;
   sectionLayer.value = null;
   loadSections();
+  loadTemplates();
   const elapsed = performance.now() - t0;
   console.log(`[CreationLibrary] 打开耗时: ${elapsed.toFixed(2)}ms (20ms指标)`);
-  // 打开后主动异步拉取外部最新资产（Stale-While-Revalidate，首屏秒呈无阻塞）
-  triggerPullExternal(false);
+  // 外部拉取会整表重画。先让本地列表停稳，两秒后再同步。
+  setTimeout(() => {
+    if (showExpandedLibrary.value) triggerPullExternal(false);
+  }, 2000);
 }
 
 function stepCardVariant(tpl, delta) {
@@ -6510,10 +7135,16 @@ function stepCardVariant(tpl, delta) {
 
 function selectModalVariant(v) {
   if (!v || !detailModal.value.tpl) return;
+  const variants = detailModal.value.tpl.variants;
   detailModal.value.tpl = {
     ...v,
-    variants: detailModal.value.tpl.variants
+    variants
   };
+  ensureFullTemplate(detailModal.value.tpl).then((full) => {
+    if (detailModal.value.tpl && detailModal.value.tpl.id === v.id) {
+      detailModal.value.tpl = { ...full, variants };
+    }
+  }).catch(() => {});
 }
 
 const templateDateGroups = computed(() => {
@@ -6946,9 +7577,31 @@ onMounted(async () => {
         const target = messages.value.find((m) => m && m.isGenerating && m.jobId && m.jobId === task.jobId)
           || (task.sessionId ? sessionPlaceholderMap.get(task.sessionId) : null);
         if (target) {
+          if (task.jobId && !target.jobId) {
+            target.jobId = task.jobId;
+            if (!target.id) target.id = `genmsg_${task.jobId}`;
+          }
+          if (target.cancelRequested) {
+            void persistCancelToServer(target, task.sessionId || currentSessionId.value, task.jobId || target.jobId);
+          }
           if (task.stage && (task.stage.key || task.stage.label)) target.serverStage = task.stage;
           if (Number.isFinite(task.progress)) target.serverProgress = Math.min(99, Math.max(8, Number(task.progress)));
         }
+        return;
+      }
+      if (task.status === 'cancelled') {
+        const target = messages.value.find((m) => m && m.jobId && m.jobId === task.jobId)
+          || (task.sessionId ? sessionPlaceholderMap.get(task.sessionId) : null);
+        if (target && !target.isCancelled) {
+          target.isGenerating = false;
+          target.isCancelled = true;
+          target.content = '生成已取消';
+        }
+        if (task.sessionId) {
+          sessionGeneratingMap.delete(task.sessionId);
+          sessionPlaceholderMap.delete(task.sessionId);
+        }
+        if (!task.sessionId || task.sessionId === currentSessionId.value) generating.value = false;
         return;
       }
       if (task.status !== 'succeeded' && task.status !== 'failed') return;
@@ -7029,9 +7682,53 @@ function fileNameFromUrl(url) {
   } catch (e) {}
   return '';
 }
+
+/** 统一规整单张参考图结构，杜绝长 hash / uuid 文件名污染，统一使用简洁规范的「图N」命名 */
+function normalizeTrayAsset(item, idx = 0) {
+  if (!item) return null;
+  const num = idx + 1;
+  const rawUrl = typeof item === 'string'
+    ? item
+    : (item.url || item.imgUrl || item.imageUrl || item.previewUrl || item.thumbUrl || item.displayUrl || item.fullUrl || item.path || '');
+  if (!rawUrl) return null;
+  const url = authedMediaUrl(rawUrl);
+
+  const defaultName = `图${num}`;
+  let rawName = typeof item === 'object' ? (item.name || item.filename || '') : '';
+  // 彻底过滤长 hash、UUID、生硬的 ARCH_ 代号以及包含扩展名的技术文件名
+  if (!rawName || /^[0-9a-f]{16,}/i.test(rawName) || /ARCH_REF/i.test(rawName) || rawName.includes('.')) {
+    rawName = defaultName;
+  }
+
+  return {
+    ...(typeof item === 'object' ? item : {}),
+    url,
+    name: rawName || defaultName,
+    tag: `@图${num}`,
+    kind: (typeof item === 'object' && item.kind) ? item.kind : 'image',
+    weight: (typeof item === 'object' && item.weight != null) ? item.weight : 85,
+    origin: (typeof item === 'object' && item.origin) ? item.origin : 'upload',
+    resolved: true
+  };
+}
+
+/** 批量规整参考图托盘列表，确保每一个项都是合法的标准对象 */
+function normalizeTrayAssets(list) {
+  if (!Array.isArray(list)) return [];
+  return list.map((it, idx) => normalizeTrayAsset(it, idx)).filter(Boolean);
+}
+
+/** 清洗提示词中残留的 @图1[261a5325...jpg] 长文件名或长哈希中括号，转为纯净的 @图1，仅保留真正的区域语义括号如 @图1[沙发] */
+function cleanPromptRefBrackets(text) {
+  if (!text) return '';
+  return String(text).replace(/@((?:图片|图|视频|音频)\d+)\[([^\]]+)\]/g, (match, tag, bracket) => {
+    return isFileLikeBracket(bracket) ? `@${tag}` : match;
+  });
+}
+
 function namesInPrompt(text) {
   const names = [];
-  // 1. 优先提取带方括号的: @图1[xxx.jpg]
+  // 1. 优先提取带方括号的: @图1[xxx]（已过滤长文件名）
   const reWithBrackets = /@(?:图|图片|视频|音频)(\d+)\[([^\]]+)\]/g;
   let match;
   while ((match = reWithBrackets.exec(String(text || '')))) {
@@ -7042,14 +7739,16 @@ function namesInPrompt(text) {
   while ((match = reSimple.exec(String(text || '')))) {
     const idx = Number(match[1]) - 1;
     if (!names[idx] && referenceTray.value[idx]) {
-      names[idx] = referenceTray.value[idx].name || referenceTray.value[idx].file_name || `素材${idx + 1}`;
+      names[idx] = referenceTray.value[idx].name || referenceTray.value[idx].file_name || `图${idx + 1}`;
     }
   }
   return names;
 }
 function labelForRef(url, promptName) {
-  if (promptName && !/^参考图\d+$/.test(promptName)) return promptName;
-  return fileNameFromUrl(url) || promptName || '未命名图片';
+  if (promptName && !/^[0-9a-f]{16,}/i.test(promptName) && !promptName.includes('.') && !/ARCH_REF/i.test(promptName)) {
+    return promptName;
+  }
+  return '参考图';
 }
 /**
  * 记录到「本会话素材池」。
@@ -7089,6 +7788,9 @@ function mountAssetFromLibrary(item) {
   let asset = referenceTray.value.find(r => r.url === assetUrl);
   if (!asset) {
     const idx = referenceTray.value.length + 1;
+    const mountedKind = (item.category === 'video' || item.kind === 'video')
+      ? 'video'
+      : ((item.category === 'audio' || item.kind === 'audio') ? 'audio' : 'image');
     asset = {
       name: assetName,
       url: assetUrl,
@@ -7096,6 +7798,8 @@ function mountAssetFromLibrary(item) {
       tag: `@图${idx}`,
       fid: item.fid,
       mediaToken: item.mediaToken,
+      kind: mountedKind,
+      origin: item.origin || 'upload',
     };
     referenceTray.value.push(asset);
     selectedImageIndex.value = referenceTray.value.length - 1;
@@ -7107,17 +7811,22 @@ function mountAssetFromLibrary(item) {
     rightDrawerOpen.value = true;
   }
 
-  if (item.category === 'video' || item.kind === 'video') {
+  const stayOnVideo = activeModality.value === 'video' && asset.kind !== 'audio';
+  if (item.category === 'video' || item.kind === 'video' || asset.kind === 'video') {
     activeModality.value = 'video';
   } else if (item.category === 'audio' || item.kind === 'audio') {
     activeModality.value = 'music';
-  } else {
+  } else if (!stayOnVideo) {
     activeModality.value = 'image';
   }
 
   // 用户需求：增加了图片后对话框不自动新增图片引用，取消输入框自动关联
   selectedImageIndex.value = referenceTray.value.indexOf(asset);
   rememberSessionRefs([asset], 'upload', { persist: true });
+  if (activeModality.value === 'video') {
+    autoSelectRefMode([asset.kind === 'video' ? 'video' : 'image']);
+    syncGenModeWithReferenceTray();
+  }
 }
 
 /**
@@ -7154,34 +7863,26 @@ function mountAssetsFromLibrary(items) {
   }
   rememberSessionRefs(referenceTray.value, 'upload', { persist: true });
 
-  // 混选时以视频为准（视频模式可同时吃图片引用）；纯图片走图片模式
+  // 已经在视频里挂图时留在视频，并按张数取图生 / 全能参考。不要改去文生视频，也不要把视频板块拽到图像。
   const anyVideo = list.some((item) => item.kind === 'video' || item.media_type === 'video');
-  if (anyVideo) {
+  const stayOnVideo = activeModality.value === 'video';
+  if (anyVideo || stayOnVideo) {
     activeModality.value = 'video';
-    autoSelectRefMode(['video']);
+    autoSelectRefMode(anyVideo ? ['video'] : ['image']);
+    syncGenModeWithReferenceTray();
   } else {
     activeModality.value = 'image';
     autoSelectRefMode(['image']);
   }
 
   nextTick(() => {
-    if (richEditorRef.value) {
-      richEditorRef.value.innerHTML = '';
-      appendRichSegmentText('参考 ');
-      referenceTray.value.forEach((asset, idx) => {
-        insertChipToEditor(asset);
-        if (idx < referenceTray.value.length - 1) appendRichSegmentText('、');
-      });
-      appendRichSegmentText(' 的整体风格与元素，生成一张协调统一的新画面。');
-    }
+    // 用户需求：增加了图片后对话框不自动新增图片引用，取消输入框自动关联，只挂载到参考托盘
     if (dropped > 0) {
       composerError.value = `当前模型最多挂载 ${limit} 个引用，已忽略多出的 ${dropped} 个素材。`;
     }
     if (unusable.length) {
       composerNotice.value = `${unusable.length} 个素材没有可用的图片地址，已跳过（${unusable.map((a) => a.name).slice(0, 3).join('、')}${unusable.length > 3 ? ' 等' : ''}）。`;
     }
-    // 托盘与正文这一刻才对齐，草稿要在这里补存一次：
-    // watch 是 pre-flush，会抢在前面把「新托盘 + 旧正文」写进 localStorage，刷新后编号就错位了。
     saveDraftToStorage();
   });
 }
@@ -7203,6 +7904,7 @@ function getEditorPlaceholder() {
 }
 
 function getSendButtonText() {
+  if (uploadingCrop.value) return '转存裁剪中...';
   if (activeModality.value === 'chat') return '发送提问';
   if (activeModality.value === 'image') return '立即生图';
   if (activeModality.value === 'video') return '立即生视频';
@@ -7337,13 +8039,23 @@ function applyQuickStarter(rec) {
   appendRichSegmentText(rec.desc);
 }
 
+let editorComposing = false;
+
+function onEditorCompositionStart() {
+  editorComposing = true;
+}
+
+function onEditorCompositionEnd() {
+  editorComposing = false;
+  onEditorInput();
+}
+
 function paintChipTag(chip, tag) {
-  const currentTag = chip.getAttribute('data-tag') || '';
-  const bracketMatch = currentTag.match(/\[([^\]]*)\]/);
-  const finalTag = (bracketMatch && !tag.includes('[')) ? `${tag}[${bracketMatch[1]}]` : tag;
+  if (editorComposing) return;
+  const finalTag = paintChipFinalTag(chip.getAttribute('data-tag') || '', tag);
   chip.setAttribute('data-tag', finalTag);
   const span = [...chip.querySelectorAll('span')].find((el) => !el.classList.contains('inline-asset-delete'));
-  if (span) span.textContent = finalTag;
+  if (span && span.textContent !== finalTag) span.textContent = finalTag;
 }
 
 function syncTrayFromEditor() {
@@ -7352,27 +8064,32 @@ function syncTrayFromEditor() {
   const chips = [...richEditorRef.value.querySelectorAll('.inline-asset-chip')];
   chips.forEach((chip) => {
     const url = chip.getAttribute('data-url') || '';
-    if (!url) return;
-    const existing = referenceTray.value.find((item) => item && item.url === url);
+    const fid = chip.getAttribute('data-fid') || '';
+    const sourceFid = chip.getAttribute('data-source-fid') || '';
+    if (!url && !fid && !sourceFid) return;
+    const existing = referenceTray.value.find((item) => {
+      if (!item) return false;
+      if (url && item.url === url) return true;
+      if (fid && (item.fid === fid || item.sourceFid === fid || item.source_fid === fid)) return true;
+      if (sourceFid && (item.fid === sourceFid || item.sourceFid === sourceFid || item.source_fid === sourceFid)) return true;
+      if (url && item.originalUrl === url) return true;
+      return false;
+    });
     if (existing) {
+      chip.setAttribute('data-url', existing.url);
+      chip.setAttribute('data-fid', existing.fid || '');
       paintChipTag(chip, existing.tag);
     }
   });
 }
 
 /** 给一个引用地址做"能不能用"的判定并尽量换新凭证；返回 '' 表示彻底救不回来。 */
-function reviveRefUrl({ fid = '', url = '', mediaToken = '' } = {}) {
-  if (fid) {
-    const fresh = getAssetImageUrl(fid, mediaToken);
-    if (fresh) return fresh;
-  }
-  if (!url) return '';
-  if (url.startsWith('blob:')) return localFileByUrl.has(url) ? url : '';
-  if (url.startsWith('/api/')) return resignAssetUrl(url) || '';
-  if (url.startsWith('data:')) return url;
-  if (/^https?:/i.test(url)) return url;
-  if (url.startsWith('/')) return url;
-  return '';
+function reviveRefUrl(ref) {
+  return decideReviveRefUrl(ref, {
+    signAsset: (fid, mediaToken) => getAssetImageUrl(fid, mediaToken),
+    resignUrl: (url) => resignAssetUrl(url),
+    blobAlive: (url) => localFileByUrl.has(url)
+  });
 }
 
 /**
@@ -7388,55 +8105,88 @@ function repairReferenceChips() {
   let repaired = 0;
   let downgraded = 0;
 
-  if (editor) {
-    for (const chip of [...editor.querySelectorAll('.inline-asset-chip')]) {
-      const fid = chip.getAttribute('data-fid') || '';
-      const url = chip.getAttribute('data-url') || '';
-      const fixed = reviveRefUrl({ fid, url });
-      if (!fixed) continue;
-      if (fixed !== url) {
-        chip.setAttribute('data-url', fixed);
-        repaired += 1;
-      }
-      chip.setAttribute('data-resolved', '1');
-    }
-  }
+  // 1. 托盘规整化（确保每个元素都有标准的 url, name, tag）
+  referenceTray.value = normalizeTrayAssets(referenceTray.value);
 
-  // 托盘侧同样体检：没有胶囊的挂载项（单张挂载/草稿恢复）也要救，救不了就摘掉
+  // 2. 托盘地址有效性体检：能换新签发地址尽量换新，换不了新也严格保留原 url，绝不误杀！
   const kept = [];
   for (const asset of referenceTray.value) {
-    if (!asset) continue;
-    const fixed = reviveRefUrl({ fid: asset.fid, url: asset.url, mediaToken: asset.mediaToken });
-    if (!fixed) {
-      downgraded += 1;
+    if (!asset || !asset.url) continue;
+    // 已裁剪/标绘/自定义的像素产物，严禁重新自愈回原始素材库图片
+    if (asset.annotated || asset.isCustomEdited || !asset.fid) {
+      asset.resolved = true;
+      kept.push(asset);
       continue;
     }
-    if (fixed !== asset.url) repaired += 1;
-    kept.push({ ...asset, url: fixed, resolved: true });
+    const fixed = reviveRefUrl({ fid: asset.fid, url: asset.url, mediaToken: asset.mediaToken }) || asset.url;
+    if (fixed && fixed !== asset.url) {
+      asset.url = fixed;
+      repaired += 1;
+    }
+    asset.resolved = true;
+    kept.push(asset);
   }
   referenceTray.value = kept;
 
-  // 重排编号：tray 顺序即编号，胶囊跟着 tray 走；对不上的胶囊降级成纯文本
+  // 3. 严格按托盘下标重排 @图1, @图2... 并清洗名称
   referenceTray.value.forEach((asset, idx) => {
     asset.tag = `@图${idx + 1}`;
-  });
-  if (editor) {
-    for (const chip of [...editor.querySelectorAll('.inline-asset-chip')]) {
-      const fid = chip.getAttribute('data-fid') || '';
-      const url = chip.getAttribute('data-url') || '';
-      const idx = referenceTray.value.findIndex(
-        (asset) => asset && ((fid && asset.fid === fid) || (url && asset.url === url))
-      );
-      if (idx < 0) {
-        const num = (chip.getAttribute('data-tag') || '').match(/@图(\d+)/)?.[1] || '';
-        chip.replaceWith(document.createTextNode(`（原@图${num}已失效）`));
-        downgraded += 1;
-        continue;
-      }
-      const tag = `@图${idx + 1}`;
-      // 用 paintChipTag 而不是直接写文本：它能保留 @图1[沙发] 这类区域后缀
-      paintChipTag(chip, tag);
+    if (!asset.name || /^[0-9a-f]{16,}/i.test(asset.name) || /ARCH_REF/i.test(asset.name) || asset.name.includes('.')) {
+      asset.name = `图${idx + 1}`;
     }
+  });
+
+  // 4. 编辑器胶囊与托盘双向自愈对齐
+  if (editor) {
+    const chips = [...editor.querySelectorAll('.inline-asset-chip')];
+    chips.forEach((chip, cIdx) => {
+      const fid = chip.getAttribute('data-fid') || '';
+      const sourceFid = chip.getAttribute('data-source-fid') || '';
+      const url = chip.getAttribute('data-url') || '';
+      const currentTag = chip.getAttribute('data-tag') || '';
+      const tagMatch = currentTag.match(/@(?:图片|图|视频|音频)(\d+)/);
+      const tagNum = tagMatch ? parseInt(tagMatch[1], 10) : 0;
+
+      // 尝试匹配托盘中的素材项：优先精确 fid/url，其次匹配裁剪/编辑前的原图 sourceFid / originalUrl
+      let idx = referenceTray.value.findIndex((asset) => {
+        if (!asset) return false;
+        if (fid && asset.fid === fid) return true;
+        if (url && asset.url === url) return true;
+        // 裁剪后资产 fid 会被置空，但保留 sourceFid / originalUrl；胶囊若记有原图 fid 则可通过 sourceFid 找回
+        if (fid && (asset.sourceFid === fid || asset.source_fid === fid)) return true;
+        if (sourceFid && (asset.fid === sourceFid || asset.sourceFid === sourceFid || asset.source_fid === sourceFid)) return true;
+        if (url && asset.originalUrl === url) return true;
+        return false;
+      });
+      if (idx < 0 && tagNum > 0 && tagNum <= referenceTray.value.length) {
+        idx = tagNum - 1;
+      }
+      if (idx < 0 && cIdx < referenceTray.value.length) {
+        idx = cIdx;
+      }
+
+      if (idx >= 0 && referenceTray.value[idx]) {
+        const targetAsset = referenceTray.value[idx];
+        const baseTag = `@图${idx + 1}`;
+        chip.setAttribute('data-url', targetAsset.url);
+        chip.setAttribute('data-name', targetAsset.name);
+        chip.setAttribute('data-fid', targetAsset.fid || '');
+        if (targetAsset.sourceFid || sourceFid || fid) {
+          chip.setAttribute('data-source-fid', targetAsset.sourceFid || sourceFid || fid);
+        }
+        paintChipTag(chip, baseTag);
+      } else if (referenceTray.value.length > 0) {
+        // 托盘有图但索引超限，对齐到第 1 张图，不粗暴报错
+        const fallbackAsset = referenceTray.value[0];
+        chip.setAttribute('data-url', fallbackAsset.url);
+        chip.setAttribute('data-name', fallbackAsset.name);
+        paintChipTag(chip, '@图1');
+      } else {
+        // 托盘彻底无图时，退化为普通 @图N 文本，不污染提示词
+        chip.replaceWith(document.createTextNode(`@图${tagNum || 1}`));
+        downgraded += 1;
+      }
+    });
   }
 
   return { repaired, downgraded };
@@ -7493,6 +8243,7 @@ function reparseEditorChips(extraAssets) {
 }
 function onEditorInput() {
   saveEditorSelection();
+  if (editorComposing) return;
   // 检查光标前刚刚输入的字符
   const sel = window.getSelection();
   let cursorChar = '';
@@ -7529,7 +8280,7 @@ function onEditorInput() {
 }
 
 function onEditorKeyup(e) {
-  if (reparsingEditor) return;
+  if (editorComposing || reparsingEditor) return;
   if (e.key === 'Backspace' || e.key === 'Delete') syncTrayFromEditor();
 }
 
@@ -7580,18 +8331,8 @@ function mentionedRefNumbers(text) {
 }
 
 function withKeptRefMentions(text, tray) {
-  const items = (Array.isArray(tray) ? tray : []).filter((item) => item && item.url);
-  if (!items.length) return text;
-  const mentioned = mentionedRefNumbers(text);
-  const missing = items.filter((_, index) => !mentioned.has(index + 1));
-  if (!missing.length) return text;
-  const prefix = missing.map((item, index) => {
-    const kind = mediaKind(item);
-    const word = kind === 'audio' ? '音频' : (kind === 'video' ? '视频' : '图片');
-    const num = (Array.isArray(tray) ? tray : []).indexOf(item) + 1;
-    return `@${word}${num || index + 1}`;
-  }).join(' ');
-  return `${prefix} ${String(text || '')}`.trim();
+  // 用户需求：取消默认自动在提示词头部补 @图1 等胶囊，用户会在正文中自然描述 图1、图2、图3，保证图片上传顺序即可
+  return String(text || '').trim();
 }
 
 /**
@@ -7632,20 +8373,21 @@ function restorePromptContent(itemOrText, optionalTray) {
   let targetSupplement = '';
   let targetSelIdx = 0;
 
+  const verbatim = !!(itemOrText && typeof itemOrText === 'object' && itemOrText.verbatim);
   if (itemOrText && typeof itemOrText === 'object') {
-    targetText = itemOrText.text || '';
+    targetText = verbatim ? String(itemOrText.text || '') : cleanPromptRefBrackets(itemOrText.text || '');
     targetTray = itemOrText.tray || [];
     targetRecipe = itemOrText.recipePrompt || '';
     targetGlobalRecipe = itemOrText.globalRecipePrompt || '';
     targetSupplement = itemOrText.supplementText || '';
     targetSelIdx = itemOrText.selectedImageIndex ?? 0;
   } else {
-    targetText = String(itemOrText || '');
+    targetText = cleanPromptRefBrackets(String(itemOrText || ''));
     targetTray = Array.isArray(optionalTray) ? optionalTray : [];
   }
 
   // 1. 恢复参考托盘数据并展开看图区工作台
-  referenceTray.value = Array.isArray(targetTray) ? JSON.parse(JSON.stringify(targetTray)) : [];
+  referenceTray.value = normalizeTrayAssets(targetTray);
   if (referenceTray.value.length > 0) {
     viewerCollapsed.value = false;
     selectedImageIndex.value = Math.min(Math.max(0, targetSelIdx), referenceTray.value.length - 1);
@@ -7672,6 +8414,16 @@ function restorePromptContent(itemOrText, optionalTray) {
 
   recipePrompt.value = targetRecipe;
   globalRecipePrompt.value = targetGlobalRecipe;
+
+  // 重新编辑：原文整段留在输入框，不剥括号，也不把【】段拆进配方区。
+  if (verbatim) {
+    recipePrompt.value = '';
+    globalRecipePrompt.value = '';
+    if (!richEditorRef.value) return;
+    richEditorRef.value.innerHTML = '';
+    if (targetText) appendRichSegmentText(targetText);
+    return;
+  }
 
   // 3. 清空并恢复富文本编辑器
   if (!richEditorRef.value) return;
@@ -7706,7 +8458,8 @@ function restorePromptContent(itemOrText, optionalTray) {
 
     let customTag = `@图${num}`;
     let regionKey = null;
-    if (bracketName) {
+    const isRegionTag = bracketName && !/\.(jpg|jpeg|png|webp|gif|svg|bmp)$/i.test(bracketName) && !/^[0-9a-f]{12,}/i.test(bracketName) && !/ARCH_REF/i.test(bracketName);
+    if (isRegionTag) {
       customTag = `@图${num}[${bracketName}]`;
       const reg = Array.isArray(matchedAsset.regions)
         ? matchedAsset.regions.find(r => r.name === bracketName || r.id === bracketName)
@@ -7785,15 +8538,7 @@ function getRawEditorText() {
       result += node.nodeValue;
     } else if (node.nodeType === Node.ELEMENT_NODE) {
       if (node.classList && node.classList.contains('inline-asset-chip')) {
-        const tag = node.getAttribute('data-tag') || '@图1';
-        const name = node.getAttribute('data-name') || '';
-        if (tag.includes('[')) {
-          result += ` ${tag} `;
-        } else if (name) {
-          result += ` ${tag}[${name}] `;
-        } else {
-          result += ` ${tag} `;
-        }
+        result += ` ${chipSubmitText(node.getAttribute('data-tag') || '@图1')} `;
       } else {
         node.childNodes.forEach(walk);
       }
@@ -7911,6 +8656,13 @@ function resultImageSrc(msg) {
   return url && msg.imgRetry ? `${url}${url.includes('?') ? '&' : '?'}_r=${msg.imgRetry}` : url;
 }
 
+/** 对话卡片只取小预览。点开大图仍走 resultImageSrc 的原文件。 */
+function resultImageCardSrc(msg) {
+  const full = resultImageSrc(msg);
+  if (!full || !/\/api\/cache\/temp\//.test(full)) return full;
+  return `${full}${full.includes('?') ? '&' : '?'}preview=1`;
+}
+
 // HTTPS 页面里拼出 http:// 的媒体地址，浏览器会直接拦掉（@error 但不给状态码），先本地判出来
 function mixedContentHint(url) {
   return window.location.protocol === 'https:' && /^http:\/\//i.test(String(url)) ? 'HTTPS 页面请求 HTTP 资源被浏览器拦截' : '';
@@ -7948,6 +8700,9 @@ async function onResultImgError(msg) {
     return;
   }
   await probeMediaError(msg, list[idx]);
+  if (!msg.assetFid && /^HTTP 404/.test(msg.imgErr || '') && list.every((u) => /\/cache\/temp\//.test(String(u)))) {
+    msg.imgErr = '未入素材库，预览已过期';
+  }
   msg.imgFailed = true;
 }
 
@@ -8018,16 +8773,14 @@ function videoFileName(msg) {
 }
 
 function messageAttachments(msg) {
-  const refs = Array.isArray(msg?.refs) ? msg.refs.filter((item) => item && item.url) : [];
-  if (refs.length) return refs;
-  const images = Array.isArray(msg?.images) ? msg.images : [];
-  const names = namesInPrompt(msg?.content);
-  return images.filter(Boolean).map((url, index) => ({
-    url,
-    name: labelForRef(url, names[index]),
-    kind: 'image',
-    tag: `@图${index + 1}`,
-  }));
+  const rawRefs = Array.isArray(msg?.refs) && msg.refs.length
+    ? msg.refs
+    : (Array.isArray(msg?.params?.refs) && msg.params.refs.length
+      ? msg.params.refs
+      : (Array.isArray(msg?.images) ? msg.images : []));
+  const normalized = normalizeTrayAssets(rawRefs);
+  if (normalized.length) return normalized;
+  return [];
 }
 
 function parseRichSegments(content, msg) {
@@ -8339,22 +9092,22 @@ watch(filteredTemplates, () => {
 });
 
 async function loadTemplates() {
-  await loadTagVocab();
   const user = getCurrentUser();
   const userId = user?.id || user?.username || 'default';
 
-  // 1. 先读本地 IndexedDB 缓存
+  // 先画本地列表。词表和增量同步都在这之后，不挡打开。
   try {
     const cached = await getTemplatesCache(userId);
     if (cached && Array.isArray(cached.templates) && cached.templates.length > 0) {
       templates.value = cached.templates;
       sortTemplates();
       setupCardObserver();
-      prewarmPreviewImages(cached.templates, 48);
+      prewarmPreviewImages(cached.templates, 6);
     }
   } catch (e) {
     console.warn('读取创作库本地缓存异常:', e);
   }
+  loadTagVocab().catch(() => {});
 
   // 2. 增量刷新
   try {
@@ -8362,22 +9115,32 @@ async function loadTemplates() {
     let pageSince = cached.row_cursor;
     let pageTomb = cached.tomb_cursor;
 
-    // 两支游标均无，直接全量拉取
+    // 两支游标均无，按 (updated_at, id) 分页拉完，不再停在第一页 1000 条
     if (!pageSince && !pageTomb) {
-      const fullRes = await fetchCreationTemplatesIncremental();
-      if (fullRes.success && Array.isArray(fullRes.data)) {
-        templates.value = fullRes.data;
-        sortTemplates();
-        setupCardObserver();
-        await replaceTemplatesCache(
-          fullRes.data,
-          {
-            row_cursor: fullRes.next_since,
-            tomb_cursor: { deleted_at: fullRes.server_time, id: '' }
-          },
-          userId
+      const collected = [];
+      let cursor = null;
+      let serverTime = Date.now();
+      for (let i = 0; i < 50; i++) {
+        const fullRes = await fetchCreationTemplatesIncremental(
+          cursor ? { since: cursor.updated_at, sinceId: cursor.id } : {}
         );
+        if (!fullRes.success || !Array.isArray(fullRes.data)) break;
+        collected.push(...fullRes.data);
+        cursor = fullRes.next_since || cursor;
+        serverTime = fullRes.server_time || serverTime;
+        if (!fullRes.has_more) break;
       }
+      templates.value = collected;
+      sortTemplates();
+      setupCardObserver();
+      await replaceTemplatesCache(
+        collected,
+        {
+          row_cursor: cursor,
+          tomb_cursor: { deleted_at: serverTime, id: '' }
+        },
+        userId
+      );
       return;
     }
 
@@ -8398,17 +9161,28 @@ async function loadTemplates() {
       if (!deltaRes.success) break;
 
       if (deltaRes.resync) {
-        await clearTemplatesCache();
-        const fullRes = await fetchCreationTemplatesIncremental();
-        if (fullRes.success && Array.isArray(fullRes.data)) {
-          templates.value = fullRes.data;
+        const collected = [];
+        let cursor = null;
+        let serverTime = Date.now();
+        for (let i = 0; i < 50; i++) {
+          const fullRes = await fetchCreationTemplatesIncremental(
+            cursor ? { since: cursor.updated_at, sinceId: cursor.id } : {}
+          );
+          if (!fullRes.success || !Array.isArray(fullRes.data)) break;
+          collected.push(...fullRes.data);
+          cursor = fullRes.next_since || cursor;
+          serverTime = fullRes.server_time || serverTime;
+          if (!fullRes.has_more) break;
+        }
+        if (collected.length || cursor) {
+          templates.value = collected;
           sortTemplates();
           setupCardObserver();
           await replaceTemplatesCache(
-            fullRes.data,
+            collected,
             {
-              row_cursor: fullRes.next_since,
-              tomb_cursor: { deleted_at: fullRes.server_time, id: '' }
+              row_cursor: cursor,
+              tomb_cursor: { deleted_at: serverTime, id: '' }
             },
             userId
           );
@@ -8454,9 +9228,155 @@ async function loadTemplates() {
   }
 }
 
-// 会话消息缓存（stale-while-revalidate）：界面底层仍是服务端，缓存只为切回刚看过的会话时秒开、不闪
+// 会话元数据与早期归档状态
+const sessionMeta = ref({
+  recent_count: 0,
+  archived_count: 0,
+  stale_empty_count: 0
+});
+const archivedDrawerOpen = ref(false);
+const archivedSessions = ref([]);
+const archivedLoading = ref(false);
+const cleaningStale = ref(false);
+
+// 会话列表本地持久化快照 (0.1ms 同步恢复，实现零白屏秒开)
+const SESSION_LIST_CACHE_KEY = () => {
+  const u = getCurrentUser();
+  return `ml_studio_sessions_cache_${String(u?.username || u?.id || 'anon')}`;
+};
+
+function getLocalSessionsCache() {
+  try {
+    const raw = localStorage.getItem(SESSION_LIST_CACHE_KEY());
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) { return null; }
+}
+
+function setLocalSessionsCache(list, meta) {
+  try {
+    localStorage.setItem(SESSION_LIST_CACHE_KEY(), JSON.stringify({
+      list: (list || []).slice(0, 100),
+      meta: meta || null,
+      at: Date.now()
+    }));
+  } catch (_) {}
+}
+
+// 会话消息持久化快照与内存缓存（stale-while-revalidate，实现 < 0.5ms 切会话）
 const messagesCache = new Map(); // sid -> { rows, at }
-const MESSAGES_CACHE_TTL = 60 * 1000;
+const MESSAGES_CACHE_TTL = 300 * 1000; // 放宽至 5 分钟，避免频繁重刷抖动
+const MAX_MESSAGES_CACHE_ENTRIES = 20;
+let currentMessagesAbortController = null;
+const SESSION_MSG_CACHE_PREFIX = 'ml_studio_msg_cache_';
+
+function setMessagesCache(sid, data) {
+  if (messagesCache.size >= MAX_MESSAGES_CACHE_ENTRIES) {
+    const oldestKey = messagesCache.keys().next().value;
+    if (oldestKey) messagesCache.delete(oldestKey);
+  }
+  messagesCache.set(sid, data);
+}
+
+function getSessionMessagesCache(sid) {
+  if (!sid) return null;
+  const mem = messagesCache.get(sid);
+  if (mem && mem.rows && mem.rows.length) return mem.rows;
+  try {
+    const raw = localStorage.getItem(`${SESSION_MSG_CACHE_PREFIX}${sid}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.rows) && parsed.rows.length) {
+        setMessagesCache(sid, parsed);
+        return parsed.rows;
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+
+function persistSessionMessagesCache(sid, rows) {
+  if (!sid || !Array.isArray(rows)) return;
+  setMessagesCache(sid, { rows: rows.map((m) => ({ ...m })), at: Date.now() });
+  try {
+    // 限制单会话持久化最近 25 条关键字段，防爆仓且保证秒开体验
+    const snapshot = rows.slice(-25).map(m => ({
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      thinking: m.thinking,
+      modality: m.modality,
+      imageUrl: m.imageUrl,
+      videoUrl: m.videoUrl,
+      modelVideoUrl: m.modelVideoUrl,
+      vendorVideoUrl: m.vendorVideoUrl,
+      srStatus: m.srStatus,
+      srError: m.srError,
+      audioUrl: m.audioUrl,
+      resolution: m.resolution,
+      ratio: m.ratio,
+      duration: m.duration,
+      model: m.model,
+      modelKey: m.modelKey,
+      userPrompt: m.userPrompt,
+      refs: m.refs,
+      images: m.images,
+      params: m.params,
+      isGenerating: m.isGenerating,
+      isCancelled: m.isCancelled,
+      isError: m.isError,
+      jobId: m.jobId,
+      startTime: m.startTime,
+      genMode: m.genMode,
+      assetFid: m.assetFid,
+      retryPrompt: m.retryPrompt,
+      retryRefs: m.retryRefs,
+      retryModel: m.retryModel,
+      retryModality: m.retryModality,
+      retryMode: m.retryMode,
+      retryParams: m.retryParams
+    }));
+    localStorage.setItem(`${SESSION_MSG_CACHE_PREFIX}${sid}`, JSON.stringify({ rows: snapshot, at: Date.now() }));
+  } catch (_) {}
+}
+
+async function toggleArchivedDrawer() {
+  archivedDrawerOpen.value = !archivedDrawerOpen.value;
+  if (archivedDrawerOpen.value && archivedSessions.value.length === 0) {
+    archivedLoading.value = true;
+    try {
+      const list = await fetchChatSessions({ scope: 'archived', days: 3, limit: 200 });
+      archivedSessions.value = Array.isArray(list) ? list : [];
+    } catch (e) {
+      console.warn('拉取早期会话失败:', e);
+    } finally {
+      archivedLoading.value = false;
+    }
+  }
+}
+
+async function handleCleanStaleEmpty() {
+  if (cleaningStale.value) return;
+  const count = sessionMeta.value.stale_empty_count;
+  if (!count) return;
+  const confirmed = window.confirm(
+    `确认一键清理 3 天前且未生成任何产物的 ${count} 个废弃会话吗？\n（有图/视频等作品的会话均会安全保留）`
+  );
+  if (!confirmed) return;
+  cleaningStale.value = true;
+  try {
+    const res = await cleanStaleChatSessions({ mode: 'empty_only', days: 3 });
+    showToast(`已成功清理 ${res.cleaned_count || count} 个废弃会话`);
+    await loadSessions({ select: 'auto' });
+    if (archivedDrawerOpen.value) {
+      const list = await fetchChatSessions({ scope: 'archived', days: 3, limit: 200 });
+      archivedSessions.value = Array.isArray(list) ? list : [];
+    }
+  } catch (e) {
+    showToast(`清理失败: ${e.message || '网络错误'}`);
+  } finally {
+    cleaningStale.value = false;
+  }
+}
 
 // 记住上次停留的会话，避免刷新后被"最近更新"的会话抢走视线
 const ACTIVE_SESSION_KEY = () => {
@@ -8537,7 +9457,7 @@ function dedupeLoadedMessages(rows) {
  */
 async function refreshMessagesFromServer(sid) {
   if (!sid || sid !== currentSessionId.value) return;
-  const raw = dedupeLoadedMessages(await fetchChatMessages(sid));
+  const raw = dedupeLoadedMessages(await fetchChatMessages(sid, 100, { screen: true }));
   if (!Array.isArray(raw) || sid !== currentSessionId.value) return;
   const known = new Set(messages.value.map((m) => m && m.id).filter(Boolean));
   const seenMedia = new Set(messages.value
@@ -8547,17 +9467,42 @@ async function refreshMessagesFromServer(sid) {
   for (const m of raw) {
     if (!m || m.role !== 'assistant' || known.has(m.id)) continue;
     const r = m.result || {};
-    if (!r.imageUrl && !r.videoUrl && !r.audioUrl) continue;
+    const isFailed = m.status === 'failed' || Boolean(r.isError) || String(m.prompt || r.content || '').startsWith('生成遇到问题');
+    const isCancelled = m.status === 'cancelled' || Boolean(r.isCancelled);
+    const hasMedia = Boolean(r.imageUrl || r.videoUrl || r.audioUrl);
+    // 允许有媒体产物、失败报错或取消态的记录追加渲染，严禁静默吞噬失败卡片
+    if (!hasMedia && !isFailed && !isCancelled) continue;
+
     // 同一份产物已经在列表里（历史双写留下的脏数据）就不再追加第二张
     const mediaUrl = r.imageUrl || r.videoUrl || r.audioUrl;
     if (mediaUrl && seenMedia.has(mediaUrl)) continue;
     if (mediaUrl) seenMedia.add(mediaUrl);
-    const modality = r.imageUrl ? 'image' : (r.videoUrl ? 'video' : 'music');
+
+    let modality = r.imageUrl ? 'image' : (r.videoUrl ? 'video' : (r.audioUrl ? 'music' : 'chat'));
+    const rawMode = String(m.mode || r.genMode || r.retryModality || '').toLowerCase();
+    if (rawMode.includes('video')) modality = 'video';
+    else if (rawMode.includes('image')) modality = 'image';
+    else if (rawMode === 'music' || rawMode === 'audio') modality = 'music';
+
+    let resolvedContent = '';
+    if (isFailed) {
+      resolvedContent = r.content || m.prompt || '生成遇到问题，请重试';
+    } else if (isCancelled) {
+      resolvedContent = r.content || '生成已取消';
+    } else {
+      const defaultContent = modality === 'video'
+        ? '影视级空间动态渲染已就绪。运镜平滑连续，空间光影与环境音效自然契合。'
+        : (modality === 'music' ? '音频已生成。' : '已为您完成空间视效生成。家具材质光泽与参考项深度统一，光影自然。');
+      resolvedContent = (r.content && r.content !== r.userPrompt)
+        ? r.content
+        : (m.prompt && m.prompt !== r.userPrompt && !m.prompt.startsWith('@图') ? m.prompt : defaultContent);
+    }
+
     extras.push({
       id: m.id,
       role: 'assistant',
       modality,
-      content: r.content || m.prompt || '',
+      content: resolvedContent,
       imageUrl: r.imageUrl,
       videoUrl: r.videoUrl,
       audioUrl: r.audioUrl,
@@ -8572,6 +9517,12 @@ async function refreshMessagesFromServer(sid) {
       refs: r.refs || m.params?.refs || [],
       params: m.params || null,
       genMode: r.genMode || m.mode,
+      isError: isFailed,
+      isCancelled,
+      isGenerating: false,
+      rawError: r.errorDetails || r.error || r.rawError || null,
+      result: r,
+      jobId: m.run_id || (m.id && m.id.startsWith('genmsg_') ? m.id.replace('genmsg_', '') : '') || r.jobId || '',
       // 后台任务在其它标签完成时补插的卡片必须带齐重试/超分元数据，
       // 否则「重新生成」会按默认参数重发、超分区会一直显示「尚未超分」
       modelVideoUrl: r.modelVideoUrl,
@@ -8580,17 +9531,23 @@ async function refreshMessagesFromServer(sid) {
       srError: r.srError,
       startTime: m.created_at || r.startTime || Date.now(),
       assetFid: r.assetFid || '',
+      librarySaved: Boolean(r.librarySaved),
+      creationSaved: Boolean(r.creationSaved),
+      creationTemplateId: r.creationTemplateId || '',
       retryPrompt: r.retryPrompt || '',
       retryRefs: Array.isArray(r.retryRefs) ? r.retryRefs : [],
       retryModel: r.retryModel || '',
       retryModality: r.retryModality || '',
       retryMode: r.retryMode || '',
+      schemaMode: r.schemaMode || m.params?.schemaMode || r.retryMode || '',
       retryParams: r.retryParams || null
     });
     if (r.imageUrl) seenMedia.add(r.imageUrl);
   }
   if (!extras.length) return;
   messages.value.push(...extras);
+  collapseCompletedRenderCards(sid, '', null);
+  persistSessionMessagesCache(sid, messages.value);
   if (pinned.value) stickToBottom();
 }
 
@@ -8601,23 +9558,93 @@ async function refreshMessagesFromServer(sid) {
  * - 'none'：只刷新列表，不切会话（后台任务完成、其它标签页改数据时用）。
  */
 async function loadSessions({ select = 'auto' } = {}) {
+  // SWR 本地同步直出（耗时 < 0.1ms）：若内存尚无会话，立即恢复快照，消除空白等待
+  if (!sessions.value.length) {
+    const cached = getLocalSessionsCache();
+    if (cached && Array.isArray(cached.list) && cached.list.length > 0) {
+      sessions.value = cached.list;
+      if (cached.meta) sessionMeta.value = { ...sessionMeta.value, ...cached.meta };
+      if (select === 'first') {
+        selectSession(cached.list[0]);
+      } else if (select === 'auto') {
+        let remembered = '';
+        try { remembered = localStorage.getItem(ACTIVE_SESSION_KEY()) || ''; } catch (e) {}
+        selectSession(cached.list.find((s) => s.id === remembered) || cached.list[0]);
+      }
+    }
+  }
+
   try {
-    const list = await fetchChatSessions();
+    // SWR 后台异步校验：默认仅拉取服务端近 3 天活跃会话 (days=3, scope='active')
+    const list = await fetchChatSessions({ days: 3, scope: 'active' });
+    if (list?.meta) {
+      sessionMeta.value = { ...sessionMeta.value, ...list.meta };
+    }
     if (Array.isArray(list) && list.length > 0) {
       sessions.value = list;
+      setLocalSessionsCache(list, sessionMeta.value);
       const stillThere = Boolean(currentSessionId.value) && list.some((s) => s.id === currentSessionId.value);
       if (select === 'first') {
         await selectSession(list[0]);
       } else if (select === 'auto' && !stillThere) {
         let remembered = '';
         try { remembered = localStorage.getItem(ACTIVE_SESSION_KEY()) || ''; } catch (e) {}
+        const targetId = currentSessionId.value || remembered;
+
+        if (targetId && !list.some((s) => s.id === targetId)) {
+          // 单条精准补查保底：尝试查询超期历史会话（>3天），严禁盲目回退到 list[0] 篡夺
+          let targetSess = null;
+          try {
+            const res = await authFetch(`/api/chat/sessions/${encodeURIComponent(targetId)}`);
+            if (res.ok) {
+              const json = await res.json();
+              targetSess = json?.data || (json?.id ? json : null);
+            }
+          } catch (_) {}
+          if (!targetSess) {
+            try {
+              const archivedList = await fetchChatSessions({ scope: 'archived', days: 3, limit: 100 });
+              targetSess = (archivedList || []).find((s) => s.id === targetId) || null;
+            } catch (_) {}
+          }
+          if (!targetSess) {
+            try {
+              const allList = await fetchChatSessions({ scope: 'all', limit: 200 });
+              targetSess = (allList || []).find((s) => s.id === targetId) || null;
+            } catch (_) {}
+          }
+          if (targetSess) {
+            list.push(targetSess);
+            sessions.value = list;
+            setLocalSessionsCache(list, sessionMeta.value);
+            await selectSession(targetSess);
+            return;
+          }
+        }
         await selectSession(list.find((s) => s.id === remembered) || list[0]);
       }
       return;
     }
     if (select === 'none') return;
+
+    // 若近 3 天活跃列表为空，但早期归档中存在历史会话：优先载入归档最近会话，坚决不无故新建空会话！
+    if (sessionMeta.value.archived_count > 0) {
+      try {
+        const archivedList = await fetchChatSessions({ scope: 'archived', days: 3, limit: 100 });
+        if (Array.isArray(archivedList) && archivedList.length > 0) {
+          sessions.value = archivedList;
+          setLocalSessionsCache(archivedList, sessionMeta.value);
+          let remembered = '';
+          try { remembered = localStorage.getItem(ACTIVE_SESSION_KEY()) || ''; } catch (e) {}
+          const targetId = currentSessionId.value || remembered;
+          await selectSession(archivedList.find((s) => s.id === targetId) || archivedList[0]);
+          return;
+        }
+      } catch (_) {}
+    }
+
     const defaultId = `sess_${Date.now()}`;
-    const defaultSess = { id: defaultId, title: '空间美学创作会话' };
+    const defaultSess = { id: defaultId, title: '空间美学创作会话', created_at: Date.now(), updated_at: Date.now() };
     sessions.value = [defaultSess];
     currentSessionId.value = defaultId;
     rememberActiveSession(defaultId);
@@ -8630,6 +9657,10 @@ async function loadSessions({ select = 'auto' } = {}) {
     } catch (e) {}
   } catch (e) {
     console.warn('加载会话列表失败:', e);
+    // 鉴权失败：全局登录弹窗已弹出，不自动新建假会话覆盖原有上下文
+    if (e?.name === 'AuthRequiredError') {
+      return;
+    }
     if (!sessions.value.length) {
       await createNewSession();
     }
@@ -8656,25 +9687,70 @@ async function selectSession(s) {
 
   currentSessionId.value = s.id;
   rememberActiveSession(s.id);
+  const reqSessionId = s.id;
+  if (currentMessagesAbortController) {
+    try { currentMessagesAbortController.abort(); } catch (_) {}
+  }
+  currentMessagesAbortController = new AbortController();
+
   // 参数与模型选择严格跟随该会话上一轮：先清掉上一个会话的残留，
   // 再恢复本会话快照（内存优先，阶段 2 后 chat_sessions.params_json 持久化）。
+  // 用户手选过的模式不跟着会话快照走。
+  const keepMode = modeUserLocked.value ? activeGenMode.value : '';
+  const keepModality = modeUserLocked.value ? activeModality.value : '';
   resetParamsToDefaults();
   restoreSessionParams(s);
+  if (keepMode) {
+    if (keepModality) activeModality.value = keepModality;
+    setGenMode(keepMode);
+  }
   generating.value = Boolean(sessionGeneratingMap.get(s.id) || sessionPlaceholderMap.has(s.id));
-  messages.value = [];
+
+  // 命中快照先秒开（内存或持久化快照，耗时 < 0.2ms，零白屏），下面照旧请求服务端并在回来后比对覆盖
+  const cachedRows = getSessionMessagesCache(s.id);
+  if (cachedRows && cachedRows.length > 0) {
+    messages.value = cachedRows.map((m) => ({ ...m }));
+    const running = messages.value.find((m) => m && m.isGenerating);
+    if (running) {
+      sessionGeneratingMap.set(s.id, true);
+      sessionPlaceholderMap.set(s.id, running);
+      generating.value = true;
+    }
+    pinned.value = true;
+    messagesLoading.value = false;
+  } else {
+    messages.value = [];
+    messagesLoading.value = true;
+  }
   pinned.value = true;
   hasNewBelow.value = false;
 
-  // 2. 恢复目标会话的草稿状态；如果无草稿，彻底干净重置输入区和配方句
-  if (sessionDrafts.has(s.id)) {
+  // 2. 用户改过的提示词粘在输入框上。目标会话自己没发出去的文字草稿直接丢掉。
+  // 当前挂着的参考图留在输入区，不因切会话被清掉。没改过字时，仍按会话各自恢复草稿；
+  // 目标会话自己没有参考图时，沿用当前这组，避免一切就空。
+  const carriedTray = JSON.parse(JSON.stringify(referenceTray.value || []));
+  const carriedIndex = selectedImageIndex.value || 0;
+  if (composerPromptDirty.value) {
+    sessionDrafts.delete(s.id);
+    try { localStorage.removeItem(draftKey(s.id)); } catch (_) {}
+    sessionDrafts.set(s.id, {
+      recipePrompt: recipePrompt.value || '',
+      globalRecipePrompt: globalRecipePrompt.value || '',
+      editorHtml: richEditorRef.value ? richEditorRef.value.innerHTML : '',
+      referenceTray: carriedTray,
+      selectedImageIndex: carriedIndex,
+    });
+    saveDraftToStorage(s.id);
+  } else if (sessionDrafts.has(s.id)) {
     const draft = sessionDrafts.get(s.id);
     recipePrompt.value = draft.recipePrompt || '';
     globalRecipePrompt.value = draft.globalRecipePrompt || '';
     if (richEditorRef.value) {
       richEditorRef.value.innerHTML = draft.editorHtml || '';
     }
-    referenceTray.value = JSON.parse(JSON.stringify(draft.referenceTray || []));
-    selectedImageIndex.value = draft.selectedImageIndex || 0;
+    const draftTray = Array.isArray(draft.referenceTray) ? draft.referenceTray : [];
+    referenceTray.value = JSON.parse(JSON.stringify(draftTray.length > 0 ? draftTray : carriedTray));
+    selectedImageIndex.value = draftTray.length > 0 ? (draft.selectedImageIndex || 0) : carriedIndex;
   } else {
     recipePrompt.value = '';
     globalRecipePrompt.value = '';
@@ -8682,43 +9758,59 @@ async function selectSession(s) {
     selectedImageIndex.value = 0;
     // 该会话上次没发出去的输入（按会话 key 存），有就接回来
     restoreDraftForSession(s.id);
+    if (referenceTray.value.length === 0 && carriedTray.length > 0) {
+      referenceTray.value = carriedTray;
+      selectedImageIndex.value = carriedIndex;
+    }
   }
   hasNewBelow.value = false;
-  // 命中缓存先秒开（60s 内看过的会话），下面照旧请求服务端并在回来后覆盖，保证内容仍然权威
-  const cachedRows = messagesCache.get(s.id);
-  if (cachedRows && Date.now() - cachedRows.at < MESSAGES_CACHE_TTL) {
-    messages.value = cachedRows.rows.map((m) => ({ ...m }));
-    pinned.value = true;
-  }
   try {
     // 服务端历史里可能同时躺着 worker 的 genmsg_<jobId> 和旧版前端盲目写入的 msg_xxx，
     // 渲染前先按 id / run_id / 同媒体合并，避免刷新看到两遍错误或两张一样的图
-    const rawMsgs = dedupeLoadedMessages(await fetchChatMessages(s.id));
+    const rawMsgs = dedupeLoadedMessages(await fetchChatMessages(s.id, 100, { screen: true }));
+    if (currentSessionId.value !== reqSessionId) return;
     if (Array.isArray(rawMsgs)) {
       messages.value = rawMsgs.map(m => {
         let mod = 'chat';
-        if (m.mode === 'text_to_image' || (m.result && m.result.imageUrl)) mod = 'image';
-        else if (m.mode === 'text_to_video' || (m.result && m.result.videoUrl)) mod = 'video';
-        else if (m.mode === 'music' || (m.result && m.result.audioUrl)) mod = 'music';
+        const rawMode = String(m.mode || m.result?.genMode || '').toLowerCase();
+        const imgUrl = m.result?.imageUrl || m.result?.url || (Array.isArray(m.images) && m.images[0]) || '';
+        const vidUrl = m.result?.videoUrl || m.result?.url || '';
+        const audUrl = m.result?.audioUrl || m.result?.url || '';
+
+        if (rawMode.includes('image') || rawMode === 'portrait' || rawMode === 'style_match' || (m.result && (m.result.imageUrl || m.result.url))) {
+          mod = 'image';
+        } else if (rawMode.includes('video') || (m.result && (m.result.videoUrl || m.result.modelVideoUrl))) {
+          mod = 'video';
+        } else if (rawMode === 'music' || rawMode === 'audio' || (m.result && m.result.audioUrl)) {
+          mod = 'music';
+        } else if (imgUrl && !vidUrl && !audUrl) {
+          mod = 'image';
+        }
 
         return {
           id: m.id,
           role: m.role,
           content: mod === 'chat'
             ? splitClientThinking(m.prompt || (m.result ? m.result.content : ''), m.result?.thinking || '').content
-            : (m.prompt || (m.result ? m.result.content : '')),
+            : (m.role === 'user'
+              ? (m.prompt || '')
+              : (m.result?.content || (m.prompt && m.prompt !== m.result?.userPrompt && !m.prompt.startsWith('@图') && !m.prompt.startsWith('【全局') && !m.prompt.includes('帮我生成')
+                ? m.prompt
+                : (mod === 'video'
+                  ? '影视级空间动态渲染已就绪。运镜平滑连续，空间光影与环境音效自然契合。'
+                  : (mod === 'music' ? '音频已生成。' : '已为您完成空间视效生成。家具材质光泽与参考项深度统一，光影自然。'))))),
           thinking: mod === 'chat'
             ? splitClientThinking(m.prompt || (m.result ? m.result.content : ''), m.result?.thinking || '').thinking
             : '',
           modality: mod,
-          imageUrl: m.result?.imageUrl,
-          videoUrl: m.result?.videoUrl,
+          imageUrl: imgUrl,
+          videoUrl: m.result?.videoUrl || (mod === 'video' ? m.result?.url : ''),
           modelVideoUrl: m.result?.modelVideoUrl,
           vendorVideoUrl: m.result?.vendorVideoUrl,
           srStatus: m.result?.srStatus,
           srError: m.result?.srError,
           compareOpen: false,
-          audioUrl: m.result?.audioUrl,
+          audioUrl: m.result?.audioUrl || (mod === 'music' ? m.result?.url : ''),
           // 历史结果里的 resolution 可能是旧的脏值（图片消息里存过 720p_sr2x），
           // 渲染前统一按「当前模型契约」过滤一遍，图片没有 size 档位就显示空。
           resolution: mod === 'image'
@@ -8728,8 +9820,16 @@ async function selectSession(s) {
             : (m.result?.resolution || m.params?.resolution),
           ratio: m.result?.ratio || m.params?.ratio,
           duration: m.result?.duration,
-          model: m.result?.model || m.engine,
-          modelKey: m.result?.modelKey || m.params?.model,
+          model: (() => {
+            const isWan = m.engine === 'wan3_0_video' || m.params?.model === 'wan3_0_video' || String(m.engine || '').startsWith('wan3');
+            if (isWan) return '万相 3.0';
+            return m.result?.model || getModelDisplayName(m.result?.modelKey || m.params?.model || m.engine);
+          })(),
+          modelKey: (() => {
+            const isWan = m.engine === 'wan3_0_video' || m.params?.model === 'wan3_0_video' || String(m.engine || '').startsWith('wan3');
+            if (isWan) return 'wan3_0_video';
+            return m.result?.modelKey || m.params?.model || m.engine;
+          })(),
           userPrompt: m.result?.userPrompt || (m.role === 'user' ? (m.prompt || '') : ''),
           refs: m.result?.refs || m.params?.refs || [],
           images: Array.isArray(m.images) ? m.images : [],
@@ -8737,7 +9837,8 @@ async function selectSession(s) {
           params: m.params || null,
           // 已有可播放/可显示产物时绝不再显示骨架：旧占位卡把 isGenerating 落进 result_json，
           // 服务端已剥离新数据；老数据在这里按「有无媒体」兜底纠正
-          isGenerating: (m.status === 'generating' || Boolean(m.result?.isGenerating))
+          isGenerating: !['cancelled', 'failed', 'done', 'succeeded'].includes(String(m.status || ''))
+            && (m.status === 'generating' || m.status === 'running' || Boolean(m.result?.isGenerating))
             && !(m.result?.imageUrl || m.result?.videoUrl || m.result?.modelVideoUrl || m.result?.audioUrl),
           isCancelled: m.status === 'cancelled' || Boolean(m.result?.isCancelled),
           isError: m.status === 'failed' || Boolean(m.result?.isError) || String(m.prompt || m.result?.content || '').startsWith('生成遇到问题'),
@@ -8745,6 +9846,9 @@ async function selectSession(s) {
           startTime: m.created_at || (m.result && m.result.startTime) || Date.now(),
           genMode: m.result?.genMode || m.mode,
           assetFid: m.result?.assetFid || '',
+          librarySaved: Boolean(m.result?.librarySaved),
+          creationSaved: Boolean(m.result?.creationSaved),
+          creationTemplateId: m.result?.creationTemplateId || '',
           camera: m.result?.camera,
           rawError: m.result?.errorDetails || m.result?.error || null,
           result: m.result || null,
@@ -8754,11 +9858,12 @@ async function selectSession(s) {
           retryModel: m.result?.retryModel || '',
           retryModality: m.result?.retryModality || '',
           retryMode: m.result?.retryMode || '',
+          schemaMode: m.params?.schemaMode || m.result?.schemaMode || m.result?.retryMode || '',
           retryParams: m.result?.retryParams || null
         };
       });
-      // 缓存的是「映射后」的消息，下次切回来直接能渲染（服务端仍是唯一真源）
-      messagesCache.set(s.id, { rows: messages.value.map((m) => ({ ...m })), at: Date.now() });
+      // 缓存映射后消息并持久化快照，下次切回来瞬间直出渲染（服务端仍是权威真源）
+      persistSessionMessagesCache(s.id, messages.value);
 
       // 旧会话若还没有参数快照（例如刚刷新页面），用最后一条带 params 的消息回填，
       // 保证「回到上一轮」时模型 / 画幅 / 分辨率与上一轮一致。
@@ -8772,20 +9877,41 @@ async function selectSession(s) {
       }
 
       const activePlaceholder = sessionPlaceholderMap.get(s.id);
-      // worker 完成时已经把同一张图写进 chat_messages 了（它的结果卡和占位卡内容一致），
-      // 这时再把内存占位卡塞回列表，屏幕上就会出现两张一样的图。
-      const landed = Boolean(activePlaceholder && activePlaceholder.imageUrl
-        && messages.value.some((m) => m && m.imageUrl && m.imageUrl === activePlaceholder.imageUrl));
+      // 检查服务端消息中是否已有对应产物或任务已在服务端成片落库，避免重复插入占位卡
+      const lastMsg = messages.value[messages.value.length - 1];
+      const hasRecentLandedMedia = Boolean(
+        lastMsg && lastMsg.role === 'assistant' && !lastMsg.isGenerating &&
+        (lastMsg.imageUrl || lastMsg.videoUrl || lastMsg.audioUrl || lastMsg.isCancelled) &&
+        (Date.now() - (lastMsg.startTime || 0) < 15 * 60 * 1000)
+      );
+      const landed = Boolean(
+        activePlaceholder && (
+          hasRecentLandedMedia ||
+          (activePlaceholder.imageUrl && messages.value.some((m) => m && m.imageUrl && m.imageUrl === activePlaceholder.imageUrl)) ||
+          (activePlaceholder.jobId && messages.value.some((m) => m && m.jobId && m.jobId === activePlaceholder.jobId && !m.isGenerating)) ||
+          (!activePlaceholder.isGenerating && (activePlaceholder.imageUrl || activePlaceholder.videoUrl))
+        )
+      );
       if (landed) sessionPlaceholderMap.delete(s.id);
       if (activePlaceholder && !landed && !messages.value.some(m => m === activePlaceholder || m.isGenerating)) {
         messages.value.push(activePlaceholder);
       }
 
+      // 清理超过 15 分钟的僵尸生成卡，防止历史未完成任务死锁界面
       const serverRunningCard = messages.value.find((m) => m && m.isGenerating);
       if (serverRunningCard) {
-        sessionGeneratingMap.set(s.id, true);
-        sessionPlaceholderMap.set(s.id, serverRunningCard);
-        generating.value = true;
+        if (Date.now() - (serverRunningCard.startTime || 0) > 15 * 60 * 1000) {
+          serverRunningCard.isGenerating = false;
+          serverRunningCard.isError = true;
+          serverRunningCard.content = '生成任务已超时未响应';
+          sessionGeneratingMap.delete(s.id);
+          sessionPlaceholderMap.delete(s.id);
+          generating.value = false;
+        } else {
+          sessionGeneratingMap.set(s.id, true);
+          sessionPlaceholderMap.set(s.id, serverRunningCard);
+          generating.value = true;
+        }
       }
 
       // 从当前会话历史用户消息中自动充实 promptHistory（标题只由视觉池起名，不在选会话时截提示词）
@@ -8827,30 +9953,32 @@ async function selectSession(s) {
       loadRecentRefs({ force: true }).catch(() => {});
 
       // 若当前没有内存草稿，自动从最近一条带图消息中恢复看图区参考托盘与生图模式
-      if (!sessionDrafts.has(s.id) && referenceTray.value.length === 0) {
+      if (!composerPromptDirty.value && !sessionDrafts.has(s.id) && referenceTray.value.length === 0) {
         const latestWithRefs = [...rawMsgs].reverse().find(m => {
           const r = m.params?.refs || m.result?.refs;
           return (Array.isArray(r) && r.length > 0) || (Array.isArray(m.images) && m.images.length > 0);
         });
         if (latestWithRefs) {
-          const restoredRefs = latestWithRefs.params?.refs || latestWithRefs.result?.refs;
-          if (Array.isArray(restoredRefs) && restoredRefs.length > 0) {
-            referenceTray.value = JSON.parse(JSON.stringify(restoredRefs));
-          } else if (Array.isArray(latestWithRefs.images) && latestWithRefs.images.length > 0) {
-            referenceTray.value = latestWithRefs.images.map((u, i) => ({
-              name: `参考图_${i + 1}`,
-              url: u,
-              tag: `@图${i + 1}`,
-              weight: 85,
-              kind: 'image'
-            }));
-          }
+          const restoredRefs = latestWithRefs.params?.refs || latestWithRefs.result?.refs || latestWithRefs.images;
+          referenceTray.value = normalizeTrayAssets(restoredRefs);
           syncGenModeWithReferenceTray();
         }
       }
     }
   } catch (e) {
-    console.warn('加载会话消息失败:', e);
+    if (currentSessionId.value === reqSessionId) {
+      console.warn('加载会话消息失败:', e);
+      // 网络抖动或接口报错时严格保留当前界面的消息与快照，坚决不置空
+      if (!messages.value || messages.value.length === 0) {
+        const cached = getSessionMessagesCache(s.id);
+        if (cached && cached.length) messages.value = cached.map((m) => ({ ...m }));
+      }
+    }
+  } finally {
+    if (currentSessionId.value === reqSessionId) {
+      messagesLoading.value = false;
+      confirmSavedState(messages.value);
+    }
   }
   scrollToBottom();
 }
@@ -8869,6 +9997,9 @@ function resetComposerState() {
   activeSkillIds.value = [];
   optimizeUndo.value = null;
   hoveredRegionKey.value = null;
+  modeUserLocked.value = false;
+  hadReferencesInTray.value = false;
+  hadReferencesClearedAutoText.value = false;
 }
 
 async function createNewSession(opts = {}) {
@@ -8883,27 +10014,65 @@ async function createNewSession(opts = {}) {
 
   if (currentSessionId.value) {
     sessionDrafts.set(currentSessionId.value, currentDraft);
-  }
-  const newId = `sess_${Date.now()}`;
-  const newSess = { id: newId, title: '新创作会话' };
-
-  // 默认跨会话自动继承未提交的参考图托盘、选区与提示词
-  if (!opts.forceReset && hasActiveContent) {
-    sessionDrafts.set(newId, currentDraft);
     saveDraftToStorage(currentSessionId.value);
+  }
+  const now = Date.now();
+  const newId = `sess_${now}_${Math.random().toString(36).slice(2, 7)}`;
+  const currentMod = activeModality.value;
+  const initialMode = currentMod === 'video' ? 'text_to_video' : (currentMod === 'music' ? 'music' : (currentMod === 'image' ? 'text_to_image' : 'chat'));
+  const newSess = reactive({
+    id: newId,
+    title: '新创作会话',
+    created_at: now,
+    updated_at: now,
+    product_count: 0,
+    last_mode: initialMode
+  });
+
+  // 用户改过的提示词留在输入框，当前参考图也留在新对话里。模式回到未手选。
+  if (!opts.forceReset && composerPromptDirty.value) {
+    recipePrompt.value = '';
+    globalRecipePrompt.value = '';
+    const promptOnly = {
+      recipePrompt: '',
+      globalRecipePrompt: '',
+      editorHtml: richEditorRef.value ? richEditorRef.value.innerHTML : '',
+      referenceTray: JSON.parse(JSON.stringify(referenceTray.value || [])),
+      selectedImageIndex: selectedImageIndex.value || 0,
+    };
+    sessionDrafts.set(newId, promptOnly);
+    saveDraftToStorage(newId);
+    modeUserLocked.value = false;
+  } else if (!opts.forceReset && hasActiveContent) {
+    sessionDrafts.set(newId, currentDraft);
+    saveDraftToStorage(newId);
   } else if (!opts.keepComposer) {
     recipePrompt.value = '';
     resetComposerState();
     selectedImageIndex.value = 0;
+    composerPromptDirty.value = false;
     try { localStorage.removeItem(draftKey(currentSessionId.value)); } catch (_) {}
   }
+  if (!composerPromptDirty.value) modeUserLocked.value = false;
 
+  // 若当前有搜索，清空搜索以确保新会话在左侧列表第一项直接呈现，方便随时切出/切回
+  if (sessionSearchQuery.value) {
+    sessionSearchQuery.value = '';
+    sessionSearchResults.value = null;
+  }
+
+  // 插入列表顶端并同步快照
   sessions.value.unshift(newSess);
+  setLocalSessionsCache(sessions.value, sessionMeta.value);
   currentSessionId.value = newId;
   rememberActiveSession(newId);
   messages.value = [];
+  messagesLoading.value = false;
   // 新会话严格回到默认（模型专属默认 > 全局 9:16），绝不继承上一个会话的参数。
+  // 模式回到未手选，再按当前参考图张数取默认（0 文生，1 图生，2 张及以上全能参考）。
+  modeUserLocked.value = false;
   resetParamsToDefaults();
+  applyUntouchedModeDefault();
   try {
     await authFetch('/api/chat/sessions', {
       method: 'POST',
@@ -8915,7 +10084,9 @@ async function createNewSession(opts = {}) {
 
 async function deleteSession(id) {
   sessions.value = sessions.value.filter(s => s.id !== id);
+  archivedSessions.value = archivedSessions.value.filter(s => s.id !== id);
   messagesCache.delete(id);
+  try { localStorage.removeItem(`${SESSION_MSG_CACHE_PREFIX}${id}`); } catch (_) {}
   recentBackfilled.delete(id);
   try {
     await deleteChatSession(id);
@@ -8923,6 +10094,8 @@ async function deleteSession(id) {
   if (currentSessionId.value === id) {
     if (sessions.value.length > 0) {
       await selectSession(sessions.value[0]);
+    } else if (archivedSessions.value.length > 0) {
+      await selectSession(archivedSessions.value[0]);
     } else {
       await createNewSession();
     }
@@ -8948,13 +10121,57 @@ function openAddTemplateModal() {
   };
 }
 
+const fullTemplateInflight = new Map();
+
+async function ensureFullTemplate(tpl) {
+  if (!tpl || !tpl.id) return tpl;
+  if (tpl.prompt && !tpl.card) return tpl;
+  const pending = fullTemplateInflight.get(tpl.id);
+  if (pending) return pending;
+  const job = (async () => {
+    const res = await authFetch(`/api/creation-templates/${encodeURIComponent(tpl.id)}`);
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || !json.success || !json.data) return tpl;
+    const variants = tpl.variants;
+    const activeVariantIdx = tpl.activeVariantIdx;
+    Object.assign(tpl, json.data, { card: false });
+    if (variants) {
+      tpl.variants = variants;
+      tpl.activeVariantIdx = activeVariantIdx;
+    }
+    const listed = templates.value.find((item) => item.id === tpl.id);
+    if (listed && listed !== tpl) Object.assign(listed, json.data, { card: false, variants: listed.variants, activeVariantIdx: listed.activeVariantIdx });
+    mergeTemplatesCache([listed || tpl]).catch(() => {});
+    return tpl;
+  })().finally(() => {
+    fullTemplateInflight.delete(tpl.id);
+  });
+  fullTemplateInflight.set(tpl.id, job);
+  return job;
+}
+
 function openTemplateDetail(tpl) {
   activeDetailPreview.value = { mode: 'result', refIndex: 0 };
   detailModal.value = { visible: true, tpl };
+  ensureFullTemplate(tpl).then((full) => {
+    if (detailModal.value.visible && detailModal.value.tpl && detailModal.value.tpl.id === tpl.id) {
+      detailModal.value.tpl = full;
+    }
+  }).catch(() => {});
 }
 
-function applyTemplate(tpl) {
+async function applyTemplate(tpl) {
   if (!tpl) return;
+  try {
+    tpl = await ensureFullTemplate(tpl);
+  } catch {
+    composerNotice.value = '配方内容还没取到，请再试一次';
+    return;
+  }
+  if (!tpl || (tpl.card && !tpl.prompt)) {
+    composerNotice.value = '配方内容还没取到，请再试一次';
+    return;
+  }
   // 异步统计使用频次并浮动
   authFetch(`/api/creation-templates/${encodeURIComponent(tpl.id)}`, {
     method: 'PATCH',
@@ -9033,13 +10250,15 @@ function applyTemplate(tpl) {
   repairStudioModelKeys();
   suppressSchemaReset = false;
   resetSchemaForModel();
-  if (params.schemaMode) {
-    const targetMode = params.schemaMode === 'image_to_video' ? 'omni_reference' : params.schemaMode;
-    setGenMode(targetMode);
-  } else if (activeModality.value === 'video') {
-    setGenMode(prepared.length > 0 ? 'omni_reference' : 'text_to_video');
-  } else if (activeModality.value === 'image') {
-    setGenMode(prepared.length > 0 ? 'image_to_image' : 'text_to_image');
+  const preparedImages = prepared.filter((item) => !item.kind || item.kind === 'image').length;
+  const schemaMode = params.schemaMode === 'image_to_video' ? 'omni_reference' : params.schemaMode;
+  const staleText = (activeModality.value === 'video' || activeModality.value === 'image') && preparedImages > 0 && (schemaMode === 'text_to_video' || schemaMode === 'text_to_image');
+  if (schemaMode && !staleText && currentSchema.value?.modes?.some((m) => m.id === schemaMode)) {
+    modeUserLocked.value = true;
+    setGenMode(schemaMode);
+  } else {
+    modeUserLocked.value = false;
+    syncGenModeWithReferenceTray({ forceDefault: true });
   }
 
   if (params.schemaParams && typeof params.schemaParams === 'object') {
@@ -9103,8 +10322,18 @@ function applyTemplateFromDetail() {
   applyTemplate(detailModal.value.tpl);
 }
 
-function selectHashTemplate(tpl) {
+async function selectHashTemplate(tpl) {
   showHashMenu.value = false;
+  try {
+    tpl = await ensureFullTemplate(tpl);
+  } catch {
+    composerNotice.value = '配方内容还没取到，请再试一次';
+    return;
+  }
+  if (!tpl || (tpl.card && !tpl.prompt)) {
+    composerNotice.value = '配方内容还没取到，请再试一次';
+    return;
+  }
   // 记录复用次数并浮动
   authFetch(`/api/creation-templates/${encodeURIComponent(tpl.id)}`, {
     method: 'PATCH',
@@ -9193,13 +10422,15 @@ function onAssetPickerConfirm(versions) {
 
 function onAssetPickerUpload(file) {
   if (!file) return;
-  const name = file.name.replace(/\.[^.]+$/, '');
+  const idx = referenceTray.value.length + 1;
+  const cleanBase = file.name.replace(/\.[^.]+$/, '');
+  const isHashOrTech = !cleanBase || /^[0-9a-f]{16,}/i.test(cleanBase) || /ARCH_REF/i.test(cleanBase);
+  const name = isHashOrTech ? `图${idx}` : cleanBase;
   const url = URL.createObjectURL(file);
   localFileByUrl.set(url, file);
-  const idx = referenceTray.value.length + 1;
   const kind = file.type.startsWith('video/') ? 'video' : (file.type.startsWith('audio/') ? 'audio' : (file.name.match(/\.(glb|gltf|obj)$/i) ? '3d' : 'image'));
   const is3D = Boolean(file.name.match(/\.(glb|gltf|obj)$/i));
-  const asset = { name, url, weight: 85, tag: `@图${idx}`, kind, origin: is3D ? '3d_snapshot' : 'upload', isRefObject: is3D };
+  const asset = { name, url, weight: 85, tag: `@图${idx}`, kind, origin: is3D ? '3d_snapshot' : 'upload', isRefObject: is3D, resolved: true };
   referenceTray.value.push(asset);
   // 用户需求：不自动在对话框新增胶囊
   showAssetSelector.value = false;
@@ -9351,6 +10582,8 @@ function handleTrayReorder({ from, to }) {
   }
   rememberSessionRefs(referenceTray.value);
   syncAggregatedRecipePrompt();
+  modeUserLocked.value = false;
+  syncGenModeWithReferenceTray({ forceDefault: true });
 }
 
 function removeRef(idx) {
@@ -9417,7 +10650,8 @@ function removeRef(idx) {
 
   // 自动重新聚合全空间配方，使提示词与图号严格同步对齐！
   syncAggregatedRecipePrompt();
-  syncGenModeWithReferenceTray();
+  modeUserLocked.value = false;
+  syncGenModeWithReferenceTray({ forceDefault: true });
 }
 
 // 优化提示词
@@ -9483,6 +10717,11 @@ function getModelDisplayName(key) {
     gemini_image: 'Google Nano Banana',
     seedance2_5: 'Seedance 2.5',
     seedance2_0: 'Seedance 2.0',
+    wan3_0_video: '万相 3.0',
+    'wan3.0-video': '万相 3.0',
+    wan_video: '万相 3.0',
+    kling_v2_5_pro: '快手可灵 2.5 Pro',
+    kling_v2_6_pro: '快手可灵 2.6 Pro',
     agnes_video_2_5_flash: 'Agnes Video 2.5 Flash',
     gemini_veo: 'Google Veo 3.1',
     modelscope_video: 'ModelScope 视频',
@@ -9519,7 +10758,7 @@ async function sendMessage() {
   const rawContent = getFullPromptText();
   // 按会话判断生成锁：A 会话生成中切到 B 仍可提交，为后台并行任务队列铺路。
   // generating 单例仍用于当前视图的 UI 状态，但不再作为全局提交闸门。
-  if (!rawContent || sessionGeneratingMap.get(currentSessionId.value) || sessionPlaceholderMap.has(currentSessionId.value)) return;
+  if (!rawContent || sessionGeneratingMap.get(currentSessionId.value) || sessionPlaceholderMap.has(currentSessionId.value) || uploadingCrop.value) return;
 
   // 2. 点击立即生图后自动收回全屏图片展示与抽屉
   viewerCollapsed.value = true;
@@ -9530,6 +10769,16 @@ async function sendMessage() {
   let placeholderMsg = null;
   // 入队成功后的 jobId：catch 分支靠它判断「worker 已在 genmsg_<jobId> 落库」，不再重复插一条
   let submittedJobId = '';
+  const noteEnqueuedJob = (jobId) => {
+    if (!jobId) return;
+    submittedJobId = jobId;
+    if (!placeholderMsg) return;
+    placeholderMsg.id = `genmsg_${jobId}`;
+    placeholderMsg.jobId = jobId;
+    if (placeholderMsg.cancelRequested) {
+      void persistCancelToServer(placeholderMsg, targetSessionId, jobId);
+    }
+  };
   const typedTray = JSON.parse(JSON.stringify(referenceTray.value));
   let currentTray = typedTray;
   const usedPriorMedia = false;
@@ -9539,6 +10788,46 @@ async function sendMessage() {
       composerError.value = refError;
       return;
     }
+  }
+
+  // 提示和确认：
+  // 1. 若当前模式不是默认模式，弹出 3 项确认（仍按当前模式发送 / 改回默认并发送 / 取消）
+  // 2. 若本轮曾经有过参考图/视频后来被删光且芯片自动转为文生，弹出确认（确定就按文生发送 / 取消）
+  if (currentMod !== 'chat' && currentSchema.value) {
+    const defaultMode = resolveDefaultMode({
+      schema: currentSchema.value,
+      modality: currentMod,
+      refCounts: currentRefCounts.value
+    });
+
+    if (activeGenMode.value && activeGenMode.value !== defaultMode.id) {
+      const currentModeObj = (currentSchema.value.modes || []).find((m) => m.id === activeGenMode.value);
+      const curLabel = currentModeObj ? currentModeObj.label : activeGenMode.value;
+      const defLabel = defaultMode.label;
+
+      const choice = await promptNonDefaultModeConfirm({
+        currentModeLabel: curLabel,
+        defaultModeLabel: defLabel,
+        defaultModeId: defaultMode.id
+      });
+      if (choice === 'cancel') return;
+      if (choice === 'switch_default') {
+        modeUserLocked.value = false;
+        setGenMode(defaultMode.id);
+      }
+    } else if (hadReferencesClearedAutoText.value) {
+      const modalityLabel = currentMod === 'video' ? '文生视频' : '文生图';
+      const ok = await promptClearedRefsConfirm({ modalityLabel });
+      if (!ok) return;
+      hadReferencesClearedAutoText.value = false;
+    }
+  }
+  hadReferencesClearedAutoText.value = false;
+
+  // 强制使用自适应画幅时，用户点击生成必须弹窗重点提醒
+  if (isAdaptiveForced.value) {
+    const ok = window.confirm('【画幅自适应提醒】\n当前处于首尾帧等特定模式，系统已强制使用「自适应」画幅，生成结果将跟随参考图比例。\n\n确认以此画幅生成吗？');
+    if (!ok) return;
   }
   composerError.value = '';
   composerNotice.value = '';
@@ -9563,6 +10852,9 @@ async function sendMessage() {
   }
   const retryModel = currentMod === 'chat' ? chatModelKey.value : (currentMod === 'image' ? imageModelKey.value : (currentMod === 'video' ? videoModelKey.value : musicType.value));
   const retryParams = declaredParams();
+  if (currentMod === 'video') {
+    applyResolvedVideoMode(currentTray.filter((item) => mediaKind(item) === 'image').length);
+  }
   const retryMode = activeGenMode.value;
 
   // 记录提示词与附带的参考图历史（支持键盘上下键自动召回）
@@ -9670,6 +10962,7 @@ async function sendMessage() {
   }
   recipePrompt.value = '';
   globalRecipePrompt.value = '';
+  composerPromptDirty.value = false;
   // 规范：发送之后看图区里的图保留，不执行 referenceTray = []
   optimizeUndo.value = null;
   generating.value = true;
@@ -9721,6 +11014,7 @@ async function sendMessage() {
   // 生成请求发出的同时让视觉池起动作标题；不 await，失败下次发送服务端会再试
   void requestAutoTitle(targetSessionId, rawContent, currentTray, currentMod);
 
+  let keepVideoLock = false;
   try {
     if (currentMod === 'chat') {
       const chatModel = (studioModels.value.chat || []).find((item) => item.id === chatModelKey.value);
@@ -9863,20 +11157,24 @@ async function sendMessage() {
         || imageRatioField?.default
         || '9:16';
       const imageStartedAt = Date.now();
+      const submitImageModelKey = retryModel || schemaParams.value.model || imageModelKey.value;
       const { result: res, jobId: imageJobId } = await generateAiImage({
         prompt: promptForModel,
-        model: imageModelKey.value,
+        model: submitImageModelKey,
         size: submitImageSize,
         ratio: submitImageRatio,
         imageUrls,
+        refs: currentTray,
         genMode: retryMode,
         extras: retryParams,
         snippetIds: activeSnippetIds(),
         // 后台任务队列按会话归属结果，clientRequestId 用于幂等去重
         sessionId: targetSessionId,
-        clientRequestId: `${targetSessionId}_${imageStartedAt}_${Math.random().toString(36).slice(2, 8)}`
+        clientRequestId: `${targetSessionId}_${imageStartedAt}_${Math.random().toString(36).slice(2, 8)}`,
+        onEnqueued: noteEnqueuedJob
       });
-      submittedJobId = imageJobId || '';
+      submittedJobId = imageJobId || submittedJobId || '';
+      if (await waitCancelDecision(placeholderMsg)) return;
       if (placeholderMsg && submittedJobId) {
         // 入队即绑定确定性主键：占位卡、前端落库、worker 落库共用 genmsg_<jobId>
         placeholderMsg.id = `genmsg_${submittedJobId}`;
@@ -9906,8 +11204,8 @@ async function sendMessage() {
         duration: imageElapsedSec > 0 ? `${imageElapsedSec}s` : (res.duration ? `${res.duration}s` : ''),
         resolution: sizeLabel,
         ratio: submitImageRatio,
-        model: getModelDisplayName(imageModelKey.value),
-        modelKey: imageModelKey.value,
+        model: getModelDisplayName(res.modelKey || res.model || submitImageModelKey),
+        modelKey: res.modelKey || res.model || submitImageModelKey,
         schemaMode: retryMode,
         schemaParams: retryParams,
         genMode: 'image'
@@ -9915,29 +11213,42 @@ async function sendMessage() {
       // 生成结果默认不入库：产物留在 /api/cache/temp/，由用户点「存入素材库」手动登记。
       rememberSessionRefs([{ url: genUrl, name: labelForRef(genUrl, ''), fid: '' }], 'generated', { persist: true });
 
-      // 原地响应式替换占位卡片为真实生成的图片
-      if (placeholderMsg && messages.value.includes(placeholderMsg)) {
+      // 无论此时用户是否切到其他会话，必须更新占位卡并确保 asstMsg 结果落地
+      if (placeholderMsg) {
         Object.assign(placeholderMsg, asstMsg, {
           isGenerating: false,
           isError: false,
           // 取消与成功竞态：成功落地时清掉取消标记，否则会同时出现结果卡和「已取消」状态
           isCancelled: false
         });
-        loadNextSuggestions(placeholderMsg);
-      } else if (currentSessionId.value === targetSessionId) {
-        messages.value.push(asstMsg);
-        loadNextSuggestions(asstMsg);
+      }
+      if (currentSessionId.value === targetSessionId) {
+        if (placeholderMsg && !messages.value.includes(placeholderMsg)) {
+          messages.value.push(placeholderMsg);
+        } else if (!placeholderMsg) {
+          messages.value.push(asstMsg);
+        }
+        loadNextSuggestions(placeholderMsg || asstMsg);
       }
       collapseCompletedRenderCards(targetSessionId, imageJobId || '', placeholderMsg);
+      persistSessionMessagesCache(targetSessionId, messages.value);
 
       // 与 worker 落库共用同一个确定性 id：两边都按该 id upsert，一张图只会有一条消息记录。
+      // 关键修复：确保 result 必带 imageUrl，杜绝切出切回后因 result 缺 imageUrl 降级为文本对话！
+      const savedResult = {
+        ...(placeholderMsg || {}),
+        ...asstMsg,
+        imageUrl: asstMsg.imageUrl || placeholderMsg?.imageUrl,
+        isGenerating: false,
+        isError: false
+      };
       await saveChatMessage({
         ...(imageJobId ? { id: `genmsg_${imageJobId}`, runId: imageJobId } : {}),
         sessionId: targetSessionId,
         role: 'assistant',
         mode: 'text_to_image',
         prompt: asstMsg.content,
-        engine: imageModelKey.value,
+        engine: asstMsg.modelKey || submitImageModelKey,
         params: {
           ...retryParams,
           refs: currentTray,
@@ -9948,8 +11259,10 @@ async function sendMessage() {
           genMode: currentMod,
           schemaMode: retryMode
         },
-        result: placeholderMsg || asstMsg
+        result: savedResult
       });
+      sessionGeneratingMap.delete(targetSessionId);
+      sessionPlaceholderMap.delete(targetSessionId);
     } else if (currentMod === 'video') {
       // 首尾帧按「输入区可见槽位」显式取（槽位就是 referenceTray[0]/[1]），不能靠 imageUrls[0]/[1]：
       // portableImageUrls 会剔除非图片项和转换失败的项，下标整体前移后尾帧会被塞进首帧位。
@@ -9977,22 +11290,26 @@ async function sendMessage() {
         : schemaParams.value.duration != null ? schemaParams.value.duration : videoDuration.value;
       const submitRatio = retryParams.ratio || schemaParams.value.ratio || selectedRatio.value;
       const submitSize = retryParams.resolution || retryParams.size || schemaParams.value.resolution || schemaParams.value.size || videoResolution.value;
+      const submitVideoModelKey = retryModel || schemaParams.value.model || videoModelKey.value;
       const { result: res, jobId: videoJobId } = await generateAiVideo({
         prompt: promptForModel,
-        model: videoModelKey.value,
+        model: submitVideoModelKey,
         duration: submitDuration,
         resolution: submitSize,
         ratio: submitRatio,
         imageUrls,
+        refs: currentTray,
         genMode: retryMode,
         extras: retryParams,
         snippetIds: activeSnippetIds(),
         firstFrame: isKeyframeMode ? (slotUrls[0] || undefined) : undefined,
         lastFrame: isKeyframeMode ? (slotUrls[1] || undefined) : undefined,
         sessionId: targetSessionId,
-        clientRequestId: `${targetSessionId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+        clientRequestId: `${targetSessionId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        onEnqueued: noteEnqueuedJob
       });
-      submittedJobId = videoJobId || '';
+      submittedJobId = videoJobId || submittedJobId || '';
+      if (await waitCancelDecision(placeholderMsg)) return;
       if (placeholderMsg && submittedJobId) {
         placeholderMsg.id = `genmsg_${submittedJobId}`;
         placeholderMsg.jobId = submittedJobId;
@@ -10017,33 +11334,46 @@ async function sendMessage() {
         duration: `${submitDuration === '-1' ? '8' : submitDuration}s`,
         resolution: res.resolution || String(submitSize || '').replace(/_sr2x$/, ''),
         ratio: submitRatio,
-        model: getModelDisplayName(videoModelKey.value),
+        model: getModelDisplayName(res.modelKey || res.model || submitVideoModelKey),
         // 复用配方要靠 id 回填下拉框；model 只是给人看的显示名，两者不能互相替代
-        modelKey: videoModelKey.value,
+        modelKey: res.modelKey || res.model || submitVideoModelKey,
         schemaMode: retryMode,
         schemaParams: retryParams
       };
       let live = asstMsg;
-      if (placeholderMsg && messages.value.includes(placeholderMsg)) {
+      if (placeholderMsg) {
         Object.assign(placeholderMsg, asstMsg, {
           isGenerating: false,
           isError: false,
           isCancelled: false,
         });
         live = placeholderMsg;
-      } else if (currentSessionId.value === targetSessionId) {
-        messages.value.push(asstMsg);
       }
-      if (currentSessionId.value === targetSessionId) loadNextSuggestions(live);
+      if (currentSessionId.value === targetSessionId) {
+        if (placeholderMsg && !messages.value.includes(placeholderMsg)) {
+          messages.value.push(placeholderMsg);
+        } else if (!placeholderMsg) {
+          messages.value.push(asstMsg);
+        }
+        loadNextSuggestions(live);
+      }
       collapseCompletedRenderCards(targetSessionId, videoJobId || '', placeholderMsg);
+      persistSessionMessagesCache(targetSessionId, messages.value);
 
+      const savedVideoResult = {
+        ...(placeholderMsg || {}),
+        ...asstMsg,
+        videoUrl: asstMsg.videoUrl || placeholderMsg?.videoUrl,
+        isGenerating: false,
+        isError: false
+      };
       await saveChatMessage({
         ...(videoJobId ? { id: `genmsg_${videoJobId}`, runId: videoJobId } : {}),
         sessionId: targetSessionId,
         role: 'assistant',
         mode: 'text_to_video',
         prompt: asstMsg.content,
-        engine: videoModelKey.value,
+        engine: asstMsg.modelKey || submitVideoModelKey,
         params: {
           ...retryParams,
           refs: currentTray,
@@ -10054,13 +11384,16 @@ async function sendMessage() {
           genMode: currentMod,
           schemaMode: retryMode
         },
-        result: live
+        result: savedVideoResult
       });
+      sessionGeneratingMap.delete(targetSessionId);
+      sessionPlaceholderMap.delete(targetSessionId);
     } else {
       const audioUrls = await portableAudioUrls(currentTray, refCap() || currentTray.length || 1);
+      const submitAudioModelKey = retryModel || schemaParams.value.model || musicType.value;
       const res = await generateAiAudio({
         prompt: rawContent,
-        model: musicType.value,
+        model: submitAudioModelKey,
         duration: retryParams.audio_duration || retryParams.duration || Number(musicDuration.value) || 30,
         genMode: retryMode,
         audioUrls,
@@ -10069,6 +11402,7 @@ async function sendMessage() {
       });
       const genAudioUrl = res.files?.[0]?.previewUrl || res.files?.[0]?.url || res.audioUrl || '';
       if (!genAudioUrl) throw new Error(res.error || '未获取到生成的音频地址');
+      const finalAudioModelKey = res.modelKey || res.model || submitAudioModelKey;
       const asstMsg = {
         role: 'assistant',
         modality: 'music',
@@ -10077,11 +11411,11 @@ async function sendMessage() {
           : '音频已生成。',
         userPrompt: rawContent,
         refs: currentTray,
-        audioTitle: getModelDisplayName(musicType.value),
+        audioTitle: getModelDisplayName(finalAudioModelKey),
         duration: `${retryParams.audio_duration || retryParams.duration || musicDuration.value}s`,
         audioUrl: genAudioUrl,
-        model: getModelDisplayName(musicType.value),
-        modelKey: musicType.value,
+        model: getModelDisplayName(finalAudioModelKey),
+        modelKey: finalAudioModelKey,
         schemaMode: retryMode,
         schemaParams: retryParams
       };
@@ -10112,11 +11446,25 @@ async function sendMessage() {
         role: 'assistant',
         mode: 'music',
         prompt: asstMsg.content,
-        engine: musicType.value,
+        engine: asstMsg.modelKey || submitAudioModelKey,
         result: asstMsg
       });
     }
   } catch (err) {
+    if (err && err.code === 'video_inflight') {
+      if (placeholderMsg && messages.value.includes(placeholderMsg)) {
+        const idx = messages.value.indexOf(placeholderMsg);
+        if (idx >= 0) messages.value.splice(idx, 1);
+      }
+      composerNotice.value = err.message || '这一轮视频还在生成，请等它完成后再发';
+      const still = messages.value.find((m) => m && m.isGenerating);
+      if (still) {
+        keepVideoLock = true;
+        sessionPlaceholderMap.set(targetSessionId, still);
+        sessionGeneratingMap.set(targetSessionId, true);
+      }
+      return;
+    }
     if (err && (err.isCancelled || err.message === '生成任务已取消')) {
       const cancelMsg = {
         role: 'assistant',
@@ -10137,6 +11485,26 @@ async function sendMessage() {
       } else if (currentSessionId.value === targetSessionId) {
         messages.value.push(cancelMsg);
       }
+      collapseCompletedRenderCards(targetSessionId, submittedJobId || '', placeholderMsg || cancelMsg);
+      persistSessionMessagesCache(targetSessionId, messages.value);
+      try {
+        const cJobId = submittedJobId || err?.jobId || placeholderMsg?.jobId;
+        const msgId = cJobId ? `genmsg_${cJobId}` : (placeholderMsg?.id || `genmsg_local_cancel_${Date.now()}`);
+        await saveChatMessage({
+          id: msgId,
+          sessionId: targetSessionId,
+          role: 'assistant',
+          mode: currentMod === 'video' ? 'text_to_video' : (currentMod === 'music' ? 'music' : 'text_to_image'),
+          status: 'cancelled',
+          prompt: '生成已取消',
+          result: {
+            ...(placeholderMsg || {}),
+            ...cancelMsg,
+            isGenerating: false,
+            isCancelled: true
+          }
+        });
+      } catch (_) {}
       return;
     }
     console.error('AI 生成调用失败:', err);
@@ -10158,7 +11526,8 @@ async function sendMessage() {
     if (placeholderMsg && messages.value.includes(placeholderMsg)) {
       Object.assign(placeholderMsg, errMsg, {
         isGenerating: false,
-        isError: true
+        isError: true,
+        isCancelled: false
       });
       collapseCompletedRenderCards(targetSessionId, errMsg.jobId || '', placeholderMsg);
       // 失败后把提示词与参考图恢复到输入区，用户可直接改参数重发，也避免「图槽 0/N」与实际附件不一致
@@ -10198,11 +11567,18 @@ async function sendMessage() {
       }
     }
   } finally {
-    sessionGeneratingMap.delete(targetSessionId);
-    sessionPlaceholderMap.delete(targetSessionId);
-    if (currentSessionId.value === targetSessionId) {
-      generating.value = false;
-      scrollToBottom();
+    if (keepVideoLock) {
+      sessionGeneratingMap.set(targetSessionId, true);
+      if (currentSessionId.value === targetSessionId) {
+        generating.value = true;
+      }
+    } else {
+      sessionGeneratingMap.delete(targetSessionId);
+      sessionPlaceholderMap.delete(targetSessionId);
+      if (currentSessionId.value === targetSessionId) {
+        generating.value = false;
+        scrollToBottom();
+      }
     }
   }
 }
@@ -10246,9 +11622,18 @@ function collapseCompletedRenderCards(sessionId, jobId, keepMsg) {
   const survivors = [];
   let changed = false;
   for (const m of list) {
-    if (!m || m === keepMsg || !m.isGenerating) { survivors.push(m); continue; }
-    if (jobId && m.jobId && m.jobId !== jobId) { survivors.push(m); continue; }
-    if (jobId && !m.jobId) { survivors.push(m); continue; }
+    if (!m) continue;
+    // 自身或者已不是生成中卡片，保留
+    if (m === keepMsg || !m.isGenerating) {
+      survivors.push(m);
+      continue;
+    }
+    // 如果指定了 jobId，且另一个占位卡有完全不同的明确 jobId，先保留
+    if (jobId && m.jobId && m.jobId !== jobId) {
+      survivors.push(m);
+      continue;
+    }
+    // 到这里说明是同 job 或无 jobId 的生成中占位卡
     const hasMedia = Boolean(m.imageUrl || m.videoUrl || m.modelVideoUrl || m.audioUrl);
     if (hasMedia) {
       m.isGenerating = false;
@@ -10256,23 +11641,22 @@ function collapseCompletedRenderCards(sessionId, jobId, keepMsg) {
       changed = true;
       continue;
     }
-    if (!String(m.content || '').trim() && !m.isError) {
-      changed = true; // 纯骨架占位，直接移除
-      continue;
-    }
-    m.isGenerating = false;
-    survivors.push(m);
+    // 无媒体产物的生成中骨架屏：当成片/错误/取消落地时，一律直接收起移除，绝不留作双消息游离转圈
     changed = true;
   }
   if (changed) messages.value = survivors;
 }
 
-function fillComposerFromError(msg) {
-  const prompt = msg.retryPrompt || sourcePromptFor(msg);
-  const refs = Array.isArray(msg.retryRefs) ? msg.retryRefs : (Array.isArray(msg.refs) ? msg.refs : []);
+function fillComposerFromError(msg, opts = {}) {
+  const verbatim = !!opts.verbatim;
+  const prompt = verbatim
+    ? String(msg.retryPrompt || sourcePromptFor(msg) || '')
+    : cleanPromptRefBrackets(msg.retryPrompt || sourcePromptFor(msg));
+  const rawRefs = Array.isArray(msg.retryRefs) ? msg.retryRefs : (Array.isArray(msg.refs) ? msg.refs : []);
+  const refs = normalizeTrayAssets(rawRefs);
   const modality = msg.retryModality || (msg.modality === 'music' ? 'music' : msg.modality) || '';
   const model = msg.retryModel || msg.modelKey || '';
-  const mode = msg.retryMode || msg.schemaMode || '';
+  const mode = msg.retryMode || msg.schemaMode || (refs.length > 0 ? 'image_to_image' : '');
   const params = msg.retryParams || msg.schemaParams || null;
   suppressSchemaReset = true;
   if (modality) activeModality.value = modality;
@@ -10283,10 +11667,23 @@ function fillComposerFromError(msg) {
   }
   suppressSchemaReset = false;
   resetSchemaForModel();
-  if (mode) setGenMode(mode);
+  const mountedImages = refs.filter((item) => mediaKind(item) === 'image').length;
+  const staleText = (modality === 'video' || (!modality && activeModality.value === 'video') || modality === 'image')
+    && mountedImages > 0
+    && (mode === 'text_to_video' || mode === 'text_to_image');
+  if (mode && !staleText && currentSchema.value?.modes?.some((m) => m.id === mode)) {
+    modeUserLocked.value = true;
+    setGenMode(mode);
+  } else {
+    modeUserLocked.value = false;
+    syncGenModeWithReferenceTray({ forceDefault: true });
+  }
   if (params) schemaParams.value = clampParamsToSchema(currentSchema.value, { ...schemaParams.value, ...params });
-  restorePromptContent(prompt, refs);
+  if (verbatim) restorePromptContent({ text: prompt, tray: refs, verbatim: true });
+  else restorePromptContent(prompt, refs);
   syncTrayFromEditor();
+  // 重新编辑本身就是用户要留下的字，不等再敲一键。
+  if (verbatim) composerPromptDirty.value = true;
 }
 // 把历史/重试/技能注入的参数夹取到当前契约：枚举非法回落默认、数值越界夹取到 [min,max]
 function clampParamsToSchema(schema, params) {
@@ -10426,8 +11823,46 @@ function resultBarReason(msg) {
   return parts.filter(Boolean).join(' ');
 }
 
+function extractRecipeMetadataFromPrompt(rawPrompt) {
+  const p = String(rawPrompt || '').trim();
+  const cleanPrompt = p.replace(/@图\d+\[[^\]]*\]/g, '').replace(/@\S+/g, '').replace(/\s+/g, ' ').trim();
+  
+  const spaces = ['客厅', '卧室', '餐厅', '主卧', '次卧', '书房', '厨房', '卫生间', '门厅', '玄关', '阳台', '茶室', '衣帽间', '儿童房', '卫浴', '庭院', '露台'];
+  let detectedSpace = '';
+  for (const s of spaces) {
+    if (cleanPrompt.includes(s)) {
+      detectedSpace = s;
+      break;
+    }
+  }
+
+  const styles = [
+    '托斯卡纳', '现代简约', '极简', '侘寂', '法式复古', '现代法式', '法式', '新中式', '中式',
+    '奶油风', '原木风', '轻奢', '北欧', '美式', '复古', '工业风', '包豪斯', '意式极简', '日式'
+  ];
+  let detectedStyle = '';
+  for (const st of styles) {
+    if (cleanPrompt.includes(st)) {
+      detectedStyle = st.endsWith('风') || st.endsWith('风格') ? st : `${st}风格`;
+      break;
+    }
+  }
+
+  let title = '';
+  if (detectedSpace && detectedStyle) {
+    title = `${detectedStyle}${detectedSpace}设计`;
+  } else if (cleanPrompt) {
+    title = cleanPrompt.slice(0, 24);
+  } else {
+    title = '灵感空间美学创作';
+  }
+
+  return { title, space: detectedSpace, style: detectedStyle, cleanPrompt };
+}
+
 function creationBodyFor(msg) {
-  const prompt = sourcePromptFor(msg);
+  const rawPrompt = (sourcePromptFor(msg) || msg?.userPrompt || msg?.content || msg?.prompt || '灵感空间创作').trim();
+  const meta = extractRecipeMetadataFromPrompt(rawPrompt);
   let detectedType = 'image';
   if (msg?.videoUrl || msg?.modelVideoUrl || msg?.modality === 'video') detectedType = 'video';
   else if (msg?.audioUrl || msg?.modality === 'music') detectedType = 'audio';
@@ -10435,11 +11870,11 @@ function creationBodyFor(msg) {
   const isVideo = detectedType === 'video';
   const playing = isAudio ? (msg?.audioUrl || '') : (msg?.videoUrl || msg?.imageUrl || '');
   return {
-    title: prompt.replace(/\s+/g, ' ').trim().slice(0, 24) || '未命名创作',
-    prompt,
+    title: meta.title,
+    prompt: rawPrompt,
     type: detectedType,
-    space: '',
-    style: '',
+    space: meta.space,
+    style: meta.style,
     purpose: '',
     is_pinned: 0,
     aspect_ratio: msg?.ratio || schemaParams.value.ratio || selectedRatio.value,
@@ -10460,8 +11895,66 @@ function creationBodyFor(msg) {
       ratio: msg?.ratio || selectedRatio.value,
       resolution: msg?.resolution || selectedResolution.value
     },
-    tags: [detectedType, '收藏配方'].filter(Boolean)
+    tags: [detectedType, meta.style, meta.space, '收藏配方'].filter(Boolean)
   };
+}
+
+async function persistSavedFlags(msg) {
+  if (!msg) return;
+  if (!msg.id) msg.id = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const prev = msg.result && typeof msg.result === 'object' ? msg.result : {};
+  const result = {
+    ...prev,
+    librarySaved: !!msg.librarySaved,
+    assetFid: msg.assetFid || prev.assetFid || '',
+    creationSaved: !!msg.creationSaved,
+    creationTemplateId: msg.creationTemplateId || prev.creationTemplateId || '',
+    imageUrl: msg.imageUrl || prev.imageUrl || '',
+    videoUrl: msg.videoUrl || prev.videoUrl || '',
+    audioUrl: msg.audioUrl || prev.audioUrl || '',
+    userPrompt: msg.userPrompt || prev.userPrompt || '',
+  };
+  msg.result = result;
+  try {
+    await saveChatMessage({
+      id: msg.id,
+      sessionId: currentSessionId.value,
+      role: msg.role || 'assistant',
+      mode: msg.genMode || (msg.modality === 'video' ? 'text_to_video' : 'text_to_image'),
+      prompt: typeof msg.content === 'string' ? msg.content : '',
+      status: 'done',
+      engine: msg.model || '',
+      result,
+    });
+    if (currentSessionId.value) persistSessionMessagesCache(currentSessionId.value, messages.value);
+  } catch (e) {
+    console.warn('入库状态没能写回会话', e);
+  }
+}
+
+async function confirmSavedState(list) {
+  const rows = Array.isArray(list) ? list : [];
+  await Promise.all(rows.map(async (msg) => {
+    if (!msg || msg.role !== 'assistant') return;
+    if (msg.librarySaved && msg.assetFid) {
+      try {
+        const res = await authFetch(`/api/assets/${encodeURIComponent(msg.assetFid)}`);
+        if (res.status === 404 || res.status === 410) {
+          msg.librarySaved = false;
+          msg.assetFid = '';
+        }
+      } catch (_) {}
+    }
+    if (msg.creationSaved && msg.creationTemplateId) {
+      try {
+        const res = await authFetch(`/api/creation-templates/${encodeURIComponent(msg.creationTemplateId)}`);
+        if (res.status === 404 || res.status === 410) {
+          msg.creationSaved = false;
+          msg.creationTemplateId = '';
+        }
+      } catch (_) {}
+    }
+  }));
 }
 
 async function saveResultToCreation(msg) {
@@ -10477,12 +11970,34 @@ async function saveResultToCreation(msg) {
     const json = await res.json().catch(() => ({}));
     if (!res.ok || json.success === false) {
       msg.creationError = json.error || '没能写入创作库';
+      showToast('❌ 存入创作库失败: ' + (json.error || '接口异常'));
       return;
     }
     msg.creationSaved = true;
+    msg.creationTemplateId = json?.data?.id || '';
+    if (msg.id) savedCreationSet.add(msg.id);
+    await persistSavedFlags(msg);
+
+    // 乐观立即合入本地 templates 响应式数组最顶端，保证创作库弹窗内即刻可见
+    const newTpl = json.data;
+    if (newTpl && typeof newTpl === 'object') {
+      const exists = templates.value.some(t => t.id === newTpl.id);
+      if (!exists) {
+        templates.value = [newTpl, ...templates.value];
+        sortTemplates();
+      }
+      try {
+        const user = getCurrentUser();
+        const userId = user?.id || user?.username || 'default';
+        mergeTemplatesCache([newTpl], [], null, userId);
+      } catch (_) {}
+    }
+
     await loadTemplates();
+    showToast('✨ 已成功存入我的创作库！可按 # 快捷调用');
   } catch (e) {
     msg.creationError = e?.message || '没能写入创作库';
+    showToast('❌ 存入创作库失败: ' + (e?.message || '网络异常'));
   } finally {
     msg.savingCreation = false;
   }
@@ -10548,6 +12063,7 @@ async function saveResultToLibrary(msg) {
     });
     msg.assetFid = filed?.fid || '';
     msg.librarySaved = true;
+    await persistSavedFlags(msg);
   } catch (e) {
     msg.librarySaveError = `存入失败：${e?.message || String(e)}`;
   } finally {
@@ -10555,64 +12071,241 @@ async function saveResultToLibrary(msg) {
   }
 }
 
-async function handleCancelGeneration(msg) {
-  if (!msg) return;
-  const jobId = msg.jobId || msg.runId || (msg.id && msg.id.startsWith('genmsg_') ? msg.id.replace('genmsg_', '') : '');
-  const sid = currentSessionId.value;
-  try {
-    if (jobId) {
-      await cancelGenJob(jobId);
+function applyFinishedJobMedia(msg, result) {
+  if (!msg || !result) return;
+  const file = Array.isArray(result.files) ? result.files[0] : null;
+  const url = result.imageUrl || result.videoUrl || result.audioUrl || file?.previewUrl || file?.url || '';
+  if (msg.modality === 'video' || result.videoUrl || result.modelVideoUrl) {
+    const videoUrl = result.videoUrl || url;
+    if (videoUrl) {
+      msg.videoUrl = videoUrl;
+      msg.modelVideoUrl = result.modelVideoUrl || videoUrl;
     }
+    if (result.vendorVideoUrl) msg.vendorVideoUrl = result.vendorVideoUrl;
+  } else if (msg.modality === 'music' || result.audioUrl) {
+    if (result.audioUrl || url) msg.audioUrl = result.audioUrl || url;
+  } else if (url) {
+    msg.imageUrl = result.imageUrl || url;
+  }
+  msg.isGenerating = false;
+  msg.isCancelled = false;
+  msg.isError = false;
+  if (result.content) msg.content = result.content;
+}
+
+function ensureCancelSettlement(msg) {
+  if (!msg) return null;
+  if (!msg.cancelSettlement) {
+    msg.cancelSettlement = new Promise((resolve) => {
+      msg._resolveCancelSettlement = resolve;
+    });
+  }
+  return msg.cancelSettlement;
+}
+
+function finishCancelSettlement(msg, accepted) {
+  if (!msg) return;
+  msg.cancelAccepted = !!accepted;
+  const resolve = msg._resolveCancelSettlement;
+  msg._resolveCancelSettlement = null;
+  if (typeof resolve === 'function') resolve(msg.cancelAccepted);
+}
+
+/** 取消已被服务端接受时返回 true，调用方不要再画成功结果。已完成的任务返回 false。 */
+async function waitCancelDecision(msg) {
+  if (!msg?.cancelRequested) return false;
+  if (msg.cancelSettlement) await msg.cancelSettlement;
+  return !!msg.cancelAccepted;
+}
+
+async function persistCancelToServer(msg, sid, jobId) {
+  const id = String(jobId || msg?.jobId || '').trim();
+  if (!msg || !id) return;
+  if (msg.cancelSent === id) return;
+  msg.cancelSent = id;
+  msg.jobId = id;
+  if (!msg.id || !String(msg.id).startsWith('genmsg_')) msg.id = `genmsg_${id}`;
+  ensureCancelSettlement(msg);
+  const mode = msg.modality === 'video' ? 'text_to_video' : (msg.modality === 'music' ? 'music' : 'text_to_image');
+  let cancelResult = null;
+  try {
+    cancelResult = await cancelGenJob(id);
   } catch (e) {
     console.warn('取消生成请求返回异常:', e.message);
-  } finally {
-    msg.isGenerating = false;
-    msg.isCancelled = true;
-    msg.content = '生成已取消';
-    if (sid) {
-      sessionGeneratingMap.delete(sid);
-      sessionPlaceholderMap.delete(sid);
+  }
+  if (cancelResult && cancelResult.cancellationAudit) {
+    msg.cancellationAudit = cancelResult.cancellationAudit;
+    msg.vendorTaskId = cancelResult.cancellationAudit.vendorTaskId;
+    msg.vendorStatus = cancelResult.cancellationAudit.vendorStatus;
+    msg.cloudContinued = cancelResult.cancellationAudit.cloudContinued;
+  }
+  // 任务已经结束：服务端不改消息。这里也不能再写成已取消，否则成功结果会被盖掉。
+  if (cancelResult && cancelResult.success === false) {
+    const ended = String(cancelResult.status || '');
+    if (ended === 'succeeded' || ended === 'failed') {
+      msg.isCancelled = false;
+      msg.cancelRequested = false;
+      if (msg.content === '生成已取消') msg.content = '';
+      try {
+        const packed = await fetchGenJob(id);
+        const job = packed?.job || packed;
+        if (ended === 'succeeded') applyFinishedJobMedia(msg, job?.result);
+        if (ended === 'failed') {
+          const detail = job?.error || {};
+          msg.isError = true;
+          msg.isGenerating = false;
+          msg.content = `生成遇到问题：${detail.message || detail.error || '任务已失败'}`;
+        }
+      } catch (e) {
+        console.warn('取回已结束任务失败:', e.message);
+      }
+      finishCancelSettlement(msg, false);
+      return;
     }
-    generating.value = false;
+    finishCancelSettlement(msg, true);
+    return;
+  }
+  try {
+    await saveChatMessage({
+      id: `genmsg_${id}`,
+      runId: id,
+      sessionId: sid,
+      role: 'assistant',
+      mode,
+      status: 'cancelled',
+      prompt: '生成已取消',
+      result: {
+        role: 'assistant',
+        modality: msg.modality,
+        content: '生成已取消',
+        isCancelled: true,
+        isGenerating: false,
+        userPrompt: msg.userPrompt || '',
+        jobId: id
+      }
+    });
+  } catch (saveErr) {
+    console.warn('取消状态落盘失败:', saveErr);
+  }
+  finishCancelSettlement(msg, true);
+}
+
+async function handleCancelGeneration(msg) {
+  if (!msg || msg.isCancelled) return;
+  const sid = currentSessionId.value;
+  const jobId = msg.jobId || msg.runId || (msg.id && String(msg.id).startsWith('genmsg_') ? String(msg.id).replace('genmsg_', '') : '');
+  msg.cancelRequested = true;
+  msg.isGenerating = false;
+  msg.isCancelled = true;
+  msg.content = '生成已取消';
+  if (jobId) {
+    msg.jobId = jobId;
+    if (!msg.id) msg.id = `genmsg_${jobId}`;
+  }
+  if (sid) {
+    sessionGeneratingMap.delete(sid);
+    sessionPlaceholderMap.delete(sid);
+    collapseCompletedRenderCards(sid, jobId || '', msg);
+    persistSessionMessagesCache(sid, messages.value);
+  }
+  generating.value = false;
+  // 有任务号就立刻打到服务端。还在入队时先记下，入队回调和运行中事件会补发，避免只改本地。
+  if (jobId) {
+    ensureCancelSettlement(msg);
+    await persistCancelToServer(msg, sid, jobId);
   }
 }
 
-async function openRetry(msg) {
-  if (!msg) return;
-  fillComposerFromError(msg);
-  await sendMessage();
-}
-function editFromError(msg) {
-  fillComposerFromError(msg);
-}
-
-function reeditResult(msg) {
-  if (!msg) return;
-  let sourceMsg = msg.role === 'user' ? msg : null;
-  if (!sourceMsg) {
+/** 核心安全提取器：全链路回溯上一轮真实用户消息与参考图附件，杜绝任何情况下丢图 */
+function resolveSourceMsgAndRefs(msg) {
+  let sourceMsg = msg?.role === 'user' ? msg : null;
+  if (!sourceMsg && msg) {
     const idx = messages.value.indexOf(msg);
-    for (let i = idx - 1; i >= 0; i -= 1) {
-      if (messages.value[i]?.role === 'user' && (messages.value[i].content || messages.value[i].userPrompt)) {
-        sourceMsg = messages.value[i];
+    const startIdx = idx >= 0 ? idx - 1 : messages.value.length - 1;
+    for (let i = startIdx; i >= 0; i -= 1) {
+      const m = messages.value[i];
+      if (m?.role === 'user' && (m.content || m.userPrompt || (Array.isArray(m.refs) && m.refs.length) || (Array.isArray(m.params?.refs) && m.params.refs.length))) {
+        sourceMsg = m;
         break;
       }
     }
   }
-  if (!sourceMsg) return;
-  const prompt = sourceMsg.userPrompt || sourceMsg.content || sourcePromptFor(sourceMsg);
-  let refs = [];
-  if (Array.isArray(sourceMsg.refs) && sourceMsg.refs.length) refs = sourceMsg.refs;
-  else if (Array.isArray(sourceMsg.params?.refs) && sourceMsg.params.refs.length) refs = sourceMsg.params.refs;
-  else if (Array.isArray(msg.refs) && msg.refs.length) refs = msg.refs;
-  const params = sourceMsg.params || msg.params || {};
+
+  // 多源安全汇聚参考图：优先取结构化 refs，避免丢失任何图
+  let rawRefs = [];
+  if (Array.isArray(msg?.retryRefs) && msg.retryRefs.length) rawRefs = msg.retryRefs;
+  else if (Array.isArray(sourceMsg?.params?.refs) && sourceMsg.params.refs.length) rawRefs = sourceMsg.params.refs;
+  else if (Array.isArray(sourceMsg?.refs) && sourceMsg.refs.length) rawRefs = sourceMsg.refs;
+  else if (Array.isArray(msg?.params?.refs) && msg.params.refs.length) rawRefs = msg.params.refs;
+  else if (Array.isArray(msg?.result?.refs) && msg.result.refs.length) rawRefs = msg.result.refs;
+  else if (Array.isArray(msg?.refs) && msg.refs.length) rawRefs = msg.refs;
+  else if (Array.isArray(sourceMsg?.images) && sourceMsg.images.length) rawRefs = sourceMsg.images;
+  else if (Array.isArray(referenceTray.value) && referenceTray.value.length) rawRefs = referenceTray.value;
+  else if (currentSessionId.value && sessionDrafts.get(currentSessionId.value)?.referenceTray?.length) {
+    rawRefs = sessionDrafts.get(currentSessionId.value).referenceTray;
+  }
+
+  const prompt = cleanPromptRefBrackets(sourceMsg?.userPrompt || sourceMsg?.content || msg?.userPrompt || msg?.retryPrompt || sourcePromptFor(msg));
+  const params = { ...(sourceMsg?.params || {}), ...(msg?.params || {}), ...(msg?.retryParams || {}) };
+
+  const modality = msg?.retryModality || sourceMsg?.modality || msg?.modality || (params.schemaMode && ['first_last_frame', 'omni_reference', 'image_to_video', 'text_to_video'].includes(params.schemaMode) ? 'video' : 'image');
+  const explicitSchemaMode = msg?.retryMode || msg?.schemaMode || sourceMsg?.schemaMode || params.schemaMode || msg?.result?.schemaMode || '';
+  const resolvedMode = explicitSchemaMode || (rawRefs.length ? (modality === 'video' ? 'omni_reference' : 'image_to_image') : (modality === 'video' ? 'text_to_video' : 'text_to_image'));
+
+  return {
+    sourceMsg,
+    prompt,
+    refs: normalizeTrayAssets(rawRefs),
+    model: msg?.retryModel || sourceMsg?.modelKey || msg?.modelKey || params.model || '',
+    modality,
+    mode: resolvedMode,
+    params
+  };
+}
+
+async function openRetry(msg) {
+  if (!msg) return;
+  const ctx = resolveSourceMsgAndRefs(msg);
   fillComposerFromError({
-    retryPrompt: prompt,
-    retryRefs: refs,
-    retryModel: sourceMsg.modelKey || msg.modelKey || params.model || msg.retryModel || '',
-    retryModality: sourceMsg.modality || msg.modality || msg.retryModality || '',
-    retryMode: sourceMsg.genMode || msg.genMode || params.genMode || params.schemaMode || msg.retryMode || '',
-    retryParams: { ...(msg.retryParams || {}), ...params },
+    retryPrompt: ctx.prompt,
+    retryRefs: ctx.refs,
+    retryModel: ctx.model,
+    retryModality: ctx.modality,
+    retryMode: ctx.mode,
+    retryParams: ctx.params
   });
+  await sendMessage();
+}
+function editFromError(msg) {
+  if (!msg) return;
+  const ctx = resolveSourceMsgAndRefs(msg);
+  fillComposerFromError({
+    retryPrompt: ctx.prompt,
+    retryRefs: ctx.refs,
+    retryModel: ctx.model,
+    retryModality: ctx.modality,
+    retryMode: ctx.mode,
+    retryParams: ctx.params
+  });
+  nextTick(() => {
+    richEditorRef.value?.focus();
+    scrollToBottom();
+  });
+}
+
+function reeditResult(msg) {
+  if (!msg) return;
+  const ctx = resolveSourceMsgAndRefs(msg);
+  const sourceMsg = ctx.sourceMsg;
+  const raw = String(sourceMsg?.userPrompt || sourceMsg?.content || msg?.userPrompt || msg?.content || msg?.retryPrompt || ctx.prompt || '');
+  fillComposerFromError({
+    retryPrompt: raw,
+    retryRefs: ctx.refs,
+    retryModel: ctx.model,
+    retryModality: ctx.modality,
+    retryMode: ctx.mode,
+    retryParams: ctx.params
+  }, { verbatim: true });
   nextTick(() => {
     richEditorRef.value?.focus();
     scrollToBottom();
@@ -10622,16 +12315,8 @@ function reeditResult(msg) {
 // 把历史某一轮恢复到输入区；若后面还有新的用户轮次，则先新建会话，原对话保留
 async function editRound(msg) {
   if (!msg) return;
-  let sourceMsg = msg.role === 'user' ? msg : null;
-  if (!sourceMsg) {
-    const idx = messages.value.indexOf(msg);
-    for (let i = idx - 1; i >= 0; i -= 1) {
-      if (messages.value[i]?.role === 'user' && (messages.value[i].content || messages.value[i].userPrompt)) {
-        sourceMsg = messages.value[i];
-        break;
-      }
-    }
-  }
+  const ctx = resolveSourceMsgAndRefs(msg);
+  const sourceMsg = ctx.sourceMsg;
   if (!sourceMsg) return;
 
   const sourceIdx = messages.value.indexOf(sourceMsg);
@@ -10641,20 +12326,13 @@ async function editRound(msg) {
     await createNewSession({ forceReset: true });
   }
 
-  const prompt = sourceMsg.userPrompt || sourceMsg.content || sourcePromptFor(sourceMsg);
-  let refs = [];
-  if (Array.isArray(sourceMsg.refs) && sourceMsg.refs.length) refs = sourceMsg.refs;
-  else if (Array.isArray(sourceMsg.params?.refs) && sourceMsg.params.refs.length) refs = sourceMsg.params.refs;
-  else if (Array.isArray(msg.refs) && msg.refs.length) refs = msg.refs;
-  const params = sourceMsg.params || msg.params || {};
-
   fillComposerFromError({
-    retryPrompt: prompt,
-    retryRefs: refs,
-    retryModel: sourceMsg.modelKey || msg.modelKey || params.model || msg.retryModel || '',
-    retryModality: sourceMsg.modality || msg.modality || msg.retryModality || '',
-    retryMode: sourceMsg.genMode || msg.genMode || params.genMode || params.schemaMode || msg.retryMode || '',
-    retryParams: { ...(msg.retryParams || {}), ...params },
+    retryPrompt: ctx.prompt,
+    retryRefs: ctx.refs,
+    retryModel: ctx.model,
+    retryModality: ctx.modality,
+    retryMode: ctx.mode,
+    retryParams: ctx.params
   });
   nextTick(() => {
     richEditorRef.value?.focus();
@@ -10664,13 +12342,30 @@ async function editRound(msg) {
 function editFromRetryDialog() {
   const msg = retryDialog.value.msg;
   retryDialog.value = { visible: false, msg: null };
-  if (msg) fillComposerFromError(msg);
+  if (!msg) return;
+  const ctx = resolveSourceMsgAndRefs(msg);
+  fillComposerFromError({
+    retryPrompt: ctx.prompt,
+    retryRefs: ctx.refs,
+    retryModel: ctx.model,
+    retryModality: ctx.modality,
+    retryMode: ctx.mode,
+    retryParams: ctx.params
+  });
 }
 async function confirmDirectRetry() {
   const msg = retryDialog.value.msg;
   retryDialog.value = { visible: false, msg: null };
   if (!msg) return;
-  fillComposerFromError(msg);
+  const ctx = resolveSourceMsgAndRefs(msg);
+  fillComposerFromError({
+    retryPrompt: ctx.prompt,
+    retryRefs: ctx.refs,
+    retryModel: ctx.model,
+    retryModality: ctx.modality,
+    retryMode: ctx.mode,
+    retryParams: ctx.params
+  });
   retryNotice.value = true;
   await sendMessage();
 }
@@ -10870,6 +12565,50 @@ function captureFrameFromVideo(msg) {
 const videoPlayers = {};
 function registerVideoEl(idx, el) {
   if (el) videoPlayers[idx] = el;
+}
+
+function videoFrameStyle(msg) {
+  return getPlaceholderContainerStyle(msg.ratio || '9:16');
+}
+
+function chatVideoPlayUrl(msg) {
+  if (msg.assetFid) return authedMediaUrl(getAssetPlayUrl(msg.assetFid));
+  return authedMediaUrl(msg.videoUrl || msg.modelVideoUrl);
+}
+
+function chatVideoPosterUrl(msg) {
+  if (msg.assetFid) return authedMediaUrl(getAssetPosterUrl(msg.assetFid));
+  const authed = authedMediaUrl(msg.videoUrl || msg.modelVideoUrl || '');
+  const q = authed.indexOf('?');
+  const pathPart = q >= 0 ? authed.slice(0, q) : authed;
+  const qs = q >= 0 ? authed.slice(q) : '';
+  if (!/\/cache\/temp\/[^/?]+\.(mp4|webm|mov)$/i.test(pathPart)) return '';
+  const bust = msg._posterTry ? `${qs ? '&' : '?'}_p=${msg._posterTry}` : '';
+  return `${pathPart}.poster.jpg${qs}${bust}`;
+}
+
+function onChatPosterLoad(msg) {
+  if (msg.assetFid || msg._posterRefresh) return;
+  msg._posterRefresh = true;
+  setTimeout(() => { msg._posterTry = (msg._posterTry || 0) + 1; }, 2500);
+  setTimeout(() => { msg._posterTry = (msg._posterTry || 0) + 1; }, 6000);
+}
+
+async function armChatVideo(msg, idx) {
+  if (msg.videoExpired) return;
+  msg._videoArmed = true;
+  await nextTick();
+  const el = videoPlayers[idx];
+  if (el && typeof el.play === 'function') {
+    try { await el.play(); } catch (_) {}
+  }
+}
+
+function onChatVideoError(msg) {
+  if (!msg.assetFid) {
+    msg.videoExpired = true;
+    msg._videoArmed = false;
+  }
 }
 </script>
 

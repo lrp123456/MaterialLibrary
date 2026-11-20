@@ -36,6 +36,7 @@ async function runTests() {
     getNearestCanonicalRatio,
     detectMediaSemantics,
     inferOptimalWorkflowAndParams,
+    resolveVideoGenMode,
     getModelPrecisionSpec,
     CANONICAL_RATIOS
   } = modelProtocol;
@@ -181,7 +182,7 @@ async function runTests() {
     });
 
     assert.strictEqual(flowA1.targetModality, 'image', '挂载图片后必须自动由纯对话切至图像板块');
-    assert.strictEqual(flowA1.targetGenMode, 'image_to_image', '单图状态下必须自动切至图生图');
+    assert.strictEqual(flowA1.targetGenMode, 'image_to_image', '有图时不管是几张图统一采用图生图（生图）');
     assert.strictEqual(flowA1.targetRatio, '9:16', '画幅必须自适应纠正为 9:16，杜绝画面压扁变形！');
 
     // 场景 A2：用户从 9:16 画幅切换至 16:9 横屏空间图（双向自适应验证）
@@ -242,7 +243,7 @@ async function runTests() {
       currentSchema: mockImageSchema,
       currentParams: { ratio: '9:16', size: '2K' }
     });
-    assert.strictEqual(flowB.targetGenMode, 'image_edit', '底图+3D家具单品必须自动切入局部编辑/安装模式');
+    assert.strictEqual(flowB.targetGenMode, 'image_to_image', '图像子模式不因 3D 参考自动改写');
     assert.strictEqual(flowB.targetRatio, '9:16', '主场景画幅必须保持室内底图的 9:16，严禁被 1:1 3D 单品快照带偏！');
     assert.strictEqual(flowB.is3DFurniture, true, '必须识别出 3D 家具透视参考');
     assert.strictEqual(flowB.directives.groundPerspectiveLock, true, '必须激活地面透视锁定');
@@ -259,7 +260,7 @@ async function runTests() {
       currentSchema: mockImageSchema,
       currentParams: { ratio: '9:16', size: '2K' }
     });
-    assert.strictEqual(flowC.targetGenMode, 'expand_fill', '画面向外延展时必须自动切入扩边填白 (expand_fill)');
+    assert.strictEqual(flowC.targetGenMode, 'image_to_image', '扩边也不自动改图像子模式');
 
     // 场景 D：视频调度 (默认全能参考，首尾帧仅限手动去选)
     const mockVideoSchema = {
@@ -284,7 +285,7 @@ async function runTests() {
       currentSchema: mockVideoSchema,
       currentParams: { ratio: '16:9' }
     });
-    assert.strictEqual(flowD.targetGenMode, 'omni_reference', '2 张图片在视频板块下默认使用全能参考，首尾帧只能手动选中');
+    assert.strictEqual(flowD.targetGenMode, 'omni_reference', '2 张图片在视频板块下默认使用全能参考，不自动进首尾帧');
     assert.strictEqual(flowD.targetRatio, '9:16', '视频画幅应根据首帧自动纠正为 9:16');
 
     const flowDManual = inferOptimalWorkflowAndParams({
@@ -296,6 +297,39 @@ async function runTests() {
       currentParams: { ratio: '16:9' }
     });
     assert.strictEqual(flowDManual.targetGenMode, 'first_last_frame', '手动选择首尾帧时保持首尾帧模式');
+
+    const flowD1 = inferOptimalWorkflowAndParams({
+      referenceTray: [frame1],
+      selectedImageIndex: 0,
+      currentModality: 'video',
+      currentGenMode: 'text_to_video',
+      currentSchema: mockVideoSchema,
+      currentParams: { ratio: '9:16' }
+    });
+    assert.strictEqual(flowD1.targetGenMode, 'omni_reference', '1 张参考图在支持全能参考的模型中统一使用全能参考');
+
+    // 场景 D2：托盘为空（文生视频，此前由于 videoItems 未定义在无图片素材时必崩）
+    const flowD2 = inferOptimalWorkflowAndParams({
+      referenceTray: [],
+      selectedImageIndex: 0,
+      currentModality: 'video',
+      currentGenMode: '',
+      currentSchema: mockVideoSchema,
+      currentParams: { ratio: '16:9' }
+    });
+    assert.strictEqual(flowD2.targetGenMode, 'text_to_video', '无任何参考素材时视频自动调度为文生视频');
+
+    // 场景 D3：仅挂载视频素材（无图片素材，验证 videoItems.length > 0 正确求值）
+    const sampleVideo = { name: '参考运镜.mp4', url: 'http://cdn/v.mp4', kind: 'video' };
+    const flowD3 = inferOptimalWorkflowAndParams({
+      referenceTray: [sampleVideo],
+      selectedImageIndex: 0,
+      currentModality: 'video',
+      currentGenMode: '',
+      currentSchema: mockVideoSchema,
+      currentParams: { ratio: '16:9' }
+    });
+    assert.strictEqual(flowD3.targetGenMode, 'omni_reference', '挂载纯视频素材且模型支持全能参考时自动调度为 omni_reference');
 
     // 场景 E：选区操作细粒度路由 (杂物消除 erase)
     const eraseRegion = {
@@ -312,11 +346,43 @@ async function runTests() {
       currentSchema: mockImageSchema,
       currentParams: { ratio: '9:16' }
     });
-    assert.strictEqual(flowE.targetGenMode, 'image_edit');
+    assert.strictEqual(flowE.targetGenMode, 'image_to_image', '选区不自动改图像子模式');
     assert.strictEqual(flowE.hasErase, true);
     assert.strictEqual(flowE.directives.eraseBackgroundSeamlessFill, true);
     assert.strictEqual(flowE.directives.noGhostingResiduals, true);
 
+    const wanModes = ['text_to_video', 'image_to_video', 'first_last_frame', 'omni_reference'];
+    assert.deepStrictEqual(
+      resolveVideoGenMode({ modeIds: wanModes, imageCount: 1, activeMode: 'text_to_video', userLocked: false }),
+      { mode: 'omni_reference', unlock: false },
+      '有图时（不管张数）统一采用全能参考'
+    );
+    assert.deepStrictEqual(
+      resolveVideoGenMode({ modeIds: wanModes, imageCount: 1, activeMode: 'text_to_video', userLocked: true }),
+      { mode: 'omni_reference', unlock: true },
+      '文生视频的手选锁在挂上参考图后要解开，否则参考图不会发给模型'
+    );
+    assert.deepStrictEqual(
+      resolveVideoGenMode({ modeIds: wanModes, imageCount: 1, activeMode: 'first_last_frame', userLocked: true }),
+      { mode: 'first_last_frame', unlock: false },
+      '手选的首尾帧保持'
+    );
+    assert.deepStrictEqual(
+      resolveVideoGenMode({ modeIds: wanModes, imageCount: 0, activeMode: 'text_to_video', userLocked: true }),
+      { mode: 'text_to_video', unlock: false },
+      '没有参考图时文生视频保持'
+    );
+    assert.deepStrictEqual(
+      resolveVideoGenMode({ modeIds: wanModes, imageCount: 2, activeMode: 'text_to_video', userLocked: false }),
+      { mode: 'omni_reference', unlock: false },
+      '2 张图用全能参考'
+    );
+    const agnesModes = ['text_to_video', 'image_to_video', 'first_last_frame'];
+    assert.deepStrictEqual(
+      resolveVideoGenMode({ modeIds: agnesModes, imageCount: 1, activeMode: 'text_to_video', userLocked: false }),
+      { mode: 'image_to_video', unlock: false },
+      '没有全能参考时用模型自带的参考/图生视频'
+    );
     console.log('✅ inferOptimalWorkflowAndParams 全链路自适应调度测试通过');
   }
 
@@ -393,6 +459,37 @@ async function runTests() {
     });
 
     assert.strictEqual(flowTpl2.targetRatio, '16:9', '底图为 16:9 横屏时，必须校准为 16:9，绝不保留模板旧的 9:16');
+
+    // 5.3 复用纯文生视频模板（无 origin_images，此前在复用创作时因短路失效导致 ReferenceError）
+    const videoTemplate = {
+      id: 'tpl_video_789',
+      title: '赛博朋克雨夜运镜',
+      type: 'video',
+      params: {
+        genMode: 'text_to_video',
+        ratio: '16:9'
+      },
+      origin_images: []
+    };
+    const flowTpl3 = inferOptimalWorkflowAndParams({
+      referenceTray: [],
+      selectedImageIndex: 0,
+      currentModality: 'chat',
+      currentGenMode: '',
+      currentSchema: {
+        id: 'kling_v2_5_pro',
+        modes: [
+          { id: 'text_to_video', label: '文生视频' },
+          { id: 'image_to_video', label: '图生视频' },
+          { id: 'omni_reference', label: '全能参考' }
+        ],
+        common: [{ key: 'ratio', options: ['16:9', '9:16', '1:1'] }]
+      },
+      currentParams: {},
+      templateMeta: videoTemplate
+    });
+    assert.strictEqual(flowTpl3.targetModality, 'video', '复用视频配方必须自动切至 video 板块');
+    assert.strictEqual(flowTpl3.targetGenMode, 'text_to_video', '复用无图视频配方时正确调度至 text_to_video，绝不抛出异常');
     console.log('✅ 创作模板复用画幅冲突自适应校准测试通过');
   }
 

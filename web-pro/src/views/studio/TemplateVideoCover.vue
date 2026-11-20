@@ -29,7 +29,7 @@
     </div>
 
     <div
-      v-if="!compact && videoUrl && stage !== 'ref' && stage !== 'empty'"
+      v-if="!compact && videoUrl && stage !== 'ref'"
       class="absolute inset-0 flex items-center justify-center pointer-events-none"
     >
       <div class="w-8 h-8 rounded-full bg-black/60 flex items-center justify-center text-purple-200 border border-white/20">
@@ -70,7 +70,6 @@ const frameUrl = computed(() => {
 function chooseStage() {
   videoReady.value = false;
   if (props.posterUrl) stage.value = 'poster';
-  else if (props.videoUrl) stage.value = 'video';
   else if (props.referenceUrl) stage.value = 'ref';
   else stage.value = 'empty';
 }
@@ -86,8 +85,7 @@ function onPosterLoad(event) {
 }
 
 function onPosterError() {
-  if (props.videoUrl) stage.value = 'video';
-  else if (props.referenceUrl) stage.value = 'ref';
+  if (props.referenceUrl) stage.value = 'ref';
   else stage.value = 'empty';
 }
 

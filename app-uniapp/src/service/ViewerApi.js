@@ -469,8 +469,9 @@ export async function pollLabRun(engine, runId) {
 }
 
 /** 获取企业级 AI 创作会话列表 */
-export async function fetchChatSessions() {
-  return request('/chat/sessions', { method: 'GET' })
+export async function fetchChatSessions(params = {}) {
+  const query = Object.entries(params || {}).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+  return request('/chat/sessions', { method: 'GET', query })
 }
 
 /** 创建/切换 AI 创作会话 */

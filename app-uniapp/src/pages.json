@@ -31,118 +31,6 @@
         "navigationBarTitleText": "素材库",
         "navigationStyle": "custom"
       }
-    },
-    {
-      "path": "pages/permission/permission",
-      "style": {
-        "navigationBarTitleText": "相册权限",
-        "navigationStyle": "custom"
-      }
-    },
-    {
-      "path": "pages/detail/detail",
-      "style": {
-        "navigationBarTitleText": "素材详情",
-        "navigationStyle": "custom"
-      }
-    },
-    {
-      "path": "pages/trash-detail/trash-detail",
-      "style": {
-        "navigationBarTitleText": "回收站详情",
-        "navigationStyle": "custom"
-      }
-    },
-    {
-      "path": "pages/model3d/model3d",
-      "style": {
-        "navigationBarTitleText": "3D 朝向",
-        "navigationStyle": "custom",
-        "app-plus": {
-          "bounce": "none"
-        }
-      }
-    },
-    {
-      "path": "pages/editor/editor",
-      "style": {
-        "navigationBarTitleText": "剪辑",
-        "navigationStyle": "custom"
-      }
-    },
-    {
-      "path": "pages/clip/clip",
-      "style": {
-        "navigationBarTitleText": "多轨剪辑",
-        "navigationStyle": "custom",
-        "app-plus": {
-          "bounce": "none",
-          "titleNView": false
-        }
-      }
-    },
-    {
-      "path": "pages/tools/tools",
-      "style": {
-        "navigationBarTitleText": "媒体工具",
-        "navigationStyle": "custom"
-      }
-    },
-    {
-      "path": "pages/chat/chat",
-      "style": {
-        "navigationBarTitleText": "元素标签对话",
-        "navigationStyle": "custom"
-      }
-    },
-    {
-      "path": "pages/edit/edit",
-      "style": {
-        "navigationBarTitleText": "精准编辑",
-        "navigationStyle": "custom"
-      }
-    },
-    {
-      "path": "pages/quick/enhance",
-      "style": {
-        "navigationBarTitleText": "画质增强",
-        "navigationStyle": "custom"
-      }
-    },
-    {
-      "path": "pages/quick/expand",
-      "style": {
-        "navigationBarTitleText": "扩图",
-        "navigationStyle": "custom"
-      }
-    },
-    {
-      "path": "pages/quick/insert",
-      "style": {
-        "navigationBarTitleText": "入画",
-        "navigationStyle": "custom"
-      }
-    },
-    {
-      "path": "pages/quick/remove",
-      "style": {
-        "navigationBarTitleText": "消除",
-        "navigationStyle": "custom"
-      }
-    },
-    {
-      "path": "pages/quick/replace",
-      "style": {
-        "navigationBarTitleText": "替换",
-        "navigationStyle": "custom"
-      }
-    },
-    {
-      "path": "pages/quick/watermark",
-      "style": {
-        "navigationBarTitleText": "去水印",
-        "navigationStyle": "custom"
-      }
     }
   ],
   "tabBar": {
@@ -179,5 +67,145 @@
     "navigationBarTitleText": "素材库",
     "navigationBarBackgroundColor": "#F8FAFC",
     "backgroundColor": "#F8FAFC"
+  },
+  "subPackages": [
+    {
+      "root": "pages",
+      "name": "pages-media",
+      "pages": [
+        {
+          "path": "detail/detail",
+          "style": {
+            "navigationBarTitleText": "素材详情",
+            "navigationStyle": "custom"
+          }
+        },
+        {
+          "path": "trash-detail/trash-detail",
+          "style": {
+            "navigationBarTitleText": "回收站详情",
+            "navigationStyle": "custom"
+          }
+        },
+        {
+          "path": "model3d/model3d",
+          "style": {
+            "navigationBarTitleText": "3D 朝向",
+            "navigationStyle": "custom",
+            "app-plus": {
+              "bounce": "none"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "root": "pages",
+      "name": "pages-editor",
+      "pages": [
+        {
+          "path": "permission/permission",
+          "style": {
+            "navigationBarTitleText": "相册权限",
+            "navigationStyle": "custom"
+          }
+        },
+        {
+          "path": "editor/editor",
+          "style": {
+            "navigationBarTitleText": "剪辑",
+            "navigationStyle": "custom"
+          }
+        },
+        {
+          "path": "clip/clip",
+          "style": {
+            "navigationBarTitleText": "多轨剪辑",
+            "navigationStyle": "custom",
+            "app-plus": {
+              "bounce": "none",
+              "titleNView": false
+            }
+          }
+        },
+        {
+          "path": "tools/tools",
+          "style": {
+            "navigationBarTitleText": "媒体工具",
+            "navigationStyle": "custom"
+          }
+        },
+        {
+          "path": "chat/chat",
+          "style": {
+            "navigationBarTitleText": "元素标签对话",
+            "navigationStyle": "custom"
+          }
+        },
+        {
+          "path": "edit/edit",
+          "style": {
+            "navigationBarTitleText": "精准编辑",
+            "navigationStyle": "custom"
+          }
+        },
+        {
+          "path": "quick/enhance",
+          "style": {
+            "navigationBarTitleText": "画质增强",
+            "navigationStyle": "custom"
+          }
+        },
+        {
+          "path": "quick/expand",
+          "style": {
+            "navigationBarTitleText": "扩图",
+            "navigationStyle": "custom"
+          }
+        },
+        {
+          "path": "quick/insert",
+          "style": {
+            "navigationBarTitleText": "入画",
+            "navigationStyle": "custom"
+          }
+        },
+        {
+          "path": "quick/remove",
+          "style": {
+            "navigationBarTitleText": "消除",
+            "navigationStyle": "custom"
+          }
+        },
+        {
+          "path": "quick/replace",
+          "style": {
+            "navigationBarTitleText": "替换",
+            "navigationStyle": "custom"
+          }
+        },
+        {
+          "path": "quick/watermark",
+          "style": {
+            "navigationBarTitleText": "去水印",
+            "navigationStyle": "custom"
+          }
+        }
+      ]
+    }
+  ],
+  "preloadRule": {
+    "pages/home/home": {
+      "network": "all",
+      "packages": [
+        "pages-editor"
+      ]
+    },
+    "pages/browse/browse": {
+      "network": "all",
+      "packages": [
+        "pages-media"
+      ]
+    }
   }
 }

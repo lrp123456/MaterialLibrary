@@ -5,7 +5,7 @@
  * 三级回退（同源网关 → 本机 → 局域网 → 公网）由 server-resolve.js 的全局
  * fetch 守卫透明处理；本模块只负责把相对媒体路径按当前生效 base 转成可用 URL。
  */
-import { resolveApiUrl } from './server-resolve.js';
+import { resolveApiUrl, setUnauthorizedHandler } from './server-resolve.js';
 
 const TOKEN_KEY = 'ml_token';
 const USER_KEY = 'ml_user';
@@ -59,6 +59,9 @@ export function reportUnauthorized() {
   setSession('', null);
   notifyAuthRequired('expired');
 }
+
+// 注入 server-resolve 全局 fetch 拦截器，确保任何角落的 401 都能统一收口
+setUnauthorizedHandler(reportUnauthorized);
 
 /**
  * 用户名密码登录：POST /api/auth/login → { token, user }。
@@ -776,11 +779,33 @@ export async function fetchChatSessions(params = {}) {
   if (params.tag) qs.set('tag', String(params.tag));
   if (params.modality && params.modality !== 'all') qs.set('modality', String(params.modality));
   if (params.limit) qs.set('limit', String(params.limit));
+  if (params.scope) qs.set('scope', String(params.scope));
+  if (params.days !== undefined && params.days !== null) qs.set('days', String(params.days));
   const query = qs.toString();
   const res = await authFetch(`/api/chat/sessions${query ? '?' + query : ''}`);
   if (!res.ok) return [];
   const json = await res.json();
-  return json.data || [];
+  const list = Array.isArray(json.data) ? json.data : [];
+  if (json.meta && typeof json.meta === 'object') {
+    list.meta = json.meta;
+  }
+  return list;
+}
+
+/**
+ * 一键清理过期废弃会话 (默认清理3天前且无产物的草稿/试探会话)
+ */
+export async function cleanStaleChatSessions({ mode = 'empty_only', days = 3 } = {}) {
+  const res = await authFetch('/api/chat/sessions/clean-stale', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode, days })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || '清理过期会话失败');
+  }
+  return await res.json();
 }
 
 /**
@@ -806,12 +831,18 @@ export async function autoTitleChatSession(sessionId, payload = {}) {
 /**
  * 获取会话中的消息历史 (/chat/messages?sessionId=...)
  */
-export async function fetchChatMessages(sessionId, limit = 100) {
+export async function fetchChatMessages(sessionId, limit = 100, opts = {}) {
   if (!sessionId) return [];
   const qs = new URLSearchParams({ sessionId: String(sessionId) });
   if (limit && limit !== 100) qs.set('limit', String(limit));
+  if (opts && opts.screen) qs.set('view', 'screen');
+  if (opts && opts.before) qs.set('before', String(opts.before));
   const res = await authFetch(`/api/chat/messages?${qs.toString()}`);
-  if (!res.ok) return [];
+  if (!res.ok) {
+    const err = new Error(`获取消息失败: HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
   const json = await res.json();
   return json.data || [];
 }
@@ -825,6 +856,10 @@ export async function saveChatMessage(payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
+  if (!res.ok) {
+    const errJson = await res.json().catch(() => ({}));
+    throw new Error(errJson.error || `保存消息失败: HTTP ${res.status}`);
+  }
   return await res.json();
 }
 
@@ -1103,8 +1138,9 @@ export async function fetchCreationTemplatesIncremental({ since, sinceId, delete
     params.set('deleted_since', String(deletedSince));
     params.set('deleted_since_id', deletedSinceId || '');
   }
+  params.set('view', 'card');
   const qs = params.toString();
-  const url = qs ? `/api/creation-templates?${qs}` : '/api/creation-templates';
+  const url = `/api/creation-templates?${qs}`;
   const res = await authFetch(url);
   return res.json();
 }
@@ -1197,6 +1233,12 @@ export async function enqueueGenJob(body) {
     body: JSON.stringify(body)
   });
   const json = await res.json();
+  if (res.status === 409 && json.code === 'video_inflight') {
+    const err = new Error(json.error || '这一轮视频还在生成，请等它完成后再发');
+    err.code = 'video_inflight';
+    err.jobId = json.jobId || '';
+    throw err;
+  }
   if (!res.ok || json.error) {
     throw new Error(json.error || `生成任务入队失败: HTTP ${res.status}`);
   }
@@ -1283,16 +1325,23 @@ function waitForGenJob(jobId, { timeoutMs = 15 * 60 * 1000, intervalMs = 2000 } 
 
 /** 入队 + 等待，返回 { result, jobId }：jobId 用于和 worker 落库共用同一个消息 id。 */
 export async function submitGenerationJob(modality, params) {
-  const sessionId = params.sessionId || 'default_session';
+  const onEnqueued = params && params.onEnqueued;
+  const rest = { ...(params || {}) };
+  delete rest.onEnqueued;
+  const sessionId = rest.sessionId || 'default_session';
   const body = {
-    ...params,
+    ...rest,
     modality,
     sessionId,
-    clientRequestId: params.clientRequestId
+    clientRequestId: rest.clientRequestId
       || `${sessionId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
   };
   const json = await enqueueGenJob(body);
   if (!json.jobId) throw new Error('生成任务入队失败：未返回 jobId');
+  // 入队一返回就把 jobId 交给界面。取消必须打到这条任务上，不能等整段生成结束才知道编号。
+  if (typeof onEnqueued === 'function') {
+    try { onEnqueued(json.jobId); } catch (_) {}
+  }
   try {
     const result = await waitForGenJob(json.jobId);
     return { result, jobId: json.jobId };

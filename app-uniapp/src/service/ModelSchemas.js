@@ -15,6 +15,7 @@ export function schemaFor(model) {
 /** 字段选项标签（与 web-pro 的 optionLabel 同语义）。 */
 export function optionLabel(field, value) {
   if (value == null) return ''
+  if (value === 'adaptive') return '自适应'
   if (field && field.labels && field.labels[String(value)] != null) return field.labels[String(value)]
   if (value === -1 || value === '-1') return '智能'
   if (value === 'auto') return '自动'

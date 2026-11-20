@@ -9,15 +9,30 @@
           type="button"
           class="param-mode"
           :class="{
-            'is-on': activeMode === mode.id,
+            'is-on': activeMode === mode.id && !isModeDisabled(mode.id),
             'opacity-40 cursor-not-allowed': isModeDisabled(mode.id)
           }"
           :disabled="isModeDisabled(mode.id)"
-          :title="isModeDisabled(mode.id) ? '当前已挂载参考图，若要纯文生图请先清空看图区' : ''"
+          :title="isModeDisabled(mode.id) ? '当前已挂载参考图。文生模式不会使用这些图，若要纯文字生成请先清空参考图。' : ''"
           @click="!isModeDisabled(mode.id) && $emit('select-mode', mode.id)"
         >
           <span class="param-mode-dot"></span>
           <span>{{ mode.label }}</span>
+        </button>
+      </div>
+
+      <!-- 非默认模式常驻提示与一键改回按钮 -->
+      <div
+        v-if="isNonDefaultMode"
+        class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/25 text-xs text-amber-300 shadow-sm"
+      >
+        <span>当前是{{ currentModeLabel }}</span>
+        <button
+          type="button"
+          class="font-semibold text-amber-400 hover:text-amber-200 underline cursor-pointer"
+          @click="$emit('reset-default-mode', defaultModeInfo.id)"
+        >
+          改回{{ defaultModeInfo.label }}
         </button>
       </div>
 
@@ -65,6 +80,7 @@
         <span class="param-label">
           {{ field.label }}
           <StudioIcon v-if="isLocked(field.key)" name="lock" :size="10" title="已联动锁定" />
+          <span v-if="isAdaptiveLocked(field)" class="text-amber-400 font-bold ml-1 text-[11px] animate-pulse">⚠️ 强制自适应</span>
         </span>
 
         <select
@@ -191,6 +207,7 @@
         <span class="param-label">
           {{ field.label }}
           <StudioIcon v-if="isLocked(field.key)" name="lock" :size="10" />
+          <span v-if="isAdaptiveLocked(field)" class="text-amber-400 font-bold ml-1 text-[11px] animate-pulse">⚠️ 强制自适应</span>
         </span>
 
         <select
@@ -275,7 +292,7 @@
 <script setup>
 import { computed, reactive } from 'vue';
 import StudioIcon from './StudioIcon.vue';
-import { evaluateClientModelRules } from '../utils/model-protocol';
+import { evaluateClientModelRules, resolveDefaultMode } from '../utils/model-protocol';
 
 const props = defineProps({
   schema: { type: Object, default: null },
@@ -285,13 +302,32 @@ const props = defineProps({
   refCounts: { type: Object, default: () => ({ images: 0, videos: 0, audios: 0 }) },
 });
 
-const emit = defineEmits(['update:modelValue', 'update:showAdvanced', 'select-mode', 'param-change']);
+const emit = defineEmits(['update:modelValue', 'update:showAdvanced', 'select-mode', 'param-change', 'reset-default-mode']);
 
 const ruleEval = computed(() =>
   evaluateClientModelRules(props.schema, props.activeMode, props.modelValue, props.refCounts)
 );
 
 const lockReasons = computed(() => ruleEval.value.lockReasons || {});
+
+const defaultModeInfo = computed(() => {
+  const modality = props.schema?.modality || (props.schema?.modes?.some((m) => m.id.includes('video')) ? 'video' : 'image');
+  return resolveDefaultMode({
+    schema: props.schema,
+    modality,
+    refCounts: props.refCounts
+  });
+});
+
+const isNonDefaultMode = computed(() => {
+  if (!props.schema || !props.activeMode) return false;
+  return props.activeMode !== defaultModeInfo.value.id;
+});
+
+const currentModeLabel = computed(() => {
+  const m = (props.schema?.modes || []).find((item) => item.id === props.activeMode);
+  return m ? m.label : props.activeMode;
+});
 
 function isModeDisabled(modeId) {
   const imgCount = Number(props.refCounts?.images || 0);
@@ -339,13 +375,31 @@ function isLocked(key) {
   return (ruleEval.value.lockedKeys || []).includes(key);
 }
 
+function isRatioField(field) {
+  if (!field) return false;
+  const k = (field.key || '').toLowerCase();
+  return ['ratio', 'aspect_ratio', 'ar'].includes(k);
+}
+
+function isAdaptiveLocked(field) {
+  if (!isRatioField(field)) return false;
+  return isLocked(field.key) && props.modelValue?.[field.key] === 'adaptive';
+}
+
 function fieldOptions(field) {
+  if (isRatioField(field)) {
+    if (isAdaptiveLocked(field)) {
+      return ['adaptive'];
+    }
+    return ['9:16', '3:4'];
+  }
   const ov = ruleEval.value.fieldOverrides?.[field.key];
   if (ov && Array.isArray(ov.options)) return ov.options;
   return field.options || [];
 }
 
 function optionLabel(field, value) {
+  if (value === 'adaptive') return '自适应';
   if (field.labels && field.labels[String(value)] != null) return field.labels[String(value)];
   if (value === -1 || value === '-1') return '智能';
   if (value === 'auto') return '自动';

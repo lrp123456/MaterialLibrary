@@ -378,7 +378,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
-import { getToken } from '../../api';
+import { getToken, authFetch } from '../../api';
 import { ensureModelViewer } from '../../utils/model-viewer.js';
 import { productCover, coverBadge, coverOrbit } from '../../utils/product-cover.js';
 
@@ -474,9 +474,7 @@ function categoryLabel(cat) {
 async function loadPresets() {
   loading.value = true;
   try {
-    const res = await fetch('/api/products/presets', {
-      headers: { Authorization: `Bearer ${getToken()}` }
-    });
+    const res = await authFetch('/api/products/presets');
     const json = await res.json();
     if (json.success) {
       presets.value = json.data || [];

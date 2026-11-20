@@ -35,17 +35,34 @@
         @click="$emit('select', idx)"
         :class="[
           'group relative flex flex-col items-center justify-between w-[58px] h-[64px] rounded-xl border p-1 transition-all cursor-grab active:cursor-grabbing bg-studio-850 shrink-0',
-          dragOverIdx === idx ? 'ring-2 ring-amber-400 border-amber-400 scale-105 bg-amber-500/10' : '',
-          draggingIdx === idx ? 'opacity-40 border-dashed border-studio-500' : '',
+          dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx ? 'ring-2 ring-amber-400 border-amber-400 scale-105 bg-amber-500/10 shadow-[0_0_14px_rgba(251,191,36,0.3)]' : '',
+          draggingIdx === idx ? 'opacity-40 border-dashed border-amber-400 scale-95' : '',
           selectedIndex === idx && dragOverIdx !== idx
             ? 'border-studio-accent shadow-sm shadow-studio-accent/20 ring-1 ring-studio-accent'
             : (dragOverIdx !== idx ? 'border-studio-700 hover:border-studio-600 hover:bg-studio-800' : '')
         ]"
         :title="`拖动可调整顺序 · ${item.name || '参考图'} (图${idx + 1})`"
       >
+        <!-- 纵向插入指示线 (before: 顶部 / after: 底部) -->
+        <div
+          v-if="dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx && trayInsertPos === 'before'"
+          class="absolute -top-1.5 left-0 right-0 h-1 rounded-full bg-gradient-to-r from-amber-300 via-amber-400 to-amber-500 shadow-[0_0_12px_rgba(251,191,36,0.95)] z-40 flex items-center justify-center pointer-events-none animate-pulse"
+        >
+          <div class="absolute -top-3.5 left-1/2 -translate-x-1/2 px-1 py-0.2 rounded bg-amber-400 text-black text-[8px] font-black shadow-md whitespace-nowrap">
+            ▲ 移至图{{ idx + 1 }}前
+          </div>
+        </div>
+        <div
+          v-if="dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx && trayInsertPos === 'after'"
+          class="absolute -bottom-1.5 left-0 right-0 h-1 rounded-full bg-gradient-to-r from-amber-300 via-amber-400 to-amber-500 shadow-[0_0_12px_rgba(251,191,36,0.95)] z-40 flex items-center justify-center pointer-events-none animate-pulse"
+        >
+          <div class="absolute -bottom-3.5 left-1/2 -translate-x-1/2 px-1 py-0.2 rounded bg-amber-400 text-black text-[8px] font-black shadow-md whitespace-nowrap">
+            移至图{{ idx + 1 }}后 ▼
+          </div>
+        </div>
         <div class="w-full flex-1 flex items-center justify-center overflow-hidden rounded-lg bg-studio-950 pointer-events-none">
           <img
-            :src="item.thumbUrl || item.url || item.imgUrl"
+            :src="resolveViewerImageUrl(item)"
             class="max-w-full max-h-full object-contain pointer-events-none"
             :alt="`图${idx + 1}`"
           />
@@ -105,17 +122,34 @@
         @click="$emit('select', idx)"
         :class="[
           'group relative flex items-center gap-2 h-9 px-2 rounded-lg border transition-all cursor-grab active:cursor-grabbing bg-studio-850 shrink-0',
-          dragOverIdx === idx ? 'ring-2 ring-amber-400 border-amber-400 scale-105 bg-amber-500/10' : '',
-          draggingIdx === idx ? 'opacity-40 border-dashed border-studio-500' : '',
+          dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx ? 'ring-2 ring-amber-400 border-amber-400 scale-105 bg-amber-500/10 shadow-[0_0_14px_rgba(251,191,36,0.3)]' : '',
+          draggingIdx === idx ? 'opacity-40 border-dashed border-amber-400 scale-95' : '',
           selectedIndex === idx && dragOverIdx !== idx
             ? 'border-studio-accent shadow-sm shadow-studio-accent/20 ring-1 ring-studio-accent'
             : (dragOverIdx !== idx ? 'border-studio-700 hover:border-studio-600 hover:bg-studio-800' : '')
         ]"
         :title="`拖动可调整顺序 · ${item.name || '参考图'} (图${idx + 1})`"
       >
+        <!-- 横向插入指示线 (before: 左侧 / after: 右侧) -->
+        <div
+          v-if="dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx && trayInsertPos === 'before'"
+          class="absolute -left-1.5 top-0 bottom-0 w-1 rounded-full bg-gradient-to-b from-amber-300 via-amber-400 to-amber-500 shadow-[0_0_12px_rgba(251,191,36,0.95)] z-40 flex items-center justify-center pointer-events-none animate-pulse"
+        >
+          <div class="absolute -top-3 left-1/2 -translate-x-1/2 px-1 py-0.2 rounded bg-amber-400 text-black text-[8px] font-black shadow-md whitespace-nowrap">
+            ◀ 移至图{{ idx + 1 }}前
+          </div>
+        </div>
+        <div
+          v-if="dragOverIdx === idx && draggingIdx !== null && draggingIdx !== idx && trayInsertPos === 'after'"
+          class="absolute -right-1.5 top-0 bottom-0 w-1 rounded-full bg-gradient-to-b from-amber-300 via-amber-400 to-amber-500 shadow-[0_0_12px_rgba(251,191,36,0.95)] z-40 flex items-center justify-center pointer-events-none animate-pulse"
+        >
+          <div class="absolute -top-3 left-1/2 -translate-x-1/2 px-1 py-0.2 rounded bg-amber-400 text-black text-[8px] font-black shadow-md whitespace-nowrap">
+            移至图{{ idx + 1 }}后 ▶
+          </div>
+        </div>
         <div class="w-6 h-6 rounded overflow-hidden bg-studio-950 flex items-center justify-center shrink-0 pointer-events-none">
           <img
-            :src="item.thumbUrl || item.url || item.imgUrl"
+            :src="resolveViewerImageUrl(item)"
             class="max-w-full max-h-full object-contain pointer-events-none"
             :alt="`图${idx + 1}`"
           />
@@ -164,9 +198,13 @@ const emit = defineEmits(['select', 'open-picker', 'expand-viewer', 'upload-file
 const isDragging = ref(false);
 const draggingIdx = ref(null);
 const dragOverIdx = ref(null);
+const trayInsertPos = ref(null); // 'before' | 'after'
 
 function onItemDragStart(e, idx) {
   draggingIdx.value = idx;
+  if (typeof window !== 'undefined') {
+    window.__studioRefDragging = true;
+  }
   e.dataTransfer.effectAllowed = 'move';
   e.dataTransfer.setData('application/x-studio-tray-idx', String(idx));
   e.dataTransfer.setData('text/plain', `tray:${idx}`);
@@ -174,6 +212,14 @@ function onItemDragStart(e, idx) {
 
 function onItemDragOver(e, idx) {
   if (draggingIdx.value !== null && draggingIdx.value !== idx) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (props.mode === 'vertical') {
+      const relY = e.clientY - rect.top;
+      trayInsertPos.value = relY < rect.height / 2 ? 'before' : 'after';
+    } else {
+      const relX = e.clientX - rect.left;
+      trayInsertPos.value = relX < rect.width / 2 ? 'before' : 'after';
+    }
     dragOverIdx.value = idx;
     e.dataTransfer.dropEffect = 'move';
   }
@@ -182,6 +228,7 @@ function onItemDragOver(e, idx) {
 function onItemDragLeave(idx) {
   if (dragOverIdx.value === idx) {
     dragOverIdx.value = null;
+    trayInsertPos.value = null;
   }
 }
 
@@ -189,8 +236,16 @@ function onItemDrop(e, targetIdx) {
   const rawIdx = e.dataTransfer.getData('application/x-studio-tray-idx');
   if (rawIdx !== '') {
     const fromIdx = Number(rawIdx);
-    if (!Number.isNaN(fromIdx) && fromIdx !== targetIdx) {
-      emit('reorder', { from: fromIdx, to: targetIdx });
+    if (!Number.isNaN(fromIdx)) {
+      const pos = trayInsertPos.value || 'before';
+      let finalTo = pos === 'before' ? targetIdx : targetIdx + 1;
+      if (fromIdx < finalTo) {
+        finalTo -= 1;
+      }
+      finalTo = Math.max(0, Math.min(finalTo, props.images.length - 1));
+      if (fromIdx !== finalTo) {
+        emit('reorder', { from: fromIdx, to: finalTo });
+      }
     }
     resetDragState();
     return;
@@ -209,7 +264,12 @@ function onItemDragEnd() {
 }
 
 function onContainerDragOver(e) {
-  if (draggingIdx.value === null) {
+  if (typeof window !== 'undefined' && window.__studioRefDragging) {
+    isDragging.value = false;
+    return;
+  }
+  const isFiles = e.dataTransfer?.types?.includes('Files');
+  if (isFiles) {
     isDragging.value = true;
   }
 }
@@ -237,8 +297,31 @@ function onContainerDrop(e) {
 }
 
 function resetDragState() {
+  if (typeof window !== 'undefined') {
+    window.__studioRefDragging = false;
+  }
   isDragging.value = false;
   draggingIdx.value = null;
   dragOverIdx.value = null;
+  trayInsertPos.value = null;
+}
+
+function resolveViewerImageUrl(img) {
+  if (!img) return '';
+  let raw = '';
+  if (typeof img === 'string') {
+    raw = img;
+  } else if (typeof img === 'object') {
+    raw = img.url || img.imgUrl || img.imageUrl || img.previewUrl || img.thumbUrl || img.displayUrl || img.fullUrl || img.path || '';
+  }
+  raw = String(raw || '').trim();
+  if (!raw || raw === 'undefined' || raw === 'null') return '';
+  if (raw.startsWith('/api/') || /^https?:\/\/[^/]+\/api\//i.test(raw)) {
+    const token = typeof window !== 'undefined' ? (localStorage.getItem('token') || localStorage.getItem('ml_token') || '') : '';
+    if (token && !/[?&]token=/.test(raw)) {
+      return `${raw}${raw.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
+    }
+  }
+  return raw;
 }
 </script>

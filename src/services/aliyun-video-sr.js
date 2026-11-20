@@ -292,6 +292,12 @@ async function processVideoSuperResolution(videoUrl, options = {}) {
       emit({ key: 'sr_download', label: '下载超分成片', progress: 97 });
       const tDownload = Date.now();
       await downloadFile(query.resultUrl, outPath);
+      try {
+        const { prepareChatVideo } = require('../umbra');
+        await prepareChatVideo(outPath);
+      } catch (e) {
+        console.warn(`[video-sr] faststart/封面失败，仍保留超分片: ${e.message}`);
+      }
       const downloadMs = Date.now() - tDownload;
       return {
         jobId,

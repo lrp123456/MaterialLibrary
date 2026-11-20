@@ -67,16 +67,16 @@ function ok(name) { console.log('✅ ' + name); }
     const row = db.prepare('SELECT file_name, kind FROM assets WHERE fid=?').get(filed.fid);
     assert.strictEqual(row.kind, 'image');
     assert.ok(fs.existsSync(path.join(tempDir, row.file_name)));
-    await assert.rejects(
-      () => registerGenerated(services, {
-        previewUrl: `http://127.0.0.1:${port}/vendor/clip.mp4`,
-        prompt: '远程视频',
-        mode: 'video',
-      }),
-      /封面没有生成，成片未入库/
-    );
-    const leftover = db.prepare("SELECT COUNT(*) AS n FROM assets WHERE kind='video'").get();
-    assert.strictEqual(leftover.n, 0);
+    const videoFiled = await registerGenerated(services, {
+      previewUrl: `http://127.0.0.1:${port}/vendor/clip.mp4`,
+      prompt: '远程视频',
+      mode: 'video',
+    });
+    assert.ok(videoFiled.fid);
+    assert.strictEqual(videoFiled.deduped, false);
+    const videoRow = db.prepare('SELECT status, kind FROM assets WHERE fid=?').get(videoFiled.fid);
+    assert.strictEqual(videoRow.kind, 'video');
+    assert.strictEqual(videoRow.status, 'ready');
     const recovered = await registerGenerated(services, {
       previewUrl: '/api/cache/temp/missing-local.jpg',
       vendorUrl: `http://127.0.0.1:${port}/vendor/still.jpg`,
@@ -89,7 +89,54 @@ function ok(name) { console.log('✅ ' + name); }
   } finally {
     server.close();
   }
-  ok('远程结果先下载再入库，封面失败不留视频记录');
+  ok('远程结果先下载再入库，封面失败仍留下成片');
+
+  const dupName = 'dup-src.jpg';
+  fs.writeFileSync(path.join(tempDir, dupName), jpeg);
+  const firstDup = await registerGenerated(services, {
+    previewUrl: `/api/cache/temp/${dupName}`,
+    prompt: '第一次入库',
+  });
+  db.prepare("UPDATE assets SET status='deleted' WHERE fid=?").run(firstDup.fid);
+  const secondDup = await registerGenerated(services, {
+    previewUrl: `/api/cache/temp/${dupName}`,
+    prompt: '删掉之后再入库',
+  });
+  assert.notStrictEqual(secondDup.fid, firstDup.fid);
+  assert.strictEqual(secondDup.deduped, false);
+  const hiddenDup = db.prepare('SELECT status, sha256 FROM assets WHERE fid=?').get(firstDup.fid);
+  assert.strictEqual(hiddenDup.status, 'deleted');
+  assert.strictEqual(hiddenDup.sha256, null);
+  const shownDup = db.prepare('SELECT status FROM assets WHERE fid=?').get(secondDup.fid);
+  assert.strictEqual(shownDup.status, 'ready');
+  const thirdDup = await registerGenerated(services, {
+    previewUrl: `/api/cache/temp/${dupName}`,
+    prompt: '看得见的那条直接复用',
+  });
+  assert.strictEqual(thirdDup.fid, secondDup.fid);
+  assert.strictEqual(thirdDup.deduped, true);
+  ok('去重只认看得见的行，隐藏哈希会另存一条');
+
+  const { sweepLocalTemp } = require('../src/temp-sweeper');
+  const oldKept = path.join(tempDir, 'kept-by-chat.jpg');
+  const oldDrop = path.join(tempDir, 'drop-me.jpg');
+  fs.writeFileSync(oldKept, jpeg);
+  fs.writeFileSync(oldDrop, jpeg);
+  const past = (Date.now() - 5 * 24 * 60 * 60 * 1000) / 1000;
+  fs.utimesSync(oldKept, past, past);
+  fs.utimesSync(oldDrop, past, past);
+  db.prepare(`
+    INSERT INTO chat_messages (id, session_id, user_id, role, mode, prompt, result_json, created_at, updated_at)
+    VALUES ('m-keep', 's', 1, 'assistant', 'text_to_image', '', ?, ?, ?)
+  `).run(JSON.stringify({ imageUrl: '/api/cache/temp/kept-by-chat.jpg' }), Date.now(), Date.now());
+  const blocked = sweepLocalTemp({ dataDir: testDir }, { prepare() { throw new Error('引用检查坏了'); } });
+  assert.strictEqual(blocked.deleted, 0);
+  assert.ok(fs.existsSync(oldDrop));
+  const swept = sweepLocalTemp({ dataDir: testDir }, db);
+  assert.ok(fs.existsSync(oldKept));
+  assert.ok(!fs.existsSync(oldDrop));
+  assert.ok(swept.skipped >= 1);
+  ok('对话还引用的临时文件不删，引用检查失败时整轮不删');
 
   const token = auth.generateMediaToken(auth.tempMediaSubject('clip.mp4'), 60, testDir);
   assert.strictEqual(auth.verifyMediaToken(auth.tempMediaSubject('clip.mp4'), token, testDir), true);

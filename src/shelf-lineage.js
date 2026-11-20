@@ -239,7 +239,12 @@ async function registerGenerated(services, input = {}) {
   }
   const buf = fs.readFileSync(src);
   const sha = crypto.createHash('sha256').update(buf).digest('hex');
-  const existing = db.prepare('SELECT fid FROM assets WHERE sha256=?').get(sha);
+  // 只和列表里看得见的行去重。deleted / rejected 仍占着哈希时，不能把按钮指到那条看不见的记录上。
+  const existing = db.prepare(`
+    SELECT fid FROM assets
+    WHERE sha256=? AND status IN ('ready', 'ready_with_flags')
+    LIMIT 1
+  `).get(sha);
   const parentFid = String(input.parentFid || '').trim();
   const refFids = [].concat(input.refFids || []).map(String).filter((id) => id && id !== parentFid);
   const now = Date.now();
@@ -286,7 +291,11 @@ async function registerGenerated(services, input = {}) {
     ext === '.mp4' || ext === '.webm' || ext === '.mov' ? 'video'
     : (ext === '.mp3' || ext === '.wav' || ext === '.m4a' ? 'audio' : 'image')
   );
-  const fid = `gen_${sha.slice(0, 24)}`;
+  let fid = `gen_${sha.slice(0, 24)}`;
+  const fidOwner = db.prepare('SELECT status FROM assets WHERE fid=?').get(fid);
+  if (fidOwner && fidOwner.status !== 'ready' && fidOwner.status !== 'ready_with_flags') {
+    fid = `gen_${sha.slice(0, 16)}_${crypto.randomBytes(4).toString('hex')}`;
+  }
   record.thumbFid = fid;
   let width = null;
   let height = null;
@@ -310,28 +319,54 @@ async function registerGenerated(services, input = {}) {
   const orientation = width && height
     ? (height > width * 1.05 ? 'portrait' : (width > height * 1.05 ? 'landscape' : 'square'))
     : null;
-  db.prepare(`
-    INSERT INTO assets (
-      fid, kind, category, file_name, size, width, height, orientation, duration_s,
-      status, is_ai, source, source_asset_id, parent_fid,
-      sha256, library_shelf, lineage_json, created_at, discovered_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', 1, 'ai', ?, ?, ?, 'retouched', ?, ?, ?, ?)
-  `).run(
-    fid,
-    kind,
-    category,
-    path.basename(src),
-    buf.length,
-    width,
-    height,
-    orientation,
-    duration,
-    parentFid || null,
-    parentFid || null,
-    sha,
-    JSON.stringify(record),
-    now, now, now
-  );
+  try {
+    db.transaction(() => {
+      try {
+        const { isBlacklisted } = require('./assets-delete');
+        const staleRows = db.prepare("SELECT fid, sha256 FROM assets WHERE sha256=? AND IFNULL(status,'') NOT IN ('ready', 'ready_with_flags')").all(sha);
+        for (const sr of staleRows) {
+          if (!isBlacklisted(db, { fid: sr.fid, sha256: sr.sha256 })) {
+            db.prepare('UPDATE assets SET sha256=NULL WHERE fid=?').run(sr.fid);
+          }
+        }
+      } catch (_) {
+        db.prepare(`
+          UPDATE assets SET sha256=NULL
+          WHERE sha256=? AND IFNULL(status,'') NOT IN ('ready', 'ready_with_flags')
+        `).run(sha);
+      }
+      db.prepare(`
+        INSERT INTO assets (
+          fid, kind, category, file_name, size, width, height, orientation, duration_s,
+          status, is_ai, source, source_asset_id, parent_fid,
+          sha256, library_shelf, lineage_json, created_at, discovered_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', 1, 'ai', ?, ?, ?, 'retouched', ?, ?, ?, ?)
+      `).run(
+        fid,
+        kind,
+        category,
+        path.basename(src),
+        buf.length,
+        width,
+        height,
+        orientation,
+        duration,
+        parentFid || null,
+        parentFid || null,
+        sha,
+        JSON.stringify(record),
+        now, now, now
+      );
+    })();
+  } catch (err) {
+    const raced = db.prepare(`
+      SELECT fid FROM assets
+      WHERE sha256=? AND status IN ('ready', 'ready_with_flags')
+      LIMIT 1
+    `).get(sha);
+    if (raced) return { fid: raced.fid, deduped: true };
+    throw err;
+  }
   const { createDerivative, setMainDerivative } = require('./derivatives');
   const deriv = await createDerivative(services, {
     assetFid: fid,
@@ -357,17 +392,15 @@ async function registerGenerated(services, input = {}) {
     let poster = '';
     try { poster = await videoTags.ensureVideoPoster(config, fid, src); } catch { poster = ''; }
     if (!poster) {
-      try { db.prepare('DELETE FROM asset_tags WHERE asset_fid=?').run(fid); } catch { /* 回滚时表可能还没有 */ }
-      try { db.prepare('DELETE FROM derivatives WHERE asset_fid=?').run(fid); } catch { /* 同上 */ }
-      try { db.prepare('DELETE FROM assets WHERE fid=?').run(fid); } catch { /* 同上 */ }
-      throw new Error('封面没有生成，成片未入库');
-    }
-    const parentHasScene = parentFid && videoTags.parentHasSceneTags(db, parentFid);
-    if (!parentHasScene && services.interpreter) {
-      try {
-        await services.interpreter.triggerRun({ assetFids: [fid], trigger: 'video_scene' });
-      } catch (err) {
-        services.logger?.warn?.(`[lineage] 视频画面打标未入队 ${fid}: ${err.message}`);
+      services.logger?.warn?.(`[lineage] 封面没有生成，成片已入库 ${fid}`);
+    } else {
+      const parentHasScene = parentFid && videoTags.parentHasSceneTags(db, parentFid);
+      if (!parentHasScene && services.interpreter) {
+        try {
+          await services.interpreter.triggerRun({ assetFids: [fid], trigger: 'video_scene' });
+        } catch (err) {
+          services.logger?.warn?.(`[lineage] 视频画面打标未入队 ${fid}: ${err.message}`);
+        }
       }
     }
   }

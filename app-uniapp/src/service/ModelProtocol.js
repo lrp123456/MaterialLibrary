@@ -32,7 +32,11 @@ export function evaluateClientModelRules(schema, activeMode, currentParams = {},
     if (Array.isArray(mc.lock)) {
       for (const k of mc.lock) {
         lockedKeys.add(k);
-        lockReasons[k] = mc.reason || '已由模型契约锁定';
+        let reason = mc.reason;
+        if (!reason && (k === 'ratio' || k === 'aspect_ratio')) {
+          reason = '当前模式（如首尾帧）要求画幅强制为「自适应」';
+        }
+        lockReasons[k] = reason || '已由模型契约锁定';
       }
     }
   }
@@ -96,11 +100,17 @@ export function evaluateClientModelRules(schema, activeMode, currentParams = {},
   };
 }
 
-/** schema 全字段默认值（common + advanced）。 */
+/** schema 全字段默认值（common + advanced）。画幅字段默认必须为 9:16。 */
 export function schemaDefaults(schema) {
   const out = {};
   for (const field of [...((schema && schema.common) || []), ...((schema && schema.advanced) || [])]) {
-    if (field && field.key) out[field.key] = field.default;
+    if (field && field.key) {
+      if (['ratio', 'aspect_ratio', 'ar'].includes(field.key)) {
+        out[field.key] = '9:16';
+      } else {
+        out[field.key] = field.default;
+      }
+    }
   }
   return out;
 }
@@ -114,6 +124,12 @@ export function fieldByKey(schema, key) {
 export function valueStillFits(schema, key, value) {
   const field = fieldByKey(schema, key);
   if (!field) return false;
+  if (['ratio', 'aspect_ratio', 'ar'].includes(key)) {
+    // 画幅默认仅能采用 9:16、3:4；adaptive 仅在强制自适应时有效
+    if (value === '9:16' || value === '3:4') return true;
+    if (value === 'adaptive') return true;
+    return false;
+  }
   if (field.type === 'enum') return (field.options || []).map(String).includes(String(value));
   if (['number', 'range', 'duration'].includes(field.type)) {
     if (value === '' || value == null) return false;
@@ -125,7 +141,7 @@ export function valueStillFits(schema, key, value) {
   return true;
 }
 
-/** 把任意参数对象裁剪回 schema 允许的键与值。 */
+/** 把任意参数对象裁剪回 schema 允许的键与值。画幅非强制情况下严格裁剪为 9:16 或 3:4。 */
 export function clampParamsToSchema(schema, params = {}) {
   if (!schema) return { ...(params || {}) };
   const out = { ...(params || {}) };
@@ -133,7 +149,11 @@ export function clampParamsToSchema(schema, params = {}) {
     if (!field || !field.key) continue;
     const has = out[field.key] != null;
     if (!has) continue;
-    if (field.type === 'enum' && !valueStillFits(schema, field.key, out[field.key])) {
+    if (['ratio', 'aspect_ratio', 'ar'].includes(field.key)) {
+      if (!['9:16', '3:4', 'adaptive'].includes(String(out[field.key]))) {
+        out[field.key] = '9:16';
+      }
+    } else if (field.type === 'enum' && !valueStillFits(schema, field.key, out[field.key])) {
       out[field.key] = field.default;
     } else if (['number', 'range', 'duration'].includes(field.type)) {
       const n = Number(out[field.key]);

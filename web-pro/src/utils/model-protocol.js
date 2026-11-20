@@ -665,9 +665,11 @@ export function inferOptimalWorkflowAndParams({
   }
 
   // 1.2 检查挂载素材属性
-  const hasVideo = tray.some(it => detectMediaSemantics(it).isVideo);
-  const hasAudio = tray.some(it => detectMediaSemantics(it).isAudio);
+  const videoItems = tray.filter(it => detectMediaSemantics(it).isVideo);
+  const audioItems = tray.filter(it => detectMediaSemantics(it).isAudio);
   const imageItems = tray.filter(it => !detectMediaSemantics(it).isVideo && !detectMediaSemantics(it).isAudio);
+  const hasVideo = videoItems.length > 0;
+  const hasAudio = audioItems.length > 0;
 
   if (hasVideo) {
     if (targetModality !== 'video') {
@@ -701,50 +703,36 @@ export function inferOptimalWorkflowAndParams({
   const has3D = effectiveRegions.some(r => ['replace', 'add'].includes(r.op))
     || tray.some(it => detectMediaSemantics(it).is3DFurniture);
 
-  if (targetModality === 'image') {
-    if (hasOutpaint && hasMode('expand_fill')) {
-      targetGenMode = 'expand_fill';
-      reasons.push('检测到画幅向外延展操作，自动切入「扩边填白 (expand_fill)」模式');
-    } else if (hasRegions && hasMode('image_edit')) {
-      targetGenMode = 'image_edit';
-      if (hasErase && !has3D && !hasRecolor) {
-        reasons.push('检测到杂物消除选区，自动切入「交互编辑」消除修复模式，智能重构背景平整纹理');
-      } else if (hasRecolor && !has3D) {
-        reasons.push('检测到材质色板/表面重塑选区，自动切入「交互编辑」材质重塑模式');
-      } else if (has3D) {
-        reasons.push('检测到 3D 软装家具陈设选区，自动切入「交互编辑」并锁定地面透视与真实物理尺度');
-      } else {
-        reasons.push('检测到空间局部标注选区，自动切入「交互编辑 (image_edit)」精准重绘模式');
-      }
-    } else if (imageItems.length === 1) {
-      if (hasMode('image_to_image')) targetGenMode = 'image_to_image';
-      else if (hasMode('image_reference')) targetGenMode = 'image_reference';
-    } else if (imageItems.length > 1) {
-      const hasSwatch = tray.some(it => detectMediaSemantics(it).isMaterialSwatch);
-      if ((has3D || hasSwatch) && hasMode('image_edit')) {
-        targetGenMode = 'image_edit';
-        reasons.push(has3D ? '识别到 3D 软装家具透视参考，自动激活空间局部编辑模式' : '识别到材质色板贴图参考，自动激活材质重塑模式');
-      } else if (hasMode('image_reference')) {
-        targetGenMode = 'image_reference';
-      } else if (hasMode('image_to_image')) {
-        targetGenMode = 'image_to_image';
-      }
-    } else if (imageItems.length === 0) {
-      if (hasMode('text_to_image')) targetGenMode = 'text_to_image';
-    }
-  } else if (targetModality === 'video') {
-    // 规则：
-    // 1. 默认选中「全能参考 (omni_reference)」；
-    // 2. 首尾帧 (first_last_frame) 只能手动去选，自动化调度绝不自动切入首尾帧（即使有 2 张图）；
-    // 3. 取消图参考模式 (image_to_video)；三种模式：文生视频、全能参考、首尾帧。
+  // 图像/视频默认模式：有参考统一使用「全能参考」(视频) 或「图生图」(生图)；无参考使用文生。
+  // 首尾帧、交互编辑、扩边等非默认模式只接受用户手动点选，不自动进入。
+  if (targetModality === 'video') {
+    const hasRefs = imageItems.length > 0 || videoItems.length > 0;
+    const tplSchemaMode = templateMeta?.params?.schemaMode;
     if (currentGenMode === 'first_last_frame' && hasMode('first_last_frame')) {
       targetGenMode = 'first_last_frame';
-    } else if (imageItems.length === 0 && currentGenMode === 'text_to_video' && hasMode('text_to_video')) {
+    } else if (tplSchemaMode && hasMode(tplSchemaMode)) {
+      targetGenMode = tplSchemaMode;
+    } else if (hasRefs) {
+      if (hasMode('omni_reference')) targetGenMode = 'omni_reference';
+      else if (hasMode('image_to_video')) targetGenMode = 'image_to_video';
+      else if (hasMode('image_reference')) targetGenMode = 'image_reference';
+      else if (hasMode('reference')) targetGenMode = 'reference';
+    } else if (hasMode('text_to_video')) {
       targetGenMode = 'text_to_video';
-    } else if (hasMode('omni_reference')) {
-      targetGenMode = 'omni_reference';
-    } else if (imageItems.length === 0 && hasMode('text_to_video')) {
-      targetGenMode = 'text_to_video';
+    }
+  } else if (targetModality === 'image') {
+    const tplSchemaMode = templateMeta?.params?.schemaMode;
+    if (tplSchemaMode && hasMode(tplSchemaMode)) {
+      targetGenMode = tplSchemaMode;
+    } else if (imageItems.length > 0) {
+      const hasSwatch = tray.some(it => detectMediaSemantics(it).isMaterialSwatch);
+      if (imageItems.length > 1 && (has3D || hasSwatch) && hasMode('image_edit')) {
+        targetGenMode = 'image_edit';
+        reasons.push(has3D ? '识别到 3D 软装家具透视参考，自动激活空间局部编辑模式' : '识别到材质色板贴图参考，自动激活材质重塑模式');
+      } else if (hasMode('image_to_image')) targetGenMode = 'image_to_image';
+      else if (hasMode('image_reference')) targetGenMode = 'image_reference';
+    } else if (hasMode('text_to_image')) {
+      targetGenMode = 'text_to_image';
     }
   }
 
@@ -805,9 +793,9 @@ export function inferOptimalWorkflowAndParams({
     }
   }
 
-  // 兜底保障 ratio 合法性
+  // 兜底保障 ratio 合法性：默认必须为 9:16（除非模型强制）
   if (!ratioOptions.includes(targetRatio)) {
-    targetRatio = ratioOptions.includes('adaptive') ? 'adaptive' : (ratioOptions[0] || '1:1');
+    targetRatio = ratioOptions.includes('9:16') ? '9:16' : (ratioOptions[0] || '9:16');
   }
 
   // 4. 选区出口路由 (Selection Exit Routing)
@@ -865,6 +853,90 @@ export function inferOptimalWorkflowAndParams({
       textureAlignmentRequired: hasRecolor
     }
   };
+}
+
+/**
+ * 解析当前模型/模态在当前参考素材下的默认生成模式
+ * 有图或参考视频：
+ *   - 视频：默认「全能参考」(omni_reference)；若模型无全能参考，用其自带的「图生视频/参考」(image_to_video / image_reference / reference)
+ *   - 生图：默认「图生图」(image_to_image / image_reference)
+ * 无图且无参考视频：
+ *   - 视频：默认「文生视频」(text_to_video)
+ *   - 生图：默认「文生图」(text_to_image)
+ */
+export function resolveDefaultMode({ schema = null, modality = 'video', refCounts = {} } = {}) {
+  const modes = Array.isArray(schema?.modes) ? schema.modes : [];
+  const modeIds = modes.map(m => m.id);
+  const imageCount = Number(refCounts.images || 0);
+  const videoCount = Number(refCounts.videos || 0);
+  const hasRefs = (imageCount + videoCount) > 0;
+
+  let targetId = '';
+  if (modality === 'video') {
+    if (hasRefs) {
+      if (modeIds.includes('omni_reference')) targetId = 'omni_reference';
+      else if (modeIds.includes('image_to_video')) targetId = 'image_to_video';
+      else if (modeIds.includes('image_reference')) targetId = 'image_reference';
+      else if (modeIds.includes('reference')) targetId = 'reference';
+      else targetId = modeIds.find(id => id !== 'text_to_video') || modeIds[0] || '';
+    } else {
+      targetId = modeIds.includes('text_to_video') ? 'text_to_video' : (modeIds[0] || '');
+    }
+  } else if (modality === 'image') {
+    if (imageCount > 0) {
+      if (modeIds.includes('image_to_image')) targetId = 'image_to_image';
+      else if (modeIds.includes('image_reference')) targetId = 'image_reference';
+      else targetId = modeIds.find(id => id !== 'text_to_image') || modeIds[0] || '';
+    } else {
+      targetId = modeIds.includes('text_to_image') ? 'text_to_image' : (modeIds[0] || '');
+    }
+  } else {
+    targetId = modeIds[0] || '';
+  }
+
+  const found = modes.find(m => m.id === targetId);
+  return {
+    id: targetId,
+    label: found?.label || targetId || '默认模式'
+  };
+}
+
+/**
+ * 视频子模式。有参考（图或视频）默认全能参考（若无则降级为模型参考/图生视频）；无参考默认文生视频。
+ * 手选模式保持（首尾帧等），但已挂参考图时文生视频绝不能保持。
+ * @returns {{ mode: string, unlock: boolean }}
+ */
+export function resolveVideoGenMode({ modeIds = [], imageCount = 0, videoCount = 0, activeMode = '', userLocked = false } = {}) {
+  const ids = Array.isArray(modeIds) ? modeIds : [];
+  const has = (id) => ids.includes(id);
+  const count = (Number(imageCount) || 0) + (Number(videoCount) || 0);
+  const mode = String(activeMode || '');
+  const textOnly = mode === 'text_to_video' || mode === 'text_to_image';
+
+  if (userLocked && mode && has(mode)) {
+    if (count > 0 && textOnly) {
+      // 挂了参考时文生不能留下
+    } else {
+      return { mode, unlock: false };
+    }
+  }
+  if (userLocked && count <= 0) {
+    return { mode: mode || (has('text_to_video') ? 'text_to_video' : ''), unlock: false };
+  }
+
+  let next = '';
+  if (count > 0) {
+    if (has('omni_reference')) next = 'omni_reference';
+    else if (has('image_to_video')) next = 'image_to_video';
+    else if (has('image_reference')) next = 'image_reference';
+    else if (has('reference')) next = 'reference';
+    else next = ids.find(id => id !== 'text_to_video') || ids[0] || '';
+  } else if (has('text_to_video')) {
+    next = 'text_to_video';
+  } else {
+    next = ids[0] || '';
+  }
+  return { mode: next, unlock: Boolean(userLocked && count > 0 && textOnly) };
 }
 
 /**

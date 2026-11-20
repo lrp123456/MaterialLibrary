@@ -345,7 +345,11 @@
       </view>
 
       <!-- 规则警告 / 限制提示 -->
-      <view v-if="ruleWarnings.length || refError" class="composer-warnings">
+      <view v-if="ruleWarnings.length || refError || isAdaptiveForced" class="composer-warnings">
+        <view v-if="isAdaptiveForced" class="composer-warn-adaptive">
+          <text class="composer-warn-icon">⚠️</text>
+          <text class="composer-warn-t warn-highlight">当前模式（如首尾帧）要求画幅强制为「自适应」，生成将按参考图比例输出</text>
+        </view>
         <text v-for="(w, wi) in ruleWarnings" :key="'warn-' + wi" class="composer-warn-t">{{ w }}</text>
         <text v-if="refError" class="composer-warn-t">{{ refError }}</text>
       </view>
@@ -366,16 +370,17 @@
               v-for="f in primaryParams"
               :key="'param-' + f.key"
               class="capsule-pill"
-              :class="{ locked: isFieldLocked(f.key) }"
+              :class="{ locked: isFieldLocked(f.key), 'adaptive-locked-pill': isFieldLocked(f.key) && isRatioField(f) && isAdaptiveValue(f) }"
               @click="onParamPill(f)"
               hover-class="capsule-hover"
             >
-              <AppIcon :name="paramFieldIcon(f)" :size="11" color="#64748B" />
+              <AppIcon :name="paramFieldIcon(f)" :size="11" :color="isFieldLocked(f.key) && isRatioField(f) && isAdaptiveValue(f) ? '#D97706' : '#64748B'" />
               <text class="capsule-t">
                 <text class="capsule-prefix">{{ paramPrefix(f) }}</text>
                 <text class="capsule-sep">·</text>
-                <text class="capsule-val">{{ paramDisplay(f) }}</text>
+                <text class="capsule-val" :class="{ 'adaptive-val-text': isFieldLocked(f.key) && isRatioField(f) && isAdaptiveValue(f) }">{{ paramDisplay(f) }}</text>
               </text>
+              <text v-if="isFieldLocked(f.key) && isRatioField(f) && isAdaptiveValue(f)" class="adaptive-pill-badge">强制</text>
               <AppIcon name="chevron-down" :size="9" color="#64748B" />
             </view>
 
@@ -764,7 +769,7 @@ import {
 } from '../../service/ModelProtocol'
 import MODEL_CATALOG, { mergeStudioCatalog } from '../../service/ModelCatalog'
 
-const RATIO_FALLBACK = ['1:1', '3:4', '4:3', '9:16', '16:9']
+const RATIO_FALLBACK = ['9:16', '3:4']
 
 function absMediaUrl(file, result) {
   const rel = (file && file.previewUrl) || (result && result.previewUrl) || ''
@@ -790,6 +795,7 @@ export default {
       sessions: [],
       sessionsLoading: false,
       currentSessionId: '',
+      sessionReqSeq: 0,
       chatList: [],
       scrollIntoId: '',
       drawerOpen: false,
@@ -981,7 +987,7 @@ export default {
       return {
         prompt,
         type,
-        aspect_ratio: ratio || (this.domain === 'video' ? '9:16' : '16:9'),
+        aspect_ratio: ratio || '9:16',
         origin_images: (this.refs || []).map((r, i) => ({
           name: r.label || '',
           fid: r.fid || '',
@@ -1022,7 +1028,7 @@ export default {
         }
       }
       try {
-        const saved = uni.getStorageSync('chat_library_creations') || []
+        const saved = uni.getStorageSync(this.chatLibraryCreationsKey()) || uni.getStorageSync('chat_library_creations') || []
         if (Array.isArray(saved)) {
           for (const s of saved) {
             if (s && s.url && !seen.has(s.url)) {
@@ -1231,12 +1237,49 @@ export default {
       if (this.domain === 'music') return '描述你想要的配乐氛围…'
       return '发消息，或输入创作想法…'
     },
+    isAdaptiveForced() {
+      const schema = this.currentSchema
+      const mode = this.activeMode
+      // 1. 首尾帧、视频编辑、视频延长等强制锁定自适应的模式
+      if (['first_last_frame', 'video_edit', 'video_extend'].includes(mode)) return true
+      // 2. 模式契约锁定 ratio 为 adaptive
+      const mc = schema && schema.modeConstraints && schema.modeConstraints[mode]
+      if (mc && Array.isArray(mc.lock) && (mc.lock.includes('ratio') || mc.lock.includes('aspect_ratio'))) {
+        if (mc.set && (mc.set.ratio === 'adaptive' || mc.set.aspect_ratio === 'adaptive')) return true
+      }
+      // 3. 规则计算中 ratio 被锁定且值为 adaptive
+      const locked = this.ruleEval && this.ruleEval.lockedKeys
+      const hasRatioLocked = Array.isArray(locked) && (locked.includes('ratio') || locked.includes('aspect_ratio') || locked.includes('ar'))
+      const rVal = this.paramValueOf({ key: 'ratio' }) || this.paramValueOf({ key: 'aspect_ratio' })
+      if (hasRatioLocked && rVal === 'adaptive') return true
+      return false
+    },
+  },
+  watch: {
+    isAdaptiveForced(newVal, oldVal) {
+      if (newVal && !oldVal) {
+        uni.showToast({
+          title: '已自动切换为「自适应」画幅（模型要求）',
+          icon: 'none',
+          duration: 3000
+        })
+      }
+    }
   },
 
   onLoad() {
     this.statusBarHeight = (uni.getSystemInfoSync && uni.getSystemInfoSync().statusBarHeight) || 20
   },
   onShow() {
+    const currentUid = this.getUserId()
+    if (this._activeUserId !== undefined && this._activeUserId !== currentUid) {
+      this.sessions = []
+      this.chatList = []
+      this.currentSessionId = ''
+      this._sessionPersisted = false
+    }
+    this._activeUserId = currentUid
+
     // 消费编辑页交接的一次性 payload（switchTabTo 中转）
     const payload = consumeTabParams('/pages/home/home')
     if (payload) this.applyPendingPayload(payload)
@@ -1246,6 +1289,67 @@ export default {
     this.loadCapabilities(false)
   },
   methods: {
+    // ─────────── 本地 Storage 多用户隔离与会话管理 ───────────
+    getUserId() {
+      try {
+        const u = uni.getStorageSync('user')
+        if (u) {
+          if (typeof u === 'object') {
+            const id = u.id || u.userId || u.username
+            if (id) return String(id)
+          } else if (typeof u === 'string' && u) {
+            return u
+          }
+        }
+        const uid = uni.getStorageSync('userId')
+        if (uid) return String(uid)
+      } catch (e) {}
+      return ''
+    },
+    chatSessionListKey() {
+      const uid = this.getUserId()
+      return uid ? `chat_session_list_${uid}` : 'chat_session_list'
+    },
+    chatMessagesKey(sid) {
+      const uid = this.getUserId()
+      return uid ? `chat_messages_${uid}_${sid}` : `chat_messages_${sid}`
+    },
+    chatLibraryCreationsKey() {
+      const uid = this.getUserId()
+      return uid ? `chat_library_creations_${uid}` : 'chat_library_creations'
+    },
+    clearSession() {
+      this.clearUserChatCache()
+    },
+    logout() {
+      this.clearUserChatCache()
+    },
+    clearUserChatCache() {
+      try {
+        uni.removeStorageSync(this.chatSessionListKey())
+        if (Array.isArray(this.sessions)) {
+          this.sessions.forEach((s) => {
+            const sid = s && (s.sessionId || s.id)
+            if (sid) {
+              try {
+                uni.removeStorageSync(this.chatMessagesKey(sid))
+                uni.removeStorageSync('chat_messages_' + sid)
+              } catch (e) {}
+            }
+          })
+        }
+        if (this.currentSessionId) {
+          try {
+            uni.removeStorageSync(this.chatMessagesKey(this.currentSessionId))
+            uni.removeStorageSync('chat_messages_' + this.currentSessionId)
+          } catch (e) {}
+        }
+      } catch (e) {}
+      this.sessions = []
+      this.chatList = []
+      this.currentSessionId = ''
+      this._sessionPersisted = false
+    },
     // ─────────── 初始化 ───────────
     async ensureSessionAndHistory() {
       if (this._booting) return
@@ -1287,12 +1391,25 @@ export default {
     resetParamsForModel() {
       const sch = this.currentSchema
       if (!sch) {
-        this.schemaParams = {}
+        this.schemaParams = { ratio: '9:16' }
         return
       }
       const mode = resolveSchemaMode(sch, this.currentMode, this.refCounts)
       const evaluated = evaluateClientModelRules(sch, mode, schemaDefaults(sch), this.refCounts)
-      this.schemaParams = clampParamsToSchema(sch, evaluated.params)
+      const clamped = clampParamsToSchema(sch, evaluated.params)
+      // 检查当前模式是否强制锁定 ratio 为自适应；非强制时必须默认 9:16
+      const isForced = ['first_last_frame', 'video_edit', 'video_extend'].includes(mode) ||
+        (Array.isArray(evaluated.lockedKeys) && (evaluated.lockedKeys.includes('ratio') || evaluated.lockedKeys.includes('aspect_ratio')) && (clamped.ratio === 'adaptive' || clamped.aspect_ratio === 'adaptive'))
+      for (const rk of ['ratio', 'aspect_ratio', 'ar']) {
+        if (fieldByKey(sch, rk)) {
+          if (!isForced) {
+            clamped[rk] = '9:16'
+          } else {
+            clamped[rk] = 'adaptive'
+          }
+        }
+      }
+      this.schemaParams = clamped
       this.activeParamKey = ''
       this.sheetMode = this.sheetMode === 'param' ? '' : this.sheetMode
     },
@@ -1389,14 +1506,14 @@ export default {
       this.sessionsLoading = true
       let remote = []
       try {
-        const data = await fetchChatSessions()
+        const data = await fetchChatSessions({ scope: 'all', limit: 100 })
         remote = Array.isArray(data) ? data : (data && data.sessions) || []
       } catch (e) {
         remote = []
       }
       let local = []
       try {
-        const raw = uni.getStorageSync('chat_session_list')
+        const raw = uni.getStorageSync(this.chatSessionListKey()) || uni.getStorageSync('chat_session_list')
         if (Array.isArray(raw)) local = raw
       } catch (e) {}
       this.sessions = this.dedupeSessions([...remote, ...local])
@@ -1429,7 +1546,7 @@ export default {
     },
     persistSessionsLocal() {
       try {
-        uni.setStorageSync('chat_session_list', this.sessions)
+        uni.setStorageSync(this.chatSessionListKey(), this.sessions)
       } catch (e) {}
     },
     sessionTypeOfDomain() {
@@ -1479,26 +1596,35 @@ export default {
       return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
     },
     async loadChatHistory() {
-      if (!this.currentSessionId) return
+      const sid = this.currentSessionId
+      if (!sid) return
+      const seq = ++this.sessionReqSeq
       try {
-        const local = uni.getStorageSync('chat_messages_' + this.currentSessionId)
-        if (Array.isArray(local) && local.length) {
-          this.chatList = local
-          this.scrollToBottom()
+        const local = uni.getStorageSync(this.chatMessagesKey(sid)) || (!this.getUserId() ? null : uni.getStorageSync('chat_messages_' + sid))
+        if (seq === this.sessionReqSeq && this.currentSessionId === sid) {
+          if (Array.isArray(local) && local.length) {
+            this.chatList = local
+            this.scrollToBottom()
+          } else {
+            this.chatList = []
+          }
         }
       } catch (e) {}
       try {
-        const remote = await fetchChatMessages(this.currentSessionId, 80)
-        if (Array.isArray(remote) && remote.length) {
-          this.chatList = remote
-          uni.setStorageSync('chat_messages_' + this.currentSessionId, remote)
+        const remote = await fetchChatMessages(sid, 80)
+        if (seq === this.sessionReqSeq && this.currentSessionId === sid) {
+          const list = Array.isArray(remote) ? remote : []
+          this.chatList = list
+          uni.setStorageSync(this.chatMessagesKey(sid), list)
           this.scrollToBottom()
         }
       } catch (e) {}
     },
     async onSelectSession(s) {
-      if (!s || !s.sessionId) return
-      this.currentSessionId = s.sessionId
+      const sid = s && (s.sessionId || s.id)
+      if (!sid) return
+      this.currentSessionId = sid
+      this.chatList = []
       const t = s.type || 'chat'
       if (t === 'chat') this.domain = 'chat'
       else if (t === 'image') { this.domain = 'image'; this.imageSub = 'standard' }
@@ -1512,6 +1638,7 @@ export default {
       await this.loadChatHistory()
     },
     async newSession() {
+      this.sessionReqSeq++
       this.drawerOpen = false
       this.chatList = []
       this.refs = []
@@ -1723,7 +1850,10 @@ export default {
       } catch (e) {}
       this.sessions = this.sessions.filter((x) => x.sessionId !== s.sessionId)
       this.persistSessionsLocal()
-      try { uni.removeStorageSync('chat_messages_' + s.sessionId) } catch (e) {}
+      try {
+        uni.removeStorageSync(this.chatMessagesKey(s.sessionId))
+        uni.removeStorageSync('chat_messages_' + s.sessionId)
+      } catch (e) {}
       if (this.currentSessionId === s.sessionId) {
         this.chatList = []
         this.currentSessionId = ''
@@ -1740,7 +1870,10 @@ export default {
         success: async (res) => {
           if (!res.confirm) return
           this.chatList = []
-          try { uni.removeStorageSync('chat_messages_' + this.currentSessionId) } catch (e) {}
+          try {
+            uni.removeStorageSync(this.chatMessagesKey(this.currentSessionId))
+            uni.removeStorageSync('chat_messages_' + this.currentSessionId)
+          } catch (e) {}
           try { await clearChatMessages(this.currentSessionId) } catch (e) {}
           uni.showToast({ title: '已清空', icon: 'none' })
         },
@@ -2201,6 +2334,28 @@ export default {
         uni.showToast({ title: '请先选择家具单品并完成 3D 朝向截图', icon: 'none' })
         return
       }
+      if (this.refError) {
+        uni.showToast({ title: this.refError, icon: 'none' })
+        return
+      }
+
+      // 强制使用自适应时，点击生成要重点提醒用户！
+      if (this.isAdaptiveForced && !opts?.confirmedAdaptive) {
+        uni.showModal({
+          title: '画幅自适应提醒',
+          content: '当前模式（如首尾帧）强制使用「自适应」画幅生成，生成结果将跟随参考图画幅比例。确认以此画幅生成吗？',
+          confirmText: '确认生成',
+          cancelText: '取消',
+          confirmColor: '#007AFF',
+          success: (res) => {
+            if (res.confirm) {
+              this.sendMessage({ ...(opts || {}), confirmedAdaptive: true })
+            }
+          }
+        })
+        return
+      }
+
       this.ensureOrientationClause()
       const isPreciseEdit = !!(this.pendingEdit && this.pendingEdit.kind !== 'global')
       this.sending = true
@@ -2244,11 +2399,15 @@ export default {
     persistMessage(msg) {
       const slim = { ...msg }
       delete slim.__b64
+      if (!slim.sessionId && this.currentSessionId) {
+        slim.sessionId = this.currentSessionId
+      }
       saveChatMessage(slim).catch(() => {})
       try {
-        const cached = uni.getStorageSync('chat_messages_' + this.currentSessionId) || []
+        const msgKey = this.chatMessagesKey(this.currentSessionId)
+        const cached = uni.getStorageSync(msgKey) || (!this.getUserId() ? null : uni.getStorageSync('chat_messages_' + this.currentSessionId)) || []
         const arr = Array.isArray(cached) ? cached : []
-        uni.setStorageSync('chat_messages_' + this.currentSessionId, [...arr, slim].slice(-80))
+        uni.setStorageSync(msgKey, [...arr, slim].slice(-80))
       } catch (e) {}
     },
 
@@ -2301,7 +2460,8 @@ export default {
         if (task) aiTaskManager.finishTask(task.taskId, { outputFid: out.fid || null, outputKind: kind })
         if (out && out.url) {
           try {
-            const saved = uni.getStorageSync('chat_library_creations') || []
+            const creationsKey = this.chatLibraryCreationsKey()
+            const saved = uni.getStorageSync(creationsKey) || (!this.getUserId() ? null : uni.getStorageSync('chat_library_creations')) || []
             const item = {
               id: aiMsg.id,
               url: out.url,
@@ -2310,7 +2470,7 @@ export default {
               prompt: recipe,
               createdAt: Date.now()
             }
-            uni.setStorageSync('chat_library_creations', [item, ...(Array.isArray(saved) ? saved : [])].slice(0, 60))
+            uni.setStorageSync(creationsKey, [item, ...(Array.isArray(saved) ? saved : [])].slice(0, 60))
           } catch (e) {}
         }
       } catch (e) {
@@ -2487,12 +2647,25 @@ export default {
     },
 
     // ─────────── 动态参数（全部由当前模型 schema 驱动） ───────────
+    isRatioField(f) {
+      if (!f) return false
+      const key = (f.key || '').toLowerCase()
+      return ['aspect_ratio', 'ratio', 'ar'].includes(key)
+    },
+    isAdaptiveValue(f) {
+      return this.paramValueOf(f) === 'adaptive'
+    },
     setSchemaParam(key, value) {
       if (!key) return
       if (this.isFieldLocked(key)) return
       const field = fieldByKey(this.currentSchema, key)
       let next = value
-      if (field && ['number', 'range', 'duration'].includes(field.type)) {
+      if (this.isRatioField(field)) {
+        // 画幅常规选择仅允许 9:16 和 3:4，禁止手动选 adaptive
+        if (!['9:16', '3:4'].includes(String(value))) {
+          next = '9:16'
+        }
+      } else if (field && ['number', 'range', 'duration'].includes(field.type)) {
         const n = Number(value)
         next = Number.isFinite(n) ? n : field.default
         if (next !== -1) {
@@ -2513,11 +2686,19 @@ export default {
     },
     paramOptionsOf(field) {
       if (!field || field.type !== 'enum') return []
+      if (this.isRatioField(field)) {
+        // 画幅常规仅能采用 9:16、3:4；仅在强制要求时才展示自适应
+        if (this.isAdaptiveForced) {
+          return ['adaptive']
+        }
+        return ['9:16', '3:4']
+      }
       const override = this.ruleEval && this.ruleEval.fieldOverrides && this.ruleEval.fieldOverrides[field.key]
       const options = (override && override.options) || field.options || []
       return Array.isArray(options) ? options : []
     },
     optionText(field, opt) {
+      if (opt === 'adaptive') return '自适应'
       return optionLabel(field, opt)
     },
     paramUnit(field) {
@@ -2552,6 +2733,9 @@ export default {
       return Array.isArray(locked) && locked.includes(key)
     },
     lockReasonOf(key) {
+      if (['ratio', 'aspect_ratio', 'ar'].includes(key) && this.isAdaptiveForced) {
+        return '当前模式（如首尾帧）要求画幅强制为「自适应」'
+      }
       const reasons = (this.ruleEval && this.ruleEval.lockReasons) || {}
       return reasons[key] || '已由模型契约锁定'
     },
@@ -2561,6 +2745,7 @@ export default {
     paramDisplay(field) {
       if (!field) return ''
       const value = this.paramValueOf(field)
+      if (this.isRatioField(field) && value === 'adaptive') return '自适应'
       if (field.type === 'enum') return this.optionText(field, value)
       if (field.type === 'bool') return value ? '开启' : '关闭'
       if (['number', 'range', 'duration'].includes(field.type)) {
@@ -3667,6 +3852,28 @@ export default {
   gap: 2px;
 }
 
+.composer-warn-adaptive {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  background-color: #FEF3C7;
+  border: 1px solid #F59E0B;
+  border-radius: 6px;
+  padding: 4px 8px;
+  margin-bottom: 2px;
+}
+
+.composer-warn-adaptive .composer-warn-icon {
+  font-size: 12px;
+}
+
+.composer-warn-adaptive .warn-highlight {
+  color: #B45309;
+  font-weight: 600;
+  font-size: 11px;
+}
+
 .composer-warn-t {
   font-size: 11px;
   color: #D97706;
@@ -3760,6 +3967,26 @@ export default {
   border-radius: 999px;
   padding: 0 4px;
   font-weight: 700;
+}
+
+.capsule-pill.adaptive-locked-pill {
+  border: 1px solid #F59E0B;
+  background: #FEF3C7;
+}
+
+.adaptive-val-text {
+  color: #B45309 !important;
+  font-weight: 700;
+}
+
+.adaptive-pill-badge {
+  font-size: 9px;
+  background: #F59E0B;
+  color: #FFFFFF;
+  border-radius: 4px;
+  padding: 0 4px;
+  font-weight: 700;
+  margin-left: 2px;
 }
 
 .composer-actions-right {

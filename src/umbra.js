@@ -272,6 +272,82 @@ function extractPoster(videoPath, posterPath) {
   });
 }
 
+/** moov 在文件头附近时，播放器不用先读完整文件才能出第一帧。 */
+function moovIsEarly(filePath, headBytes = 256 * 1024) {
+  if (!filePath || !fs.existsSync(filePath)) return false;
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    const size = fs.fstatSync(fd).size;
+    const n = Math.min(size, headBytes);
+    if (n < 8) return false;
+    const buf = Buffer.alloc(n);
+    fs.readSync(fd, buf, 0, n, 0);
+    return buf.indexOf('moov') >= 0;
+  } catch {
+    return false;
+  } finally {
+    try { fs.closeSync(fd); } catch {}
+  }
+}
+
+const fastStartInflight = new Map();
+
+/**
+ * 把 moov 移到文件头。拷贝流，不重编码。并发对同一路径只跑一次。
+ * ffmpeg 不可用或失败时保留原文件。
+ */
+function fastStartVideo(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return Promise.resolve(false);
+  if (moovIsEarly(filePath)) return Promise.resolve(true);
+  if (fastStartInflight.has(filePath)) return fastStartInflight.get(filePath);
+  const job = new Promise((resolve) => {
+    const tmp = `${filePath}.faststart.tmp.mp4`;
+    const bak = `${filePath}.faststart.bak`;
+    try { fs.unlinkSync(tmp); } catch {}
+    const ff = spawn('ffmpeg', ['-y', '-i', filePath, '-c', 'copy', '-movflags', '+faststart', tmp]);
+    const finish = (ok) => {
+      if (!ok) {
+        try { fs.unlinkSync(tmp); } catch {}
+        resolve(false);
+        return;
+      }
+      try {
+        try { fs.unlinkSync(bak); } catch {}
+        fs.renameSync(filePath, bak);
+        fs.renameSync(tmp, filePath);
+        try { fs.unlinkSync(bak); } catch {}
+        resolve(moovIsEarly(filePath));
+      } catch {
+        try {
+          if (!fs.existsSync(filePath) && fs.existsSync(bak)) fs.renameSync(bak, filePath);
+        } catch {}
+        try { fs.unlinkSync(tmp); } catch {}
+        resolve(false);
+      }
+    };
+    ff.on('close', (code) => {
+      const ok = code === 0 && fs.existsSync(tmp) && fs.statSync(tmp).size > 0;
+      finish(ok);
+    });
+    ff.on('error', () => finish(false));
+  }).finally(() => {
+    fastStartInflight.delete(filePath);
+  });
+  fastStartInflight.set(filePath, job);
+  return job;
+}
+
+/** 落盘后的对话成片：索引前移，并写出同目录封面，打开会话时不再抽帧。 */
+async function prepareChatVideo(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return false;
+  await fastStartVideo(filePath);
+  const poster = `${filePath}.poster.jpg`;
+  if (!fs.existsSync(poster) || fs.statSync(poster).size < 100) {
+    await extractPoster(filePath, poster);
+  }
+  return true;
+}
+
 module.exports = {
   getUmbraConfig,
   resolveTemplateId,
@@ -285,6 +361,9 @@ module.exports = {
   buildTouchBindings,
   extractVideoMeta,
   extractPoster,
+  moovIsEarly,
+  fastStartVideo,
+  prepareChatVideo,
   WALKTHROUGH_VIDEO_KEYS,
   WALKTHROUGH_POSTER_KEYS,
   TOUCH_IMAGE_KEYS,

@@ -46,12 +46,12 @@ const services = { db, config, logger: console };
 const interpreter = new WorkflowInterpreter(services);
 services.interpreter = interpreter;
 if (!DISABLE_WORKERS) interpreter.startWorkerLoop(2000);
-// 重启不能无条件重跑补缺：一次批次是几十张图生图，反复重启会把本地生图服务打满显存，
-// 连带把常驻 GPU 的音频模型挤到 OOM。默认 6 小时内只自动补一次，可用
-// ML_RESTAGE_BACKFILL_ON_START=0 关掉，或调 ML_RESTAGE_BACKFILL_COOLDOWN_MS。
+// 已按用户要求彻底关闭启动自动画幅重构补跑。
+// 画幅重构严格仅允许人工在资产选择器或详情页手动点击单张触发，绝不自动扫库入队消耗算力/额度。
+// 仅在明确传入 ML_RESTAGE_BACKFILL_ON_START=1 时才允许手动调试触发。
 const RESTAGE_BACKFILL_COOLDOWN_MS = Number(process.env.ML_RESTAGE_BACKFILL_COOLDOWN_MS) || 6 * 3600 * 1000;
 function maybeQueueRestageBackfill() {
-  if (process.env.ML_RESTAGE_BACKFILL_ON_START === '0') return;
+  if (process.env.ML_RESTAGE_BACKFILL_ON_START !== '1') return;
   const last = Number(db.prepare("SELECT value FROM kv WHERE key='restage_backfill_auto_at'").get()?.value || 0);
   if (last && Date.now() - last < RESTAGE_BACKFILL_COOLDOWN_MS) {
     console.log(`[restage] 跳过启动补跑：${Math.round((Date.now() - last) / 60000)} 分钟前刚跑过`);
@@ -91,10 +91,10 @@ if (!DISABLE_WORKERS) {
   console.log(`[workers] 后台 worker 已停用（channel=${APP_CHANNEL}）：灰测实例只做读写 API，不消费任务队列`);
 }
 
-// 本地临时生成产物：data/cache/temp 顶层 30 天清扫（6h 定时器）
+// 本地临时生成产物：data/cache/temp 顶层 3 天未引用文件清扫（保护 chat_messages 会话产物，6h 定时器）
 try {
   require('./src/temp-sweeper').startTempSweeper(services);
-  console.log('[temp-sweeper] 本地临时文件 30 天清扫已启动');
+  console.log('[temp-sweeper] 本地临时文件清扫已启动（3天无引用清扫，会话产物引用受保护）');
 } catch (e) {
   console.warn('[temp-sweeper] 启动失败:', e.message);
 }

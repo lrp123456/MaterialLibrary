@@ -551,28 +551,10 @@ async function resolveSimilarityCluster(services, payload = {}) {
 
 /**
  * 检查素材是否需要补跑 restage_dual（若暂缓了或尚无 9:16 衍生图）
+ * 注意：已按用户要求关闭后台自动补跑，画幅重构严格仅允许人工在前端手动点击单张生成。
  */
 async function maybeTriggerDeferredRestage(services, fid) {
-  const { db, interpreter, logger } = services;
-  if (!interpreter || !fid) return false;
-  try {
-    const asset = db.prepare('SELECT fid, category, ready_flags FROM assets WHERE fid = ?').get(fid);
-    if (!asset) return false;
-
-    const cat = asset.category || 'interior';
-    if (!['interior', 'exterior'].includes(cat)) return false;
-
-    // 检查是否已有 9:16 衍生图
-    const has916 = db.prepare(`SELECT id FROM derivatives WHERE asset_fid = ? AND kind = 'clean_9_16' LIMIT 1`).get(fid);
-    if (has916) return false;
-
-    logger?.info?.(`[similarity-workbench] 确认保留，自动触发补跑 restage_dual fid=${fid}`);
-    await interpreter.triggerSingleNode(fid, 'restage_dual', { forceRestage: true });
-    return true;
-  } catch (e) {
-    logger?.warn?.(`[similarity-workbench] 补跑 restage_dual 异常 fid=${fid}: ${e.message}`);
-    return false;
-  }
+  return false;
 }
 
 /**

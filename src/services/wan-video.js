@@ -66,10 +66,16 @@ function gatewayBase() {
     .replace(/\/api\/v1$/i, '');
 }
 
-function assertWanEnv() {
+function getWanEnv() {
   const key = String(process.env.ALIBAILIAN_KEY || '').trim();
-  if (!key) throw missingEnvError();
+  if (!key) return null;
   return { key, base: gatewayBase() };
+}
+
+function assertWanEnv() {
+  const env = getWanEnv();
+  if (!env) throw missingEnvError();
+  return env;
 }
 
 function mapResolution(value) {
@@ -88,7 +94,7 @@ function mapDuration(value) {
 
 function mapRatio(value) {
   const raw = String(value || '').trim();
-  return RATIOS.has(raw) ? raw : 'adaptive';
+  return RATIOS.has(raw) ? raw : '9:16';
 }
 
 function gatewayError(json, status, fallback) {
@@ -171,6 +177,51 @@ async function createTask(env, body, { signal } = {}) {
   const taskId = json.output?.task_id || json.task_id || json.id || '';
   if (!taskId) throw new Error('万相没有返回任务号');
   return taskId;
+}
+
+/**
+ * 向阿里云百炼发送取消任务请求（真实中止云端计算并避免继续计费）
+ */
+async function cancelWanTask(env, taskId) {
+  if (!taskId) return false;
+  const url = `${env.base}/api/v1/tasks/${encodeURIComponent(taskId)}/cancel`;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${env.key}`,
+      },
+      signal: AbortSignal.timeout(10000),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (res.ok) {
+      console.log(`[wan-video] 已成功向百炼发送取消请求: taskId=${taskId}`);
+      return true;
+    }
+    console.warn(`[wan-video] 取消百炼任务返回 HTTP ${res.status}: ${json.message || json.code || ''}`);
+    return false;
+  } catch (e) {
+    console.warn(`[wan-video] 取消百炼任务请求异常: ${e.message}`);
+    return false;
+  }
+}
+
+/**
+ * 单次查询百炼任务状态（用于诊断与取消核验）
+ */
+async function queryWanTask(env, taskId) {
+  if (!taskId || !env?.key) return null;
+  const url = `${env.base}/api/v1/tasks/${encodeURIComponent(taskId)}`;
+  try {
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${env.key}` },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (_) {
+    return null;
+  }
 }
 
 const { directDispatcher } = require('../gen/net-retry');
@@ -303,24 +354,45 @@ async function generateWanVideo(services, input = {}, { signal, onStage } = {}) 
   const env = assertWanEnv(services);
   const t0 = Date.now();
   const prompt = String(input.prompt || '').trim();
+  const existingTaskId = String(input.vendorTaskId || '').trim();
 
-  emitStage(onStage, { key: 'wan_prepare', label: '准备参考图并上传 OSS', progress: 12 });
-  const media = await buildMedia(services, input);
-  const prepareMs = Date.now() - t0;
-  if (!prompt && !media.length) {
-    const err = new Error('请填写提示词，或上传一张参考图');
-    err.status = 400;
-    throw err;
-  }
-  const body = buildSubmitBody(input, media);
-  let taskId = '';
+  let taskId = existingTaskId;
+  let prepareMs = 0;
+  let submitMs = 0;
+  let tAfterSubmit = Date.now();
+  let body = { parameters: {} };
   try {
-    emitStage(onStage, { key: 'wan_submit', label: '提交万相视频任务', progress: 15 });
-    const tBeforeSubmit = Date.now();
-    taskId = await createTask(env, body, { signal });
-    const tAfterSubmit = Date.now();
-    const submitMs = tAfterSubmit - tBeforeSubmit;
-    console.log(`[wan-video] 任务已提交 taskId=${taskId} 参考图=${media.length} 张 提交用时=${fmtSec(submitMs)}`);
+    if (!taskId) {
+      emitStage(onStage, { key: 'wan_prepare', label: '准备参考图并上传 OSS', progress: 12 });
+      const media = await buildMedia(services, input);
+      prepareMs = Date.now() - t0;
+      if (!prompt && !media.length) {
+        const err = new Error('请填写提示词，或上传一张参考图');
+        err.status = 400;
+        throw err;
+      }
+      body = buildSubmitBody(input, media);
+      emitStage(onStage, { key: 'wan_submit', label: '提交万相视频任务', progress: 15 });
+      const tBeforeSubmit = Date.now();
+      taskId = await createTask(env, body, { signal });
+      tAfterSubmit = Date.now();
+      submitMs = tAfterSubmit - tBeforeSubmit;
+      console.log(`[wan-video] 任务已提交 taskId=${taskId} 参考图=${media.length} 张 提交用时=${fmtSec(submitMs)}`);
+      emitStage(onStage, { key: 'wan_submitted', label: '万相任务已提交，开始轮询', progress: 18, vendorTaskId: taskId });
+    } else {
+      console.log(`[wan-video] 继续轮询已提交任务 taskId=${taskId}`);
+      emitStage(onStage, { key: 'wan_resume', label: '继续轮询已提交的万相任务', progress: 20, vendorTaskId: taskId });
+    }
+
+    if (signal) {
+      if (signal.aborted) {
+        cancelWanTask(env, taskId).catch(() => {});
+        throw new Error('任务已取消');
+      }
+      signal.addEventListener('abort', () => {
+        cancelWanTask(env, taskId).catch(() => {});
+      }, { once: true });
+    }
 
     const polled = await pollTask(env, taskId, { signal, onStage, submittedAt: tAfterSubmit });
     const { videoUrl: remoteUrl, polls, detectedAt, upstream } = polled;
@@ -340,6 +412,12 @@ async function generateWanVideo(services, input = {}, { signal, onStage } = {}) 
 
     const tBeforeDownload = Date.now();
     await downloadPublic(remoteUrl, dest, { signal });
+    try {
+      const { prepareChatVideo } = require('../umbra');
+      await prepareChatVideo(dest);
+    } catch (e) {
+      console.warn(`[wan-video] faststart/封面失败，仍保留原片: ${e.message}`);
+    }
     const downloadMs = Date.now() - tBeforeDownload;
     const sizeMb = fs.existsSync(dest) ? fs.statSync(dest).size / 1048576 : 0;
     console.log(`[wan-video] 原片下载完成 taskId=${taskId} ${sizeMb.toFixed(1)}MB 用时=${fmtSec(downloadMs)}`);
@@ -389,7 +467,10 @@ function setPollDelay(ms) {
 
 module.exports = {
   isWanModel,
+  getWanEnv,
   assertWanEnv,
+  cancelWanTask,
+  queryWanTask,
   mapResolution,
   mapDuration,
   mapRatio,

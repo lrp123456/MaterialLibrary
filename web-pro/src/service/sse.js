@@ -21,6 +21,16 @@ class SSEClient {
     this.pendingAssetChanges = [];
     this.assetChangeTimer = null;
     this.assetChangeRaf = 0;
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('ml_auth_required', () => {
+        this.close();
+      });
+      window.addEventListener('ml_login', () => {
+        this.reconnectDelay = 1000;
+        this.connect();
+      });
+    }
   }
 
   /**
@@ -64,9 +74,13 @@ class SSEClient {
     if (this.eventSource || typeof window === 'undefined' || !window.EventSource) {
       return;
     }
-    this.isManualClosed = false;
     const token = getToken();
-    const query = token ? `?token=${encodeURIComponent(token)}` : '';
+    if (!token) {
+      // 未登录或会话已失效时不盲目建立 SSE，防止反复打 401 耗尽连接数
+      return;
+    }
+    this.isManualClosed = false;
+    const query = `?token=${encodeURIComponent(token)}`;
     const rawUrl = `/api/events${query}`;
     const url = resolveApiUrl(rawUrl);
 

@@ -1346,6 +1346,17 @@
 
         <div class="flex items-center gap-3 shrink-0">
           <button
+            v-if="activeTool === 'crop'"
+            type="button"
+            @click="applyCrop"
+            class="px-4 py-2 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 text-xs font-bold border border-sky-500/40 cursor-pointer transition-colors flex items-center gap-1.5"
+            title="应用当前裁切框进行画面预览"
+          >
+            <StudioIcon name="crop" :size="14" />
+            <span>应用裁剪预览</span>
+          </button>
+
+          <button
             type="button"
             @click="handleCancel"
             class="px-4 py-2 rounded-xl bg-studio-800 hover:bg-studio-750 text-slate-300 text-xs font-bold border border-studio-700 cursor-pointer transition-colors"
@@ -1419,6 +1430,16 @@
           </div>
 
           <!-- 3. 底图即时修改说明 -->
+          <div v-if="stagedCrop && regions.length === 0 && annotations.length === 0" class="p-3 rounded-xl bg-studio-950 border border-studio-800 text-xs text-slate-300 leading-relaxed space-y-1">
+            <div class="font-bold text-amber-400 flex items-center gap-1">
+              <StudioIcon name="crop" :size="12" />
+              <span>底图裁剪修改</span>
+            </div>
+            <div>
+              本次将把裁剪后的新画面（{{ stagedCrop.width }} × {{ stagedCrop.height }}）应用到看图区参考图中。
+            </div>
+          </div>
+
           <div v-if="regions.length === 0 && annotations.length > 0" class="p-3 rounded-xl bg-studio-950 border border-studio-800 text-xs text-slate-300 leading-relaxed space-y-1">
             <div class="font-bold text-rose-400 flex items-center gap-1">
               <StudioIcon name="edit" :size="12" />
@@ -1576,10 +1597,17 @@ const isAssetReplace = computed(() => props.mode === 'asset-replace');
 const assetBaseUrl = ref(props.assetImageUrl || '');
 watch(() => props.assetImageUrl, (v) => { assetBaseUrl.value = v || ''; });
 
-// 原图与天然尺寸（generation 模式来源保持不变）
-const imageSrc = computed(() => isAssetReplace.value
-  ? (assetBaseUrl.value || '')
-  : (props.image?.url || props.image?.src || ''));
+// 本地暂存裁剪状态（在最终确认生效前不污染父级托盘）
+const stagedCrop = ref(null); // { dataUrl: '', width: 0, height: 0 }
+const stagedImageUrl = ref('');
+const stagedDimensions = reactive({ width: 0, height: 0 });
+
+// 原图与天然尺寸（支持暂存裁剪底图预览，生成模式来源在未应用前保持不变）
+const imageSrc = computed(() => {
+  if (stagedImageUrl.value) return stagedImageUrl.value;
+  if (isAssetReplace.value) return assetBaseUrl.value || '';
+  return props.image?.url || props.image?.src || '';
+});
 const imgNaturalSize = reactive({ w: 0, h: 0 });
 const canvasDisplaySize = reactive({ w: 800, h: 600 });
 
@@ -2367,8 +2395,12 @@ function projectNormalizedDataToScreen(dw, dh) {
   }
 }
 
-// 监听弹层显示，还原底图已有选区与标绘
+// 监听弹层显示，还原底图已有选区与标绘并重置暂存裁剪
 watch(() => props.visible, (val) => {
+  stagedCrop.value = null;
+  stagedImageUrl.value = '';
+  stagedDimensions.width = 0;
+  stagedDimensions.height = 0;
   if (val) {
     if (Array.isArray(props.image?.regions) && props.image.regions.length > 0) {
       regions.value = JSON.parse(JSON.stringify(props.image.regions));
@@ -4050,7 +4082,7 @@ async function captureWireframeSnapshot() {
 // 保持别名兼容
 const captureAnnotatedCanvasSnapshot = captureWireframeSnapshot;
 
-// 打开极简确认浮层
+// 执行裁剪：暂存到组件本地状态，不立即改写父级托盘
 async function applyCrop() {
   const box = cropBox.value || cropRect.value;
   const img = baseImageRef.value;
@@ -4066,10 +4098,21 @@ async function applyCrop() {
   canvas.height = sh;
   try {
     canvas.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-    emit('apply-custom-image', {
-      imageIndex: props.imageIndex,
-      dataUrl: canvas.toDataURL('image/jpeg', 0.92)
-    });
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+    // 暂存裁剪结果，待确认生效时再应用到父级，取消则直接丢弃
+    stagedCrop.value = {
+      dataUrl,
+      width: sw,
+      height: sh
+    };
+    stagedImageUrl.value = dataUrl;
+    stagedDimensions.width = sw;
+    stagedDimensions.height = sh;
+    imgNaturalSize.w = sw;
+    imgNaturalSize.h = sh;
+    // 裁剪后清空与原图尺寸绑定的旧标绘与选区
+    annotations.value = [];
+    regions.value = [];
     setTool('select');
   } catch {
     alert('这张图不能在本地裁剪。请换一张已经保存在素材库里的图片。');
@@ -4228,6 +4271,7 @@ function handleReplaceOriginal() {
     ? `${result.width} × ${result.height}`
     : '当前画面尺寸';
   const hasEdit = Boolean(getEffectiveCropBox())
+    || Boolean(stagedCrop.value)
     || mosaicAnnotations.value.length > 0
     || arrowAnnotations.value.length > 0
     || (regions.value || []).some((r) => r && r.type === 'brush');
@@ -4271,6 +4315,26 @@ async function openConfirmModal() {
   }
   if (activeTool.value === 'crop') {
     await applyCrop();
+    if (stagedCrop.value && regions.value.length === 0 && annotations.value.length === 0) {
+      if (props.image) {
+        props.image.naturalWidth = stagedCrop.value.width;
+        props.image.naturalHeight = stagedCrop.value.height;
+        props.image.width = stagedCrop.value.width;
+        props.image.height = stagedCrop.value.height;
+      }
+      emit('apply-custom-image', {
+        imageIndex: props.imageIndex,
+        dataUrl: stagedCrop.value.dataUrl,
+        width: stagedCrop.value.width,
+        height: stagedCrop.value.height
+      });
+      stagedCrop.value = null;
+      stagedImageUrl.value = '';
+      stagedDimensions.width = 0;
+      stagedDimensions.height = 0;
+      emit('close');
+      return;
+    }
     return;
   }
 
@@ -4325,15 +4389,67 @@ async function openConfirmModal() {
 async function executeUnifiedApply() {
   showConfirmModal.value = false;
 
+  // 场景 0：如果仅有裁剪修改（无选区且无额外标绘），应用裁剪新像素与尺寸并关闭
+  if (regions.value.length === 0 && annotations.value.length === 0 && stagedCrop.value) {
+    if (props.image) {
+      props.image.naturalWidth = stagedCrop.value.width;
+      props.image.naturalHeight = stagedCrop.value.height;
+      props.image.width = stagedCrop.value.width;
+      props.image.height = stagedCrop.value.height;
+    }
+    emit('apply-custom-image', {
+      imageIndex: props.imageIndex,
+      dataUrl: stagedCrop.value.dataUrl,
+      width: stagedCrop.value.width,
+      height: stagedCrop.value.height
+    });
+    stagedCrop.value = null;
+    stagedImageUrl.value = '';
+    stagedDimensions.width = 0;
+    stagedDimensions.height = 0;
+    emit('close');
+    return;
+  }
+
   // 场景 1：如果仅有即时标绘（无写回选区），直接更新看图区原图（提供撤回）
   if (regions.value.length === 0 && annotations.value.length > 0) {
     const dataUrl = await captureWireframeSnapshot();
+    const finalWidth = stagedCrop.value?.width || imgNaturalSize.w || 0;
+    const finalHeight = stagedCrop.value?.height || imgNaturalSize.h || 0;
+    if (props.image && finalWidth && finalHeight) {
+      props.image.naturalWidth = finalWidth;
+      props.image.naturalHeight = finalHeight;
+      props.image.width = finalWidth;
+      props.image.height = finalHeight;
+    }
     emit('apply-custom-image', {
       imageIndex: props.imageIndex,
-      dataUrl
+      dataUrl,
+      width: finalWidth,
+      height: finalHeight
     });
+    stagedCrop.value = null;
+    stagedImageUrl.value = '';
+    stagedDimensions.width = 0;
+    stagedDimensions.height = 0;
     emit('close');
     return;
+  }
+
+  // 若存在暂存裁剪，在应用选区前先应用裁剪图片
+  if (stagedCrop.value) {
+    if (props.image) {
+      props.image.naturalWidth = stagedCrop.value.width;
+      props.image.naturalHeight = stagedCrop.value.height;
+      props.image.width = stagedCrop.value.width;
+      props.image.height = stagedCrop.value.height;
+    }
+    emit('apply-custom-image', {
+      imageIndex: props.imageIndex,
+      dataUrl: stagedCrop.value.dataUrl,
+      width: stagedCrop.value.width,
+      height: stagedCrop.value.height
+    });
   }
 
   // 检查是否有基础属性选区
@@ -4477,6 +4593,9 @@ async function executeUnifiedApply() {
     finalRecipe = `【空间局部编辑方案】\n${compiledPrompt}\n要求：保持空间整体结构、主要动线与光影一致。`;
   }
 
+  const finalNaturalW = stagedCrop.value?.width || imgNaturalSize.w || 0;
+  const finalNaturalH = stagedCrop.value?.height || imgNaturalSize.h || 0;
+
   emit('apply-regions-to-image', {
     imageIndex: props.imageIndex,
     regions: JSON.parse(JSON.stringify(regions.value)),
@@ -4486,17 +4605,26 @@ async function executeUnifiedApply() {
     baseAttrRefs: baseAttrRefs || null,
     annotations: JSON.parse(JSON.stringify(annotations.value)),
     wireframeDataUrl,
-    naturalWidth: imgNaturalSize.w || 0,
-    naturalHeight: imgNaturalSize.h || 0,
+    naturalWidth: finalNaturalW,
+    naturalHeight: finalNaturalH,
     canonicalRatio: effectiveRatio,
     colorPaletteHint: paletteHint,
     is3DFurniture: regions.value.some(r => ['replace', 'add'].includes(r.op))
   });
 
+  stagedCrop.value = null;
+  stagedImageUrl.value = '';
+  stagedDimensions.width = 0;
+  stagedDimensions.height = 0;
+
   emit('close');
 }
 
 function handleCancel() {
+  stagedCrop.value = null;
+  stagedImageUrl.value = '';
+  stagedDimensions.width = 0;
+  stagedDimensions.height = 0;
   emit('close');
 }
 

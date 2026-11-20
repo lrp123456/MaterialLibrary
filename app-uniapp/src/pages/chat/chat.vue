@@ -282,10 +282,13 @@ export default {
           .filter((m) => !m.err && m.text)
           .slice(-20)
           .map((m) => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.text }))
+        const imageUrls = refChips.map((c) => c.imgUrl).filter(Boolean)
+        const promptText = text || (imageUrls.length ? '请分析并介绍引用的素材' : '')
         const data = await chatComplete({
           model: this.currentModelId || undefined,
-          prompt: text,
+          prompt: promptText,
           messages: history,
+          images: imageUrls.length ? imageUrls : undefined,
         })
         const reply = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content)
           || data.reply || data.text || ''
