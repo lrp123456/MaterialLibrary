@@ -81,6 +81,10 @@ const MANIFEST = [
   ['unit', 'unit/proxy-isolation.test.js'],
   ['unit', 'unit/async-proc-loop.test.js'],
   ['unit', 'unit/error-reporter.test.js'],
+  ['unit', 'unit/pg-migration.test.js'],
+  ['unit', 'unit/pg-concurrency.test.js'],
+  ['unit', 'unit/worker-resilience.test.js'],
+  ['unit', 'unit/pubsub-sse-latency.test.js'],
 
   // ---------- security：鉴权/凭据隔离/对抗输入 ----------
   ['security', 'auth-audit.test.js'],

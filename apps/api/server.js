@@ -20,11 +20,14 @@ const dataDir = process.env.ML_DATA_DIR || path.join(os.homedir(), '.dsh-materia
 
 // ── 通道标记（遗留同树灰测通道已于 2026-11-03 退役，见 archive/gray-retired-20261103/）
 // 现行分支验证通道是 worktree test（30000/30003，scripts/branch-channel.js）。
-// test 通道启动时仍借 APP_CHANNEL=gray 这个标记的两个行为：只做「读写 API + 前端联调」、
-// 不跑后台 worker（否则同一个正式库快照会被两个进程重复消费 AI 任务/治理定时器）、不自我重启。
+// Phase 2：API 服务纯作为控制面运行，全部后台 Worker 彻底剥离至 apps/worker (BullMQ) 执行面。
+// 默认 DISABLE_WORKERS=true；仅当显式设置 ML_ENABLE_EMBEDDED_WORKERS=1 时作为单机兜底运行。
 const APP_CHANNEL = String(process.env.APP_CHANNEL || '').toLowerCase() === 'gray' ? 'gray' : 'prod';
 const IS_GRAY = APP_CHANNEL === 'gray';
-const DISABLE_WORKERS = IS_GRAY || String(process.env.ML_DISABLE_WORKERS || '') === '1';
+const DISABLE_WORKERS = String(process.env.ML_ENABLE_EMBEDDED_WORKERS || '') !== '1';
+if (DISABLE_WORKERS) {
+  console.log('[control-plane] API 控制面就绪：所有后台 Worker 已剥离至 apps/worker，主线程零 worker 阻塞');
+}
 
 const config = {
   cliPath: resolveQuarkCli(process.env.QUARK_CLI_PATH),
@@ -477,8 +480,10 @@ server.listen(PORT, () => {
       const sweep = () => oss.sweepChatTemp(services)
         .then((r) => { if (r.deleted) console.log(`[oss] 已清理 ${r.deleted} 个过期对话临时图片`); })
         .catch((e) => console.warn('[oss] 临时图片清扫失败:', e.message));
-      sweep();
-      setInterval(sweep, 6 * 60 * 60 * 1000).unref();
+      if (!DISABLE_WORKERS) {
+        sweep();
+        setInterval(sweep, 6 * 60 * 60 * 1000).unref();
+      }
     }
   } catch (e) {
     console.warn('[oss] 初始化清扫失败:', e.message);

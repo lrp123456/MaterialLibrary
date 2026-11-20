@@ -1,0 +1,122 @@
+# Material Library Infrastructure Orchestration (Phase 2)
+# Services: PostgreSQL (pgvector), Redis (AOF), API (30001), Worker, Web-Pro (30002), Editor (3010)
+# Note: Host retains ops-hub (3790), pack-studio (3789) and GPU ASR (10095/10096)
+
+version: '3.8'
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: mls-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-material_library}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-material_library}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: mls-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    image: node:22-alpine
+    container_name: mls-api
+    restart: unless-stopped
+    working_dir: /app
+    ports:
+      - "30001:30001"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-material_library}
+      REDIS_URL: redis://redis:6379
+      ML_PORT: 30001
+      ML_DATA_DIR: /app/data
+      ML_EXTERNAL_PROXY_URL: ${ML_EXTERNAL_PROXY_URL:-http://host.docker.internal:7890}
+    volumes:
+      - ../:/app
+      - materialdata:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["sh", "-c", "pnpm --filter @mls/api start"]
+
+  worker:
+    image: node:22-alpine
+    container_name: mls-worker
+    restart: unless-stopped
+    working_dir: /app
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-material_library}
+      REDIS_URL: redis://redis:6379
+      ML_DATA_DIR: /app/data
+      ML_EXTERNAL_PROXY_URL: ${ML_EXTERNAL_PROXY_URL:-http://host.docker.internal:7890}
+    volumes:
+      - ../:/app
+      - materialdata:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["sh", "-c", "pnpm --filter @mls/worker start"]
+
+  web-pro:
+    image: node:22-alpine
+    container_name: mls-web-pro
+    restart: unless-stopped
+    working_dir: /app/apps/web-pro
+    ports:
+      - "30002:30002"
+    environment:
+      PORT: 30002
+    volumes:
+      - ../apps/web-pro:/app/apps/web-pro
+    depends_on:
+      - api
+    command: ["sh", "-c", "pnpm preview --port 30002 --host 0.0.0.0"]
+
+  editor:
+    image: node:22-alpine
+    container_name: mls-editor
+    restart: unless-stopped
+    working_dir: /app/apps/editor
+    ports:
+      - "3010:3010"
+    environment:
+      PORT: 3010
+    volumes:
+      - ../apps/editor:/app/apps/editor
+    depends_on:
+      - api
+    command: ["sh", "-c", "node start.cjs"]
+
+volumes:
+  pgdata:
+    driver: local
+  redisdata:
+    driver: local
+  materialdata:
+    driver: local
