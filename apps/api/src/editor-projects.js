@@ -495,13 +495,26 @@ async function assembleExport(services, body) {
   };
 }
 
+function streamFileSha256(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    const s = fs.createReadStream(filePath);
+    s.on('data', chunk => hash.update(chunk));
+    s.on('end', () => resolve(hash.digest('hex')));
+    s.on('error', reject);
+  });
+}
+
 async function fileFinishedCut(services, { filePath, project, projectId, projectName, width, height, duration }) {
   const { db, config } = services;
   const { createDerivative, setMainDerivative } = require('./derivatives');
   const { ensureColumns } = require('./shelf-lineage');
   ensureColumns(db);
-  const buf = fs.readFileSync(filePath);
-  const sha = crypto.createHash('sha256').update(buf).digest('hex');
+  const [sha, stat] = await Promise.all([
+    streamFileSha256(filePath),
+    fs.promises.stat(filePath)
+  ]);
+  const fileSize = stat.size;
   const editUses = collectEditUses(project || { id: projectId });
   const now = Date.now();
   const record = {
@@ -538,7 +551,7 @@ async function fileFinishedCut(services, { filePath, project, projectId, project
   `).run(
     fid,
     fileName,
-    buf.length,
+    fileSize,
     width || null,
     height || null,
     width && height ? (height > width * 1.05 ? 'portrait' : (width > height * 1.05 ? 'landscape' : 'square')) : null,

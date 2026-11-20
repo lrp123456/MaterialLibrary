@@ -6,13 +6,10 @@
  * 而火山方舟、Agnes 这类国内上游直连是通的，所以第二次尝试改直连。
  */
 const { Agent } = require('undici');
+const { fetchWithPolicy, getDirectDispatcher } = require('../net/http-client');
 
-let directAgent = null;
 function directDispatcher() {
-  if (!directAgent) {
-    directAgent = new Agent({ connect: { timeout: 20000 }, keepAliveTimeout: 30000 });
-  }
-  return directAgent;
+  return getDirectDispatcher();
 }
 
 function describeFetchError(e) {
@@ -62,18 +59,18 @@ async function fetchNet(url, opts = {}, cfg = {}) {
   } = cfg;
   let lastErr;
   for (let i = 1; i <= attempts; i++) {
-    // 第 2 次尝试绕开代理直连，第 3 次回到原通路
-    const useDirect = i === 2;
+    // 默认 100% 直连；若显式指定走代理且第 1 次失败，则第 2 次直连
+    const useProxy = Boolean(cfg.useProxy && i !== 2);
     try {
-      return await fetch(url, {
+      return await fetchWithPolicy(url, {
         ...opts,
-        ...(useDirect ? { dispatcher: directDispatcher() } : null),
-        signal: AbortSignal.timeout(timeoutMs),
+        useProxy,
+        timeoutMs,
       });
     } catch (e) {
       lastErr = e;
       if (i >= attempts || !retryOn(e)) break;
-      try { onRetry?.({ attempt: i, useDirect, error: e, what, url }); } catch (_) {}
+      try { onRetry?.({ attempt: i, useDirect: !useProxy, error: e, what, url }); } catch (_) {}
       await new Promise((r) => setTimeout(r, i === 1 ? 700 : 1800));
     }
   }

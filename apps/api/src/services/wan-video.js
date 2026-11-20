@@ -12,6 +12,7 @@ const crypto = require('crypto');
 const { Readable } = require('stream');
 const { pipeline } = require('stream/promises');
 const { materializeFrameUrl } = require('../frame-relay');
+const { fetchWithPolicy } = require('../net/http-client');
 
 const WAN_IDS = new Set(['wan3_0_video', 'wan3.0-video']);
 const RATIOS = new Set(['16:9', '4:3', '1:1', '3:4', '9:16', 'adaptive']);
@@ -163,7 +164,8 @@ function buildSubmitBody(input, media) {
 
 async function createTask(env, body, { signal } = {}) {
   const url = `${env.base}/api/v1/services/aigc/video-generation/video-synthesis`;
-  const res = await fetch(url, {
+  const res = await fetchWithPolicy(url, {
+    useProxy: false,
     method: 'POST',
     headers: {
       Authorization: `Bearer ${env.key}`,
@@ -171,7 +173,8 @@ async function createTask(env, body, { signal } = {}) {
       'X-DashScope-Async': 'enable',
     },
     body: JSON.stringify(body),
-    signal: signal || AbortSignal.timeout(60000),
+    signal,
+    timeoutMs: 60000,
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw gatewayError(json, res.status, '万相提交失败');
@@ -187,12 +190,13 @@ async function cancelWanTask(env, taskId) {
   if (!taskId) return false;
   const url = `${env.base}/api/v1/tasks/${encodeURIComponent(taskId)}/cancel`;
   try {
-    const res = await fetch(url, {
+    const res = await fetchWithPolicy(url, {
+      useProxy: false,
       method: 'POST',
       headers: {
         Authorization: `Bearer ${env.key}`,
       },
-      signal: AbortSignal.timeout(10000),
+      timeoutMs: 10000,
     });
     const json = await res.json().catch(() => ({}));
     if (res.ok) {
@@ -214,9 +218,10 @@ async function queryWanTask(env, taskId) {
   if (!taskId || !env?.key) return null;
   const url = `${env.base}/api/v1/tasks/${encodeURIComponent(taskId)}`;
   try {
-    const res = await fetch(url, {
+    const res = await fetchWithPolicy(url, {
+      useProxy: false,
       headers: { Authorization: `Bearer ${env.key}` },
-      signal: AbortSignal.timeout(5000),
+      timeoutMs: 5000,
     });
     if (!res.ok) return null;
     return await res.json();
@@ -251,9 +256,11 @@ async function pollTask(env, taskId, { signal, onStage, submittedAt } = {}) {
 
     let res;
     try {
-      res = await fetch(url, {
+      res = await fetchWithPolicy(url, {
+        useProxy: false,
         headers: { Authorization: `Bearer ${env.key}` },
-        signal: signal || AbortSignal.timeout(30000),
+        signal,
+        timeoutMs: 30000,
       });
       consecutiveErrors = 0;
     } catch (e) {
@@ -322,10 +329,11 @@ async function downloadPublic(url, dest, { signal } = {}) {
         try { fs.unlinkSync(dest); } catch {}
       }
 
-      const res = await fetch(url, {
+      const res = await fetchWithPolicy(url, {
+        useProxy: false,
         redirect: 'follow',
-        ...(useDirect ? { dispatcher: directDispatcher() } : null),
-        signal: signal || AbortSignal.timeout(300000), // 5分钟大视频下载保护
+        signal,
+        timeoutMs: 300000, // 5分钟大视频下载保护
       });
 
       if (!res.ok || !res.body) {

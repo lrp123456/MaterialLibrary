@@ -711,6 +711,13 @@ function migrate(dataDir, { doBackup = true } = {}) {
       CREATE INDEX IF NOT EXISTS idx_creation_tpl_user ON creation_templates(user_id, updated_at DESC);
     `);
 
+    // 旁路错误监控表迁移 (Phase 1 可逆迁移)
+    try {
+      require('./migrations/001-system-error-events').up(db);
+    } catch (e) {
+      console.warn('[migrate] system_error_events 迁移失败:', e.message);
+    }
+
     // 5. 存量视频冻结（P2 已移除：视频改为分批解冻进管线）
     const jobsTableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='jobs'").get();
     if (jobsTableExists) {

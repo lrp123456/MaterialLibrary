@@ -937,7 +937,7 @@ async function ingestAiVideo(services, {
   fs.mkdirSync(absDir, { recursive: true });
   const relPath = path.join(relDir, `${fid}.mp4`);
   const absPath = path.join(config.dataDir, relPath);
-  if (srcPath !== absPath) fs.copyFileSync(srcPath, absPath);
+  if (srcPath !== absPath) await fs.promises.copyFile(srcPath, absPath);
 
   let posterRel = null;
   if (posterSrc && fs.existsSync(posterSrc)) {
@@ -945,7 +945,7 @@ async function ingestAiVideo(services, {
     fs.mkdirSync(posterDir, { recursive: true });
     posterRel = path.join('cache', 'ai_posters', `${fid}.jpg`);
     const posterAbs = path.join(config.dataDir, posterRel);
-    if (posterSrc !== posterAbs) fs.copyFileSync(posterSrc, posterAbs);
+    if (posterSrc !== posterAbs) await fs.promises.copyFile(posterSrc, posterAbs);
   }
 
   const now = Date.now();
@@ -983,7 +983,7 @@ async function ingestAiVideo(services, {
     const thumbDir = path.join(config.dataDir, 'cache', 'thumbs');
     fs.mkdirSync(thumbDir, { recursive: true });
     try {
-      fs.copyFileSync(path.join(config.dataDir, posterRel), path.join(thumbDir, `${fid}.jpg`));
+      await fs.promises.copyFile(path.join(config.dataDir, posterRel), path.join(thumbDir, `${fid}.jpg`));
     } catch {}
   }
 

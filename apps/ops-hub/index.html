@@ -107,6 +107,7 @@ pre.console.live{max-height:260px;min-height:120px}
     <button data-tab="channels">通道与发布</button>
     <button data-tab="runtime">运行日志</button>
     <button data-tab="contract">三端对接契约</button>
+    <button data-tab="errors">异常诊断台</button>
   </nav>
 </header>
 <div id="faultBanner" class="fault-banner" hidden>
@@ -239,6 +240,27 @@ pre.console.live{max-height:260px;min-height:120px}
       </div>
     </div>
   </section>
+
+  <!-- ======================== Tab 5：异常诊断台 ======================== -->
+  <section id="tab-errors" class="tab">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <h3>🚨 旁路错误监控与异常诊断台</h3>
+        <div style="display:flex;gap:8px">
+          <select id="selErrorStatus" style="background:#0b1322;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:4px 8px;font-size:12px">
+            <option value="open">待解决 (open)</option>
+            <option value="resolved">已解决 (resolved)</option>
+            <option value="all">全部 (all)</option>
+          </select>
+          <button class="btn open sm" id="btnRefreshErrors" type="button">刷新</button>
+        </div>
+      </div>
+      <div class="mut" style="margin-top:4px;font-size:12px">
+        聚合指纹消重 · 10分钟风暴抑制 · 敏感凭据已自动脱敏 · 独立旁路通道与业务隔离
+      </div>
+    </div>
+    <div id="errorList" style="display:flex;flex-direction:column;gap:10px"></div>
+  </section>
 </main>
 <div class="toast" id="toast"></div>
 <script>
@@ -282,6 +304,7 @@ document.querySelectorAll('nav button').forEach((b) => {
     $('main').classList.toggle('wide', activeTab === 'runtime')
     if (activeTab === 'channels') { loadChannels(); pollJob() }
     if (activeTab === 'contract') loadContract()
+    if (activeTab === 'errors') loadErrors()
     if (activeTab === 'runtime') startRuntime()
     else stopRuntime()
   }
@@ -750,12 +773,63 @@ $('btnFaultRetry').onclick = () => {
   if (btn) btn.click()
 }
 
+/* ---------------- Tab 5: errors (Phase 1 异常诊断台) ---------------- */
+async function loadErrors() {
+  const status = $('selErrorStatus') ? $('selErrorStatus').value : 'open';
+  const listEl = $('errorList');
+  if (!listEl) return;
+  try {
+    const res = await safeJson(await fetch(API + '/ops-api/errors?status=' + encodeURIComponent(status)));
+    const errors = res.errors || [];
+    if (!errors.length) {
+      listEl.innerHTML = '<div class="card mut" style="text-align:center;padding:24px">🎉 当前无异常事件记录</div>';
+      return;
+    }
+    listEl.innerHTML = errors.map(e => `
+      <div class="card" style="border-left: 4px solid ${e.severity === 'fatal' ? '#ef4444' : '#f59e0b'}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+          <div>
+            <span class="sev ${e.severity === 'fatal' ? 'high' : 'medium'}">${esc((e.severity || 'error').toUpperCase())}</span>
+            <b style="margin-left:6px">${esc(e.module)} / ${esc(e.error_code || 'ERROR')}</b>
+            <span class="pill" style="margin-left:8px">频次: ${e.count} 次</span>
+          </div>
+          ${e.status === 'open' ? `<button class="btn sm go" onclick="resolveError(${e.id})">标记已解决</button>` : `<span class="pill" style="color:#10b981">已解决</span>`}
+        </div>
+        <div style="margin:8px 0;font-size:13px;color:#fff">${esc(e.message)}</div>
+        <div class="mut" style="font-size:11px">首次: ${new Date(e.first_seen_at).toLocaleString()} · 最近: ${new Date(e.last_seen_at).toLocaleString()} · 指纹: ${esc(e.fingerprint.slice(0, 16))}</div>
+        ${e.stack ? `<pre class="console" style="margin-top:8px;font-size:11px">${esc(e.stack)}</pre>` : ''}
+        ${e.context_json && e.context_json !== '{}' ? `<div style="margin-top:6px;font-size:11px;color:var(--mut)">脱敏上下文:</div><pre class="console" style="font-size:11px">${esc(e.context_json)}</pre>` : ''}
+      </div>
+    `).join('');
+  } catch (err) {
+    listEl.innerHTML = `<div class="card mut" style="color:#ef4444">加载失败: ${esc(err.message)}</div>`;
+  }
+}
+
+async function resolveError(id) {
+  try {
+    const res = await safeJson(await fetch(API + '/ops-api/errors/' + id + '/resolve', { method: 'POST' }));
+    if (res.ok) {
+      toast('已标记解决 #' + id);
+      loadErrors();
+    } else {
+      toast('操作失败: ' + (res.error || '未知错误'));
+    }
+  } catch (e) {
+    toast('网络异常: ' + e.message);
+  }
+}
+
+if ($('selErrorStatus')) $('selErrorStatus').onchange = () => loadErrors();
+if ($('btnRefreshErrors')) $('btnRefreshErrors').onclick = () => loadErrors();
+
 loadServices()
 pollFaults()
 statusTimer = setInterval(() => {
   loadServices()
   pollFaults()
   if (activeTab === 'channels') loadChannels()
+  if (activeTab === 'errors') loadErrors()
 }, 5000)
 </script>
 </body>

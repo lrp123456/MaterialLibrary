@@ -53,18 +53,23 @@ async function extractFrames({ videoPath, destDir, mode = 'interval', intervalSe
       pattern
     ];
     await runFfmpeg(args);
-    const files = fs.readdirSync(destDir).filter(f => f.startsWith(`frame_${runId}_`)).sort();
-    for (let i = 0; i < files.length; i++) {
-      const fPath = path.join(destDir, files[i]);
-      const stat = fs.statSync(fPath);
-      results.push({
-        name: files[i],
+    const dirEntries = await fs.promises.readdir(destDir);
+    const files = dirEntries.filter(f => f.startsWith(`frame_${runId}_`)).sort();
+    const frameResults = await Promise.all(files.map(async (fileName, i) => {
+      const fPath = path.join(destDir, fileName);
+      const [stat, buf] = await Promise.all([
+        fs.promises.stat(fPath),
+        fs.promises.readFile(fPath)
+      ]);
+      return {
+        name: fileName,
         path: fPath,
         size: stat.size,
         timestamp: i * 2, // 估算
-        dataUrl: `data:image/jpeg;base64,${fs.readFileSync(fPath).toString('base64')}`
-      });
-    }
+        dataUrl: `data:image/jpeg;base64,${buf.toString('base64')}`
+      };
+    }));
+    results.push(...frameResults);
   } else {
     // 按照固定秒数逐帧截取
     const step = Math.max(0.5, Number(intervalSeconds) || 2);
@@ -87,13 +92,15 @@ async function extractFrames({ videoPath, destDir, mode = 'interval', intervalSe
           '-q:v', '2',
           outPath
         ]);
-        if (fs.existsSync(outPath) && fs.statSync(outPath).size > 0) {
+        const outStat = await fs.promises.stat(outPath).catch(() => null);
+        if (outStat && outStat.size > 0) {
+          const buf = await fs.promises.readFile(outPath);
           results.push({
             name: outName,
             path: outPath,
-            size: fs.statSync(outPath).size,
+            size: outStat.size,
             timestamp: t,
-            dataUrl: `data:image/jpeg;base64,${fs.readFileSync(outPath).toString('base64')}`
+            dataUrl: `data:image/jpeg;base64,${buf.toString('base64')}`
           });
         }
       } catch (err) {

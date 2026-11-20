@@ -3,6 +3,7 @@
  * 图片统一 base64 data URL 喂入（thumb 300px / 打标 1024px），
  * 不依赖模型服务端公网抓取夸克 CDN（海外模型访问国内链接会超时）。
  */
+const { fetchWithPolicy } = require('./net/http-client');
 
 /** 思考块里经常夹着一份假 JSON，必须整段丢掉再找真正的对象。 */
 function stripThinking(text) {
@@ -131,14 +132,17 @@ async function completeChat({
       body[k] = v;
     }
   }
-  const res = await fetch(endpoint, {
+  const isDirect = /localhost|127\.0\.0\.1|::1|10\.\d|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|naite\.cc|aliyun|volces|modelscope|agnes/i.test(endpoint);
+  const useProxy = !isDirect && (/googleapis|google|openai\.com/i.test(endpoint) || /gemini/i.test(model));
+  const res = await fetchWithPolicy(endpoint, {
+    useProxy,
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       ...(apiKey ? { Authorization: apiKey.startsWith('Bearer ') ? apiKey : `Bearer ${apiKey}` } : {}),
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(timeoutMs),
+    timeoutMs,
   });
   if (!res.ok) {
     const t = await res.text().catch(() => '');

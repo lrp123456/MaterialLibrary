@@ -266,7 +266,7 @@ function startWorker(services, { intervalMs = 2000 } = {}) {
       if (out.outputPath && fs.existsSync(out.outputPath)) {
         const name = path.basename(out.outputPath);
         outputPath = path.join(outputDir, name);
-        fs.copyFileSync(out.outputPath, outputPath);
+        await fs.promises.copyFile(out.outputPath, outputPath);
       }
 
       updateJob(db, row.id, {

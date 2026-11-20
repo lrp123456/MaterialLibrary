@@ -78,6 +78,9 @@ const MANIFEST = [
   ['unit', 'open-fast-card.test.mjs'],
   ['unit', 'mode-and-audit-fixes.test.js'],
   ['unit', 'batch-ab-regression.test.js'],
+  ['unit', 'unit/proxy-isolation.test.js'],
+  ['unit', 'unit/async-proc-loop.test.js'],
+  ['unit', 'unit/error-reporter.test.js'],
 
   // ---------- security：鉴权/凭据隔离/对抗输入 ----------
   ['security', 'auth-audit.test.js'],

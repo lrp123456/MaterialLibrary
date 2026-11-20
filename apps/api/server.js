@@ -42,6 +42,8 @@ const config = {
 };
 
 const db = openDb(dataDir);
+const { initErrorReporter, reportError } = require('./src/ops/error-reporter');
+initErrorReporter({ db, config });
 const services = { db, config, logger: console };
 const interpreter = new WorkflowInterpreter(services);
 services.interpreter = interpreter;
@@ -366,6 +368,11 @@ const server = http.createServer(async (req, res) => {
   } catch (e) {
     // B6：服务端日志保留细节，对外不回显 e.message（防内部路径/SQL 等信息泄漏）
     console.error('[server] 请求处理异常:', e);
+    reportError({
+      module: 'server',
+      err: e,
+      context: { url: req.url, method: req.method, headers: req.headers }
+    });
     if (!res.headersSent) {
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ error: '服务器内部错误' }));

@@ -436,7 +436,7 @@ async function backupAsset(services, asset) {
     try {
       fs.mkdirSync(settings.nasDir, { recursive: true });
       const dest = path.join(settings.nasDir, path.basename(src));
-      fs.copyFileSync(src, dest);
+      await fs.promises.copyFile(src, dest);
       out.nas = dest;
     } catch (e) {
       logger?.warn?.(`[backup] NAS 复制失败: ${e.message}`);

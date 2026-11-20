@@ -925,6 +925,74 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+  // ── Phase 1: 异常诊断台 API ───────────────────────────────────────────────
+  let hubDb = null;
+  function getHubDb() {
+    if (hubDb) return hubDb;
+    const dataDir = process.env.ML_DATA_DIR || path.join(os.homedir(), '.dsh-material-library');
+    const dbFile = path.join(dataDir, 'material.db');
+    if (!fs.existsSync(dbFile)) return null;
+    try {
+      const Database = require('better-sqlite3');
+      hubDb = new Database(dbFile);
+      return hubDb;
+    } catch (_) {
+      try {
+        const dbHelper = require(path.join(ROOT, 'src', 'db'));
+        hubDb = dbHelper.openDb(dataDir);
+        return hubDb;
+      } catch (_) {
+        return null;
+      }
+    }
+  }
+
+  if (p === '/ops-api/errors' && req.method === 'GET') {
+    const status = url.searchParams.get('status') || 'open';
+    const limit = Math.min(Number(url.searchParams.get('limit')) || 50, 200);
+    const db = getHubDb();
+    if (!db) return json(res, 200, { ok: true, errors: [], note: 'db_not_ready' });
+    try {
+      let rows;
+      if (status === 'all') {
+        rows = db.prepare('SELECT * FROM system_error_events ORDER BY last_seen_at DESC LIMIT ?').all(limit);
+      } else {
+        rows = db.prepare('SELECT * FROM system_error_events WHERE status = ? ORDER BY last_seen_at DESC LIMIT ?').all(status, limit);
+      }
+      return json(res, 200, { ok: true, errors: rows });
+    } catch (e) {
+      return json(res, 200, { ok: true, errors: [], error: e.message });
+    }
+  }
+
+  const mErrGet = p.match(/^\/ops-api\/errors\/(\d+)$/);
+  if (mErrGet && req.method === 'GET') {
+    const id = Number(mErrGet[1]);
+    const db = getHubDb();
+    if (!db) return json(res, 404, { ok: false, error: 'db_not_ready' });
+    try {
+      const row = db.prepare('SELECT * FROM system_error_events WHERE id = ?').get(id);
+      if (!row) return json(res, 404, { ok: false, error: 'not_found' });
+      return json(res, 200, { ok: true, error: row });
+    } catch (e) {
+      return json(res, 500, { ok: false, error: e.message });
+    }
+  }
+
+  const mErrResolve = p.match(/^\/ops-api\/errors\/(\d+)\/resolve$/);
+  if (mErrResolve && req.method === 'POST') {
+    const id = Number(mErrResolve[1]);
+    const db = getHubDb();
+    if (!db) return json(res, 500, { ok: false, error: 'db_not_ready' });
+    try {
+      const now = Date.now();
+      const r = db.prepare("UPDATE system_error_events SET status = 'resolved', resolved_at = ?, resolved_by = 'ops-hub' WHERE id = ?").run(now, id);
+      return json(res, 200, { ok: true, resolved: r.changes > 0, id });
+    } catch (e) {
+      return json(res, 500, { ok: false, error: e.message });
+    }
+  }
+
   json(res, 404, { ok: false, error: 'not found' });
 });
 

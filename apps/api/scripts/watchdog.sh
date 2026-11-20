@@ -14,15 +14,9 @@ set +m  # 关闭 job control，避免 wait 时打印 "Killed" 等噪音
 
 export PATH="/home/lrp/.local/node/bin:/home/naite/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
-# 代理环境：Node fetch 不读 http_proxy，但 proxy-setup 会用它作为候选并 setGlobalDispatcher。
-# watchdog 拉起的进程往往没有交互 shell 的代理变量，这里兜底注入。
-if [ -z "${https_proxy:-}" ] && [ -z "${HTTPS_PROXY:-}" ]; then
-  export https_proxy="http://127.0.0.1:7890"
-  export http_proxy="http://127.0.0.1:7890"
-  export HTTPS_PROXY="$https_proxy"
-  export HTTP_PROXY="$http_proxy"
-fi
-export no_proxy="${no_proxy:-localhost,127.0.0.1,::1}"
+# Phase 1: 外部代理专用于海外端点（按需调用），不污染全局网络与国内流量
+export ML_EXTERNAL_PROXY_URL="${ML_EXTERNAL_PROXY_URL:-http://127.0.0.1:7890}"
+export no_proxy="${no_proxy:-localhost,127.0.0.1,::1,newapi.naite.cc,naite.cc,aliyuncs.com,aliyun.com,volces.com,volcengine.com,modelscope.cn,agnes-ai.cn,api.agnes-ai.cn,laozhang.ai}"
 export NO_PROXY="${NO_PROXY:-$no_proxy}"
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
