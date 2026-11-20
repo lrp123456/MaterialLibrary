@@ -89,6 +89,8 @@ const MANIFEST = [
   ['unit', 'unit/gate-routing.test.js'],
   ['unit', 'unit/three-factor-sim.test.js'],
   ['unit', 'unit/ba-locked-fields.test.js'],
+  ['unit', 'unit/cancel-matrix.test.js'],
+  ['unit', 'unit/wysiwyg-snapshot.test.js'],
 
   // ---------- security：鉴权/凭据隔离/对抗输入 ----------
   ['security', 'auth-audit.test.js'],

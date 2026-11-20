@@ -387,7 +387,15 @@ async function generateWanVideo(services, input = {}, { signal, onStage } = {}) 
       tAfterSubmit = Date.now();
       submitMs = tAfterSubmit - tBeforeSubmit;
       console.log(`[wan-video] 任务已提交 taskId=${taskId} 参考图=${media.length} 张 提交用时=${fmtSec(submitMs)}`);
-      emitStage(onStage, { key: 'wan_submitted', label: '万相任务已提交，开始轮询', progress: 18, vendorTaskId: taskId });
+      emitStage(onStage, { key: 'wan_submitted', label: '万相任务已提交，开始轮询', progress: 18, vendorTaskId: taskId, cancellable: true });
+
+      // Phase 4 Deferred Cancel 检查：提交窗口期收到取消请求时立即向云端发送且仅发送一次 /cancel
+      const vendorCancel = require('./vendor-cancel');
+      if (input.jobId && vendorCancel.consumeDeferredCancel(input.jobId)) {
+        console.log(`[wan-video] 触发 Deferred Cancel: jobId=${input.jobId} taskId=${taskId}`);
+        await vendorCancel.cancelVendorTask({ model: 'wan3.0-video', vendorTaskId: taskId, jobId: input.jobId });
+        throw new Error('任务在提交窗口期被取消 (Deferred Cancel)');
+      }
     } else {
       console.log(`[wan-video] 继续轮询已提交任务 taskId=${taskId}`);
       emitStage(onStage, { key: 'wan_resume', label: '继续轮询已提交的万相任务', progress: 20, vendorTaskId: taskId });
@@ -395,11 +403,10 @@ async function generateWanVideo(services, input = {}, { signal, onStage } = {}) 
 
     if (signal) {
       if (signal.aborted) {
-        cancelWanTask(env, taskId).catch(() => {});
         throw new Error('任务已取消');
       }
       signal.addEventListener('abort', () => {
-        cancelWanTask(env, taskId).catch(() => {});
+        // AbortController 仅负责打断本地轮询休眠与下载流，不发送重复 HTTP /cancel（单点由 vendor-cancel 发起）
       }, { once: true });
     }
 

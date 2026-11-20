@@ -104,6 +104,7 @@ export default defineConfig({
   resolve: {
     alias: [
       { find: '@', replacement: path.resolve(__dirname, './src') },
+      { find: '@mls/api-contract', replacement: path.resolve(__dirname, '../../packages/api-contract/index.mjs') },
       {
         find: /^(\.\.\/)+src\/(chat-context\.mjs|prompt-chip-text\.mjs|outpaint-layout\.mjs|base-library\/.*)$/,
         replacement: path.resolve(__dirname, '../../material-library-server/src/$2')

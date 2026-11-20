@@ -1236,6 +1236,8 @@ function migrate(dataDir, { doBackup = true } = {}) {
   } catch (e) {}
   // 阶段文案（准备参考图/云端渲染/下载原片/超分处理等），随 WS/SSE 推给前端占位卡
   try { db.exec('ALTER TABLE gen_jobs ADD COLUMN stage TEXT;'); } catch (e) {}
+  try { db.exec('ALTER TABLE gen_jobs ADD COLUMN cancellable INTEGER DEFAULT 1;'); } catch (e) {}
+  try { db.exec('ALTER TABLE gen_jobs ADD COLUMN cancel_requested INTEGER DEFAULT 0;'); } catch (e) {}
   // ===== 会话动作标题 / 侧栏两天分组 / 服务端搜索 =====
   try { db.exec('ALTER TABLE chat_sessions ADD COLUMN action_tag TEXT;'); } catch (e) {}
   // title_source: auto=视觉池已起名，manual=用户手改后永不再被自动覆盖，NULL=尚未成功起名

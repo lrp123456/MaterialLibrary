@@ -90,8 +90,14 @@
           :value="modelValue[field.key]"
           @change="onParamChange(field.key, $event.target.value)"
         >
-          <option v-for="opt in fieldOptions(field)" :key="String(opt)" :value="opt">
-            {{ optionLabel(field, opt) }}
+          <option
+            v-for="opt in fieldOptions(field)"
+            :key="String(opt)"
+            :value="opt"
+            :disabled="isOptionDisabled(field, opt)"
+            :title="optionDisabledTitle(field, opt)"
+          >
+            {{ optionLabel(field, opt) }}{{ isOptionDisabled(field, opt) ? ' (不支持)' : '' }}
           </option>
         </select>
 
@@ -217,8 +223,14 @@
           :value="modelValue[field.key]"
           @change="onParamChange(field.key, $event.target.value)"
         >
-          <option v-for="opt in fieldOptions(field)" :key="String(opt)" :value="opt">
-            {{ optionLabel(field, opt) }}
+          <option
+            v-for="opt in fieldOptions(field)"
+            :key="String(opt)"
+            :value="opt"
+            :disabled="isOptionDisabled(field, opt)"
+            :title="optionDisabledTitle(field, opt)"
+          >
+            {{ optionLabel(field, opt) }}{{ isOptionDisabled(field, opt) ? ' (不支持)' : '' }}
           </option>
         </select>
 
@@ -293,16 +305,58 @@
 import { computed, reactive } from 'vue';
 import StudioIcon from './StudioIcon.vue';
 import { evaluateClientModelRules, resolveDefaultMode } from '../utils/model-protocol';
+import { getModelCapabilities } from '@mls/api-contract';
 
 const props = defineProps({
   schema: { type: Object, default: null },
   activeMode: { type: String, default: '' },
+  modelKey: { type: String, default: '' },
   modelValue: { type: Object, default: () => ({}) },
   showAdvanced: { type: Boolean, default: false },
   refCounts: { type: Object, default: () => ({ images: 0, videos: 0, audios: 0 }) },
 });
 
 const emit = defineEmits(['update:modelValue', 'update:showAdvanced', 'select-mode', 'param-change', 'reset-default-mode']);
+
+const resolvedModelKey = computed(() => {
+  return props.modelKey || props.schema?.modelKey || props.schema?.id || props.schema?.model_code || '';
+});
+
+const capabilities = computed(() => {
+  return getModelCapabilities(resolvedModelKey.value);
+});
+
+function isOptionDisabled(field, opt) {
+  if (isRatioField(field)) {
+    if (opt === 'adaptive') return false;
+    const supported = capabilities.value?.aspectRatios;
+    if (Array.isArray(supported) && supported.length > 0) {
+      return !supported.includes(opt);
+    }
+  }
+  if (field.key === 'size' || field.key === 'resolution') {
+    const supportedRes = capabilities.value?.resolutionTiers;
+    if (Array.isArray(supportedRes) && supportedRes.length > 0) {
+      return !supportedRes.includes(opt);
+    }
+  }
+  return false;
+}
+
+function optionDisabledTitle(field, opt) {
+  if (isOptionDisabled(field, opt)) {
+    if (isRatioField(field)) {
+      const supp = (capabilities.value?.aspectRatios || []).join(' 或 ');
+      return `当前模型不支持 ${opt}，请使用 ${supp || '其他支持比例'}`;
+    }
+    if (field.key === 'size' || field.key === 'resolution') {
+      const supp = (capabilities.value?.resolutionTiers || []).join(' 或 ');
+      return `当前模型不支持 ${opt}，请使用 ${supp || '其他支持档位'}`;
+    }
+    return `当前模型不支持选项 ${opt}`;
+  }
+  return '';
+}
 
 const ruleEval = computed(() =>
   evaluateClientModelRules(props.schema, props.activeMode, props.modelValue, props.refCounts)
@@ -391,7 +445,7 @@ function fieldOptions(field) {
     if (isAdaptiveLocked(field)) {
       return ['adaptive'];
     }
-    return ['9:16', '3:4'];
+    return ['9:16', '16:9', '1:1', '4:3', '3:4'];
   }
   const ov = ruleEval.value.fieldOverrides?.[field.key];
   if (ov && Array.isArray(ov.options)) return ov.options;

@@ -10122,89 +10122,30 @@ module.exports = {
     if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
     const jobId = decodeURIComponent(mGenJobCancel[1]);
     try {
-      const { cancelGenJob } = require('./gen-jobs');
-      const { abortJob } = require('./gen-jobs-worker');
-      // 先鉴权并落库，再中断执行：旧顺序先 abort 后鉴权，别人可以抢先打断他人的在跑任务、随后才吃 403
-      const out = cancelGenJob(db, jobId, sessionUser.id);
-      // 任务已结束时不能再改消息状态，否则会把成功/失败的结果卡改写成「已取消」
-      if (!out.success) return sendJson(res, 200, out);
-      abortJob(jobId);
-
-      const jobRow = db.prepare('SELECT model, modality, payload_json, result_json FROM gen_jobs WHERE job_id=?').get(jobId);
-      let payloadObj = {};
-      try { payloadObj = JSON.parse(jobRow?.payload_json || '{}'); } catch (_) {}
-      let resultObj = {};
-      try { resultObj = JSON.parse(jobRow?.result_json || '{}'); } catch (_) {}
-      const vTaskId = payloadObj.vendorTaskId || resultObj.vendorTaskId || null;
-      const msgId = 'genmsg_' + jobId;
-
-      // 先把会话消息写成已取消，再去等云端。云端取消可能要几秒，
-      // 这段时间用户一切回会话，不能再从 generating 读出等待卡。
-      const writeCancelledMessage = (extra) => {
-        const existingMsg = db.prepare('SELECT result_json FROM chat_messages WHERE id=?').get(msgId);
-        let cancelResult = {
-          role: 'assistant',
-          isCancelled: true,
-          isGenerating: false,
-          content: '生成已取消',
-          ...(extra || {})
-        };
-        if (existingMsg?.result_json) {
-          try {
-            cancelResult = { ...JSON.parse(existingMsg.result_json), ...cancelResult };
-          } catch (_) {}
-        }
-        const now = Date.now();
-        db.prepare("UPDATE chat_messages SET status='cancelled', prompt='生成已取消', result_json=?, updated_at=? WHERE id=?")
-          .run(JSON.stringify(cancelResult), now, msgId);
-      };
-      try { writeCancelledMessage(); } catch (_) {}
-      try {
-        const { eventBus, EVENTS } = require('./events');
-        eventBus.emit(EVENTS.TASK_UPDATED, { jobId, status: 'cancelled', type: 'gen_job', sessionId: payloadObj.sessionId || '' });
-      } catch (_) {}
-
-      // 真实接线：真正向云端发送取消请求（可真取消则真取消，不可真取消则前端取消，并拉取最新结果）
-      const { cancelVendorTask } = require('./services/vendor-cancel');
-      const cancelAudit = await cancelVendorTask({
-        model: jobRow?.model || payloadObj.model || '',
-        vendorTaskId: vTaskId,
-        jobId
-      });
-
-      // 等云端取消回来之后，若任务已经是 succeeded 或 failed，不再写成 cancelled
-      const freshJob = db.prepare('SELECT status FROM gen_jobs WHERE job_id=?').get(jobId);
-      if (freshJob && (freshJob.status === 'succeeded' || freshJob.status === 'failed')) {
-        return sendJson(res, 200, { success: false, status: freshJob.status, message: '任务已结束，无法取消', cancellationAudit: cancelAudit });
-      }
-
-      const now = Date.now();
-      const updatedResult = {
-        ...(resultObj || {}),
-        isCancelled: true,
-        isGenerating: false,
-        cancellationAudit: cancelAudit
-      };
-      try {
-        db.prepare("UPDATE gen_jobs SET status='cancelled', stage='已取消', result_json=?, updated_at=? WHERE job_id=? AND status='cancelled'")
-          .run(JSON.stringify(updatedResult), now, jobId);
-      } catch (_) {}
-
-      try {
-        writeCancelledMessage({
-          content: cancelAudit.auditSummary || '生成已取消',
-          cancellationAudit: cancelAudit
+      if (process.env.CANCEL_STATE_MACHINE_V2 !== '0') {
+        const { cancelStudioJob } = require('./routes/studio');
+        const result = await cancelStudioJob(services, {
+          jobId,
+          userId: sessionUser.id,
+          sessionUser
         });
-      } catch (_) {}
-
-      try {
-        const { eventBus, EVENTS } = require('./events');
-        eventBus.emit(EVENTS.TASK_UPDATED, { jobId, status: 'cancelled', type: 'gen_job', cancellationAudit: cancelAudit });
-      } catch (_) {}
-
-      return sendJson(res, 200, { success: true, cancellationAudit: cancelAudit, ...out });
-    } catch (e) {
-      return sendJson(res, e.status || 500, { error: e.message });
+        return sendJson(res, 200, result);
+      } else {
+        cancelGenJob(db, jobId, sessionUser.id);
+        abortJob(jobId);
+        return sendJson(res, 200, { success: true, cancelled: true });
+      }
+    } catch (err) {
+      if (err.status === 409 || err.code === 'IRREVERSIBLE') {
+        return sendJson(res, 409, {
+          success: false,
+          cancelled: false,
+          code: 'IRREVERSIBLE',
+          message: err.message || '任务已进入渲染阶段，当前已无法取消，将继续为您等待生成结果',
+          cancellationAudit: err.cancellationAudit
+        });
+      }
+      return sendJson(res, err.status || 500, { error: err.message, code: err.code });
     }
   }
 

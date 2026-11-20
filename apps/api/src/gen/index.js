@@ -1795,34 +1795,25 @@ async function executeAdapterInner(services, adapter, input) {
           label: '任务已提交到云端，开始轮询',
           progress: 18,
           vendorTaskId: taskId,
+          cancellable: true
         });
       } catch (_) {}
     }
 
-    const isVolc = (adapter.id || '').includes('seedance') || baseUrl.includes('volces.com');
-    const cancelRemoteTask = async () => {
-      try {
-        if (isVolc) {
-          const cancelUrl = resolveUrl(baseUrl, `/contents/generations/tasks/${taskId}`);
-          const res = await fetchNet(cancelUrl, { method: 'DELETE', headers }, { timeoutMs: 10000, what: '取消火山任务' });
-          console.log(`[gen] 已向火山方舟发送 DELETE 取消任务请求: taskId=${taskId} status=${res.status}`);
-        } else if (baseUrl.includes('modelscope.cn') || baseUrl.includes('aliyuncs.com')) {
-          const cancelUrl = resolveUrl(baseUrl, `/api/v1/tasks/${taskId}/cancel`);
-          const res = await fetchNet(cancelUrl, { method: 'POST', headers }, { timeoutMs: 10000, what: '取消云端任务' });
-          console.log(`[gen] 已向云端发送 POST 取消任务请求: taskId=${taskId} status=${res.status}`);
-        }
-      } catch (err) {
-        console.warn(`[gen] 取消远端异步任务异常: ${err.message}`);
-      }
-    };
+    // Phase 4 Deferred Cancel 检查：提交窗口期收到取消请求时单点补发取消
+    const vendorCancel = require('../services/vendor-cancel');
+    if (input.jobId && vendorCancel.consumeDeferredCancel(input.jobId)) {
+      console.log(`[gen] 触发 Deferred Cancel: jobId=${input.jobId} taskId=${taskId}`);
+      await vendorCancel.cancelVendorTask({ model: adapter.id || '', vendorTaskId: taskId, jobId: input.jobId });
+      throw new Error('任务在提交窗口期被取消 (Deferred Cancel)');
+    }
 
     if (input.signal) {
       if (input.signal.aborted) {
-        cancelRemoteTask().catch(() => {});
         throw new Error('任务已取消');
       }
       input.signal.addEventListener('abort', () => {
-        cancelRemoteTask().catch(() => {});
+        // AbortController 仅负责打断本地轮询休眠与下载流，不发送重复 HTTP /cancel（单点由 vendor-cancel 发起）
       }, { once: true });
     }
 

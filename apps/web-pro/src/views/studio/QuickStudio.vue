@@ -1232,6 +1232,8 @@ const props = defineProps({
   initialFid: { type: String, default: '' }
 });
 
+const emit = defineEmits(['inject-to-composer', 'close']);
+
 const studioMode = ref('precision'); // 'precision' | 'global'
 const currentImage = ref(props.initialImage || '');
 const currentAssetFid = ref(props.initialFid || '');
@@ -2292,6 +2294,33 @@ onMounted(loadCustomStyles);
 // 执行生图处理 (真实打通火山即梦扩图与服务端 /edit/run 管线)
 async function runExecute() {
   if (!currentImage.value) return;
+
+  const isStrictWysiwyg = typeof window !== 'undefined'
+    ? (window.STUDIO_WYSIWYG_STRICT !== '0' && window.STUDIO_WYSIWYG_STRICT !== false)
+    : true;
+
+  if (isStrictWysiwyg) {
+    const mode = studioMode.value;
+    const op = mode === 'precision' ? selectedMode.value : activeGlobalMode.value;
+    const draft = {
+      mode,
+      op,
+      prompt: expandPrompt.value || '',
+      assets: [{
+        fid: currentAssetFid.value || '',
+        url: currentImage.value,
+        tag: '@图1',
+        name: '精修参考底图'
+      }],
+      params: {
+        ratio: targetExpandRatio.value,
+        ...outParamFields.value
+      }
+    };
+    emit('inject-to-composer', draft);
+    return;
+  }
+
   executing.value = true;
   // 上一次运行的回显不能留下来冒充这次的，扩图走的是另一条通道尤其容易看串
   lastOutSize.value = null;

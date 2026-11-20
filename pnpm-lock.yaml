@@ -10,6 +10,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@mls/api-contract':
+        specifier: workspace:*
+        version: link:../../packages/api-contract
       '@mls/shared-core':
         specifier: workspace:*
         version: link:../../packages/shared-core
@@ -139,6 +142,9 @@ importers:
       '@google/model-viewer':
         specifier: ^4.4.0
         version: 4.4.0(three@0.183.2)
+      '@mls/api-contract':
+        specifier: workspace:*
+        version: link:../../packages/api-contract
       '@mls/shared-core':
         specifier: workspace:*
         version: link:../../packages/shared-core

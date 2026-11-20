@@ -23,6 +23,7 @@
         }
     },
     "dependencies": {
+        "@mls/api-contract": "workspace:*",
         "@mls/shared-core": "workspace:*",
         "better-sqlite3": "^11.0.0",
         "bullmq": "^5.81.5",

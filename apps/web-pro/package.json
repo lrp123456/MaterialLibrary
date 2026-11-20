@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@google/model-viewer": "^4.4.0",
+    "@mls/api-contract": "workspace:*",
     "@mls/shared-core": "workspace:*",
     "dompurify": "^3.4.17",
     "jszip": "^3.10.2",

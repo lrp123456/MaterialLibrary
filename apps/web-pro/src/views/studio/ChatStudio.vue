@@ -998,6 +998,7 @@
               <DynamicModelParamBar
                 v-if="currentSchema"
                 :schema="currentSchema"
+                :modelKey="modelKeyNow()"
                 :activeMode="activeGenMode"
                 v-model="schemaParams"
                 v-model:showAdvanced="showAdvanced"
@@ -1446,8 +1447,12 @@
             <div
               ref="richEditorRef"
               contenteditable="true"
-              class="rich-prompt-editor text-slate-100 text-sm leading-relaxed font-medium min-h-[44px] max-h-36 overflow-y-auto outline-none"
-              :class="activeModality === 'chat' ? 'pr-3' : (optimizeUndo ? 'pr-48' : 'pr-32')"
+              class="rich-prompt-editor text-slate-100 text-sm leading-relaxed font-medium min-h-[44px] max-h-36 overflow-y-auto outline-none transition-colors"
+              :class="[
+                activeModality === 'chat' ? 'pr-3' : (optimizeUndo ? 'pr-48' : 'pr-32'),
+                hasInvalidChip ? 'ring-2 ring-rose-500/70 border border-rose-500 rounded-lg p-1.5' : ''
+              ]"
+              :title="hasInvalidChip ? '挂载的资产已失效或缺失，严禁自动垫图发送。' : ''"
               data-placeholder="例如：沙发换成深灰色布艺，百叶窗拉上一半，阳光只洒在地毯上..."
               @input="onUserEditorInput"
               @compositionstart="onEditorCompositionStart"
@@ -1622,6 +1627,8 @@
             <button
               @click="sendMessage"
               :disabled="currentGenerating || uploadingCrop"
+              :class="{ 'opacity-50 cursor-not-allowed': hasInvalidChip }"
+              :title="hasInvalidChip ? '挂载的资产已失效或缺失，严禁自动垫图发送。' : ''"
               class="px-5 py-2 rounded-xl bg-gradient-to-r from-studio-accent to-studio-cyan hover:brightness-110 text-white text-xs font-extrabold flex items-center space-x-2 shadow-lg shadow-studio-accent/25 transition-all disabled:opacity-40 cursor-pointer ml-1"
             >
               <span>{{ getSendButtonText() }}</span>
@@ -3137,6 +3144,7 @@ import StudioViewer from './StudioViewer.vue';
 import StudioBottomTray from './StudioBottomTray.vue';
 import StudioGlobalDrawer from './StudioGlobalDrawer.vue';
 import StudioEditLayer from './StudioEditLayer.vue';
+import { validateComposerDraft, createFrozenSubmitSnapshot } from '@mls/api-contract';
 import TemplateVideoCover from './TemplateVideoCover.vue';
 import ResultActions from '../../components/ResultActions.vue';
 import RequestPreviewModal from '../../components/RequestPreviewModal.vue';
@@ -4156,6 +4164,14 @@ const AUTO_ADAPT_RATIO = false;
 const AUTO_ADAPT_SIZE = false;
 
 function dispatchSmartWorkflow({ force = false, fromTemplate = null, source = 'general' } = {}) {
+  // STUDIO_WYSIWYG_STRICT 铁律守卫：严禁在用户未授权时静默改写模型模式或覆写画幅宽高比
+  const isStrictWysiwyg = typeof window !== 'undefined'
+    ? (window.STUDIO_WYSIWYG_STRICT !== '0' && window.STUDIO_WYSIWYG_STRICT !== false)
+    : true;
+  if (isStrictWysiwyg && !force && source !== 'apply_template' && source !== 'select_hash_template') {
+    return;
+  }
+
   // 关键防抖与竞态守卫：复用配方时处于会话重置、模型切换、清空托盘的中间阶段，
   // 必须忽略中间事件，只在最后 source 为 apply_template 或 select_hash_template 时执行！
   if (isApplyingTemplate && source !== 'apply_template' && source !== 'select_hash_template') return;
@@ -4608,6 +4624,10 @@ const optimizeUndo = ref(null);
 const showHashMenu = ref(false);
 const showAssetSelector = ref(false);
 const richEditorRef = ref(null);
+const hasInvalidChip = computed(() => {
+  if (!richEditorRef.value) return false;
+  return !!richEditorRef.value.querySelector('.inline-asset-chip.chip-invalid, .inline-asset-chip[data-invalid="true"]');
+});
 
 // 语音录制与 FunASR 9000 转写状态
 const isRecording = ref(false);
@@ -8118,16 +8138,18 @@ function repairReferenceChips() {
         if (targetAsset.sourceFid || sourceFid || fid) {
           chip.setAttribute('data-source-fid', targetAsset.sourceFid || sourceFid || fid);
         }
+        chip.removeAttribute('data-invalid');
+        chip.classList.remove('chip-invalid');
+        chip.removeAttribute('title');
         paintChipTag(chip, baseTag);
-      } else if (referenceTray.value.length > 0) {
-        // 托盘有图但索引超限，对齐到第 1 张图，不粗暴报错
-        const fallbackAsset = referenceTray.value[0];
-        chip.setAttribute('data-url', fallbackAsset.url);
-        chip.setAttribute('data-name', fallbackAsset.name);
-        paintChipTag(chip, '@图1');
       } else {
-        // 托盘彻底无图时，退化为普通 @图N 文本，不污染提示词
-        chip.replaceWith(document.createTextNode(`@图${tagNum || 1}`));
+        // WYSIWYG 铁律：挂载资产缺失或超限时，严禁静默 fallback 到 @图1！标红阻止提交并明确提示
+        const targetNum = tagNum || (idx >= 0 ? idx + 1 : 1);
+        const tagText = `@图${targetNum}`;
+        chip.setAttribute('data-invalid', 'true');
+        chip.classList.add('chip-invalid');
+        chip.setAttribute('title', `挂载的资产 ${tagText} 已失效或缺失`);
+        paintChipTag(chip, `${tagText} (缺失)`);
         downgraded += 1;
       }
     });
@@ -10698,6 +10720,16 @@ async function sendMessage() {
   if (currentMod !== 'chat') {
     repairReferenceChips();
   }
+
+  // 挂载资产失效应阻断守卫：若富文本框中存在失效或缺失资产，严禁自动垫图发送
+  if (richEditorRef.value) {
+    const invalidChip = richEditorRef.value.querySelector('.inline-asset-chip.chip-invalid, .inline-asset-chip[data-invalid="true"]');
+    if (invalidChip) {
+      composerError.value = '挂载的资产已失效或缺失，严禁自动垫图发送。请移除或重新上传失效素材。';
+      return;
+    }
+  }
+
   // 修复会改写编辑器内容（失效胶囊变纯文本），提示词必须在修复之后再取
   const rawContent = getFullPromptText();
   // 按会话判断生成锁：A 会话生成中切到 B 仍可提交，为后台并行任务队列铺路。
@@ -10806,16 +10838,14 @@ async function sendMessage() {
     }
   }
   if (currentMod !== 'chat' && currentTray.length) {
-    // 正文里提到但没有对应素材的编号：只提示，不再拦（以前的强制拦截正是「素材明明挂上了却说失效」的来源）
+    // 正文里提到但没有对应素材的编号：严格阻断，严禁静默 fallback 垫图
     const mentioned = [...new Set(
       [...normalizeRefMentions(rawContent || '').matchAll(/@图(\d+)/g)].map((m) => parseInt(m[1], 10))
     )];
-    const missing = mentioned.filter((n) => !(currentTray[n - 1] && currentTray[n - 1].url));
+    const missing = mentioned.filter((n) => !(currentTray[n - 1] && (currentTray[n - 1].url || currentTray[n - 1].fid)));
     if (missing.length) {
-      composerNotice.value = [
-        composerNotice.value,
-        `正文提到的 ${missing.map((n) => `@图${n}`).join('、')} 当前没有对应素材，本次按已挂载的 ${currentTray.length} 张图生成。`
-      ].filter(Boolean).join(' ');
+      composerError.value = `挂载的资产 ${missing.map((n) => `@图${n}`).join('、')} 已失效或缺失，严禁自动垫图发送。请移除或重新挂载素材。`;
+      return;
     }
   }
   const retryModel = currentMod === 'chat' ? chatModelKey.value : (currentMod === 'image' ? imageModelKey.value : (currentMod === 'video' ? videoModelKey.value : musicType.value));
@@ -10824,6 +10854,32 @@ async function sendMessage() {
     applyResolvedVideoMode(currentTray.filter((item) => mediaKind(item) === 'image').length);
   }
   const retryMode = activeGenMode.value;
+
+  // ComposerDraft 单向数据源与不可变 FrozenSubmitSnapshot
+  const composerDraft = {
+    prompt: rawContent,
+    model: retryModel,
+    modality: currentMod,
+    mode: retryMode,
+    assets: currentTray.map((item, idx) => ({
+      fid: item.fid || '',
+      url: item.url || '',
+      tag: item.tag || `@图${idx + 1}`,
+      name: item.name || '',
+      isWireframe: item.versionLabel === '线框'
+    })),
+    params: retryParams,
+    ratio: selectedRatio.value,
+    size: selectedResolution.value
+  };
+
+  const draftValidation = validateComposerDraft(composerDraft);
+  if (!draftValidation.valid) {
+    composerError.value = `草稿校验未通过: ${draftValidation.errors.join('; ')}`;
+    return;
+  }
+
+  const frozenSnapshot = createFrozenSubmitSnapshot(composerDraft);
 
   // 记录提示词与附带的参考图历史（支持键盘上下键自动召回）
   pushPromptHistory(rawContent, currentTray, {
@@ -10848,6 +10904,8 @@ async function sendMessage() {
   }));
 
   const outboundSnapshot = {
+    frozenSnapshot,
+    draftHash: frozenSnapshot.hash,
     rawPrompt: rawContent,
     dialectPrompt: rawContent,
     images: currentTray.map((item, idx) => {
@@ -10894,7 +10952,8 @@ async function sendMessage() {
     modality: currentMod,
     refs: currentTray,
     images: currentTray.map((item) => item.url),
-    requestSnapshot: outboundSnapshot
+    requestSnapshot: outboundSnapshot,
+    frozenSnapshot
   });
 
   // 5. 占位渲染图实时显示生成进度（图片、视频）
@@ -12597,6 +12656,12 @@ function onChatVideoError(msg) {
   user-select: none;
   margin: 0 2px;
   vertical-align: middle;
+}
+
+:deep(.inline-asset-chip.chip-invalid) {
+  border: 1px solid #ef4444 !important;
+  color: #ef4444 !important;
+  background-color: rgba(239, 68, 68, 0.15) !important;
 }
 
 :deep(.inline-asset-thumb) {

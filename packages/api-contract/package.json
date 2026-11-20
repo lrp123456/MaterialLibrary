@@ -4,6 +4,15 @@
   "description": "Material Library API Contract (single truth route contract)",
   "private": true,
   "main": "index.js",
+  "module": "index.mjs",
+  "types": "src/models.ts",
+  "exports": {
+    ".": {
+      "types": "./src/models.ts",
+      "import": "./index.mjs",
+      "require": "./index.js"
+    }
+  },
   "scripts": {
     "build": "node index.js"
   }
