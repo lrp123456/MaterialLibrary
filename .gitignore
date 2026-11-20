@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Backups of independent repos (preserved read-only per Phase 0 rollback plan)
+material-library-app/
+material-library-harmony/
+material-library-server/
+material-library-web/
+
+# Release bundles & large archives
+release/
+*.zip
+*.tar.gz
+
+# Environment & local credentials
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Build outputs
+dist/
+.cache/
+.turbo/
+
+# OS and Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.workbuddy/
