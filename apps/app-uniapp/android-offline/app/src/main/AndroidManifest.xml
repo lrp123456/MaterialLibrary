@@ -1,0 +1,422 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+
+     >
+
+    <uses-sdk
+
+        android:minSdkVersion="26"
+
+        android:targetSdkVersion="34" />
+
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+
+    <uses-permission
+
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+
+        android:maxSdkVersion="32" />
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+
+    <supports-screens
+
+        android:anyDensity="true"
+
+        android:largeScreens="true"
+
+        android:normalScreens="true"
+
+        android:resizeable="true"
+
+        android:smallScreens="true" />
+
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+
+    <!--
+
+    <uses-permission
+
+        android:name="com.android.launcher.permission.UNINSTALL_SHORTCUT" />
+
+    -->
+
+    <!-- 华为修改角标需要设置权限 -->
+
+    <uses-permission android:name="com.huawei.android.launcher.permission.CHANGE_BADGE" /> <!-- vivo 修改角标需要设置权限 -->
+
+    <uses-permission android:name="com.vivo.notification.permission.BADGE_ICON" />
+
+    <queries>
+
+        <intent>
+
+            <action android:name="android.intent.action.MAIN" />
+
+        </intent>
+
+        <intent>
+
+            <action android:name="android.intent.action.VIEW" />
+
+            <category android:name="android.intent.category.DEFAULT" />
+
+        </intent>
+
+    </queries>
+
+    <uses-permission android:name="com.asus.msa.SupplementaryDID.ACCESS" />
+
+    <uses-permission android:name="freemme.permission.msa" />
+
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <permission
+
+        android:name="lrp.aibum.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+
+        android:protectionLevel="signature" />
+
+    <uses-permission android:name="lrp.aibum.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
+
+    <application
+
+        android:name="io.dcloud.application.DCloudApplication"
+
+        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
+
+        android:enableOnBackInvokedCallback="false"
+
+        android:extractNativeLibs="true"
+
+        android:icon="@drawable/icon"
+
+        android:label="@string/app_name"
+
+        android:requestLegacyExternalStorage="true"
+
+        android:supportsRtl="true"
+
+        android:usesCleartextTraffic="true" >
+
+        <!-- 与 offline-config.json / 后台离线 AppKey 一致；签名 SHA1 必须是 Test.keystore -->
+
+        <meta-data
+
+            android:name="dcloud_appkey"
+
+            android:value="5caa3303184881d7e0e03282f9922357" />
+
+        <meta-data
+
+            android:name="DCLOUD_DARK_MODE"
+
+            android:value="light" />
+
+        <provider
+
+            android:name="io.dcloud.common.util.DCloud_FileProvider"
+
+            android:authorities="lrp.aibum.dc.fileprovider"
+
+            android:exported="false"
+
+            android:grantUriPermissions="true" >
+
+            <meta-data
+
+                android:name="android.support.FILE_PROVIDER_PATHS"
+
+                android:resource="@xml/dcloud_file_provider" />
+
+        </provider>
+
+        <activity
+
+            android:name="io.dcloud.PandoraEntry"
+
+            android:configChanges="orientation|keyboardHidden|keyboard|navigation|uiMode|smallestScreenSize|screenLayout|screenSize"
+
+            android:exported="true"
+
+            android:hardwareAccelerated="true"
+
+            android:label="@string/app_name"
+
+            android:launchMode="singleTask"
+
+            android:screenOrientation="user"
+
+            android:theme="@style/TranslucentTheme"
+
+            android:windowSoftInputMode="adjustResize" >
+
+            <intent-filter>
+
+                <action android:name="android.intent.action.MAIN" />
+
+                <category android:name="android.intent.category.LAUNCHER" />
+
+            </intent-filter>
+
+        </activity>
+
+        <activity
+
+            android:name="io.dcloud.PandoraEntryActivity"
+
+            android:configChanges="orientation|keyboardHidden|screenSize|mcc|mnc|fontScale|keyboard|smallestScreenSize|screenLayout|screenSize|uiMode"
+
+            android:exported="false"
+
+            android:hardwareAccelerated="true"
+
+            android:launchMode="singleTask"
+
+            android:screenOrientation="user"
+
+            android:theme="@style/DCloudTheme"
+
+            android:windowSoftInputMode="adjustResize" />
+
+        <service
+
+            android:name="io.dcloud.debug.WebSocketService"
+
+            android:exported="true" />
+
+        <service
+
+            android:name="io.dcloud.debug.PullService"
+
+            android:exported="true" />
+
+        <activity
+
+            android:name="io.dcloud.debug.PullDebugActivity"
+
+            android:configChanges="orientation|keyboardHidden|screenSize|mcc|mnc|fontScale"
+
+            android:exported="true"
+
+            android:launchMode="singleTask"
+
+            android:theme="@style/PullActivityTheme" />
+
+        <!--
+
+        <activity
+
+            android:name="io.dcloud.imagepick.CustomGalleryActivity"
+
+            android:noHistory="true"
+
+            android:exported="false"/>
+
+        -->
+
+        <activity
+
+            android:name="io.dcloud.feature.nativeObj.photoview.PhotoActivity"
+
+            android:configChanges="orientation|keyboardHidden"
+
+            android:exported="false"
+
+            android:noHistory="false"
+
+            android:screenOrientation="behind"
+
+            android:theme="@style/DCloudTheme.Light" />
+
+        <activity
+
+            android:name="io.dcloud.WebAppActivity"
+
+            android:configChanges="orientation|keyboard|keyboardHidden|smallestScreenSize|screenLayout|screenSize|mcc|mnc|fontScale|navigation"
+
+            android:hardwareAccelerated="true"
+
+            android:icon="@drawable/dcloud_recent"
+
+            android:label="@string/stream_my"
+
+            android:launchMode="singleTask"
+
+            android:screenOrientation="portrait"
+
+            android:theme="@style/DCloudTheme"
+
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+
+            android:name="io.dcloud.ProcessMediator"
+
+            android:excludeFromRecents="true"
+
+            android:exported="false"
+
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <activity
+
+            android:name="io.dcloud.WebviewActivity"
+
+            android:exported="false"
+
+            android:screenOrientation="portrait"
+
+            android:theme="@style/AppCompat.ThemeNoTitleBar"
+
+            android:windowSoftInputMode="adjustPan" >
+
+        </activity> <!-- gallery******start -->
+
+        <activity
+
+            android:name="com.dmcbig.mediapicker.PickerActivity"
+
+            android:configChanges="orientation|screenSize"
+
+            android:exported="false"
+
+            android:theme="@style/DeviceDefault.Light"
+
+            android:windowSoftInputMode="stateAlwaysHidden" />
+
+        <activity
+
+            android:name="com.dmcbig.mediapicker.PreviewActivity"
+
+            android:configChanges="orientation|screenSize"
+
+            android:exported="false"
+
+            android:theme="@style/DeviceDefault.Light"
+
+            android:windowSoftInputMode="stateAlwaysHidden" />
+
+        <!--
+
+            <meta-data
+
+            android:name="DCLOUD_STREAMAPP_CHANNEL"
+
+            android:value="io.dcloud.%APPID%|%APPID%|" />
+
+        -->
+
+        <meta-data
+
+            android:name="android.max_aspect"
+
+            android:value="2.4" />
+
+        <activity
+
+            android:name="io.dcloud.feature.gallery.imageedit.IMGEditActivity"
+
+            android:configChanges="orientation|keyboardHidden|screenSize"
+
+            android:exported="false"
+
+            android:theme="@style/ImageEditTheme"
+
+            android:windowSoftInputMode="stateAlwaysHidden" /> <!-- 广告相关配置开始 -->
+
+        <activity
+
+            android:name="io.dcloud.sdk.activity.WebViewActivity"
+
+            android:exported="false"
+
+            android:screenOrientation="portrait"
+
+            android:theme="@style/ThemeNoTitleBar"
+
+            android:windowSoftInputMode="adjustPan" />
+
+        <service
+
+            android:name="io.dcloud.sdk.base.service.DownloadService"
+
+            android:exported="false"
+
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <provider
+
+            android:name="io.dcloud.sdk.base.service.provider.DCloudAdFileProvider"
+
+            android:authorities="lrp.aibum.dc.fileprovider"
+
+            android:exported="false"
+
+            android:grantUriPermissions="true" >
+
+            <meta-data
+
+                android:name="android.support.FILE_PROVIDER_PATHS"
+
+                android:resource="@xml/dcloud_gg_file_provider" />
+
+        </provider>
+
+        <activity
+
+            android:name="uts.sdk.modules.DCloudUniMedia.SystemPickerActivity"
+
+            android:configChanges="orientation|keyboardHidden|screenSize"
+
+            android:exported="false"
+
+            android:theme="@android:style/Theme.Translucent.NoTitleBar.Fullscreen"
+
+            android:windowSoftInputMode="stateAlwaysHidden" >
+
+        </activity>
+
+        <receiver
+
+            android:name="com.taobao.weex.WXGlobalEventReceiver"
+
+            android:enabled="true"
+
+            android:exported="false" >
+
+        </receiver>
+
+        <uses-library
+
+            android:name="org.apache.http.legacy"
+
+            android:required="false" />
+
+        <service
+
+            android:name="com.tencent.smtt.export.external.DexClassLoaderProviderService"
+
+            android:exported="false"
+
+            android:label="dexopt"
+
+            android:process=":dexopt" >
+
+        </service>
+
+    </application>
+
+</manifest>

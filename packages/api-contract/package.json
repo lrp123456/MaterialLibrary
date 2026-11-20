@@ -1,0 +1,10 @@
+{
+  "name": "@mls/api-contract",
+  "version": "1.0.0",
+  "description": "Material Library API Contract (single truth route contract)",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "build": "node index.js"
+  }
+}

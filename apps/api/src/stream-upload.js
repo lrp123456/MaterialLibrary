@@ -1,0 +1,1082 @@
+/**
+ * 流式直传与大文件分片服务 (Stream & Chunked Upload to NAS)
+ * - 纯流式管道传输，单文件支持数 GB 大视频，杜绝内存溢出 (OOM)；
+ * - 自动按时间线归档至 NAS /mnt/synology/material/YYYY/MM/；
+ * - 自动生成缩略图：sharp（图片）、ffmpeg（视频截取封面）；
+ * - 自动入库与派发 AI 解释器打标。
+ */
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const { spawn } = require('child_process');
+const sharp = require('sharp');
+const { nasDateOriginalPath, createNasWriteStream, nasMaterialDir } = require('./nasstore');
+const { createDerivative, setMainDerivative } = require('./derivatives');
+const { calculateOriginOrientation } = require('./ratio');
+
+const VIDEO_EXTS = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.3gp', '.wmv', '.flv']);
+const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif', '.bmp', '.gif', '.tiff']);
+
+const AUDIO_EXTS = new Set(['.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg', '.wma', '.aiff']);
+
+// B6：单请求上传体积上限（默认 2GB，可用环境变量 ML_MAX_UPLOAD_BYTES 覆盖）
+const DEFAULT_MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
+function resolveMaxUploadBytes() {
+  const v = parseInt(process.env.ML_MAX_UPLOAD_BYTES || '', 10);
+  return Number.isFinite(v) && v > 0 ? v : DEFAULT_MAX_UPLOAD_BYTES;
+}
+const ML_MAX_UPLOAD_BYTES = resolveMaxUploadBytes();
+// 分片上传的单片上限（与历史 readRequestBuffer(64MB) 保持一致）
+const MAX_CHUNK_BYTES = 64 * 1024 * 1024;
+
+function makePayloadTooLarge(limit) {
+  const err = new Error(`上传文件体积超过限制 (${Math.round(limit / (1024 * 1024))}MB)`);
+  err.statusCode = 413;
+  err.code = 'PAYLOAD_TOO_LARGE';
+  err.limit = limit;
+  return err;
+}
+
+function isVideoFile(fileName) {
+  const ext = (path.extname(fileName || '') || '').toLowerCase();
+  return VIDEO_EXTS.has(ext);
+}
+
+function isAudioFile(fileName) {
+  const ext = (path.extname(fileName || '') || '').toLowerCase();
+  return AUDIO_EXTS.has(ext);
+}
+
+function getChunkDir(config, uploadId) {
+  const safeId = String(uploadId).replace(/[^a-zA-Z0-9_-]/g, '_');
+  const d = path.join(config.dataDir, 'cache', 'upload_chunks', safeId);
+  fs.mkdirSync(d, { recursive: true });
+  return d;
+}
+
+/**
+ * 抽取视频第一秒海报帧
+ */
+function extractVideoThumbnail(videoPath, thumbPath) {
+  return new Promise((resolve) => {
+    fs.mkdirSync(path.dirname(thumbPath), { recursive: true });
+    // 先尝试 -ss 00:00:01，若视频极短则可能在 0 秒
+    const ff = spawn('ffmpeg', [
+      '-y',
+      '-ss', '00:00:01',
+      '-i', videoPath,
+      '-vframes', '1',
+      '-q:v', '2',
+      thumbPath
+    ]);
+
+    ff.on('close', (code) => {
+      if (code === 0 && fs.existsSync(thumbPath) && fs.statSync(thumbPath).size > 0) {
+        return resolve(true);
+      }
+      // 重试从 0 秒提取
+      const ffRetry = spawn('ffmpeg', [
+        '-y',
+        '-ss', '00:00:00',
+        '-i', videoPath,
+        '-vframes', '1',
+        '-q:v', '2',
+        thumbPath
+      ]);
+      ffRetry.on('close', (c2) => {
+        resolve(c2 === 0 && fs.existsSync(thumbPath) && fs.statSync(thumbPath).size > 0);
+      });
+      ffRetry.on('error', () => resolve(false));
+    });
+
+    ff.on('error', (err) => {
+      console.warn('[stream-upload] ffmpeg 未安装或启动失败，视频封面待后续补充:', err.message);
+      resolve(false);
+    });
+  });
+}
+
+/**
+ * 流式接收文件并同时计算 SHA-256，写入临时文件。
+ * B6：支持 maxBytes 字节计数硬上限（超限即 413 并清理半成品）。
+ */
+function streamToTempFile(readableStream, tempPath, { maxBytes = ML_MAX_UPLOAD_BYTES } = {}) {
+  return new Promise((resolve, reject) => {
+    fs.mkdirSync(path.dirname(tempPath), { recursive: true });
+    const writeStream = fs.createWriteStream(tempPath);
+    const hash = crypto.createHash('sha256');
+    let totalBytes = 0;
+    let settled = false;
+
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      try { readableStream.destroy(); } catch (_) {}
+      try { writeStream.destroy(); } catch (_) {}
+      try { fs.unlinkSync(tempPath); } catch (_) {}
+      reject(err);
+    };
+
+    readableStream.on('data', (chunk) => {
+      if (settled) return;
+      totalBytes += chunk.length;
+      if (totalBytes > maxBytes) {
+        return fail(makePayloadTooLarge(maxBytes));
+      }
+      hash.update(chunk);
+      // 背压：磁盘跟不上时暂停读端，drain 后恢复（drain 监听只挂一个，避免监听器堆积）
+      if (!writeStream.write(chunk) && readableStream.pause) {
+        readableStream.pause();
+        if (!writeStream._b6DrainBound) {
+          writeStream._b6DrainBound = true;
+          writeStream.once('drain', () => {
+            writeStream._b6DrainBound = false;
+            if (!settled && readableStream.resume) readableStream.resume();
+          });
+        }
+      }
+    });
+
+    readableStream.on('end', () => {
+      if (settled) return;
+      writeStream.end(() => {
+        if (settled) return;
+        settled = true;
+        resolve({ sha256: hash.digest('hex'), size: totalBytes });
+      });
+    });
+
+    writeStream.on('error', fail);
+    readableStream.on('error', fail);
+  });
+}
+
+const CRLF = Buffer.from('\r\n');
+
+function indexOfBuf(buf, needle, from = 0) {
+  return buf.indexOf(needle, from);
+}
+
+/**
+ * B6：流式 multipart/form-data 解析器（零新依赖）。
+ * 主文件分片（name=file 或第一个带 filename 的 part）直接流式写入 targetFile，
+ * 边写边算 sha256 并做字节计数；thumb 等附带小文件与普通字段在内存中收集。
+ * 彻底消除旧实现 readRequestBuffer(2GB)+Buffer.concat+writeFileSync 的 OOM 路径。
+ *
+ * @returns {Promise<{fields:Object, file:Object|null, extras:Object<string,Buffer>}>}
+ */
+function streamMultipartFile(req, targetFile, boundary, {
+  maxBytes = ML_MAX_UPLOAD_BYTES,
+  extraFileNames = ['thumb'],
+  extraMaxBytes = 16 * 1024 * 1024,
+  fieldsMaxBytes = 1 * 1024 * 1024,
+} = {}) {
+  return new Promise((resolve, reject) => {
+    const delim = Buffer.from('--' + String(boundary).trim());
+    const sep = Buffer.concat([CRLF, delim]);
+    fs.mkdirSync(path.dirname(targetFile), { recursive: true });
+
+    let settled = false;
+    let pending = Buffer.alloc(0);
+    let state = 'delim'; // delim -> headers -> body -> delim ... -> done
+    let partMode = 'ignore'; // 'file' | 'extra' | 'field' | 'ignore'
+    let partName = '';
+    let partChunks = null;
+    let partSize = 0;
+    let fieldsTotal = 0;
+    let ws = null;
+    let hash = null;
+    const result = { fields: {}, file: null, extras: {} };
+
+    const cleanup = () => {
+      try { if (ws) ws.destroy(); } catch (_) {}
+      try { fs.unlinkSync(targetFile); } catch (_) {}
+    };
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      try { req.destroy(); } catch (_) {}
+      cleanup();
+      reject(err);
+    };
+
+    function openPart(headerText) {
+      const nameM = headerText.match(/name="([^"]*)"/i);
+      const fileM = headerText.match(/filename="([^"]*)"/i);
+      partName = nameM ? nameM[1] : '';
+      partChunks = [];
+      partSize = 0;
+      if (fileM) {
+        // 第一个带 filename 的 part 即主文件（与旧 files[0] 兜底语义一致）
+        if (!result.file) {
+          partMode = 'file';
+          ws = fs.createWriteStream(targetFile);
+          ws.on('error', fail);
+          hash = crypto.createHash('sha256');
+        } else if (extraFileNames.includes(partName)) {
+          partMode = 'extra';
+        } else {
+          // 未知文件 part：按额外文件丢弃式收集有内存风险，直接忽略不落地
+          partMode = 'ignore';
+        }
+        result._lastFilename = fileM[1] || '';
+        result._lastPartName = partName;
+      } else {
+        partMode = 'field';
+      }
+    }
+
+    function emitBody(buf) {
+      if (!buf.length || partMode === 'ignore') return;
+      partSize += buf.length;
+      if (partMode === 'file') {
+        if (partSize > maxBytes) return fail(makePayloadTooLarge(maxBytes));
+        hash.update(buf);
+        if (!ws.write(buf) && req.pause) {
+          req.pause();
+          if (!ws._b6DrainBound) {
+            ws._b6DrainBound = true;
+            ws.once('drain', () => {
+              ws._b6DrainBound = false;
+              if (!settled && req.resume) req.resume();
+            });
+          }
+        }
+      } else if (partMode === 'extra') {
+        if (partSize > extraMaxBytes) return fail(makePayloadTooLarge(extraMaxBytes));
+        partChunks.push(buf);
+      } else if (partMode === 'field') {
+        fieldsTotal += buf.length;
+        if (fieldsTotal > fieldsMaxBytes) {
+          const err = new Error('表单字段总体积超限');
+          err.statusCode = 413;
+          err.code = 'PAYLOAD_TOO_LARGE';
+          return fail(err);
+        }
+        partChunks.push(buf);
+      }
+    }
+
+    function closePart() {
+      if (partMode === 'file') {
+        const fileName = result._lastFilename || '';
+        return new Promise((res, rej) => {
+          ws.end(() => {
+            result.file = {
+              name: 'file',
+              filename: fileName,
+              size: partSize,
+              sha256: hash.digest('hex'),
+            };
+            res();
+          });
+          ws.on('error', rej);
+        });
+      }
+      if (partMode === 'extra' && partName) {
+        result.extras[partName] = Buffer.concat(partChunks, partSize);
+      } else if (partMode === 'field' && partName) {
+        result.fields[partName] = Buffer.concat(partChunks, partSize).toString('utf8');
+      }
+      partMode = 'ignore';
+      partChunks = null;
+      return null;
+    }
+
+    async function processBuffer(finalFlush) {
+      let cursor = 0;
+      // eslint-disable-next-line no-constant-condition
+      outer: while (true) {
+        if (state === 'done') break;
+        if (state === 'delim') {
+          const idx = indexOfBuf(pending, delim, cursor);
+          if (idx < 0) {
+            const keep = Math.min(pending.length - cursor, delim.length - 1);
+            pending = pending.slice(pending.length - keep);
+            return;
+          }
+          // 边界恰落在 delim 末尾：还需至少 2 字节判断 '--' 或 CRLF
+          if (pending.length < idx + delim.length + 2) {
+            pending = pending.slice(idx);
+            return;
+          }
+          cursor = idx + delim.length;
+          if (pending[cursor] === 0x2d && pending[cursor + 1] === 0x2d) {
+            state = 'done';
+            break;
+          }
+          if (pending[cursor] === 0x0d && pending[cursor + 1] === 0x0a) cursor += 2;
+          state = 'headers';
+        }
+        if (state === 'headers') {
+          const hend = indexOfBuf(pending, Buffer.from('\r\n\r\n'), cursor);
+          if (hend < 0) {
+            pending = pending.slice(cursor);
+            return;
+          }
+          const headerText = pending.slice(cursor, hend).toString('latin1');
+          cursor = hend + 4;
+          openPart(headerText);
+          state = 'body';
+        }
+        if (state === 'body') {
+          const idx = indexOfBuf(pending, sep, cursor);
+          if (idx < 0) {
+            // 保留 sep.length-1 尾巴，防止分隔符跨 chunk 被切断
+            const keep = sep.length - 1;
+            const end = Math.max(cursor, pending.length - keep);
+          emitBody(pending.slice(cursor, end));
+            if (settled) return;
+            pending = pending.slice(end);
+            return;
+          }
+          emitBody(pending.slice(cursor, idx));
+          if (settled) return;
+          const p = closePart();
+          if (p) await p;
+          if (settled) return;
+          // 仅消费 body 与前导 CRLF，下一轮 delim 状态从 "--boundary" 开始匹配
+          cursor = idx + 2;
+          pending = pending.slice(cursor);
+          cursor = 0;
+          state = 'delim';
+          continue outer;
+        }
+      }
+      // state === 'done'
+      pending = Buffer.alloc(0);
+      if (!finalFlush) return;
+    }
+
+    (async () => {
+      try {
+        for await (const chunk of req) {
+          if (settled) return;
+          pending = pending.length ? Buffer.concat([pending, chunk]) : chunk;
+          await processBuffer(false);
+          if (settled) return;
+        }
+        if (settled) return;
+        await processBuffer(true);
+        if (state !== 'done') {
+          throw new Error('multipart 数据不完整或缺少结束边界');
+        }
+        if (!result.file) {
+          settled = true;
+          cleanup();
+          return reject(new Error('缺少 file 字段'));
+        }
+        settled = true;
+        resolve({ fields: result.fields, file: result.file, extras: result.extras });
+      } catch (err) {
+        fail(err);
+      }
+    })();
+  });
+}
+
+/** 看得见的行，或用户删过、进了黑名单的行，才算「已经有了」。其余不可见行不拦截新的同步。 */
+function duplicateTargetStillHolds(db, fid, sha256) {
+  if (!fid) return false;
+  let row = null;
+  try {
+    row = db.prepare('SELECT fid, status, sha256 FROM assets WHERE fid=?').get(fid);
+  } catch (_) {
+    return false;
+  }
+  if (!row) return false;
+  if (row.status === 'ready' || row.status === 'ready_with_flags') return true;
+  try {
+    const { isBlacklisted } = require('./assets-delete');
+    if (isBlacklisted(db, { fid: row.fid, sha256: sha256 || row.sha256 })) return true;
+  } catch (_) {}
+  return false;
+}
+
+/**
+ * 将已落盘的媒体文件入库、生成缩略图、注册衍生图并触发工作流
+ */
+async function registerMediaAsset(services, {
+  filePath,
+  fileName,
+  sha256,
+  size,
+  dateModified = null,
+  clientAssetId = null,
+  clientThumbBuffer = null,
+  source = 'sync',
+  category = null,
+  manualTags = null,
+  shelf = null
+}) {
+  const { db, config, logger, interpreter } = services;
+  const isVideo = isVideoFile(fileName);
+  const isAudio = isAudioFile(fileName);
+  const fid = `local_${sha256.slice(0, 24)}`;
+  const now = Date.now();
+
+  // ★ 宽容入库策略（Store-First, Gate-Later）：
+  // 所有上传图片入库时先不筛选、不物理删除，确保文件完整安全落盘并生成资产与衍生记录。
+  // 成功触发工作流后，由 Gate 节点统一进行黑名单、截图防御与质量判定，若判定不合格再移入垃圾站。
+
+  // 0d. 检查 export_registry、预览图/缩略图以及全部衍生图绝对哈希
+  try {
+    const regHit = db.prepare('SELECT source_fid, variant FROM export_registry WHERE sha256 = ? OR (md5 IS NOT NULL AND md5 = ?) LIMIT 1').get(sha256, sha256);
+    if (regHit) {
+      logger?.info?.(`[stream-upload] export_registry 绝对查重拦截 sha=${sha256.slice(0, 12)} fid=${regHit.source_fid}`);
+      try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (_) {}
+      return { fid: regHit.source_fid, deduped: true, reason: 'export_registry', sha256, matchedKind: regHit.variant };
+    }
+
+    const derivHit = db.prepare('SELECT asset_fid, kind FROM derivatives WHERE sha256 = ? OR (md5 IS NOT NULL AND md5 = ?) LIMIT 1').get(sha256, sha256);
+    if (derivHit && duplicateTargetStillHolds(db, derivHit.asset_fid, sha256)) {
+      logger?.info?.(`[stream-upload] 衍生图绝对查重拦截 sha=${sha256.slice(0, 12)} fid=${derivHit.asset_fid}`);
+      try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (_) {}
+      return { fid: derivHit.asset_fid, deduped: true, reason: 'duplicate_of_derivative', sha256, matchedKind: derivHit.kind };
+    }
+
+    const visHit = db.prepare('SELECT fid FROM assets WHERE preview_sha256 = ? OR preview_md5 = ? OR thumb_sha256 = ? OR thumb_md5 = ? LIMIT 1').get(sha256, sha256, sha256, sha256);
+    if (visHit && duplicateTargetStillHolds(db, visHit.fid, sha256)) {
+      logger?.info?.(`[stream-upload] 可见缓存图绝对查重拦截 sha=${sha256.slice(0, 12)} fid=${visHit.fid}`);
+      try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (_) {}
+      return { fid: visHit.fid, deduped: true, reason: 'visible_cache_duplicate', sha256 };
+    }
+  } catch (_) {}
+
+  // 1. 去重检查：若同 sha256 已存在，直接返回
+  try {
+    const { findExportBySha } = require('./export-registry');
+    const exp = findExportBySha(db, sha256);
+    if (exp) {
+      logger?.info?.(`[stream-upload] 导出登记拦截 sha=${String(sha256).slice(0, 12)} fid=${exp.source_fid || ''}`);
+      try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (_) {}
+      const err = new Error('本端导出件，拒绝重复入库');
+      err.code = 'export_registry';
+      throw err;
+    }
+  } catch (e) {
+    if (e.code === 'export_registry') throw e;
+  }
+  const existing = db.prepare('SELECT fid, client_asset_id, status, sha256 FROM assets WHERE sha256 = ?').get(sha256);
+  const reuseExisting = !!(existing && duplicateTargetStillHolds(db, existing.fid, sha256));
+  // 1b. 指纹去重（MD5 + pHash），覆盖已在库的 9:16/3:4 衍生
+  let streamFp = null;
+  if (!reuseExisting && !isVideo && !isAudio) {
+    try {
+      const fpApi = require('./fingerprint');
+      fpApi.ensureFingerprintColumns(db);
+      const buf = fs.readFileSync(filePath);
+      streamFp = await fpApi.computeFingerprints(buf, fileName);
+      const fpHit = fpApi.findFingerprintHit(
+        db,
+        { md5: streamFp.md5, sha256: streamFp.sha256, phash: streamFp.phash },
+        { exactOnly: true }
+      );
+      if (fpHit && fpHit.hit && duplicateTargetStillHolds(db, fpHit.fid, sha256)) {
+        logger?.info?.(`[stream-upload] 指纹命中跳过入库 ${fpHit.reason} → ${fpHit.fid} (${fpHit.kind || ''})`);
+        try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (_) {}
+        return {
+          fid: fpHit.fid,
+          deduped: true,
+          reason: fpHit.reason,
+          derivativeId: fpHit.derivativeId || null,
+          sha256,
+          matchedKind: fpHit.kind || null,
+        };
+      }
+    } catch (e) {
+      logger?.warn?.(`[stream-upload] fingerprint check failed: ${e.message}`);
+    }
+  }
+  if (reuseExisting) {
+    logger?.info?.(`[stream-upload] 资产已存在，直接复用 fid: ${existing.fid}`);
+    // 补齐同哈希副本别名记录，终结快照对账循环重传
+    try {
+      const aliasKey = `${fileName}|${size}`;
+      db.prepare(`
+        INSERT OR IGNORE INTO asset_aliases (fid, item_key, client_asset_id, file_name, size, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(existing.fid, aliasKey, clientAssetId || null, fileName, size, now);
+
+      if (!existing.client_asset_id && clientAssetId) {
+        db.prepare('UPDATE assets SET client_asset_id = ? WHERE fid = ?').run(clientAssetId, existing.fid);
+      }
+    } catch (e) {
+      logger?.warn?.(`[stream-upload] 登记别名警告: ${e.message}`);
+    }
+
+    // 关键：立即清理临时文件，杜绝磁盘泄漏
+    try {
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    } catch (_) {}
+
+    return { fid: existing.fid, deduped: true, sha256 };
+  }
+
+  // 2. 年月归档路径
+  const nasInfo = nasDateOriginalPath(config, {
+    fileName,
+    date: dateModified || now,
+    hash: sha256
+  });
+
+  // 如果当前文件不在目标 NAS 路径，移动/复制过去
+  if (path.resolve(filePath) !== path.resolve(nasInfo.fullPath)) {
+    try {
+      fs.renameSync(filePath, nasInfo.fullPath);
+    } catch {
+      fs.copyFileSync(filePath, nasInfo.fullPath);
+      try { fs.unlinkSync(filePath); } catch {}
+    }
+  }
+
+  const thumbsDir = path.join(config.dataDir, 'cache', 'thumbs');
+  fs.mkdirSync(thumbsDir, { recursive: true });
+  const thumbPath = path.join(thumbsDir, `${fid}.jpg`);
+
+  let width = null;
+  let height = null;
+  let orientation = null;
+
+  let duration_s = null;
+  if (isAudio || isVideo) {
+    try {
+      const { spawnSync } = require('child_process');
+      const ffprobeRes = spawnSync('ffprobe', [
+        '-v', 'error',
+        '-show_entries', 'format=duration',
+        '-of', 'default=noprint_wrappers=1:nokey=1',
+        nasInfo.fullPath
+      ], { encoding: 'utf-8', timeout: 5000 });
+      const dur = parseFloat(ffprobeRes.stdout);
+      if (!isNaN(dur) && dur > 0) {
+        duration_s = Math.round(dur);
+      }
+    } catch (_) {}
+  }
+
+  if (isVideo) {
+    // 优先使用前端上传的客户端本地快速缩略图
+    if (clientThumbBuffer && clientThumbBuffer.length > 0) {
+      try {
+        await sharp(clientThumbBuffer).jpeg({ quality: 80 }).toFile(thumbPath);
+      } catch {}
+    }
+    // 若尚未生成缩略图，调用 ffmpeg 截取
+    if (!fs.existsSync(thumbPath)) {
+      await extractVideoThumbnail(nasInfo.fullPath, thumbPath);
+    }
+  } else if (isAudio) {
+    // 音频资产免除 sharp 缩略图处理，前端使用专属音频封面波形渲染
+    if (clientThumbBuffer && clientThumbBuffer.length > 0) {
+      try {
+        await sharp(clientThumbBuffer).jpeg({ quality: 80 }).toFile(thumbPath);
+      } catch {}
+    }
+  } else {
+    // 图片文件：读取 metadata 并生成 512 缩略图
+    try {
+      const imgInstance = sharp(nasInfo.fullPath, { failOn: 'none' }).rotate();
+      const meta = await imgInstance.metadata();
+      width = meta.width || null;
+      height = meta.height || null;
+      if (width && height) {
+        orientation = height > width * 1.05 ? 'portrait' : (width > height * 1.05 ? 'landscape' : 'square');
+      }
+      // 生成缩略图
+      await imgInstance
+        .resize(512, 512, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 82 })
+        .toFile(thumbPath);
+    } catch (e) {
+      logger?.warn?.(`[stream-upload] sharp 生成缩略图异常: ${e.message}`);
+      if (clientThumbBuffer) {
+        try { fs.writeFileSync(thumbPath, clientThumbBuffer); } catch {}
+      }
+    }
+  }
+
+  const originOrientation = calculateOriginOrientation(width, height);
+  const mediaKind = isVideo ? 'video' : (isAudio ? 'audio' : 'image');
+  const takenAt = dateModified ? (Number(dateModified) < 1e12 ? Number(dateModified) * 1000 : Number(dateModified)) : now;
+  const isDirectAppUpload = source === 'app_upload' || source === 'manual' || source === 'upload' || source === 'edit';
+  const { normalizeCategory } = require('./gate-route');
+  const normalizedCategory = normalizeCategory(category);
+  let targetCategory;
+  if (isAudio) {
+    const catLower = String(category || '').toLowerCase();
+    targetCategory = (catLower === 'voice' || catLower === 'vocal') ? 'voice' : 'music';
+  } else if (isVideo) {
+    targetCategory = 'video';
+  } else {
+    targetCategory = (normalizedCategory && normalizedCategory !== 'none' ? normalizedCategory : 'interior');
+  }
+  const isFinished = targetCategory === 'finished' || isAudio;
+  // ★ 宽容入库：所有上传素材初始状态均为 ready，入库立即可见，工作流触发后再行判定
+  const initialStatus = 'ready';
+
+  // 隐藏且未拉黑的哈希先置空再插入，与生成入库一致，避免隐藏死行阻挡新文件入库
+  try {
+    const { isBlacklisted } = require('./assets-delete');
+    const staleRows = db.prepare("SELECT fid, sha256 FROM assets WHERE sha256=? AND IFNULL(status,'') NOT IN ('ready', 'ready_with_flags')").all(sha256);
+    for (const sr of staleRows) {
+      if (!isBlacklisted(db, { fid: sr.fid, sha256: sr.sha256 })) {
+        db.prepare('UPDATE assets SET sha256=NULL WHERE fid=?').run(sr.fid);
+      }
+    }
+  } catch (_) {}
+
+  // 3. 写入 assets 表
+  db.prepare(`
+    INSERT INTO assets (
+      fid, kind, category, file_name, size, width, height, orientation, origin_orientation, duration_s,
+      status, source, sha256, client_asset_id, thumb_url,
+      auth_state, auth_matched_at,
+      created_at, discovered_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'live', ?, ?, ?, ?)
+    ON CONFLICT(fid) DO UPDATE SET
+      category=COALESCE(excluded.category, assets.category),
+      file_name=excluded.file_name, size=excluded.size,
+      duration_s=COALESCE(excluded.duration_s, assets.duration_s),
+      status=CASE WHEN excluded.status='ready' THEN 'ready' ELSE assets.status END,
+      updated_at=excluded.updated_at
+  `).run(
+    fid,
+    mediaKind,
+    targetCategory,
+    nasInfo.fileName,
+    size,
+    width,
+    height,
+    orientation,
+    originOrientation,
+    duration_s,
+    initialStatus,
+    source,
+    sha256,
+    clientAssetId || null,
+    `/api/thumbs/${fid}.jpg`,
+    now,
+    takenAt,
+    now,
+    now
+  );
+
+
+  // 4. 插入 derivatives 表
+  const ext = (path.extname(nasInfo.fileName) || '').toLowerCase();
+  let mime = 'image/jpeg';
+  if (isVideo) {
+    mime = `video/${ext.slice(1) || 'mp4'}`;
+  } else if (isAudio) {
+    if (ext === '.wav') mime = 'audio/wav';
+    else if (ext === '.m4a') mime = 'audio/mp4';
+    else if (ext === '.flac') mime = 'audio/flac';
+    else if (ext === '.aac') mime = 'audio/aac';
+    else if (ext === '.ogg') mime = 'audio/ogg';
+    else mime = 'audio/mpeg';
+  } else if (ext === '.png') {
+    mime = 'image/png';
+  }
+
+  const deriv = await createDerivative(services, {
+    assetFid: fid,
+    kind: 'origin',
+    srcPath: null, // 已在 NAS
+    fileName: nasInfo.fileName,
+    width,
+    height,
+    mime,
+    params: { source, sha256, path: nasInfo.relPath }
+  });
+
+  // 设置存储类型为 nas，storage_ref 存相对路径（如 2026/09/xxx.jpg）
+  db.prepare("UPDATE derivatives SET storage_type='nas', storage_ref=? WHERE id=?")
+    .run(nasInfo.relPath, deriv.id);
+  setMainDerivative(db, fid, deriv.id);
+
+  // 写入指纹（md5/phash），供后续入库与衍生对照
+  try {
+    if (streamFp) {
+      const fpApi = require('./fingerprint');
+      fpApi.saveAssetFingerprints(db, fid, {
+        md5: streamFp.md5,
+        sha256,
+        phash: streamFp.phash,
+      });
+      fpApi.saveDerivativeFingerprints(db, deriv.id, {
+        md5: streamFp.md5,
+        sha256,
+        phash: streamFp.phash,
+      });
+    }
+  } catch (e) {
+    logger?.warn?.(`[stream-upload] save fingerprints failed: ${e.message}`);
+  }
+
+  // 像素级质量分析：把真实锐度写回 assets.sharpness，并落 9 维分（只读评估）
+  if (!isVideo && !isAudio) {
+    try {
+      await require('./quality-score').analyzeAndPersist(services, fid, nasInfo.fullPath);
+    } catch (e) {
+      logger?.warn?.(`[stream-upload] 质量分析失败: ${e.message}`);
+    }
+  }
+
+  // 记录主别名及原始文件名映射
+  try {
+    const mainKey = `${nasInfo.fileName}|${size}`;
+    db.prepare(`
+      INSERT OR IGNORE INTO asset_aliases (fid, item_key, client_asset_id, file_name, size, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(fid, mainKey, clientAssetId || null, nasInfo.fileName, size, now);
+
+    if (fileName && fileName !== nasInfo.fileName) {
+      const rawKey = `${fileName}|${size}`;
+      db.prepare(`
+        INSERT OR IGNORE INTO asset_aliases (fid, item_key, client_asset_id, file_name, size, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(fid, rawKey, clientAssetId || null, fileName, size, now);
+    }
+  } catch (_) {}
+
+  // 4b. 手动标签录入（若有）
+  if (manualTags && !isFinished) {
+    try {
+      let tagObj = typeof manualTags === 'string' ? JSON.parse(manualTags) : manualTags;
+      if (typeof tagObj === 'object' && tagObj !== null) {
+        for (const [dim, val] of Object.entries(tagObj)) {
+          if (!val) continue;
+          const vals = Array.isArray(val) ? val : [val];
+          for (const v of vals) {
+            const row = db.prepare('SELECT id, dir, label FROM tag_dict WHERE dimension=? AND (dir=? OR label=?)').get(dim, v, v);
+            if (row) {
+              db.prepare(`
+                INSERT INTO asset_tags (asset_fid, tag_id, source, confidence, updated_at)
+                VALUES (?, ?, 'human', 1.0, ?)
+                ON CONFLICT(asset_fid, tag_id, role) DO UPDATE SET source='human', confidence=1.0, updated_at=excluded.updated_at
+              `).run(fid, row.id, Date.now());
+            }
+          }
+        }
+      }
+    } catch (e) {
+      logger?.warn?.(`[stream-upload] 手动打标解析异常: ${e.message}`);
+    }
+  }
+
+  // ★ 宽容入库：所有上传素材入库后立即标记为 ready 可浏览（工作流触发后再判定是否移入垃圾站）
+  db.prepare(`
+    UPDATE assets SET status='ready', updated_at=? WHERE fid=?
+  `).run(Date.now(), fid);
+
+  // 货架归属：编辑器导出/备份等入口通过 shelf 直接指定成品库等货架
+  const shelfName = ['original', 'retouched', 'finished'].includes(String(shelf || ''))
+    ? String(shelf)
+    : null;
+  if (shelfName) {
+    try {
+      db.prepare('UPDATE assets SET library_shelf=?, updated_at=? WHERE fid=?')
+        .run(shelfName, Date.now(), fid);
+    } catch (e) {
+      logger?.warn?.(`[stream-upload] 写入货架失败: ${e.message}`);
+    }
+  }
+
+  // 5. 触发 AI 工作流解释器（成品库不打标）
+  let queued = null;
+  if (interpreter && !isVideo && !isAudio && !isFinished) {
+    try {
+      queued = await interpreter.triggerRun({
+        workflowId: 'default',
+        assetFids: [fid],
+        trigger: manualTags ? `sync:${source}:manual` : `sync:${source}`
+      });
+    } catch (e) {
+      logger?.warn?.(`[stream-upload] 触发打标工作流跳过: ${e.message}`);
+    }
+  }
+
+  // 推给 App：新素材已入库，客户端据此按分层策略预取缩略图
+  try {
+    require('./ws-server').broadcast('asset.ingested', {
+      fid, kind: mediaKind, width, height, status: initialStatus,
+    });
+  } catch (e) {
+    logger?.warn?.(`[ws] 素材入库事件广播失败: ${e.message}`);
+  }
+
+  return {
+    fid,
+    deduped: false,
+    mediaKind,
+    fileName: nasInfo.fileName,
+    nasPath: nasInfo.fullPath,
+    relPath: nasInfo.relPath,
+    size,
+    sha256,
+    derivativeId: deriv.id,
+    queued
+  };
+}
+
+/**
+ * 处理单文件直传（octet-stream 或 multipart/form-data）
+ */
+async function handleDirectUpload(services, req, {
+  fileName = '',
+  dateModified = null,
+  clientAssetId = null,
+  clientThumbBuffer = null,
+  source = 'sync',
+  shelf = null
+} = {}) {
+  const { config } = services;
+  const ct = (req && req.headers && req.headers['content-type']) || '';
+  const tempDir = path.join(config.dataDir, 'cache', 'temp_upload');
+  fs.mkdirSync(tempDir, { recursive: true });
+  const tempFile = path.join(tempDir, `tmp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+
+  let targetFileName = fileName || (req && req.headers && req.headers['x-filename']) || 'upload.jpg';
+  let targetDateModified = dateModified || (req && req.headers && req.headers['x-date-modified']) || null;
+  let targetClientAssetId = clientAssetId || (req && req.headers && req.headers['x-client-asset-id']) || null;
+  let targetThumbBuffer = clientThumbBuffer || null;
+  let targetSource = source || (req && req.headers && req.headers['x-source']) || 'sync';
+  let targetCategory = (req && req.headers && req.headers['x-category']) || null;
+  let targetManualTags = (req && req.headers && req.headers['x-manual-tags']) || null;
+  let targetShelf = (req && req.headers && req.headers['x-shelf']) || null;
+
+
+  let sha256 = '';
+  let size = 0;
+
+  if (ct.includes('multipart/form-data')) {
+    // B6：multipart 改为流式解析，文件 part 直接落临时盘（边算 sha256 边做 2GB 字节计数）
+    const bm = ct.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+    if (!bm) throw new Error('缺少 multipart boundary');
+    const parsed = await streamMultipartFile(req, tempFile, (bm[1] || bm[2]).trim(), {
+      maxBytes: ML_MAX_UPLOAD_BYTES,
+    });
+    const { fields, file, extras } = parsed;
+    if (!file) throw new Error('缺少 file 字段');
+
+    targetFileName = file.filename || fields.filename || targetFileName;
+    if (fields.date_modified || fields.taken_at) {
+      targetDateModified = fields.date_modified || fields.taken_at;
+    }
+    if (fields.client_asset_id) {
+      targetClientAssetId = fields.client_asset_id;
+    }
+    if (fields.source) {
+      targetSource = fields.source;
+    }
+    if (fields.category) {
+      targetCategory = fields.category;
+    }
+    if (fields.manual_tags) {
+      targetManualTags = fields.manual_tags;
+    }
+    if (fields.shelf) {
+      targetShelf = fields.shelf;
+    }
+    sha256 = file.sha256;
+    size = file.size;
+
+    if (extras.thumb) {
+      targetThumbBuffer = extras.thumb;
+    }
+  } else {
+    // 流式处理 application/octet-stream 或 image/* 或 video/*
+    const streamRes = await streamToTempFile(req, tempFile, { maxBytes: ML_MAX_UPLOAD_BYTES });
+    sha256 = streamRes.sha256;
+    size = streamRes.size;
+  }
+
+  // 解码 URI 编码文件名
+  try { targetFileName = decodeURIComponent(targetFileName); } catch {}
+
+  try {
+    return await registerMediaAsset(services, {
+      filePath: tempFile,
+      fileName: targetFileName,
+      sha256,
+      size,
+      dateModified: targetDateModified,
+      clientAssetId: targetClientAssetId,
+      clientThumbBuffer: targetThumbBuffer,
+      source: targetSource,
+      category: targetCategory,
+      manualTags: targetManualTags,
+      shelf: targetShelf
+    });
+  } finally {
+    try {
+      if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+    } catch (_) {}
+  }
+}
+
+/**
+ * 接收大文件单个分片
+ */
+async function handleChunkUpload(services, req, {
+  uploadId,
+  chunkIndex,
+  totalChunks
+}) {
+  const { config } = services;
+  if (!uploadId || chunkIndex === undefined || chunkIndex === null || chunkIndex === '' || !totalChunks) {
+    throw new Error('缺少 uploadId、chunkIndex 或 totalChunks 参数');
+  }
+
+  const chunkDir = getChunkDir(config, uploadId);
+  const chunkFile = path.join(chunkDir, `part_${String(chunkIndex).padStart(6, '0')}`);
+
+  const ct = (req && req.headers && req.headers['content-type']) || '';
+  if (ct.includes('multipart/form-data')) {
+    // B6：单分片走流式 multipart（单片硬上限 64MB，超限 413），替代整包缓冲+writeFileSync
+    const bm = ct.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+    if (!bm) throw new Error('缺少 multipart boundary');
+    const parsed = await streamMultipartFile(req, chunkFile, (bm[1] || bm[2]).trim(), {
+      maxBytes: MAX_CHUNK_BYTES,
+      extraFileNames: [],
+    });
+    if (!parsed.file) throw new Error('缺少分片数据');
+  } else {
+    // raw 分片：流式落盘 + 单片 64MB 字节计数
+    await streamToTempFile(req, chunkFile, { maxBytes: MAX_CHUNK_BYTES });
+  }
+
+  const parts = fs.readdirSync(chunkDir).filter(f => f.startsWith('part_'));
+
+  return {
+    uploadId,
+    chunkIndex: Number(chunkIndex),
+    totalChunks: Number(totalChunks),
+    receivedChunks: parts.length
+  };
+}
+
+/**
+ * 完成大文件所有分片并合并写入 NAS
+ */
+async function handleCompleteChunkUpload(services, {
+  uploadId,
+  fileName,
+  totalChunks,
+  dateModified = null,
+  clientAssetId = null,
+  source = 'sync'
+}) {
+  const { config } = services;
+  const chunkDir = getChunkDir(config, uploadId);
+  const parts = fs.readdirSync(chunkDir).filter(f => f.startsWith('part_')).sort();
+
+  if (parts.length < Number(totalChunks)) {
+    throw new Error(`分片不完整：已收到 ${parts.length}/${totalChunks}`);
+  }
+
+  const tempDir = path.join(config.dataDir, 'cache', 'temp_upload');
+  fs.mkdirSync(tempDir, { recursive: true });
+  const mergedPath = path.join(tempDir, `merged_${uploadId}_${Date.now()}`);
+
+  // B6：合并改为分片流式管道，杜绝 readFileSync 全量驻留与写缓冲堆积
+  const hash = crypto.createHash('sha256');
+  let totalSize = 0;
+  const outWs = fs.createWriteStream(mergedPath);
+
+  await new Promise((resolve, reject) => {
+    let aborted = false;
+    const fail = (err) => { if (!aborted) { aborted = true; reject(err); } };
+    outWs.once('error', fail);
+    (async () => {
+      for (const part of parts) {
+        const partPath = path.join(chunkDir, part);
+        totalSize += fs.statSync(partPath).size;
+        await new Promise((res, rej) => {
+          const rs = fs.createReadStream(partPath);
+          rs.on('error', (e) => { fail(e); rej(e); });
+          rs.on('end', res);
+          rs.pipe(hash, { end: false });
+          rs.pipe(outWs, { end: false });
+        });
+        if (aborted) return;
+      }
+      outWs.end(() => !aborted && resolve());
+    })();
+  });
+  await new Promise((resolve) => hash.end(resolve));
+  const sha256 = hash.digest('hex');
+
+  // 清理临时分片
+  try {
+    for (const part of parts) {
+      fs.unlinkSync(path.join(chunkDir, part));
+    }
+    fs.rmdirSync(chunkDir);
+  } catch {}
+
+  return await registerMediaAsset(services, {
+    filePath: mergedPath,
+    fileName,
+    sha256,
+    size: totalSize,
+    dateModified,
+    clientAssetId,
+    source
+  });
+}
+
+
+/**
+ * 媒体工具纯临时上传：供格式转换 / 音频提炼等独立工具使用
+ * 仅落地到 cache/temp/uploads/，绝对不写入素材库 assets、不校验黑名单、不触发同步
+ */
+async function handleToolTempUpload(services, req) {
+  const { config } = services;
+  const ct = (req && req.headers && req.headers['content-type']) || '';
+  const uploadDir = path.join(config.dataDir, 'cache', 'temp', 'uploads');
+  fs.mkdirSync(uploadDir, { recursive: true });
+
+  let targetFileName = (req && req.headers && req.headers['x-filename']) || 'media_tool_source.mp4';
+  try { targetFileName = decodeURIComponent(targetFileName); } catch {}
+  const safeName = path.basename(targetFileName).replace(/[^a-zA-Z0-9_.一-龥-]/g, '_');
+  const tempPath = path.join(uploadDir, `tool_${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safeName}`);
+
+  let size = 0;
+  if (ct.includes('multipart/form-data')) {
+    // B6：流式 multipart，2GB 上限边收边计（旧实现整包缓冲 2GB + writeFileSync）
+    const bm = ct.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+    if (!bm) throw new Error('缺少 multipart boundary');
+    const parsed = await streamMultipartFile(req, tempPath, (bm[1] || bm[2]).trim(), {
+      maxBytes: ML_MAX_UPLOAD_BYTES,
+      extraFileNames: [],
+    });
+    if (!parsed.file) throw new Error('缺少 file 字段');
+    size = parsed.file.size;
+    targetFileName = parsed.file.filename || parsed.fields.filename || targetFileName;
+  } else {
+    const streamRes = await streamToTempFile(req, tempPath, { maxBytes: ML_MAX_UPLOAD_BYTES });
+    size = streamRes.size;
+  }
+
+  return {
+    videoPath: tempPath,
+    fileName: targetFileName,
+    size
+  };
+}
+
+module.exports = {
+  ML_MAX_UPLOAD_BYTES,
+  MAX_CHUNK_BYTES,
+  makePayloadTooLarge,
+  streamToTempFile,
+  streamMultipartFile,
+  handleToolTempUpload,
+  handleDirectUpload,
+  handleChunkUpload,
+  handleCompleteChunkUpload,
+  registerMediaAsset,
+  extractVideoThumbnail
+};

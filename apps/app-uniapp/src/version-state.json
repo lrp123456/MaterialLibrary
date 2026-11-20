@@ -1,0 +1,209 @@
+﻿{
+    "versionName":  "1.0.7",
+    "versionCode":  207,
+    "machineCode":  3,
+    "buildCode":  2070003,
+    "updatedAt":  "2026-11-04T16:55:55",
+    "history":  [
+                    {
+                        "at":  "2026-11-04T02:02:49.546Z",
+                        "versionName":  "1.0.5",
+                        "versionCode":  205,
+                        "machineCode":  11,
+                        "buildCode":  2050011,
+                        "note":  ""
+                    },
+                    {
+                        "at":  "2026-11-04T01:36:00.112Z",
+                        "versionName":  "1.0.5",
+                        "versionCode":  205,
+                        "machineCode":  10,
+                        "buildCode":  2050010,
+                        "note":  ""
+                    },
+                    {
+                        "at":  "2026-11-03T09:46:23.458Z",
+                        "versionName":  "1.0.5",
+                        "versionCode":  205,
+                        "machineCode":  9,
+                        "buildCode":  2050009,
+                        "note":  ""
+                    },
+                    {
+                        "at":  "2026-11-03T09:43:59.392Z",
+                        "versionName":  "1.0.5",
+                        "versionCode":  205,
+                        "machineCode":  8,
+                        "buildCode":  2050008,
+                        "note":  ""
+                    },
+                    {
+                        "at":  "2026-11-03T09:41:28.941Z",
+                        "versionName":  "1.0.5",
+                        "versionCode":  205,
+                        "machineCode":  7,
+                        "buildCode":  2050007,
+                        "note":  ""
+                    },
+                    {
+                        "at":  "2026-11-03T09:39:56.703Z",
+                        "versionName":  "1.0.5",
+                        "versionCode":  205,
+                        "machineCode":  6,
+                        "buildCode":  2050006,
+                        "note":  ""
+                    },
+                    {
+                        "at":  "2026-11-03T09:38:34.809Z",
+                        "versionName":  "1.0.5",
+                        "versionCode":  205,
+                        "machineCode":  5,
+                        "buildCode":  2050005,
+                        "note":  ""
+                    },
+                    {
+                        "at":  "2026-11-03T09:22:27.451Z",
+                        "versionName":  "1.0.5",
+                        "versionCode":  205,
+                        "machineCode":  4,
+                        "buildCode":  2050004,
+                        "note":  "初始化同步素材库版本基线"
+                    },
+                    {
+                        "at":  "2026-11-04T10:27:47",
+                        "versionName":  "1.0.5",
+                        "note":  "machine+1",
+                        "versionCode":  205,
+                        "machineCode":  12,
+                        "buildCode":  2050012
+                    },
+                    {
+                        "at":  "2026-11-04T10:40:12",
+                        "versionName":  "1.0.5",
+                        "note":  "machine+1",
+                        "versionCode":  205,
+                        "machineCode":  13,
+                        "buildCode":  2050013
+                    },
+                    {
+                        "at":  "2026-11-04T10:42:09",
+                        "versionName":  "1.0.5",
+                        "note":  "machine+1",
+                        "versionCode":  205,
+                        "machineCode":  14,
+                        "buildCode":  2050014
+                    },
+                    {
+                        "at":  "2026-11-04T11:04:06",
+                        "versionName":  "1.0.5",
+                        "note":  "machine+1",
+                        "versionCode":  205,
+                        "machineCode":  15,
+                        "buildCode":  2050015
+                    },
+                    {
+                        "at":  "2026-11-04T11:13:28",
+                        "versionName":  "1.0.5",
+                        "note":  "machine+1",
+                        "versionCode":  205,
+                        "machineCode":  16,
+                        "buildCode":  2050016
+                    },
+                    {
+                        "at":  "2026-11-04T14:26:19",
+                        "versionName":  "1.0.5",
+                        "note":  "machine+1",
+                        "versionCode":  205,
+                        "machineCode":  17,
+                        "buildCode":  2050017
+                    },
+                    {
+                        "at":  "2026-11-04T14:29:03",
+                        "versionName":  "1.0.5",
+                        "note":  "machine+1",
+                        "versionCode":  205,
+                        "machineCode":  18,
+                        "buildCode":  2050018
+                    },
+                    {
+                        "at":  "2026-11-04T14:30:49",
+                        "versionName":  "1.0.5",
+                        "note":  "machine+1",
+                        "versionCode":  205,
+                        "machineCode":  19,
+                        "buildCode":  2050019
+                    },
+                    {
+                        "at":  "2026-11-04T14:33:28",
+                        "versionName":  "1.0.5",
+                        "note":  "machine+1",
+                        "versionCode":  205,
+                        "machineCode":  20,
+                        "buildCode":  2050020
+                    },
+                    {
+                        "at":  "2026-11-04T14:36:58",
+                        "versionName":  "1.0.6",
+                        "note":  "version-bump 1.0.5/205 -\u003e 1.0.6/206",
+                        "versionCode":  206,
+                        "machineCode":  0,
+                        "buildCode":  2060000
+                    },
+                    {
+                        "at":  "2026-11-04T15:29:03",
+                        "versionName":  "1.0.6",
+                        "note":  "machine+1",
+                        "versionCode":  206,
+                        "machineCode":  1,
+                        "buildCode":  2060001
+                    },
+                    {
+                        "at":  "2026-11-04T15:35:11",
+                        "versionName":  "1.0.6",
+                        "note":  "machine+1",
+                        "versionCode":  206,
+                        "machineCode":  2,
+                        "buildCode":  2060002
+                    },
+                    {
+                        "at":  "2026-11-04T15:37:10",
+                        "versionName":  "1.0.6",
+                        "note":  "machine+1",
+                        "versionCode":  206,
+                        "machineCode":  3,
+                        "buildCode":  2060003
+                    },
+                    {
+                        "at":  "2026-11-04T15:56:21",
+                        "versionName":  "1.0.7",
+                        "note":  "version-bump 1.0.6/206 -\u003e 1.0.7/207",
+                        "versionCode":  207,
+                        "machineCode":  0,
+                        "buildCode":  2070000
+                    },
+                    {
+                        "at":  "2026-11-04T16:40:11",
+                        "versionName":  "1.0.7",
+                        "note":  "machine+1",
+                        "versionCode":  207,
+                        "machineCode":  1,
+                        "buildCode":  2070001
+                    },
+                    {
+                        "at":  "2026-11-04T16:50:49",
+                        "versionName":  "1.0.7",
+                        "note":  "machine+1",
+                        "versionCode":  207,
+                        "machineCode":  2,
+                        "buildCode":  2070002
+                    },
+                    {
+                        "at":  "2026-11-04T16:55:55",
+                        "versionName":  "1.0.7",
+                        "note":  "machine+1",
+                        "versionCode":  207,
+                        "machineCode":  3,
+                        "buildCode":  2070003
+                    }
+                ]
+}

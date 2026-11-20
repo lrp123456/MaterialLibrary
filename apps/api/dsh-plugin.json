@@ -1,0 +1,22 @@
+{
+  "id": "dsh-material-library",
+  "name": "素材库 (Material Library)",
+  "version": "0.1.0",
+  "description": "夸克网盘室内设计素材库：自动吸收、质检去水印、AI 打标、多维检索、长按下载",
+  "author": "DSH Team",
+  "main": "web/dist/index.html",
+  "icon": "photo_library",
+  "category": "ai-tools",
+  "menu": {
+    "title": "素材库",
+    "icon": "photo_library",
+    "path": "/plugins/material",
+    "order": 49
+  },
+  "defaultConfig": {
+    "rootFid": "225f01205b7942b1a75bb0c2d7a0565a",
+    "systemFid": "a082098178f74add99cbf6de2c4caa8a",
+    "autoScan": true,
+    "scanIntervalMs": 1800000
+  }
+}

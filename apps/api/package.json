@@ -1,0 +1,50 @@
+{
+    "name": "@mls/api",
+    "version": "0.1.0",
+    "description": "DSH 素材库插件：夸克网盘素材自动吸收、质检、去水印、AI 打标、检索与下载",
+    "main": "index.js",
+    "exports": {
+        ".": "./index.js",
+        "./package.json": "./package.json"
+    },
+    "keywords": [
+        "dsh",
+        "dsh-plugin",
+        "cordis-plugin",
+        "material-library",
+        "quark"
+    ],
+    "dsh": {
+        "bundle": {
+            "patch": "./cordis.patch.yml"
+        },
+        "client": {
+            "platform": "web"
+        }
+    },
+    "dependencies": {
+        "@mls/shared-core": "workspace:*",
+        "better-sqlite3": "^11.0.0",
+        "https-proxy-agent": "^9.1.0",
+        "sharp": "^0.35.4",
+        "undici": "^7.29.0"
+    },
+    "author": "DSH Team",
+    "license": "MIT",
+    "scripts": {
+        "start": "node server.js",
+        "stop": "node scripts/mls-ctl.js stop prod",
+        "restart": "node scripts/mls-ctl.js restart prod",
+        "status": "node scripts/mls-ctl.js status",
+        "logs": "node scripts/mls-ctl.js logs prod-server",
+        "ctl": "node scripts/mls-ctl.js",
+        "contract": "node scripts/gen-contract-manifest.js",
+        "contract:check": "node scripts/gen-contract-manifest.js --check",
+        "test": "node test/run-tests.js",
+        "test:unit": "node test/run-tests.js unit",
+        "test:security": "node test/run-tests.js security",
+        "test:integration": "node test/run-tests.js integration",
+        "test:e2e": "node test/run-tests.js e2e",
+        "test:list": "node test/run-tests.js --list"
+    }
+}

@@ -1,0 +1,11091 @@
+/**
+ * 统一 HTTP API 处理器 (API Router & Pure Data Layer)
+ * 供独立服务 (server.js /api) 与 DSH Cordis 插件 (index.js /plugins/material/api) 同源复用。
+ * 严格两档权限隔离：Viewer 仅保留检索/详情/下载，Admin 享有工作流、适配器、异常治理与账号管理。
+ */
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const zlib = require('zlib');
+const { Quark, resolveQuarkCli } = require('./quark');
+const { searchSimilar, getVectorStatus, embedCaption, storeVector } = require('./vector');
+const {
+  getDerivatives, getDerivativeById, setMainDerivative, resolveDerivativeFile, ensurePreviewJpeg
+} = require('./derivatives');
+const {
+  parseDerivativeParams,
+  isQualifiedAgnes,
+  findQualifiedKind,
+  pickBrowseMain,
+  restageStatusForAsset
+} = require('./restage');
+const { orientationLabelMap } = require('./ratio');
+const { expandSpaceFilterValues } = require('./space-filter');
+const { executeAdapter } = require('./gen');
+const { AUTH_VISIBLE_SQL } = require('./governance');
+const { BROWSE_READY_SQL, PROCESSING_STATUSES, VALID_STATUSES } = require('./asset-status');
+const processSvc = require('./process');
+const aiTasks = require('./ai-tasks');
+const umbra = require('./umbra');
+const labSvc = require('./lab');
+const portraitLib = require('./portrait-library');
+const { assertSeedanceOrEmpty } = require('./portrait-contract');
+const auth = require('./auth');
+const { ensureCreationLibrarySchema } = require('./creation-library');
+const appUpdate = require('./app-update');
+const assetsDelete = require('./assets-delete');
+const tagGov = require('./tag-governance');
+const genGov = require('./gen-governance');
+const { resolveModelCode } = require('./studio-catalog');
+const { getCapabilities } = require('./handlers/registry');
+const {
+  inferRoomTopology,
+  generatePascal3DGeometry,
+  inferCameraSequence,
+  scheduleSeedanceRender,
+} = require('./handlers/walkthrough-pipeline');
+const mediaTools = require('./media-tools');
+const studioPresets = require('./studio-presets');
+const menuTree = require('./menu-tree');
+const studioAcl = require('./studio-acl');
+const { mapCreationTemplateRow, toCreationCard } = require('./creation-card');
+const { screenMessage } = require('./chat-screen');
+
+// B6：上传体积上限（与 stream-upload 共享同一环境变量约定，默认 2GB）
+function resolveMlMaxUploadBytes() {
+  const v = parseInt(process.env.ML_MAX_UPLOAD_BYTES || '', 10);
+  return Number.isFinite(v) && v > 0 ? v : 2 * 1024 * 1024 * 1024;
+}
+const ML_MAX_UPLOAD_BYTES = resolveMlMaxUploadBytes();
+// Content-Length 预检：客户端虚报/实报超限直接 413，不进入接收流程（流式字节计数是第二道保险）
+function contentLengthExceeds(req, limit) {
+  const len = Number(req.headers && req.headers['content-length']);
+  return Number.isFinite(len) && len > limit;
+}
+
+// PERF-05：按 db 实例缓存表结构自检结果，避免每个 HTTP 请求重复跑 PRAGMA / 抛异常的 ALTER TABLE。
+const dbSchemaCache = new WeakMap();
+function schemaCheckedOnce(db, key) {
+  let keys = dbSchemaCache.get(db);
+  if (!keys) { keys = new Set(); dbSchemaCache.set(db, keys); }
+  if (keys.has(key)) return true;
+  keys.add(key);
+  return false;
+}
+
+// 需求1/2 新增列的懒兜底：migrate 正常会在启动时补齐，这里防御「懒建表 / 旧库直连」场景。
+function ensureIsolationSchema(db) {
+  if (schemaCheckedOnce(db, 'isolation_v1')) return;
+  try { db.exec('ALTER TABLE users ADD COLUMN allow_all_models INTEGER DEFAULT 0;'); } catch (e) {}
+  try { db.exec('ALTER TABLE chat_sessions ADD COLUMN params_json TEXT;'); } catch (e) {}
+  // 动作标题/手改标记/最后模型：新库直连（未跑 migrate）也要能写
+  try { db.exec('ALTER TABLE chat_sessions ADD COLUMN action_tag TEXT;'); } catch (e) {}
+  try { db.exec('ALTER TABLE chat_sessions ADD COLUMN title_source TEXT;'); } catch (e) {}
+  try { db.exec('ALTER TABLE chat_sessions ADD COLUMN title_attempted_at INTEGER;'); } catch (e) {}
+  try { db.exec('ALTER TABLE chat_sessions ADD COLUMN last_model TEXT;'); } catch (e) {}
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN builtin INTEGER DEFAULT 0;'); } catch (e) {}
+  try { db.exec('ALTER TABLE presets ADD COLUMN user_id INTEGER DEFAULT 0;'); } catch (e) {}
+  // studio_presets 可能由 studio-presets.js 懒创建，先兜底建表（含新列）再补列
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS studio_presets (
+      id TEXT PRIMARY KEY, title TEXT NOT NULL, prompt TEXT NOT NULL,
+      negative_prompt TEXT DEFAULT '', aspect_ratio TEXT DEFAULT '16:9',
+      category TEXT DEFAULT 'general', tags_json TEXT DEFAULT '[]', model TEXT DEFAULT '',
+      user_id INTEGER DEFAULT 0, builtin INTEGER DEFAULT 1,
+      created_at INTEGER, updated_at INTEGER);`);
+  } catch (e) {}
+  try { db.exec('ALTER TABLE studio_presets ADD COLUMN user_id INTEGER DEFAULT 0;'); } catch (e) {}
+  try { db.exec('ALTER TABLE studio_presets ADD COLUMN builtin INTEGER DEFAULT 0;'); } catch (e) {}
+  // 测试账号固定拥有全模型可见权限（需求 2：白名单之外的模型仅测试用户可用）。
+  // 放在启动兜底里，避免 migrate 未跑到的旧库/灰测通道漏配。
+  try { db.exec("UPDATE users SET allow_all_models=1 WHERE username='naite_test_user';"); } catch (e) {}
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_assets_sort ON assets(COALESCE(created_at, discovered_at, 0) DESC, fid DESC);'); } catch (e) {}
+}
+
+// 创作库表结构懒兜底：GET/POST/PATCH/DELETE 与拉取外部资产都会触碰该表，
+// 不能只在 GET 里补列（新库首写会因缺 type/poster_* 直接 500）。
+function ensureCreationTemplatesSchema(db) {
+  if (schemaCheckedOnce(db, 'creation_templates')) return;
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS creation_templates (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER DEFAULT 1,
+      title TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      aspect_ratio TEXT DEFAULT '16:9',
+      origin_images TEXT DEFAULT '[]',
+      result_images TEXT DEFAULT '[]',
+      params_json TEXT DEFAULT '{}',
+      tags TEXT DEFAULT '[]',
+      type TEXT DEFAULT 'image',
+      space TEXT DEFAULT '',
+      style TEXT DEFAULT '',
+      is_pinned INTEGER DEFAULT 0,
+      use_count INTEGER DEFAULT 0,
+      created_at INTEGER,
+      updated_at INTEGER
+    );
+  `);
+  try { db.exec("ALTER TABLE creation_templates ADD COLUMN type TEXT DEFAULT 'image';"); } catch (e) {}
+  try { db.exec("ALTER TABLE creation_templates ADD COLUMN space TEXT DEFAULT '';"); } catch (e) {}
+  try { db.exec("ALTER TABLE creation_templates ADD COLUMN style TEXT DEFAULT '';"); } catch (e) {}
+  try { db.exec("ALTER TABLE creation_templates ADD COLUMN is_pinned INTEGER DEFAULT 0;"); } catch (e) {}
+  try { db.exec("ALTER TABLE creation_templates ADD COLUMN use_count INTEGER DEFAULT 0;"); } catch (e) {}
+  try { db.exec("ALTER TABLE creation_templates ADD COLUMN purpose TEXT DEFAULT '';"); } catch (e) {}
+  try { db.exec("ALTER TABLE creation_templates ADD COLUMN channel TEXT DEFAULT 'studio';"); } catch (e) {}
+  // 分区/置顶顺序/私有文件/创作库回收（懒建库与旧库直连兜底）
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN section_id TEXT;'); } catch (e) {}
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN pin_order INTEGER;'); } catch (e) {}
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN pinned_at INTEGER;'); } catch (e) {}
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN deleted_at INTEGER;'); } catch (e) {}
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN trashed_section_id TEXT;'); } catch (e) {}
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN media_dir TEXT;'); } catch (e) {}
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS creation_sections (
+        id TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_creation_sections_user ON creation_sections(user_id, sort_order);
+      CREATE INDEX IF NOT EXISTS idx_creation_tpl_section ON creation_templates(section_id, pin_order);
+    `);
+  } catch (e) {}
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_creation_tpl_sort ON creation_templates(is_pinned DESC, use_count DESC, updated_at DESC);'); } catch (e) {}
+  if (!schemaCheckedOnce(db, 'base_library_schema')) {
+    try {
+      const { ensureBaseLibrarySchema } = require('./base-library/schema');
+      ensureBaseLibrarySchema(db);
+    } catch (e) {
+      console.warn('[base-library] ensureBaseLibrarySchema skip:', e.message);
+    }
+  }
+}
+
+const MIME = {
+  '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.svg': 'image/svg+xml', '.json': 'application/json',
+  '.webp': 'image/webp', '.ico': 'image/x-icon', '.mp4': 'video/mp4'
+};
+
+function sendJson(res, status, data) {
+  let body;
+  try {
+    body = Buffer.from(JSON.stringify(data));
+  } catch (err) {
+    body = Buffer.from(JSON.stringify({ error: 'JSON序列化失败: ' + err.message }));
+    status = 500;
+  }
+  const headers = { 'Content-Type': 'application/json; charset=utf-8' };
+  const req = res.req;
+  const accept = req ? String(req.headers['accept-encoding'] || '') : '';
+  // 1KB ~ 5MB 之间走异步 gzip，避免在主线程 gzipSync 阻塞事件循环；超大 JSON 跳过压缩防内存尖刺
+  if (body.length >= 1024 && body.length <= 5 * 1024 * 1024 && /\bgzip\b/.test(accept)) {
+    zlib.gzip(body, (err, gz) => {
+      if (res.destroyed || res.writableEnded) return;
+      if (err || !gz) {
+        headers['Content-Length'] = body.length;
+        endJsonBody(res, status, headers, body);
+        return;
+      }
+      headers['Content-Encoding'] = 'gzip';
+      headers['Content-Length'] = gz.length;
+      headers.Vary = 'Accept-Encoding';
+      endJsonBody(res, status, headers, gz);
+    });
+    return;
+  }
+  headers['Content-Length'] = body.length;
+  endJsonBody(res, status, headers, body);
+}
+
+function endJsonBody(res, status, headers, body) {
+  try {
+    if (res.destroyed || res.writableEnded) return;
+    if (!res.headersSent) res.writeHead(status, headers);
+    res.end(body);
+  } catch (_) {}
+}
+
+function pipeFileStream(req, res, filePath, contentType, disp, cacheControl) {
+  let stat;
+  try {
+    stat = fs.statSync(filePath);
+  } catch (_) {
+    if (!res.headersSent) sendJson(res, 404, { error: '文件读取失败' });
+    return;
+  }
+  if (!stat.isFile()) {
+    if (!res.headersSent) sendJson(res, 404, { error: '文件读取失败' });
+    return;
+  }
+  const etag = `"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`;
+  const ifNoneMatch = req.headers && req.headers['if-none-match'];
+  const ifModifiedSince = req.headers && req.headers['if-modified-since'];
+  if (ifNoneMatch === etag || (ifModifiedSince && new Date(ifModifiedSince).getTime() >= Math.floor(stat.mtimeMs))) {
+    res.writeHead(304, {
+      'ETag': etag,
+      'Last-Modified': stat.mtime.toUTCString(),
+      'Cache-Control': cacheControl || 'public, max-age=86400',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': '*'
+    });
+    return res.end();
+  }
+  const headers = {
+    'Content-Type': contentType,
+    'Content-Length': stat.size,
+    'ETag': etag,
+    'Last-Modified': stat.mtime.toUTCString(),
+    'Cache-Control': cacheControl || 'public, max-age=86400',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': '*'
+  };
+  if (disp) headers['Content-Disposition'] = disp;
+  res.writeHead(200, headers);
+  if (req.method === 'HEAD') return res.end();
+  const stream = fs.createReadStream(filePath);
+  const destroyStream = () => {
+    if (!stream.destroyed) {
+      try { stream.destroy(); } catch (_) {}
+    }
+  };
+  // GET 的 req close 表示请求体已收完，不能在那里拆流。
+  // 只在响应未写完时（客户端中断）销毁读流。
+  res.on('close', () => {
+    if (!res.writableFinished) destroyStream();
+  });
+  stream.on('error', () => {
+    destroyStream();
+    if (!res.headersSent) {
+      try {
+        res.writeHead(500);
+        res.end();
+      } catch (_) {}
+    } else if (!res.writableEnded) {
+      try { res.destroy(); } catch (_) {}
+    }
+  });
+  return stream.pipe(res);
+}
+
+// 创作目录/Schema 契约体量大且极少变动，短 TTL 缓存避免每次请求重建 schema map
+const STUDIO_CATALOG_TTL_MS = 60 * 1000;
+// 按 ACL 分桶缓存：/studio/catalog 在免登录白名单内，必须留 anon 桶；
+// allow_all_models 变化会切换桶，避免把全量目录泄漏给普通账号。
+const _studioCatalogCache = new Map();
+function studioCatalogAclKey(sessionUser) {
+  return (sessionUser?.id || 'anon') + ':' + (Number(sessionUser?.allow_all_models) === 1 ? 1 : 0);
+}
+function getStudioCatalogCache(db, aclKey) {
+  const hit = _studioCatalogCache.get(aclKey);
+  if (!hit) return null;
+  if (Date.now() - hit.at > STUDIO_CATALOG_TTL_MS) {
+    _studioCatalogCache.delete(aclKey);
+    return null;
+  }
+  return hit.payload;
+}
+function setStudioCatalogCache(aclKey, payload) {
+  _studioCatalogCache.set(aclKey, { at: Date.now(), payload });
+}
+
+/**
+ * 幂等解码路径参数（fid 等），最多解 3 轮。
+ *
+ * 背景：部分 fid 为夸克网盘风格，含特殊字符 `|`（如 `~1xxx...|yyy`）。
+ * 老版本客户端在 App 原生端从 navigateTo query 拿到的是**未解码**的 `%7C`，
+ * 再经 `encodeURIComponent` 变成 `%257C`；服务端只解一次 → 得到字面量 `%7C`
+ * → 查不到资产 → 误报 404「资产不存在」。
+ *
+ * 解到稳定为止后，`%257C` / `%7C` / `|` 三种入参都会收敛到同一个真实 fid，
+ * 老版本客户端无需升级即可恢复。
+ */
+function decodeParamLoose(raw) {
+  let s = String(raw == null ? '' : raw);
+  for (let i = 0; i < 3; i++) {
+    if (!/%[0-9A-Fa-f]{2}/.test(s)) break;
+    let next;
+    try {
+      next = decodeURIComponent(s);
+    } catch (e) {
+      break; // 含非法/不完整转义（如原串本身带 %），原样返回
+    }
+    if (next === s) break;
+    s = next;
+  }
+  return s;
+}
+
+async function executeChatCompletion(db, config, {
+  model, messages, images, videos, videoUrls, videoLocalPaths,
+  temperature = 0.4, max_tokens = 4096, timeoutMs = 60000, reasoning = null,
+}) {
+  const { completeChat } = require('./vlm');
+  const { resolveLiteLlmChatConfig } = require('./providers');
+  const llm = resolveLiteLlmChatConfig(db, config, model);
+
+  const extraImages = Array.isArray(images) ? images.filter(Boolean) : [];
+  const videoRefs = [
+    ...(Array.isArray(videos) ? videos : []),
+    ...(Array.isArray(videoUrls) ? videoUrls : []),
+    ...(Array.isArray(videoLocalPaths) ? videoLocalPaths : []),
+  ].filter(Boolean);
+  if (videoRefs.length) {
+    const { framesFromVideoRef } = require('./video-frames');
+    const tempDir = path.join(config.dataDir || path.join(__dirname, '..', 'data'), 'cache', 'temp');
+    for (let i = 0; i < videoRefs.length; i++) {
+      const frames = await framesFromVideoRef(videoRefs[i], tempDir, `chatv_${Date.now()}_${i}`);
+      for (const f of frames) extraImages.push(f.dataUrl);
+    }
+  }
+
+  let msgs = Array.isArray(messages) ? messages.map((m) => ({ ...m })) : [];
+  let imageNotes = [];
+  let tempKeys = [];
+  if (extraImages.length) {
+    const { prepareChatImages } = require('./chat-images');
+    const prepared = await prepareChatImages(db, config, extraImages);
+    imageNotes = prepared.notes;
+    tempKeys = prepared.tempKeys;
+    const imageParts = prepared.parts;
+    const lastUser = [...msgs].reverse().find((m) => m.role === 'user');
+    if (lastUser) {
+      if (typeof lastUser.content === 'string') {
+        lastUser.content = [{ type: 'text', text: lastUser.content }, ...imageParts];
+      } else if (Array.isArray(lastUser.content)) {
+        lastUser.content = [...lastUser.content, ...imageParts];
+      } else {
+        lastUser.content = imageParts;
+      }
+    } else {
+      msgs.push({ role: 'user', content: imageParts });
+    }
+  }
+
+  try {
+    const data = await completeChat({
+      baseUrl: llm.baseUrl,
+      apiKey: llm.apiKey,
+      model: llm.model,
+      messages: msgs,
+      temperature,
+      max_tokens,
+      timeoutMs,
+      extraBody: reasoning && typeof reasoning === 'object' ? reasoning : null,
+    });
+    if (imageNotes.length) data.image_notes = imageNotes;
+    return data;
+  } catch (e) {
+    const msg = String(e.message || e);
+    if (imageNotes.length) e.image_notes = imageNotes;
+    if (/ECONNREFUSED|fetch failed|network|ENOTFOUND|timed out|timeout/i.test(msg)) {
+      const wrapped = new Error(`LiteLLM 不可用（${llm.baseUrl}）：${msg}`);
+      if (imageNotes.length) wrapped.image_notes = imageNotes;
+      throw wrapped;
+    }
+    throw e;
+  } finally {
+    if (tempKeys.length) {
+      const { cleanupChatTempObjects } = require('./chat-images');
+      await cleanupChatTempObjects({ db, config }, tempKeys);
+    }
+  }
+}
+
+/**
+ * 按模型声明的思考能力组装透传参数。
+ * 只接受上层 caps.reasoning 里列出的档位，避免客户端把任意字段塞进上游请求。
+ * Gemini 的 OpenAI 兼容入口与豆包都使用扁平 reasoning_effort；
+ * 不能发 reasoning:{effort}，也不能发 Gemini 不支持的 none。
+ * 客户端传了模型不支持的档位时回落到该模型默认档，实际值随响应回传。
+ * LiteLLM 的 openai provider 未声明 reasoning_effort，drop_params 会把它吞掉，
+ * 必须同时发 allowed_openai_params 才会真正透传到上游。
+ */
+function buildChatReasoningPayload(reasoningCaps, body = {}) {
+  if (!reasoningCaps || !reasoningCaps.supported || reasoningCaps.mode !== 'levels') return null;
+  const levels = Array.isArray(reasoningCaps.levels) ? reasoningCaps.levels : [];
+  if (!levels.length) return null;
+  const asked = String(body.reasoning_effort ?? body.thinkingStrength ?? '').trim().toLowerCase();
+  const level = levels.includes(asked)
+    ? asked
+    : (levels.includes(reasoningCaps.default) ? reasoningCaps.default : levels[0]);
+  return { reasoning_effort: level, allowed_openai_params: ['reasoning_effort'] };
+}
+
+/**
+ * 对话模型的上游超时（毫秒）。
+ * Gemini Flash（非 Lite）经 LiteLLM 实测常需 90~140s，放宽到 240s；
+ * Flash-Lite 与其它模型保持 90s，让真正的故障尽快失败。
+ * 客户端显式传 b.timeoutMs 时以其为准（但不低于默认值，避免被故意设小绕过）。
+ */
+function chatTimeoutMs(modelCaps, raw) {
+  const DEFAULT_MS = 90000;
+  const SLOW_MS = 240000;
+  const id = String(modelCaps?.modelId || '').toLowerCase();
+  const slow = /gemini[_-]?flash(?!.*lite)/.test(id);
+  const base = slow ? SLOW_MS : DEFAULT_MS;
+  const asked = Number(raw);
+  if (Number.isFinite(asked) && asked > 0) return Math.max(asked, base);
+  return base;
+}
+
+/**
+ * 把模型返回的思考内容从正文里拆出来：
+ * - Doubao 等走 message.reasoning_content
+ * - Gemma 4 把 <thought>…</thought>（或 <thinking>）直接混在 content 里
+ * 返回 { content, reasoning }，客户端分别渲染思考块与回答块。
+ */
+function splitChatThinking(data) {
+  const msg = data?.choices?.[0]?.message;
+  if (!msg) return data;
+  let reasoning = typeof msg.reasoning_content === 'string' ? msg.reasoning_content : '';
+  let content = typeof msg.content === 'string' ? msg.content : '';
+
+  const blockRe = /<(thought|thinking)>([\s\S]*?)<\/\1>/gi;
+  content = content.replace(blockRe, (_, __, inner) => {
+    if (inner && inner.trim()) reasoning = reasoning ? `${reasoning}\n${inner.trim()}` : inner.trim();
+    return '';
+  });
+  // 未闭合的思考标签：把后半段整体当思考，正文留空由客户端兜底
+  const openRe = /<(thought|thinking)>([\s\S]*)$/i;
+  const open = content.match(openRe);
+  if (open) {
+    if (open[2] && open[2].trim()) reasoning = reasoning ? `${reasoning}\n${open[2].trim()}` : open[2].trim();
+    content = content.replace(openRe, '');
+  }
+
+  content = content.replace(/^\s+|\s+$/g, '');
+  reasoning = reasoning.replace(/^\s+|\s+$/g, '');
+  msg.content = content;
+  if (reasoning) msg.reasoning_content = reasoning;
+  else delete msg.reasoning_content;
+  data.reasoning = reasoning;
+  return data;
+}
+
+// 音频等无画面媒体的浏览占位图（sharp 生成，缓存到 thumbs）
+async function ensureMediaPlaceholder(services, fid, kind, fileName) {
+  const dataDir = services?.config?.dataDir || process.env.ML_DATA_DIR || path.join(require('os').homedir(), '.dsh-material-library');
+  const out = path.join(dataDir, 'cache', 'thumbs', `${fid}.jpg`);
+  if (fs.existsSync(out) && fs.statSync(out).size > 0) return out;
+  try {
+    fs.mkdirSync(path.dirname(out), { recursive: true });
+    const sharp = require('sharp');
+    const isMusic = kind === 'audio' || kind === 'music' || /\.(mp3|wav|m4a|aac|flac|ogg)$/i.test(fileName || '');
+    const label = isMusic ? '♪' : '▶';
+    const bg = isMusic ? '#1e293b' : '#334155';
+    const svg = Buffer.from(`
+      <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512">
+        <rect width="512" height="512" fill="${bg}"/>
+        <circle cx="256" cy="230" r="90" fill="none" stroke="#94a3b8" stroke-width="8"/>
+        <text x="256" y="250" text-anchor="middle" font-size="96" fill="#e2e8f0" font-family="sans-serif">${label}</text>
+        <text x="256" y="380" text-anchor="middle" font-size="28" fill="#94a3b8" font-family="sans-serif">${isMusic ? 'Audio' : 'Media'}</text>
+      </svg>
+    `);
+    await sharp(svg).jpeg({ quality: 80 }).toFile(out);
+    return fs.existsSync(out) ? out : null;
+  } catch (e) {
+    console.warn('[api] 生成媒体占位图失败', fid, e.message);
+    return null;
+  }
+}
+
+async function rememberVideoFrame(services, fid, videoPath) {
+  if (!services?.db || !fid || !videoPath) return;
+  try {
+    const meta = await umbra.extractVideoMeta(videoPath);
+    const width = Number(meta?.width) || 0;
+    const height = Number(meta?.height) || 0;
+    if (!(width > 0 && height > 0)) return;
+    services.db.prepare(`
+      UPDATE assets
+      SET width = CASE WHEN COALESCE(width, 0) = 0 THEN ? ELSE width END,
+          height = CASE WHEN COALESCE(height, 0) = 0 THEN ? ELSE height END,
+          duration_s = CASE WHEN COALESCE(duration_s, 0) = 0 THEN ? ELSE duration_s END
+      WHERE fid = ?
+    `).run(width, height, Number(meta.duration) || 0, fid);
+  } catch (e) {
+    console.warn('[api] 写回视频宽高失败', fid, e.message);
+  }
+}
+
+// 后台为缺失缩略图的视频抽帧（不阻塞请求）
+let videoPosterPlaceholder = null;
+async function videoPosterPlaceholderBuffer() {
+  if (videoPosterPlaceholder) return videoPosterPlaceholder;
+  try {
+    const sharp = require('sharp');
+    const svg = Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="#0f172a"/><polygon points="26,18 26,46 48,32" fill="#94a3b8"/></svg>'
+    );
+    videoPosterPlaceholder = await sharp(svg).jpeg({ quality: 70 }).toBuffer();
+  } catch {
+    videoPosterPlaceholder = Buffer.from(
+      '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDABALDA4MChAODQ4SERATGCgaGBYWGDEjJR0oOjM9PDkzODdASFxOQERXRTc4UG1RV19iZ2hnPk1xeXBkeFxlZ2P/2wBDARESEhgVGC8aGi9jQjhCY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2P/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCwAA//2Q==',
+      'base64'
+    );
+  }
+  return videoPosterPlaceholder;
+}
+
+// 网格档缺失时立刻回的灰块。不写进 cache/grid，避免以后被当成真缩略图。
+const GRID_PLACEHOLDER_JPEG = Buffer.from(
+  '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDABALDA4MChAODQ4SERATGCgaGBYWGDEjJR0oOjM9PDkzODdASFxOQERXRTc4UG1RV19iZ2hnPk1xeXBkeFxlZ2P/2wBDARESEhgVGC8aGi9jQjhCY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2P/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCwAA//2Q==',
+  'base64'
+);
+const gridFillQueued = new Set();
+const gridFillQueue = [];
+let gridFillActive = 0;
+
+function enqueueGridFill(key, job) {
+  if (!key || gridFillQueued.has(key)) return;
+  gridFillQueued.add(key);
+  gridFillQueue.push({ key, job });
+  pumpGridFill();
+}
+
+function pumpGridFill() {
+  while (gridFillActive < 2 && gridFillQueue.length) {
+    const item = gridFillQueue.shift();
+    gridFillActive += 1;
+    setImmediate(() => {
+      Promise.resolve()
+        .then(item.job)
+        .catch(() => {})
+        .finally(() => {
+          gridFillQueued.delete(item.key);
+          gridFillActive -= 1;
+          pumpGridFill();
+        });
+    });
+  }
+}
+
+async function fillGridFromSource(services, fid, wantsWebp) {
+  const db = services?.db;
+  if (!db || !fid) return;
+  let deriv = null;
+  try {
+    const asset = db.prepare('SELECT main_derivative_id, category FROM assets WHERE fid=?').get(fid);
+    if (asset?.main_derivative_id && asset.category !== 'portrait' && asset.category !== 'clothing') {
+      deriv = getDerivativeById(db, asset.main_derivative_id);
+    }
+    if (!deriv) {
+      deriv = db.prepare("SELECT * FROM derivatives WHERE asset_fid=? AND kind='origin' LIMIT 1").get(fid);
+    }
+  } catch {
+    return;
+  }
+  if (!deriv) return;
+  let filePath = null;
+  try {
+    filePath = await resolveDerivativeFile(services, deriv);
+  } catch {
+    return;
+  }
+  if (!filePath || !fs.existsSync(filePath)) return;
+  if (wantsWebp) {
+    const { ensureGridWebp } = require('./derivatives');
+    await ensureGridWebp(services, fid, filePath, null);
+  } else {
+    const { ensureGridJpeg } = require('./derivatives');
+    await ensureGridJpeg(services, fid, filePath, null);
+  }
+}
+
+/** 没有海报时在后台抽帧或拉云端缩略图，不占用打开列表的那一次请求。 */
+async function fillVideoPosterFile(services, fid, visCheck) {
+  const config = services.config;
+  const db = services.db;
+  const outThumb = path.join(config.dataDir, 'cache', 'thumbs', `${fid}.jpg`);
+  try {
+    if (visCheck && (visCheck.kind === 'video' || visCheck.main_derivative_id)) {
+      const vidDeriv = db.prepare(`
+        SELECT * FROM derivatives
+        WHERE asset_fid=? AND (mime LIKE 'video/%' OR file_name LIKE '%.mp4' OR file_name LIKE '%.mov')
+        ORDER BY id DESC LIMIT 1
+      `).get(fid) || (visCheck.main_derivative_id
+        ? db.prepare('SELECT * FROM derivatives WHERE id=?').get(visCheck.main_derivative_id)
+        : null);
+      if (vidDeriv) {
+        await ensureVideoThumbAsync(services, fid, vidDeriv);
+        if (fs.existsSync(outThumb) && fs.statSync(outThumb).size > 20000) {
+          const relPath = path.relative(config.dataDir, outThumb).replace(/\\/g, '/');
+          try {
+            db.prepare("UPDATE assets SET poster_path=? WHERE fid=? AND (poster_path IS NULL OR poster_path='')").run(relPath, fid);
+          } catch {}
+          return;
+        }
+      }
+      try {
+        const assetRow = db.prepare('SELECT thumb_url FROM assets WHERE fid=?').get(fid);
+        if (assetRow?.thumb_url && String(assetRow.thumb_url).startsWith('http')) {
+          const resp = await fetch(assetRow.thumb_url, { signal: AbortSignal.timeout(6000) });
+          if (resp.ok) {
+            const buf = Buffer.from(await resp.arrayBuffer());
+            fs.mkdirSync(path.dirname(outThumb), { recursive: true });
+            fs.writeFileSync(outThumb, buf);
+            return;
+          }
+        }
+      } catch {}
+    }
+  } catch (err) {
+    console.warn(`[api] 后台视频海报失败 (${fid}):`, err.message);
+  }
+  try {
+    const trashSrc = trashFilePath(services, fid);
+    if (trashSrc && /\.(mp4|mov|m4v|webm|avi|mkv)$/i.test(trashSrc)) {
+      fs.mkdirSync(path.dirname(outThumb), { recursive: true });
+      const { extractPoster } = require('./umbra');
+      await extractPoster(trashSrc, outThumb);
+    }
+  } catch (err) {
+    console.warn(`[api] 回收站视频封面生成失败 (${fid}):`, err.message);
+  }
+}
+
+async function ensureVideoThumbAsync(services, fid, deriv) {
+  try {
+    const dataDir = services?.config?.dataDir || process.env.ML_DATA_DIR || path.join(require('os').homedir(), '.dsh-material-library');
+    const out = path.join(dataDir, 'cache', 'thumbs', `${fid}.jpg`);
+    if (fs.existsSync(out) && fs.statSync(out).size > 1000) return true;
+    const db = services?.db;
+    if (!db || !deriv) return false;
+    // 已有较大真实缩略图则跳过（占位图通常 < 20KB）
+    if (fs.existsSync(out) && fs.statSync(out).size > 20000) return true;
+    const vidPath = await resolveDerivativeFile(services, deriv);
+    if (!vidPath || !fs.existsSync(vidPath)) return false;
+    fs.mkdirSync(path.dirname(out), { recursive: true });
+    const { extractPoster } = require('./umbra');
+    const ok = await extractPoster(vidPath, out);
+    if (ok && fs.existsSync(out)) {
+      await rememberVideoFrame(services, fid, vidPath);
+      return true;
+    }
+    return false;
+  } catch (e) {
+    console.warn('[api] 后台视频抽帧失败', fid, e.message);
+    return false;
+  }
+}
+
+async function attachLocalVideoPoster(services, resultImages) {
+  if (!Array.isArray(resultImages) || !resultImages[0] || typeof resultImages[0] !== 'object') return resultImages;
+  const list = resultImages.map((row) => (row && typeof row === 'object' ? { ...row } : row));
+  const row = list[0];
+  const fid = String(row.fid || '').trim();
+  const dataDir = services?.config?.dataDir;
+  if (!fid || !dataDir || !services?.db) return list;
+  const thumb = path.join(dataDir, 'cache', 'thumbs', `${fid}.jpg`);
+  const fresh = fs.existsSync(thumb) && fs.statSync(thumb).size > 20000;
+  if (!fresh) {
+    try {
+      const deriv = services.db.prepare(`
+        SELECT * FROM derivatives
+        WHERE asset_fid=? AND (mime LIKE 'video/%' OR file_name LIKE '%.mp4' OR file_name LIKE '%.mov' OR file_name LIKE '%.webm')
+        ORDER BY id DESC LIMIT 1
+      `).get(fid);
+      if (deriv) {
+        const vidPath = await resolveDerivativeFile(services, deriv);
+        if (vidPath && fs.existsSync(vidPath)) {
+          fs.mkdirSync(path.dirname(thumb), { recursive: true });
+          const { extractPoster } = require('./umbra');
+          await extractPoster(vidPath, thumb);
+          const rel = path.relative(dataDir, thumb).replace(/\\/g, '/');
+          services.db.prepare("UPDATE assets SET poster_path=? WHERE fid=? AND (poster_path IS NULL OR poster_path='')").run(rel, fid);
+        }
+      }
+    } catch (err) {
+      console.warn('[creation-templates] 视频封面抽帧失败', fid, err.message);
+    }
+  }
+  if (fs.existsSync(thumb) && fs.statSync(thumb).size > 1000) {
+    row.poster = `/api/viewer/assets/${encodeURIComponent(fid)}/poster`;
+  }
+  return list;
+}
+
+function parseBody(req, limit = 2 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    let b = '';
+    let overflow = false;
+    let settled = false;
+    req.on('data', c => {
+      if (overflow || settled) return;
+      b += c;
+      if (b.length > limit) {
+        overflow = true;
+        b = '';
+        settled = true;
+        try { req.destroy(); } catch (_) {}
+        // 保持历史哨兵约定：调用方按 __bodyTooLarge 显式回 413
+        resolve({ __bodyTooLarge: true });
+      }
+    });
+    req.on('end', () => {
+      if (overflow || settled) return;
+      if (!b) return resolve({});
+      try {
+        resolve(JSON.parse(b));
+      } catch {
+        // B6：坏 JSON 不再静默成 {}，显式 400（由 handleApi 兜底或各 handler catch 透传）
+        const err = new Error('请求体不是合法的 JSON');
+        err.statusCode = 400;
+        err.code = 'BAD_JSON';
+        reject(err);
+      }
+    });
+    req.on('error', () => { if (!overflow && !settled) resolve({}); });
+  });
+}
+
+function extractToken(req, urlObj, opts = {}) {
+  const allowQuery = opts.allowQuery === true;
+  const authHeader = req.headers.authorization || '';
+  if (authHeader.startsWith('Bearer ')) return authHeader.slice(7).trim();
+
+  const cookie = req.headers.cookie || '';
+  const match = cookie.match(/ml_session=([^;]+)/);
+  if (match) return match[1];
+
+  // Query token 仅媒体 GET 使用（App <image src>）；敏感接口勿传 token 到 URL
+  if (allowQuery) return urlObj.searchParams.get('token') || '';
+  return '';
+}
+
+// BROWSE_READY_FACET_PATCH：与 queryAssets 默认（all=0）可浏览集合完全一致的口径
+//
+// 2026-10-03 状态收敛：原先是 5 个状态的 IN 白名单
+//   ('ready','ready_with_flags','tagging_done','gating_passed','qc')
+// 但实测真实库后 4 个全是 0 条僵尸，且 nodes/index.js 仍在往
+// gating_passed / tagging_done 写值 —— 它们在白名单里意味着
+// 「流水线跑到一半的半成品素材会被当成可用素材返回」。
+// 判据收敛为唯一真源 asset-status.js 的 BROWSE_READY_SQL。
+// CONFLICT-002：重复组概念已退役——is_representative / dup_group_id 不再参与可见性。
+const BROWSE_READY = `(${BROWSE_READY_SQL} AND ${AUTH_VISIBLE_SQL})`;
+
+let cachedFilterOptions = null;
+let cachedFilterOptionsTs = 0;
+const FILTER_OPTIONS_TTL_MS = 60000; // 60s 内存缓存
+
+function invalidateFilterOptionsCache() {
+  cachedFilterOptions = null;
+  cachedFilterOptionsTs = 0;
+}
+
+function filterOptions(db, forceRefresh = false) {
+  const now = Date.now();
+  if (!forceRefresh && cachedFilterOptions && (now - cachedFilterOptionsTs < FILTER_OPTIONS_TTL_MS)) {
+    return cachedFilterOptions;
+  }
+
+  // 多维主筛选与单品维度：space / style_atom / wood_style / material_kind / orientation / ...
+  const primaryDims = [
+    'space', 'style_atom', 'wood_style', 'style_region', 'material_kind', 'orientation',
+    'furniture_category', 'furniture_item', 'furniture_craft', 'furniture_form', 'classic_design',
+    'mood', 'pose', 'character', 'video_purpose'
+  ];
+  const out = {};
+
+  // 素材大类统计（全部 / 室内空间 / 独立单品 / 材质纹理 / 建筑室外 / 空间漫游）
+  const catRows = db.prepare(`
+    SELECT COALESCE(a.category, 'interior') as dir, COUNT(*) as count
+    FROM assets a
+    WHERE ${BROWSE_READY}
+    GROUP BY COALESCE(a.category, 'interior')
+  `).all();
+  const catLabelMap = {
+    interior: '室内空间',
+    furniture: '独立单品',
+    material: '材质纹理',
+    exterior: '建筑室外'
+  };
+  out.categories = catRows.map(r => ({ dir: r.dir, label: catLabelMap[r.dir] || r.dir, count: r.count }));
+
+  // 统计视频大类数量 (kind=video)
+  const videoCountRow = db.prepare(`
+    SELECT COUNT(*) as count FROM assets a
+    WHERE a.kind = 'video' AND ${AUTH_VISIBLE_SQL}
+  `).get();
+  const videoCount = videoCountRow?.count || 0;
+  out.videoCount = videoCount;
+  out.categories.push({ dir: 'video', label: '空间漫游', count: videoCount });
+
+  const musicCountRow = db.prepare(`
+    SELECT COUNT(*) as count FROM assets a
+    WHERE (a.kind = 'audio' OR a.category = 'music' OR a.file_name LIKE '%.mp3' OR a.file_name LIKE '%.wav') AND ${AUTH_VISIBLE_SQL}
+  `).get();
+  out.musicCount = musicCountRow?.count || 0;
+
+  const portraitCountRow = db.prepare(`
+    SELECT COUNT(*) as count FROM assets a
+    WHERE a.category = 'portrait' AND ${AUTH_VISIBLE_SQL}
+  `).get();
+  out.portraitCount = portraitCountRow?.count || 0;
+
+  const retouchedCountRow = db.prepare(`
+    SELECT COUNT(DISTINCT a.fid) as count FROM assets a
+    JOIN derivatives d ON d.asset_fid = a.fid
+    WHERE d.kind IN ('style_transferred', 'quick_replace', 'quick_remove', 'quick_insert', 'clarity_enhanced', 'expand', 'retouched', 'manual_edit') AND ${AUTH_VISIBLE_SQL} AND ${BROWSE_READY}
+  `).get();
+  out.retouchedCount = retouchedCountRow?.count || 0;
+
+  // 需要特殊结构（materials_hard/soft、wood_style 兼容、画幅标签映射）的维度单独处理；
+  // 其余普通标签维度合并为 1 条批量聚合 SQL（PERF-07）。
+  const specialDims = new Set(['orientation', 'material_kind', 'style_atom', 'wood_style']);
+
+  if (primaryDims.includes('orientation')) {
+    const rows = db.prepare(`
+      SELECT '9:16' as dir, COUNT(*) as c FROM assets a
+      WHERE ${BROWSE_READY} AND
+        (a.origin_orientation = '9:16' OR a.fid IN (SELECT asset_fid FROM derivatives WHERE kind = 'restage_9_16'))
+      UNION ALL
+      SELECT '3:4' as dir, COUNT(*) as c FROM assets a
+      WHERE ${BROWSE_READY} AND
+        (a.origin_orientation = '3:4' OR a.fid IN (SELECT asset_fid FROM derivatives WHERE kind = 'restage_3_4'))
+      UNION ALL
+      SELECT a.origin_orientation as dir, COUNT(*) as c FROM assets a
+      WHERE ${BROWSE_READY} AND a.origin_orientation IS NOT NULL
+        AND a.origin_orientation NOT IN ('9:16','3:4')
+      GROUP BY a.origin_orientation
+      ORDER BY c DESC
+    `).all();
+    const labelMap = orientationLabelMap();
+    out.orientation = rows
+      .filter(r => r.c > 0)
+      .map(r => ({ dir: r.dir, label: labelMap[r.dir] || r.dir, count: r.c }));
+  }
+
+  if (primaryDims.includes('material_kind')) {
+    const rows = db.prepare(`
+      SELECT t.dir, t.label, COUNT(DISTINCT a.fid) as count
+      FROM tag_dict t
+      LEFT JOIN asset_tags at ON at.tag_id = t.id
+      LEFT JOIN assets a ON a.fid = at.asset_fid AND ${BROWSE_READY}
+      WHERE t.dimension = ? AND (t.deprecated IS NULL OR t.deprecated = 0)
+      GROUP BY t.id
+      ORDER BY count DESC
+    `).all('material_kind');
+    const { getMaterialGroup } = require('./tags-seed');
+    out.material_kind = rows.map(r => ({
+      ...r,
+      group: getMaterialGroup(r.dir)
+    }));
+    out.materials_hard = out.material_kind.filter(r => r.group === 'hard');
+    out.materials_soft = out.material_kind.filter(r => r.group === 'soft');
+  }
+
+  if (primaryDims.includes('style_atom')) {
+    out.style_atom = db.prepare(`
+      SELECT t.dir, t.label, t.parent_dir as region, COUNT(DISTINCT a.fid) as count
+      FROM tag_dict t
+      LEFT JOIN asset_tags at ON at.tag_id = t.id
+      LEFT JOIN assets a ON a.fid = at.asset_fid AND ${BROWSE_READY}
+      WHERE t.dimension = 'style_atom' AND (t.deprecated IS NULL OR t.deprecated = 0)
+      GROUP BY t.id
+      ORDER BY count DESC, t.id ASC
+    `).all();
+    // 向后兼容旧客户端对 wood_style 的读取
+    out.wood_style = out.style_atom.filter(r => r.region === 'wood_system');
+  } else if (primaryDims.includes('wood_style') && !out.wood_style) {
+    // 保持空或已由 style_atom.wood_system 供给
+    out.wood_style = (out.style_atom || []).filter(r => r.region === 'wood_system');
+  }
+
+  const normalDims = primaryDims.filter(d => !specialDims.has(d));
+  if (normalDims.length) {
+    const ph = normalDims.map(() => '?').join(',');
+    // LEFT JOIN：把词表里所有未废弃的取值都列出来（命中数为 0 也保留），
+    // 这样客户端筛选项与服务端词表一致，不会因为「当前库里没用到」就少一维。
+    const rows = db.prepare(`
+      SELECT t.dimension, t.dir, t.label, COUNT(DISTINCT a.fid) as count
+      FROM tag_dict t
+      LEFT JOIN asset_tags at ON at.tag_id = t.id
+      LEFT JOIN assets a ON a.fid = at.asset_fid AND ${BROWSE_READY}
+      WHERE t.dimension IN (${ph}) AND (t.deprecated IS NULL OR t.deprecated = 0)
+      GROUP BY t.dimension, t.id
+      ORDER BY t.dimension ASC, count DESC, t.id ASC
+    `).all(...normalDims);
+    for (const d of normalDims) out[d] = [];
+    for (const r of rows) {
+      if (!out[r.dimension]) out[r.dimension] = [];
+      out[r.dimension].push({ dir: r.dir, label: r.label, count: r.count });
+    }
+  }
+
+  // 12 室内设计主色统计（从 assets.dominant_color 唯一主色统计）
+  const dominantColorRows = db.prepare(`
+    SELECT a.dominant_color as dir, a.dominant_color as label, COUNT(*) as count
+    FROM assets a
+    WHERE a.dominant_color IS NOT NULL AND a.dominant_color != '' AND ${BROWSE_READY}
+    GROUP BY a.dominant_color HAVING count > 0
+    ORDER BY count DESC
+  `).all();
+  // 附上标准色板 hex，客户端直接画色块，不必自己硬编码色表
+  const colorHexMap = new Map(require('./tags-seed').DOMINANT_COLORS.map((c) => [c.name, c.hex]));
+  out.colors = dominantColorRows.map((r) => ({ ...r, hex: colorHexMap.get(r.dir) || '' }));
+
+  // 视频来源（手机实拍 / AI 创作）：按 is_ai 切分
+  const videoSourceRows = db.prepare(`
+    SELECT CASE WHEN COALESCE(a.is_ai,0)=1 THEN 'ai' ELSE 'sync' END as dir, COUNT(*) as count
+    FROM assets a
+    WHERE a.kind='video' AND ${AUTH_VISIBLE_SQL}
+    GROUP BY dir
+  `).all();
+  const videoSourceCount = new Map(videoSourceRows.map((r) => [r.dir, r.count]));
+  out.video_source = [
+    { dir: 'sync', label: '手机实拍', count: videoSourceCount.get('sync') || 0 },
+    { dir: 'ai', label: 'AI 创作', count: videoSourceCount.get('ai') || 0 },
+  ];
+
+  /**
+   * 筛选面板契约：客户端按这个数组渲染，一项不多一项不少。
+   * source 指向上面同级的 facet 字段名，客户端不再自带维度词表。
+   */
+  out.dimensions = [
+    { key: 'space', label: '空间场景', source: 'space' },
+    { key: 'style', label: '风格', source: 'style_atom' },
+    { key: 'furniture', label: '家具单品', source: ['furniture_item', 'furniture_category'] },
+    { key: 'material', label: '材质', source: 'material_kind' },
+    { key: 'color', label: '主色', source: 'colors' },
+    { key: 'orientation', label: '画幅', source: 'orientation' },
+    { key: 'videoSource', label: '来源', source: 'video_source' },
+    { key: 'videoPurpose', label: '成片用途', source: 'video_purpose' },
+    { key: 'mood', label: '情绪氛围', source: 'mood' },
+    { key: 'pose', label: '姿态动作', source: 'pose' },
+    { key: 'character', label: '人物角色', source: 'character' },
+  ];
+
+  cachedFilterOptions = out;
+  cachedFilterOptionsTs = now;
+  return out;
+}
+
+function ensureAssetShelfColumns(db) {
+  if (schemaCheckedOnce(db, 'shelf_cols')) return;
+  const names = new Set(db.prepare('PRAGMA table_info(assets)').all().map((c) => c.name));
+  if (!names.has('library_shelf')) {
+    db.exec("ALTER TABLE assets ADD COLUMN library_shelf TEXT DEFAULT 'original'");
+  }
+  if (!names.has('category_locked')) {
+    db.exec('ALTER TABLE assets ADD COLUMN category_locked INTEGER DEFAULT 0');
+  }
+  if (!names.has('lineage_json')) {
+    db.exec('ALTER TABLE assets ADD COLUMN lineage_json TEXT');
+  }
+  try {
+    db.exec('CREATE INDEX IF NOT EXISTS idx_assets_sort ON assets(COALESCE(created_at, discovered_at, 0) DESC, fid DESC);');
+  } catch (_) {}
+}
+
+function queryAssets(db, query = {}) {
+  try { ensureAssetShelfColumns(db); } catch (_) {}
+  const {
+    keyword, category, space, style, wood_style: woodStyle, style_region: styleRegion,
+    material, materials, orientation,
+    color_style, colors, flags, region, tone,
+    furniture_category, furniture_item, furniture_craft, furniture_form, classic_design,
+    palette, luxury, era, temperature, functional,
+    media_type: mediaType, video_source: videoSource, video_purpose: videoPurpose,
+    lane, section, shelf: queryShelf,
+    page = 1, pageSize = 24, all = 0, sort, skip_facets, fields
+  } = query;
+
+  // 列表可见判据与筛选项/详情统一（BROWSE_READY_SQL = "a.status = 'ready'"）
+    const where = [BROWSE_READY_SQL, AUTH_VISIBLE_SQL];
+  const args = [];
+
+  const addTagFilter = (dim, val) => {
+    if (!val) return;
+    if (dim === 'space') {
+      const expanded = expandSpaceFilterValues(val);
+      if (!expanded.length) return;
+      val = expanded;
+    }
+    const list = (Array.isArray(val) ? val : String(val).split(','))
+      .map(s => s.trim())
+      .filter(Boolean);
+    if (!list.length) return;
+    if (list.length === 1) {
+      where.push(`
+        a.fid IN (
+          SELECT at.asset_fid FROM asset_tags at
+          JOIN tag_dict t ON t.id = at.tag_id
+          WHERE t.dimension = ? AND (t.dir = ? OR t.label = ?)
+        )
+      `);
+      args.push(dim, list[0], list[0]);
+    } else {
+      const conds = list.map(() => '(t.dir = ? OR t.label = ?)').join(' OR ');
+      where.push(`
+        a.fid IN (
+          SELECT at.asset_fid FROM asset_tags at
+          JOIN tag_dict t ON t.id = at.tag_id
+          WHERE t.dimension = ? AND (${conds})
+        )
+      `);
+      args.push(dim);
+      for (const item of list) {
+        args.push(item, item);
+      }
+    }
+  };
+
+  // media_type: image | video | furniture | music | portrait | clothing | material | favorite | retouched | finished | interior_design
+  try { require('./favorites').ensureFavoriteColumn(db); } catch (_) {}
+  const isOnlyFavorite = (
+    String(query.only_favorite || '') === '1' || query.only_favorite === true ||
+    String(query.favorite || '') === '1' || query.favorite === true ||
+    mediaType === 'favorite'
+  );
+  if (isOnlyFavorite) {
+    where.push('a.favorited_at IS NOT NULL');
+  }
+
+  const effectiveCat = category || (mediaType !== 'favorite' ? mediaType : null);
+
+  if (lane === 'image') {
+    where.push("a.kind = 'image'");
+  }
+  // 图片类目过滤在 lane=image 或 media_type=image + section 时都要生效。
+  // 旧逻辑只写在 lane 分支里：素材选择器「全部图片」不带 lane（否则被默认收窄到室内外），
+  // 而「人物穿搭/单品家具」只带 section，结果 section 被静默丢弃、返回全部图片。
+  if (lane === 'image' || (mediaType === 'image' && section)) {
+    // lane 已推过 kind=image；只带 media_type+section 时这里补上，避免混进同类目的视频/音频
+    if (lane !== 'image' && mediaType === 'image') where.push("a.kind = 'image'");
+    if (!section || section === 'interior_exterior') {
+      where.push("(a.kind = 'image' AND COALESCE(a.category, 'interior') IN ('interior', 'exterior'))");
+    } else if (section === 'portrait') {
+      where.push("a.category = 'portrait'");
+    } else if (section === 'clothing') {
+      where.push("a.category = 'clothing'");
+    } else if (section === 'figure') {
+      where.push("a.category IN ('portrait', 'clothing')");
+    } else if (section === 'furniture') {
+      where.push("(a.category = 'furniture' OR a.kind = 'furniture')");
+    }
+  } else if (lane === 'video') {
+    where.push("a.kind = 'video'");
+    if (section && section !== 'all') {
+      addTagFilter('video_purpose', section);
+    }
+  } else if (lane === 'audio') {
+    where.push("(a.kind = 'audio' OR a.category IN ('music', 'voice', 'vocal') OR a.file_name LIKE '%.mp3' OR a.file_name LIKE '%.wav' OR a.file_name LIKE '%.m4a')");
+    if (section === 'vocal' || section === 'voice') {
+      where.push("a.category IN ('voice', 'vocal')");
+    } else if (section === 'bgm') {
+      where.push("(a.category = 'music' OR a.category IS NULL OR a.category = '' OR a.category NOT IN ('voice', 'vocal'))");
+    } else if (section && section !== 'all') {
+      addTagFilter('audio_role', section);
+    }
+  } else if (lane === 'clip') {
+    if (section === 'output') {
+      where.push("a.kind = 'video' AND a.category = 'finished'");
+    } else {
+      where.push("a.in_managed_zone = 1");
+    }
+  } else if (lane === 'trash') {
+    if (section === 'gate_reject') {
+      where.push("a.status IN ('gate_reject', 'gateway_reject')");
+    } else if (section === 'user_delete') {
+      where.push("a.status = 'user_delete'");
+    } else {
+      where.push("a.status IN ('gate_reject', 'gateway_reject', 'user_delete')");
+    }
+  } else if (effectiveCat === 'favorites' || effectiveCat === 'all_favorites') {
+    if (!isOnlyFavorite) where.push('a.favorited_at IS NOT NULL');
+  } else if (effectiveCat === 'interior_design' || effectiveCat === 'interior' || effectiveCat === 'interior_exterior') {
+    where.push("(a.kind = 'image' AND COALESCE(a.category, 'interior') IN ('interior', 'exterior'))");
+  } else if (effectiveCat === 'exterior') {
+    where.push("a.category = 'exterior'");
+  } else if (effectiveCat === 'finished') {
+    where.push("a.category = 'finished'");
+  } else if (effectiveCat === 'clothing') {
+    where.push("a.category = 'clothing'");
+  } else if (effectiveCat === 'portrait') {
+    where.push("a.category = 'portrait'");
+  } else if (effectiveCat === 'furniture') {
+    where.push("(a.category = 'furniture' OR a.kind = 'furniture')");
+  } else if (effectiveCat === 'portrait_dynamic') {
+    where.push("(a.kind = 'video' OR a.kind = 'audio' OR COALESCE(a.category, '') IN ('portrait', 'finished', 'music', 'video'))");
+  } else if (effectiveCat === 'retouched') {
+    where.push("a.fid IN (SELECT asset_fid FROM derivatives WHERE kind IN ('style_transferred', 'quick_replace', 'quick_remove', 'quick_insert', 'clarity_enhanced', 'expand', 'retouched', 'manual_edit'))");
+  } else if (effectiveCat === 'video') {
+    where.push("a.kind = 'video'");
+  } else if (effectiveCat === 'music' || effectiveCat === 'audio') {
+    where.push("(a.kind = 'audio' OR a.category = 'music' OR a.file_name LIKE '%.mp3' OR a.file_name LIKE '%.wav' OR a.file_name LIKE '%.m4a')");
+  } else if (effectiveCat === 'image') {
+    where.push("a.kind = 'image'");
+  } else if (category && !['furniture', 'music', 'portrait', 'clothing', 'finished', 'retouched', 'interior_design', 'interior', 'exterior', 'interior_exterior', 'favorites', 'all_favorites'].includes(category)) {
+    where.push("COALESCE(a.category, 'interior') = ?");
+    args.push(category);
+  }
+
+  // 成片阶段（原素材/精修/成品）是资产属性：支持逗号多选；不传时不过滤
+  const shelfList = String(queryShelf || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const allowedShelves = shelfList.filter((s) => ['original', 'retouched', 'finished'].includes(s));
+  if (allowedShelves.length) {
+    where.push(`COALESCE(a.library_shelf, 'original') IN (${allowedShelves.map(() => '?').join(',')})`);
+    args.push(...allowedShelves);
+  }
+
+  if (effectiveCat === 'video' || videoSource || lane === 'video') {
+    if (videoSource === 'sync') {
+      where.push('(a.is_ai IS NULL OR a.is_ai = 0)');
+    } else if (videoSource === 'ai') {
+      where.push('a.is_ai = 1');
+    }
+  }
+
+  addTagFilter('space', space);
+  addTagFilter('video_purpose', videoPurpose);
+  addTagFilter('style_atom', style);
+  if (woodStyle) {
+    // 兼容旧 wood_style 入参，映射到已合并的 style_atom 及旧 wood_style
+    addTagFilter('style_atom', woodStyle);
+    addTagFilter('wood_style', woodStyle);
+  }
+  // 大区筛选：资产挂 style_atom 叶子，经 parent_dir 归属大区
+  if (styleRegion) {
+    const regions = (Array.isArray(styleRegion) ? styleRegion : String(styleRegion).split(','))
+      .map(s => s.trim()).filter(Boolean);
+    if (regions.length) {
+      const conds = regions.map(() => '(t.parent_dir = ? OR rt.dir = ? OR rt.label = ?)').join(' OR ');
+      where.push(`
+        a.fid IN (
+          SELECT at.asset_fid FROM asset_tags at
+          JOIN tag_dict t ON t.id = at.tag_id
+          LEFT JOIN tag_dict rt ON rt.dimension = 'style_region' AND (rt.dir = t.parent_dir OR rt.label = t.parent_dir)
+          WHERE t.dimension = 'style_atom' AND (${conds})
+        )
+      `);
+      for (const r of regions) args.push(r, r, r);
+    }
+  }
+
+  // 材质多选 AND 严格过滤（同时包含所有已选材质）
+  const matParam = materials || material;
+  if (matParam) {
+    const matList = (Array.isArray(matParam) ? matParam : String(matParam).split(','))
+      .map(s => s.trim())
+      .filter(Boolean);
+    for (const m of matList) {
+      where.push(`
+        a.fid IN (
+          SELECT at.asset_fid FROM asset_tags at
+          JOIN tag_dict t ON t.id = at.tag_id
+          WHERE t.dimension = 'material_kind' AND (t.dir = ? OR t.label = ?)
+        )
+      `);
+      args.push(m, m);
+    }
+  }
+
+  addTagFilter('color_style', color_style);
+  addTagFilter('flags', flags);
+  addTagFilter('region', region);
+  addTagFilter('tone', tone);
+  addTagFilter('furniture_category', furniture_category);
+  addTagFilter('furniture_item', furniture_item);
+  addTagFilter('furniture_craft', furniture_craft);
+  addTagFilter('furniture_form', furniture_form);
+  addTagFilter('classic_design', classic_design);
+  addTagFilter('palette', palette);
+  addTagFilter('luxury', luxury);
+  addTagFilter('era', era);
+  addTagFilter('temperature', temperature);
+  addTagFilter('functional', functional);
+  addTagFilter('mood', query.mood);
+  addTagFilter('genre', query.genre);
+  addTagFilter('pose', query.pose);
+  addTagFilter('character', query.character);
+  addTagFilter('gender', query.gender);
+  addTagFilter('person_style', query.person_style);
+  addTagFilter('shot_type', query.shot_type);
+  addTagFilter('clothing_category', query.clothing_category);
+  addTagFilter('clothing_style', query.clothing_style);
+  addTagFilter('season', query.season);
+
+  const derivativeKind = query.derivative_kind || query.deriv_kind;
+  if (derivativeKind && effectiveCat === 'retouched') {
+    const kinds = (Array.isArray(derivativeKind) ? derivativeKind : String(derivativeKind).split(','))
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (kinds.length) {
+      where.push(`a.fid IN (SELECT asset_fid FROM derivatives WHERE kind IN (${kinds.map(() => '?').join(',')}))`);
+      args.push(...kinds);
+    }
+  }
+
+  // 12 室内设计主色检索：支持单选或多选匹配
+  const targetColor = colors || query.color;
+  if (targetColor) {
+    const colorList = (Array.isArray(targetColor) ? targetColor : String(targetColor).split(','))
+      .map(s => s.trim())
+      .filter(Boolean);
+    if (colorList.length === 1) {
+      where.push('a.dominant_color = ?');
+      args.push(colorList[0]);
+    } else if (colorList.length > 1) {
+      const qmarks = colorList.map(() => '?').join(',');
+      where.push(`a.dominant_color IN (${qmarks})`);
+      args.push(...colorList);
+    }
+  }
+
+
+  if (orientation) {
+    // 画幅多选：客户端以逗号下发（如 "9:16,3:4"），逐值展开为 OR 条件。
+    // 9:16 / 3:4 同时命中原始画幅与对应重构衍生；其余值按原始画幅精确匹配。
+    const orientList = (Array.isArray(orientation) ? orientation : String(orientation).split(','))
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const orientConds = [];
+    for (const o of orientList) {
+      if (o === '9:16') {
+        orientConds.push(`(a.origin_orientation = '9:16' OR a.fid IN (SELECT asset_fid FROM derivatives WHERE kind = 'restage_9_16'))`);
+      } else if (o === '3:4') {
+        orientConds.push(`(a.origin_orientation = '3:4' OR a.fid IN (SELECT asset_fid FROM derivatives WHERE kind = 'restage_3_4'))`);
+      } else {
+        orientConds.push('a.origin_orientation = ?');
+        args.push(o);
+      }
+    }
+    if (orientConds.length) where.push('(' + orientConds.join(' OR ') + ')');
+  }
+
+  // q 为 keyword 的短别名：剪辑器素材库选择器统一用 q 下发关键词，
+  // 两种写法语义完全一致（文件名 + 标签 label/dir），keyword 仍优先。
+  const keywordValue = keyword || query.q;
+  if (keywordValue) {
+    where.push(`
+      (a.file_name LIKE ? OR a.fid IN (
+        SELECT at.asset_fid FROM asset_tags at
+        JOIN tag_dict t ON t.id = at.tag_id
+        WHERE t.label LIKE ? OR t.dir LIKE ?
+      ))
+    `);
+    args.push(`%${keywordValue}%`, `%${keywordValue}%`, `%${keywordValue}%`);
+  }
+
+  const whereSql = where.join(' AND ');
+  const total = db.prepare(`SELECT COUNT(*) c FROM assets a WHERE ${whereSql}`).get(...args).c;
+
+  const p = Math.max(1, +page || 1);
+  const ps = Math.max(1, Math.min(100, +pageSize || 24));
+  const offset = (p - 1) * ps;
+
+  // 排序：默认时间倒序（最新优先），与移动端相册时间线对齐展示今天、昨天、……；
+  // 联合覆盖索引 idx_assets_sort: (COALESCE(created_at, discovered_at, 0) DESC, fid DESC)
+  // 列表默认排序移除逐行 EXISTS，直接走联合覆盖索引，避免全表逐行关联子查询导致耗时 800ms+。
+  // 加权推荐排序仅在用户显式指定 sort=recommend 时启用。
+  const cardFields = fields === 'summary' || fields === 'card';
+  let orderSql = 'COALESCE(a.created_at, a.discovered_at, 0) DESC, a.fid DESC';
+  // 显式排序优先于「收藏/精修」的默认排序：调用方传了 name / size 就是要按它排。
+  // 这两个值只影响新调用方，latest / earliest / recommend 的既有分支保持不变。
+  if (sort === 'name') {
+    orderSql = 'a.file_name COLLATE NOCASE ASC, a.fid ASC';
+  } else if (sort === 'size') {
+    orderSql = 'COALESCE(a.size, 0) DESC, a.fid DESC';
+  } else if (isOnlyFavorite || mediaType === 'favorite' || mediaType === 'favorites' || mediaType === 'all_favorites') {
+    orderSql = 'a.favorited_at DESC, a.fid DESC';
+  } else if (mediaType === 'retouched' || category === 'retouched') {
+    orderSql = `(SELECT COALESCE(MAX(created_at), 0) FROM derivatives WHERE asset_fid = a.fid AND kind IN ('style_transferred', 'quick_replace', 'quick_remove', 'quick_insert', 'clarity_enhanced', 'expand', 'retouched', 'manual_edit')) DESC, a.fid DESC`;
+  } else if (sort === 'earliest') {
+    orderSql = 'COALESCE(a.created_at, a.discovered_at, 0) ASC, a.fid ASC';
+  } else if (sort === 'recommend') {
+    orderSql = `
+      (CASE WHEN EXISTS (SELECT 1 FROM derivatives d WHERE d.asset_fid = a.fid AND d.kind IN ('restage_dual', 'restage_9_16', 'restage_3_4')) THEN 0 ELSE 1 END) ASC,
+      (CASE WHEN a.has_watermark = 0 AND (a.origin_orientation IN ('9:16', '3:4')) THEN 0
+            WHEN a.has_watermark = 0 THEN 1
+            ELSE 2 END) ASC,
+      COALESCE(a.created_at, a.discovered_at, 0) DESC,
+      a.fid DESC`;
+  }
+
+  const items = db.prepare(`
+    SELECT a.fid, a.file_name, a.width, a.height, a.orientation, a.origin_orientation,
+           COALESCE(a.category, 'interior') AS category, a.dominant_color,
+           a.thumb_url, a.main_derivative_id, a.status, a.ready_flags,
+           a.has_watermark, a.auth_state, COALESCE(a.created_at, a.discovered_at, 0) AS created_at,
+           a.kind, a.is_ai, a.source_asset_id, a.poster_path, a.duration_s, a.size,
+           a.phash, a.md5, a.sha256, a.favorited_at, a.library_shelf,
+           a.parent_fid, a.lineage_json, a.dup_group_id
+    FROM assets a
+    WHERE ${whereSql}
+    ORDER BY ${orderSql}
+    LIMIT ? OFFSET ?
+  `).all(...args, ps, offset);
+
+  // 批量消除 N+1 查询：将 96 次循环单条 SQL 压降为 4 次批量查询。
+  // 卡片视图只要封面字段，标签/颜色/衍生/来源留到点开单条时再取。
+  if (items.length > 0 && cardFields) {
+    for (const it of items) {
+      it.tags = [];
+      it.dupCount = 1;
+      it.mediaToken = auth.generateMediaToken(it.fid, 900);
+      it.media_type = it.kind === 'video' ? 'video'
+        : (it.kind === 'audio' || it.category === 'music' ? 'music'
+        : (it.category === 'portrait' ? 'portrait'
+        : (it.category === 'clothing' ? 'clothing'
+        : (it.category === 'material' ? 'material'
+        : (it.category === 'furniture' ? 'furniture' : 'image')))));
+      it.is_ai = it.is_ai ? 1 : 0;
+      it.duration = it.duration_s || 0;
+      it.poster_url = (it.poster_path || it.kind === 'video')
+        ? `/api/viewer/assets/${encodeURIComponent(it.fid)}/poster`
+        : '';
+    }
+  } else if (items.length > 0) {
+    const fids = items.map(it => it.fid);
+    const placeholders = fids.map(() => '?').join(',');
+
+    // 1. 批量获取 tags
+    const allTags = db.prepare(`
+      SELECT at.asset_fid, t.dimension, t.dir, t.label, at.role, at.source
+      FROM asset_tags at
+      JOIN tag_dict t ON t.id = at.tag_id
+      WHERE at.asset_fid IN (${placeholders})
+    `).all(...fids);
+    const tagsByFid = new Map();
+    for (const t of allTags) {
+      if (!tagsByFid.has(t.asset_fid)) tagsByFid.set(t.asset_fid, []);
+      tagsByFid.get(t.asset_fid).push({
+        dimension: t.dimension,
+        dir: t.dir,
+        label: t.label,
+        role: t.role,
+        source: t.source
+      });
+    }
+
+    // 2. 批量获取 colors
+    const allColors = db.prepare(`
+      SELECT asset_fid, hex, role, name, weight, basic_color
+      FROM asset_colors
+      WHERE asset_fid IN (${placeholders})
+    `).all(...fids);
+    const colorsByFid = new Map();
+    for (const c of allColors) {
+      if (!colorsByFid.has(c.asset_fid)) colorsByFid.set(c.asset_fid, []);
+      colorsByFid.get(c.asset_fid).push({
+        hex: c.hex,
+        role: c.role,
+        name: c.name,
+        weight: c.weight,
+        basic_color: c.basic_color
+      });
+    }
+
+    // 3. 批量获取 derivatives
+    const allDerivs = db.prepare(`
+      SELECT id, asset_fid, kind, storage_type, storage_ref, width, height, mime, params, phash, md5, sha256
+      FROM derivatives
+      WHERE asset_fid IN (${placeholders})
+    `).all(...fids);
+    const derivsByFid = new Map();
+    const derivById = new Map();
+    for (const d of allDerivs) {
+      if (!derivsByFid.has(d.asset_fid)) derivsByFid.set(d.asset_fid, []);
+      derivsByFid.get(d.asset_fid).push(d);
+      derivById.set(d.id, d);
+    }
+
+    // CONFLICT-002：重复组退役，dupCount 批量统计已移除（列表恒为独立素材）。
+
+    // 5. 批量获取 AI 产物的母素材 source_asset
+    const sourceFids = [...new Set(items.map(it => it.source_asset_id).filter(Boolean))];
+    const sourceMap = new Map();
+    if (sourceFids.length > 0) {
+      const sp = sourceFids.map(() => '?').join(',');
+      const sources = db.prepare(`
+        SELECT a.fid, a.file_name, a.width, a.height, a.main_derivative_id, a.thumb_url,
+               COALESCE(a.created_at, a.discovered_at, 0) AS created_at
+        FROM assets a
+        WHERE a.fid IN (${sp})
+      `).all(...sourceFids);
+      const sourceTags = db.prepare(`
+        SELECT at.asset_fid, t.label
+        FROM asset_tags at
+        JOIN tag_dict t ON t.id = at.tag_id
+        WHERE at.asset_fid IN (${sp})
+      `).all(...sourceFids);
+      const tagsOf = new Map();
+      for (const st of sourceTags) {
+        if (!tagsOf.has(st.asset_fid)) tagsOf.set(st.asset_fid, []);
+        tagsOf.get(st.asset_fid).push(st.label);
+      }
+      for (const s of sources) {
+        const labels = tagsOf.get(s.fid) || [];
+        sourceMap.set(s.fid, {
+          fid: s.fid,
+          fileName: s.file_name,
+          file_name: s.file_name,
+          imgUrl: `/api/viewer/assets/${encodeURIComponent(s.fid)}/image`,
+          tagsText: labels.join(' · '),
+          tags: labels,
+          main_derivative_id: s.main_derivative_id,
+          width: s.width,
+          height: s.height
+        });
+      }
+    }
+
+    // 组装回 items
+    for (const it of items) {
+      it.tags = tagsByFid.get(it.fid) || [];
+      it.colors = colorsByFid.get(it.fid) || [];
+      const derivs = derivsByFid.get(it.fid) || [];
+
+      const explicitMain = it.main_derivative_id ? (derivById.get(it.main_derivative_id) || null) : null;
+      let picked = explicitMain || pickBrowseMain(derivs, { orientation, category: it.category });
+      if (it.category === 'portrait' || it.category === 'clothing') {
+        const origin = derivs.find(d => d.kind === 'origin') || null;
+        if (!picked || String(picked.kind || '').startsWith('restage_')) {
+          picked = origin || picked;
+        }
+      }
+      if ((mediaType === 'retouched' || category === 'retouched') && derivs.length > 0) {
+        const retouchedList = derivs.filter(d => ['style_transferred', 'quick_replace', 'quick_remove', 'quick_insert', 'clarity_enhanced', 'expand', 'retouched', 'manual_edit'].includes(d.kind)).sort((a, b) => (b.id || 0) - (a.id || 0));
+        if (retouchedList.length > 0) picked = retouchedList[0];
+      }
+      if (picked) {
+        it.mainDerivative = picked;
+        it.main_derivative_id = picked.id;
+        it.main_derivative_kind = picked.kind;
+      } else {
+        it.mainDerivative = it.main_derivative_id ? (derivById.get(it.main_derivative_id) || null) : null;
+      }
+
+      // CONFLICT-002：重复组退役，dupCount 恒为 1（兼容旧客户端字段）
+      it.dupCount = 1;
+      try { it.readyFlags = JSON.parse(it.ready_flags || '[]'); } catch { it.readyFlags = []; }
+      it.mediaToken = auth.generateMediaToken(it.fid, 900);
+
+      it.media_type = it.kind === 'video' ? 'video'
+        : (it.kind === 'audio' || it.category === 'music' ? 'music'
+        : (it.category === 'portrait' ? 'portrait'
+        : (it.category === 'clothing' ? 'clothing'
+        : (it.category === 'material' ? 'material'
+        : (it.category === 'furniture' ? 'furniture' : 'image')))));
+      it.is_ai = it.is_ai ? 1 : 0;
+      it.duration = it.duration_s || 0;
+      it.poster_url = it.poster_path
+        ? `/api/viewer/assets/${encodeURIComponent(it.fid)}/poster`
+        : (it.kind === 'video' ? `/api/viewer/assets/${encodeURIComponent(it.fid)}/poster` : '');
+      it.source_asset = it.source_asset_id ? (sourceMap.get(it.source_asset_id) || null) : null;
+    }
+  }
+
+  // 当请求参数中不含 skip_facets 时，第 2 页及以后的翻页请求自动追加 skip_facets=1 效果，避免每次翻页都跑全库统计
+  const hasSkipParam = skip_facets !== undefined && skip_facets !== null && skip_facets !== '';
+  const skipFacets = hasSkipParam
+    ? (skip_facets === '1' || skip_facets === 1 || skip_facets === true || skip_facets === 'true')
+    : (p > 1);
+  let resultItems = items;
+  if (cardFields) {
+    resultItems = items.map(it => ({
+      fid: it.fid,
+      file_name: it.file_name,
+      width: it.width,
+      height: it.height,
+      orientation: it.orientation,
+      origin_orientation: it.origin_orientation,
+      category: it.category,
+      thumb_url: it.thumb_url,
+      main_derivative_id: it.main_derivative_id,
+      mainDerivative: it.mainDerivative,
+      media_type: it.media_type,
+      kind: it.kind,
+      created_at: it.created_at,
+      tags: it.tags,
+      dominant_color: it.dominant_color,
+      mediaToken: it.mediaToken,
+      poster_url: it.poster_url,
+      duration: it.duration,
+      is_ai: it.is_ai,
+      favorited_at: it.favorited_at,
+      library_shelf: it.library_shelf || 'original',
+      mime: it.mime || '',
+      source_asset_id: it.source_asset_id || '',
+      has_watermark: it.has_watermark,
+      status: it.status,
+      auth_state: it.auth_state,
+      dupCount: it.dupCount || 1
+    }));
+  }
+
+  const resObj = {
+    items: resultItems,
+    total,
+    page: p,
+    pageSize: ps
+  };
+  if (!skipFacets) {
+    resObj.filterOptions = filterOptions(db);
+  }
+  return resObj;
+}
+
+/**
+ * 回收站素材的文件回读。
+ *
+ * 软删时原文件被 rename 到 dataDir/trash/，但 derivatives.storage_ref 仍指向原路径，
+ * 所以 /image 解析不到。回收站详情页要能预览，就从这里兜底读回。
+ * 命中返回 true（已写响应），未命中返回 false 交给调用方走 404。
+ */
+function serveFromTrash(services, fid, res) {
+  const { db, config } = services;
+  if (!config?.dataDir) return false;
+  let row = null;
+  try {
+    row = db.prepare('SELECT trash_rel FROM asset_trash WHERE fid=? ORDER BY id DESC LIMIT 1').get(fid);
+  } catch (_) { return false; }
+  if (!row?.trash_rel) return false;
+  const p = row.trash_rel.includes('/') || row.trash_rel.includes('\\')
+    ? (require('path').isAbsolute(row.trash_rel) ? row.trash_rel : require('path').join(config.dataDir, row.trash_rel))
+    : row.trash_rel;
+  if (!fs.existsSync(p)) return false;
+  let buf = null;
+  try { buf = fs.readFileSync(p); } catch (_) { return false; }
+  if (!buf || !buf.length) return false;
+  const ext = String(p).split('.').pop().toLowerCase();
+  const mime = ext === 'png' ? 'image/png'
+    : ext === 'webp' ? 'image/webp'
+    : ext === 'gif' ? 'image/gif'
+    : ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
+    : 'application/octet-stream';
+  res.writeHead(200, {
+    'Content-Type': mime,
+    'Content-Length': buf.length,
+    'Cache-Control': 'private, max-age=300',
+  });
+  res.end(buf);
+  return true;
+}
+
+/** 回收站里该 fid 的实际文件路径；不存在返回 null。 */
+function trashFilePath(services, fid) {
+  const { db, config } = services;
+  if (!config?.dataDir) return null;
+  let row = null;
+  try {
+    row = db.prepare('SELECT trash_rel FROM asset_trash WHERE fid=? ORDER BY id DESC LIMIT 1').get(fid);
+  } catch (_) { return null; }
+  if (!row?.trash_rel) return null;
+  const p = path.isAbsolute(row.trash_rel) ? row.trash_rel : path.join(config.dataDir, row.trash_rel);
+  return fs.existsSync(p) ? p : null;
+}
+
+/**
+ * 回收站图片回读（带档位缓存）。
+ *
+ * 列表需要 256px、详情需要 1280px，但软删后 derivatives 仍指向原路径，
+ * 常规缩略图链路会先 302 到失效的 thumb_url，导致 App 端整片空白。
+ * 这里直接从 dataDir/trash 读取原文件，按档位生成/复用缓存后返回。
+ */
+async function serveTrashImage(services, fid, req, res, { tier = '', wantsWebp = false } = {}) {
+  const src = trashFilePath(services, fid);
+  if (!src) return false;
+  const ext = path.extname(src).toLowerCase();
+  if (!/\.(jpg|jpeg|png|webp|gif|bmp|tif|tiff|heic|heif|avif)$/.test(ext)) return false;
+
+  const dataDir = services.config.dataDir;
+  const isGrid = tier === 'grid';
+  const isPreview = tier === 'preview';
+  const bucket = isGrid ? 'grid' : (isPreview ? 'preview' : 'thumbs');
+  const maxSide = isGrid ? 256 : (isPreview ? 1280 : 768);
+  const outJpg = path.join(dataDir, 'cache', bucket, `${fid}.jpg`);
+
+  const sendFile = (file, mime = 'image/jpeg') => {
+    const buf = fs.readFileSync(file);
+    res.writeHead(200, {
+      'Content-Type': mime,
+      'Content-Length': buf.length,
+      'Cache-Control': 'private, max-age=3600',
+    });
+    if (req.method === 'HEAD') return res.end();
+    res.end(buf);
+    return true;
+  };
+
+  if (fs.existsSync(outJpg)) return sendFile(outJpg);
+  try {
+    const sharp = require('sharp');
+    await sharp(src)
+      .rotate()
+      .resize(maxSide, maxSide, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: isGrid ? 72 : 82 })
+      .toFile(outJpg);
+    if (fs.existsSync(outJpg)) return sendFile(outJpg);
+  } catch (e) {
+    console.warn('[api] 回收站图片缩略生成失败', fid, e.message);
+  }
+  // sharp 失败时退回原图，至少保证详情页不是空白
+  const mime = ext === '.png' ? 'image/png'
+    : ext === '.webp' ? 'image/webp'
+    : ext === '.gif' ? 'image/gif'
+    : 'image/jpeg';
+  return sendFile(src, mime);
+}
+
+/**
+ * 素材详情。
+ *
+ * 可见性判据与列表统一（2026-10-02 状态统一机制）：
+ * 列表只出 BROWSE_READY 的素材，详情也必须用同一套 status 白名单，
+ * 否则会出现「详情 200 但文件已被移走 → 前端空图/加载失败」，
+ * 比直接 404 更难排查。
+ *
+ * 内部编排调用（如 AI 编辑流水线回读母素材）传 allowNonReady=true 走旁路，
+ * 因为那些流程本来就在处理中间态素材。
+ */
+function getAssetDetail(services, fid, { allowNonReady = false, includeSimilar = false } = {}) {
+  const { db } = services;
+  const statusSql = allowNonReady ? '' : ' AND ' + BROWSE_READY_SQL;
+  const asset = db.prepare('SELECT * FROM assets a WHERE a.fid = ? AND ' + AUTH_VISIBLE_SQL + statusSql).get(fid);
+  if (!asset) return null;
+
+  try { asset.readyFlags = JSON.parse(asset.ready_flags || '[]'); } catch { asset.readyFlags = []; }
+  asset.category = asset.category || 'interior';
+  asset.dominant_color = asset.dominant_color || '';
+  asset.media_type = asset.kind === 'video' ? 'video'
+    : (asset.kind === 'audio' || asset.category === 'music' ? 'music'
+    : (asset.category === 'portrait' ? 'portrait'
+    : (asset.category === 'furniture' ? 'furniture' : 'image')));
+  asset.is_ai = asset.is_ai ? 1 : 0;
+  asset.duration = asset.duration_s || 0;
+  asset.poster_url = asset.poster_path || asset.kind === 'video'
+    ? `/api/viewer/assets/${encodeURIComponent(fid)}/poster`
+    : '';
+
+  // AI 产物：挂母素材卡片
+  let source_asset = null;
+  if (asset.source_asset_id) {
+    const s = db.prepare(`
+      SELECT fid, file_name, width, height, main_derivative_id, thumb_url
+      FROM assets WHERE fid=?
+    `).get(asset.source_asset_id);
+    if (s) {
+      const sLabels = db.prepare(`
+        SELECT t.label FROM asset_tags at
+        JOIN tag_dict t ON t.id = at.tag_id
+        WHERE at.asset_fid = ?
+      `).all(s.fid).map(r => r.label);
+      source_asset = {
+        fid: s.fid,
+        fileName: s.file_name,
+        file_name: s.file_name,
+        imgUrl: `/api/viewer/assets/${encodeURIComponent(s.fid)}/image`,
+        tagsText: sLabels.join(' · '),
+        tags: sLabels.map(label => ({ label })),
+        main_derivative_id: s.main_derivative_id,
+        width: s.width,
+        height: s.height
+      };
+    }
+  }
+  asset.source_asset = source_asset;
+
+  const tags = db.prepare(`
+    SELECT t.dimension, t.dir, t.label, at.role, at.source FROM asset_tags at
+    JOIN tag_dict t ON t.id = at.tag_id WHERE at.asset_fid = ?
+  `).all(fid);
+
+  const colors = db.prepare('SELECT hex, role, name, weight, basic_color FROM asset_colors WHERE asset_fid = ?').all(fid);
+  const derivatives = getDerivatives(db, fid);
+
+  // CONFLICT-002：重复组概念已退役，组员/组长查询全部移除。
+
+  // PERF-01：详情弹窗默认不阻塞在同步全表相似计算上；
+  // 仅当显式 include_similar=1（或内部明确需要）时才计算。
+  const similar = includeSimilar ? searchSimilar(services, fid, { limit: 8 }) : [];
+  const originIdStmt = db.prepare("SELECT id FROM derivatives WHERE asset_fid=? AND kind='origin' LIMIT 1");
+  for (const s of similar || []) {
+    const sfid = s.fid || s.asset_fid;
+    if (sfid) s.origin_derivative_id = originIdStmt.get(sfid)?.id || null;
+  }
+
+  const parsedDerivs = (derivatives || []).map(d => {
+    const params = parseDerivativeParams(d);
+    return { ...d, params, generated: isQualifiedAgnes({ ...d, params }) };
+  });
+
+  // CONFLICT-002：重复组退役，血缘归属就是素材本身
+  const restageOwnerFid = asset.fid;
+  let restageOwnerDerivs = parsedDerivs;
+  if (restageOwnerFid && restageOwnerFid !== fid) {
+    restageOwnerDerivs = (getDerivatives(db, restageOwnerFid) || []).map(d => {
+      const params = parseDerivativeParams(d);
+      return { ...d, params, generated: isQualifiedAgnes({ ...d, params }), ownerFid: restageOwnerFid };
+    });
+  }
+
+  const displayDerivs = parsedDerivs.filter(d => !String(d.kind || '').startsWith('restage_') || isQualifiedAgnes(d));
+  for (const kind of ['restage_9_16', 'restage_3_4']) {
+    if (!findQualifiedKind(displayDerivs, kind)) {
+      const shared = findQualifiedKind(restageOwnerDerivs, kind);
+      if (shared) displayDerivs.push({ ...shared, sharedFromRepresentative: restageOwnerFid !== fid, ownerFid: restageOwnerFid });
+    }
+  }
+
+  const restageStatus = restageStatusForAsset(db, asset, restageOwnerDerivs);
+  let lineage = null;
+  try {
+    lineage = require('./shelf-lineage').lineageTree(db, fid);
+  } catch (e) {
+    lineage = null;
+  }
+
+  return {
+    asset,
+    tags,
+    colors,
+    lineage,
+    derivatives: displayDerivs,
+    allDerivatives: parsedDerivs,
+    restageOwnerFid,
+    restageStatus,
+    // CONFLICT-002：重复组退役，组员/组原因字段保留为空以兼容旧客户端
+    dupMembers: [],
+    similar,
+    matchReason: null
+  };
+}
+
+function getStats(db) {
+  // 2026-10-03 状态收敛：原先统计 ready_with_flags / tagging_done / frozen
+  // 三个零数据僵尸字段，永远返回 0，纯属误导。改为按 asset-status.js 的
+  // 有效状态集统计，并显式暴露 unknownStatus 便于发现脏数据。
+  const base = {
+    total: db.prepare('SELECT COUNT(*) c FROM assets').get().c,
+    ready: db.prepare("SELECT COUNT(*) c FROM assets WHERE status='ready'").get().c,
+    readyWithFlags: db.prepare("SELECT COUNT(*) c FROM assets WHERE status='ready_with_flags'").get().c,
+    processing: db.prepare("SELECT COUNT(*) c FROM assets WHERE status IN ('discovered','processing')").get().c,
+    rejected: db.prepare("SELECT COUNT(*) c FROM assets WHERE status='rejected'").get().c,
+    deleted: db.prepare("SELECT COUNT(*) c FROM assets WHERE status='deleted'").get().c,
+    images: db.prepare("SELECT COUNT(*) c FROM assets WHERE kind='image'").get().c,
+    queuedNodeRuns: db.prepare("SELECT COUNT(*) c FROM node_runs WHERE status IN ('queued','running')").get().c,
+    failedNodeRuns: db.prepare("SELECT COUNT(*) c FROM node_runs WHERE status='failed'").get().c,
+    // 待治理失败数：与 /exceptions 的 actionable 口径完全一致（存活资产 + 最新运行仍失败
+    // + 近 7 天 + 偶发错误 + 非废弃来源）。顶栏卡片必须等于清单条数，否则会出现「卡片 2810 / 清单 28」
+    // 这种自相矛盾、让人怀疑治理台漏报的数字。
+    actionableFailedRuns: (() => {
+      const { isTransientErrorText, isDeterministicErrorText } = require('./nodes/index');
+      const rows = db.prepare(`
+        SELECT nr.error, COALESCE(a.source,'') as source FROM node_runs nr
+        JOIN (
+          SELECT asset_fid, node_id, MAX(id) as mid FROM node_runs
+          WHERE updated_at >= ? OR updated_at IS NULL
+          GROUP BY asset_fid, node_id
+        ) x ON x.mid = nr.id
+        JOIN assets a ON a.fid = nr.asset_fid
+        LEFT JOIN asset_trash t ON t.fid = a.fid
+        LEFT JOIN (SELECT DISTINCT fid FROM asset_blacklist) b ON b.fid = a.fid
+        WHERE nr.status = 'failed'
+          AND t.fid IS NULL AND b.fid IS NULL
+          AND COALESCE(a.status, '') NOT IN ('deleted','rejected','excluded')
+        LIMIT 300
+      `).all(Date.now() - 7 * 86400000);
+      return rows.filter(r =>
+        !['quark'].includes(String(r.source || '').toLowerCase())
+        && !isDeterministicErrorText(r.error)
+        && isTransientErrorText(r.error)
+      ).length;
+    })(),
+    restageQueued: db.prepare("SELECT COUNT(*) c FROM node_runs WHERE node_type IN ('restage_dual','restage_9_16') AND status IN ('queued','running')").get().c,
+    lastScan: JSON.parse(db.prepare("SELECT value FROM kv WHERE key='last_scan'").get()?.value || 'null')
+  };
+  // 脏数据自检：出现非 VALID_STATUSES 的状态说明有写入路径漏改
+  const ph = VALID_STATUSES.map(() => '?').join(',');
+  const unknown = db.prepare('SELECT COALESCE(status,\'(NULL)\') s, COUNT(*) c FROM assets WHERE status IS NULL OR status NOT IN (' + ph + ') GROUP BY 1').all(...VALID_STATUSES);
+  base.unknownStatus = {};
+  for (const r of unknown) base.unknownStatus[r.s] = r.c;
+  base.unknownStatusTotal = Object.values(base.unknownStatus).reduce((a, b) => a + b, 0);
+  const authRows = db.prepare("SELECT COALESCE(auth_state,'unmanaged') AS state, COUNT(*) c FROM assets GROUP BY auth_state").all();
+  base.authStateCounts = {};
+  for (const r of authRows) base.authStateCounts[r.state] = r.c;
+  return base;
+}
+
+function applyHumanTag(db, fid, dimension, dir) {
+  const t = db.prepare('SELECT id FROM tag_dict WHERE dimension=? AND (dir=? OR label=?)').get(dimension, dir, dir);
+  if (!t) return false;
+  db.prepare(`
+    INSERT INTO asset_tags (asset_fid, tag_id, role, source, confidence, updated_at)
+    VALUES (?, ?, NULL, 'human', 1.0, ?)
+    ON CONFLICT(asset_fid, tag_id, role) DO UPDATE SET
+      source='human', confidence=1.0, updated_at=excluded.updated_at
+  `).run(fid, t.id, Date.now());
+  return true;
+}
+
+// ===== 统一 RBAC 角色权限体系 =====
+function isPublicRoute(pathname, method) {
+  if (method === 'OPTIONS') return true;
+  if (pathname === '/health' || pathname === '/api/health') return true;
+  if (pathname === '/auth/login' || pathname === '/api/auth/login') return true;
+  if (pathname.startsWith('/frames/')) return true;
+  if (/^\/(?:api\/)?(?:viewer\/)?products\/(?:previews|models)\/[^\/]+$/.test(pathname)) return true;
+  return false;
+}
+
+function requireViewer(res, sessionUser) {
+  if (!sessionUser) {
+    sendJson(res, 401, { error: '未登录或会话已过期' });
+    return false;
+  }
+  return true;
+}
+
+function requireAdmin(res, sessionUser) {
+  if (!sessionUser) {
+    sendJson(res, 401, { error: '未登录或会话已过期' });
+    return false;
+  }
+  if (sessionUser.role !== 'admin') {
+    sendJson(res, 403, { error: '需要管理员权限' });
+    return false;
+  }
+  return true;
+}
+
+// 核心 HTTP 请求路由调度
+// B6：入口兜底 —— 未被各路由局部 try/catch 接住的 4xx 语义错误（如 parseBody 坏 JSON 的
+// statusCode=400）按其状态码返回；其余异常继续上抛由服务端 500 处理，避免坏请求体被静默当 {}。
+async function handleApi(services, req, res, prefix = '/api') {
+  try {
+    return await handleApiImpl(services, req, res, prefix);
+  } catch (e) {
+    if (res.headersSent) throw e;
+    const code = Number(e && e.statusCode);
+    if (code >= 400 && code < 500) {
+      return sendJson(res, code, { success: false, error: e.message });
+    }
+    throw e;
+  }
+}
+
+async function handleApiImpl(services, req, res, prefix = '/api') {
+  const { db, config, interpreter } = services;
+  ensureIsolationSchema(db);
+  const urlObj = new URL(req.url, 'http://127.0.0.1');
+  let pathname = urlObj.pathname;
+  if (prefix && pathname.startsWith(prefix)) {
+    pathname = pathname.slice(prefix.length) || '/';
+  }
+
+  // 跨域头与预检
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Filename, X-Source, X-Client-Asset-Id, X-Upload-Id, X-Chunk-Index, X-Total-Chunks');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
+  // 会话提取
+  const token = extractToken(req, urlObj, {
+    // HEAD 与 GET 同样是媒体探活/播放器分片请求（<video>、Chrome 下载器都可能先发 HEAD），
+    // 只放行 GET 会让带 token 的 HEAD 直接 401。
+    // SSE (/events) 标准浏览器 EventSource 无法自定义 Header，亦允许 query token 鉴权。
+    allowQuery:
+      (req.method === 'GET' || req.method === 'HEAD') &&
+      /(image|poster|file|mask|temp|masks|video|audio|download|media|voice|preview|basecolor|swatch|scene|events|models)/.test(pathname || urlObj.pathname || ''),
+  });
+  const isViewerRoute = pathname === '/viewer' || pathname.startsWith('/viewer/');
+  // SEC-001：已移除 lanInternalSession 免密提权后门——会话只认真实登录 token。
+  const sessionUser = auth.verifySession(db, token);
+  const isAdmin = sessionUser?.role === 'admin';
+  const isViewerOrAdmin = !!sessionUser;
+  // 需求2：auth.verifySession 不返回 allow_all_models，这里补一次供模型白名单 / 缓存分桶使用。
+  if (sessionUser) {
+    try {
+      const aclRow = db.prepare('SELECT allow_all_models FROM users WHERE id=?').get(sessionUser.id);
+      sessionUser.allow_all_models = Number(aclRow?.allow_all_models || 0) ? 1 : 0;
+    } catch (_) {
+      sessionUser.allow_all_models = 0;
+    }
+  }
+
+  // ===== 视角端白名单 (/api/viewer/*)：浏览/详情/媒体 + 同步快照 + App/H5 写操作（删除/画幅/AI/生成）=====
+  // 非只读：DELETE assets、restage、main-derivative、AI/gen/chat、portrait 等供客户端使用。
+  // 白名单外一律 404；完整治理/后台接口不在 /viewer 前缀内。
+  const VIEWER_WHITELIST = [
+    ['POST', /^\/auth\/login$/],
+    ['GET', /^\/auth\/me$/],
+    ['POST', /^\/auth\/logout$/],
+    ['GET', /^\/assets$/],
+    ['GET', /^\/assets\/timeline-days$/],
+    ['GET', /^\/assets\/trash$/],
+    ['GET', /^\/assets\/trash\/[^\/]+$/],
+    ['POST', /^\/assets\/trash\/restore$/],
+    // R6：purge / rehome-gate 处理器要求 admin，viewer 账号命中也只会吃 403；
+    // 管理员经 /api/* 根路径（绕过白名单）访问，故从 viewer 白名单移除（viewer 调则 404）。
+    ['POST', /^\/assets\/[^\/]+\/favorite$/],
+    // 素材架（原素材/精修/成品）移动：处理器本身仅要求 isViewerOrAdmin
+    ['POST', /^\/assets\/shelf$/],
+    ['POST', /^\/assets\/[^\/]+\/library-prep$/],
+    ['GET', /^\/assets\/[^\/]+$/],
+    ['GET', /^\/assets\/[^\/]+\/similar$/],
+    ['GET', /^\/assets\/[^\/]+\/image$/],
+    ['HEAD', /^\/assets\/[^\/]+\/image$/],
+    // 导出下载：/assets/<fid>/image/ML_SAVED_xxx.jpg（客户端另存/分享走同一路由）
+    ['GET', /^\/assets\/[^\/]+\/image\/[^\/]+$/],
+    ['HEAD', /^\/assets\/[^\/]+\/image\/[^\/]+$/],
+    ['GET', /^\/assets\/[^\/]+\/file$/],
+    ['HEAD', /^\/assets\/[^\/]+\/file$/],
+    ['GET', /^\/assets\/[^\/]+\/video$/],
+    ['HEAD', /^\/assets\/[^\/]+\/video$/],
+    ['GET', /^\/assets\/[^\/]+\/poster$/],
+    ['HEAD', /^\/assets\/[^\/]+\/poster$/],
+    ['GET', /^\/assets\/[^\/]+\/process$/],
+    ['POST', /^\/assets\/[^\/]+\/process$/],
+    ['GET', /^\/assets\/[^\/]+\/ai\/tasks$/],
+    ['POST', /^\/ai\/tasks$/],
+    ['GET', /^\/ai\/tasks\/[^\/]+$/],
+    ['GET', /^\/ai\/masks\/[^\/]+$/],
+    ['HEAD', /^\/ai\/masks\/[^\/]+$/],
+    ['GET', /^\/presets$/],
+    ['GET', /^\/dict$/],
+    ['GET', /^\/dict\/menu-tree$/],
+    ['GET', /^\/library\/catalog$/],
+    ['GET', /^\/studio\/schema$/],
+    ['GET', /^\/studio\/catalog$/],
+    ['POST', /^\/tools\/convert-video$/],
+    ['POST', /^\/tools\/upload$/],
+    ['POST', /^\/tools\/extract-frames$/],
+    ['POST', /^\/upload$/],
+    ['GET', /^\/tools\/lip-sync\/status$/],
+    ['POST', /^\/tools\/lip-sync$/],
+    ['GET', /^\/tools\/lip-sync\/tasks\/[^\/]+$/],
+    ['GET', /^\/gen\/(?:videos\/)?tasks\/[^\/]+$/],
+    ['GET', /^\/stats$/],
+    ['GET', /^\/vectors\/status$/],
+    ['POST', /^\/snapshot$/],
+    ['GET', /^\/sync\/reconcile$/],
+    ['POST', /^\/sync\/upload$/],
+    ['POST', /^\/sync\/chunk$/],
+    ['POST', /^\/sync\/complete$/],
+    ['POST', /^\/assets\/[^\/]+\/restage$/],
+    ['POST', /^\/assets\/[^\/]+\/main-derivative$/],
+    ['GET', /^\/lab\/capabilities$/],
+    ['GET', /^\/lab\/model-caps$/],
+    ['GET', /^\/lab\/filter-vocabulary$/],
+    ['GET', /^\/lab\/quick-models$/],
+    ['GET', /^\/lab\/local-models$/],
+    // R3：本地模型文件下载（viewer 视角端拉取已发布模型，路由仅要求 isViewerOrAdmin）
+    ['GET', /^\/lab\/local-models\/[^\/]+\/download$/],
+    ['POST', /^\/lab\/gate-preview$/],
+    ['POST', /^\/lab\/stale-tags$/],
+    ['POST', /^\/lab\/runs$/],
+    ['GET', /^\/lab\/runs\/[^\/]+\/[^\/]+$/],
+    ['GET', /^\/cache\/temp\/[^\/]+$/],
+    ['HEAD', /^\/cache\/temp\/[^\/]+$/],
+    ['GET', /^\/events$/],
+    // 云端视频供应商凭 media_token 免登拉取首帧/尾帧（帧中继：/frames/<token>/<file>）
+    ['GET', /^\/frames\/[^/]+\/[^/]+$/],
+    ['HEAD', /^\/frames\/[^/]+\/[^/]+$/],
+    ['GET', /^\/app\/update$/],
+    ['DELETE', /^\/assets\/[^\/]+$/],
+    ['POST', /^\/assets\/[^\/]+\/delete$/],
+    ['POST', /^\/assets\/dedupe-library$/],
+    ['GET', /^\/rejected$/],
+    ['GET', /^\/rejected\/[^\/]+$/],
+    ['POST', /^\/rejected\/[^\/]+\/restore$/],
+    ['POST', /^\/rejected\/restore-batch$/],
+    ['GET', /^\/gateway\/config$/],
+    ['GET', /^\/chat\/sessions$/],
+    ['GET', /^\/chat\/sessions\/[^\/]+$/],
+    ['POST', /^\/chat\/sessions$/],
+    ['DELETE', /^\/chat\/sessions\/[^\/]+$/],
+    ['GET', /^\/chat\/messages$/],
+    ['POST', /^\/chat\/messages$/],
+    ['DELETE', /^\/chat\/messages$/],
+    ['POST', /^\/chat\/optimize-prompt$/],
+    ['GET', /^\/asr\/status$/],
+    ['POST', /^\/asr\/transcribe$/],
+    // 创作配方库（列表/保存/置顶/复用计数/删除）处理器均为 isViewerOrAdmin
+    ['GET', /^\/creation-templates$/],
+    ['POST', /^\/creation-templates$/],
+    ['GET', /^\/creation-templates\/[^\/]+$/],
+    ['PATCH', /^\/creation-templates\/[^\/]+$/],
+    ['DELETE', /^\/creation-templates\/[^\/]+$/],
+    ['POST', /^\/creation-templates\/pull-external$/],
+    ['POST', /^\/ai\/segment$/],
+    ['POST', /^\/ai\/detect$/],
+    ['GET', /^\/ai\/capabilities$/],
+    ['POST', /^\/ai\/expand-jimeng$/],
+    ['POST', /^\/ai\/vlm-describe$/],
+    ['POST', /^\/edit\/run$/],
+    ['POST', /^\/edit\/preview$/],
+    ['POST', /^\/exports\/register$/],
+    ['POST', /^\/ai\/upload$/],
+    ['GET', /^\/products\/presets$/],
+    ['GET', /^\/products\/models\/[^\/]+$/],
+    ['GET', /^\/products\/previews\/[^\/]+$/],
+    // R6：治理台读接口（9 个 GET）与 prompts/preview-compile 处理器均要求 admin
+    // （preview-compile 虽在 isGovernanceWrite 前置闸门被豁免，但处理器内部仍 403），
+    // viewer 命中白名单也只吃 403，故全部移出；管理员经 /api/* 根路径访问。
+    ['GET', /^\/thumbs\/[^\/]+$/],
+    ['HEAD', /^\/thumbs\/[^\/]+$/],
+    ['POST', /^\/gen\/preview$/],
+    ['GET', /^\/studio\/color-schemes$/],
+    ['PUT', /^\/studio\/color-schemes$/],
+    ['POST', /^\/chat\/suggest-prompts$/],
+    ['POST', /^\/gen\/images$/],
+    ['POST', /^\/gen\/videos$/],
+    ['POST', /^\/gen\/chat$/],
+    // 后台生成任务队列（viewer 视角端同样需要入队 / 轮询）
+    ['POST', /^\/gen\/jobs$/],
+    ['GET', /^\/gen\/jobs$/],
+    ['GET', /^\/gen\/jobs\/[^\/]+$/],
+    // 替换原图 / 还原历史版本
+    ['POST', /^\/assets\/[^\/]+\/replace-image$/],
+    ['POST', /^\/assets\/[^\/]+\/restore-version$/],
+    ['GET', /^\/portrait-library$/],
+    ['GET', /^\/portrait-library\/catalog$/],
+    ['GET', /^\/portrait-library\/consent$/],
+    ['POST', /^\/portrait-library\/consent$/],
+    ['POST', /^\/portrait-library\/groups$/],
+    ['POST', /^\/portrait-library\/groups\/[^\/]+\/assets$/],
+    ['DELETE', /^\/portrait-library\/assets\/[^\/]+$/],
+    ['DELETE', /^\/portrait-library\/groups\/[^\/]+$/],
+    ['POST', /^\/ai\/walkthrough\/infer-topology$/],
+    ['POST', /^\/ai\/walkthrough\/generate-3d$/],
+    ['POST', /^\/ai\/walkthrough\/confirm-topology$/],
+    ['POST', /^\/ai\/walkthrough\/infer-sequence$/],
+    ['POST', /^\/ai\/walkthrough\/confirm-sequence$/],
+    ['GET', /^\/studio\/presets$/],
+    // SEC-007：presets 写操作移出 viewer 白名单（管理员经 /api/* 操作）
+    ['GET', /^\/assets\/similarity-workbench$/],
+    // R6：resolve/clean-exact/ignored 的写操作均为 admin 处理器，已移出白名单；
+    // 唯 GET ignored 处理器无 admin 守卫（登录即可读忽略对列表），保留。
+    ['GET', /^\/assets\/similarity-workbench\/ignored$/],
+    ['GET', /^\/assets\/[^\/]+\/quality$/]
+  ];
+  if (pathname === '/viewer' || pathname.startsWith('/viewer/')) {
+    pathname = pathname.slice('/viewer'.length) || '/';
+    // 管理员直接豁免白名单限制；普通 viewer 校验白名单
+    if (!isAdmin) {
+      const hit = VIEWER_WHITELIST.some(([m, re]) => req.method === m && re.test(pathname));
+      if (!hit) return sendJson(res, 404, { error: `视角端不支持的端点: ${pathname}` });
+    }
+  }
+
+  // SEC-007：治理台写操作 / 技能流水线 / 沙盒执行一律管理员。
+  // viewer 只保留治理台读接口与提示词编译预览。
+  const isGovernanceWrite = pathname.startsWith('/governance/') && req.method !== 'GET'
+    && pathname !== '/governance/prompts/preview-compile';
+  if ((isGovernanceWrite || pathname === '/skills/create') && !isAdmin) {
+    return sendJson(res, 403, { error: '需要管理员权限' });
+  }
+  if (pathname.startsWith('/v1/gen/')) {
+    pathname = pathname.slice('/v1'.length);
+  }
+
+  // 公开健康探测（客户端 ServerResolve 依赖 2xx/401）
+  if ((pathname === '/health' || pathname === '/api/health') && req.method === 'GET') {
+    return sendJson(res, 200, { ok: true, service: 'material-library', ts: Date.now() });
+  }
+
+  // ===== 实时事件总线 SSE 推送 (/api/events & /api/viewer/events) =====
+  if (pathname === '/events' && req.method === 'GET') {
+    if (!requireViewer(res, sessionUser)) return;
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.write(': sse connected\n\n');
+
+    const { eventBus, EVENTS } = require('./events');
+
+    const onTaskUpdated = (payload) => {
+      // 带 user_id 的事件只发给它的属主：以前不看归属，任何账号/标签页都能收到别人的生图结果，
+      // 前端再据此刷新会话，就会「图片被推到别的对话框」。
+      const owner = payload && payload.userId;
+      if (owner != null && sessionUser && Number(owner) !== Number(sessionUser.id)) return;
+      try { res.write(`event: task:updated\ndata: ${JSON.stringify(payload)}\n\n`); } catch (_) {}
+    };
+    const onAssetIngested = (payload) => {
+      try { res.write(`event: asset:ingested\ndata: ${JSON.stringify(payload)}\n\n`); } catch (_) {}
+    };
+    const onAssetDeleted = (payload) => {
+      try { res.write(`event: asset:deleted\ndata: ${JSON.stringify(payload)}\n\n`); } catch (_) {}
+    };
+    const onReconcileDone = (payload) => {
+      try { res.write(`event: sync:reconcile_done\ndata: ${JSON.stringify(payload)}\n\n`); } catch (_) {}
+    };
+
+    eventBus.on(EVENTS.TASK_UPDATED, onTaskUpdated);
+    eventBus.on(EVENTS.ASSET_INGESTED, onAssetIngested);
+    eventBus.on(EVENTS.ASSET_DELETED, onAssetDeleted);
+    eventBus.on(EVENTS.RECONCILE_DONE, onReconcileDone);
+
+    const pingTimer = setInterval(() => {
+      try { res.write(': ping\n\n'); } catch (_) {}
+    }, 20000);
+
+    const cleanup = () => {
+      clearInterval(pingTimer);
+      eventBus.off(EVENTS.TASK_UPDATED, onTaskUpdated);
+      eventBus.off(EVENTS.ASSET_INGESTED, onAssetIngested);
+      eventBus.off(EVENTS.ASSET_DELETED, onAssetDeleted);
+      eventBus.off(EVENTS.RECONCILE_DONE, onReconcileDone);
+    };
+
+    req.on('close', cleanup);
+    res.on('close', cleanup);
+    res.on('finish', cleanup);
+    return;
+  }
+
+  // ===== 语音输入（ASR）=====
+  // 浏览器只认同源 /api/asr/*，真实识别在本机 Python 服务（见 scripts/asr/asr_server.py）。
+  if (pathname === '/asr/status' || pathname === '/asr/transcribe') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const handled = await require('./asr').handleAsrApi(services, req, res, pathname);
+    if (handled) return;
+  }
+
+  // 遗留同树灰测通道（src/gray.js + scripts/gray-release.js）已于 2026-11-03
+  // 退役并归档至 archive/gray-retired-20261103/；分支验证统一走 worktree test
+  // 通道（scripts/branch-channel.js），发布走 mls-ctl promote。
+
+  // ===== 发布用自重启（仅本机 + 内部标记）=====
+  // 灰测通道构建完正式产物后调用它，让正式端退出、由 watchdog 拉起新代码。
+  // 不能从 Windows 直接调 wsl.exe（被安全策略拉黑），所以由正式端自己退出。
+  if (pathname === '/system/restart' && req.method === 'POST') {
+    const ip = String(req.socket?.remoteAddress || '').replace(/^::ffff:/i, '');
+    const isLocal = ip === '127.0.0.1' || ip === '::1';
+    if (!isLocal) return sendJson(res, 403, { error: '只接受本机发起的重启' });
+    if (String(req.headers['x-ml-internal'] || '') !== 'restart') {
+      return sendJson(res, 400, { error: '缺少内部调用标记' });
+    }
+    const wdPidFile = path.join(config.dataDir, 'watchdog.pid');
+    let watchdogPid = 0;
+    let watchdogAlive = false;
+    try {
+      watchdogPid = Number(fs.readFileSync(wdPidFile, 'utf8').trim()) || 0;
+      if (watchdogPid) { process.kill(watchdogPid, 0); watchdogAlive = true; }
+    } catch (_) {}
+    if (!watchdogAlive) {
+      return sendJson(res, 409, {
+        error: '没有检测到 watchdog 进程，重启后无法自动拉起。请在素材库控制台（3790）「通道与发布」整组重启，或 WSL 内执行 bash start.sh restart',
+        channel: config.channel || 'prod',
+      });
+    }
+    sendJson(res, 202, { ok: true, note: '服务即将退出，watchdog 会自动拉起', watchdogPid, pid: process.pid });
+    console.log(`[restart] 发布触发自重启（watchdog=${watchdogPid}），1.2s 后退出`);
+    setTimeout(() => {
+      try { db.close(); } catch (_) {}
+      process.exit(0);
+    }, 1200);
+    return;
+  }
+
+  if (pathname.startsWith('/portrait-library')) {
+    const handled = await portraitLib.handlePortraitApi(services, req, res, pathname, {
+      sendJson,
+      parseBody,
+      sessionUser,
+      isAdmin,
+    });
+    if (handled) return;
+  }
+
+  // 帧中继公网读取（云端视频供应商拉取首帧/尾帧；免会话，token 在路径中段、文件名在末段）
+  const mFrame = pathname.match(/^\/frames\/([^/]+)\/([^/]+)$/);
+  if (mFrame && (req.method === 'GET' || req.method === 'HEAD')) {
+    return require('./frame-relay').serveFrame(
+      services, req, res,
+      decodeURIComponent(mFrame[2]),
+      decodeURIComponent(mFrame[1])
+    );
+  }
+
+  // 公开/登录接口
+  if (pathname === '/auth/login' && req.method === 'POST') {
+    const b = await parseBody(req);
+    const clientIp = (req.socket?.remoteAddress || '').replace(/^::ffff:/i, '');
+    try {
+      const loginRes = auth.login(db, b.username, b.password, clientIp);
+      if (!loginRes) return sendJson(res, 401, { error: '用户名或密码错误' });
+      res.setHeader('Set-Cookie', `ml_session=${loginRes.token}; Path=/; Max-Age=${30*24*3600}; HttpOnly; SameSite=Lax`);
+      return sendJson(res, 200, { success: true, data: loginRes });
+    } catch (err) {
+      if (err.code === 'RATE_LIMITED') {
+        return sendJson(res, 429, { error: err.message });
+      }
+      return sendJson(res, 500, { error: err.message });
+    }
+  }
+
+  if (pathname === '/auth/logout' && req.method === 'POST') {
+    if (token) auth.logout(db, token);
+    res.setHeader('Set-Cookie', 'ml_session=; Path=/; Max-Age=0');
+    return sendJson(res, 200, { success: true });
+  }
+
+  // ===== App 远程更新：检查与下载对客户端公开（启动静默检查无需会话） =====
+  if (pathname === '/app/update' && req.method === 'GET') {
+    try {
+      const userAgent = String(req.headers['user-agent'] || '');
+      const clientIp = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '');
+      const data = await appUpdate.checkUpdate(config, {
+        platform: urlObj.searchParams.get('platform') || 'android',
+        versionCode: urlObj.searchParams.get('versionCode') || '0',
+        wgtVersion: urlObj.searchParams.get('wgtVersion') || urlObj.searchParams.get('versionCode') || '0',
+        channel: urlObj.searchParams.get('channel') || 'private',
+        deviceId: urlObj.searchParams.get('deviceId') || '',
+        userAgent,
+        clientIp,
+      });
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 灰度版本状态获取（正式版 vs 灰度版，公开供状态检查与监控面板查询）
+  if (pathname === '/app/update/state' && req.method === 'GET') {
+    try {
+      const state = appUpdate.getUpdateState(config);
+      return sendJson(res, 200, { success: true, data: state });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+  const mUpdFilePub = pathname.match(/^\/app\/update\/files\/([^\/]+)$/);
+  if (mUpdFilePub && req.method === 'GET') {
+    const fileName = decodeURIComponent(mUpdFilePub[1]);
+    const fp0 = appUpdate.resolveUpdateFilePath(config, fileName);
+    if (!fp0) return sendJson(res, 404, { error: '更新包不存在' });
+    const isApk = fileName.toLowerCase().endsWith('.apk');
+
+    // wgt 公开下载；apk 仍需会话/token，避免公网裸奔安装包。
+    //
+    // 为什么 wgt 必须公开（2026-10-03 设备实证的真实故障）：
+    //   /app/update（检查）本来就是公开的，App 冷启动 3 秒后就会弹更新；
+    //   但下载要 token，而全新安装 / 登录过期时 App 根本没有 token，
+    //   结果是「弹窗能出来、点立即更新就失败」，
+    //   401 让 uni.downloadFile 走 fail 分支，用户只看到一句无意义的网络错误。
+    //   设备日志：HTTP/1.1 401 {"error":"下载更新包需要登录"}。
+    //   wgt 只是 JS 资源包（不含可执行代码、不含密钥），公开下载不扩大风险面。
+    if (isApk) {
+      const upTok = extractToken(req, urlObj, { allowQuery: true });
+      const upSess = upTok ? auth.verifySession(db, upTok) : null;
+      if (!upSess && !isViewerOrAdmin) {
+        return sendJson(res, 401, { error: '下载更新包需要登录' });
+      }
+    }
+    const fp = fp0;
+    const stat = fs.statSync(fp);
+    res.writeHead(200, {
+      'Content-Type': fp.endsWith('.apk') ? 'application/vnd.android.package-archive' : 'application/octet-stream',
+      'Content-Length': stat.size,
+      'Content-Disposition': `attachment; filename="${path.basename(fp)}"`,
+    });
+    fs.createReadStream(fp).pipe(res);
+    return;
+  }
+
+  // ===== 统一菜单树与工作台契约 (Server-Driven UI 元数据开放只读) =====
+  if (pathname === '/library/catalog' && req.method === 'GET') {
+    try {
+      const { getLibraryCatalog } = require('./library-catalog');
+      return sendJson(res, 200, { success: true, data: getLibraryCatalog() });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  if (pathname === '/dict/menu-tree' && req.method === 'GET') {
+    try {
+      const data = menuTree.getMenuTree(db);
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  if (pathname === '/studio/schema' && req.method === 'GET') {
+    try {
+      const data = menuTree.getStudioSchema(db);
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 鉴权拦截（临时生成预览产物同样需要会话；前端 <img> 标签走 ml_session Cookie 鉴权；或走 15min media_token）
+  // SEC-002：/tools/* 不再免鉴权直达——未登录只放行公共模型目录与合法 media_token 的媒体读取。
+  if (!isViewerOrAdmin) {
+    if (pathname === '/studio/catalog' || /^\/base-library\/items\/[^\/]+\/(preview|scene)$/.test(pathname) || /^\/base-library\/materials\/[^\/]+\/preview$/.test(pathname) || /^\/products\/(previews|models)\/[^\/]+$/.test(pathname)) {
+      // 仅允许公共模型目录与公共切片预览图直达
+    } else {
+      const mImgCheck = pathname.match(/^\/assets\/([^\/]+)\/(?:image|file)(?:\/([^\/]+))?$/);
+      const mMaskCheck = pathname.match(/^\/ai\/masks\/([^\/]+)$/);
+      const mTempCheck = pathname.match(/^\/cache\/temp\/([^\/]+)$/);
+      const mediaToken = urlObj.searchParams.get('media_token');
+      const hasValidMediaToken =
+        (req.method === 'GET' || req.method === 'HEAD') &&
+        !!mediaToken &&
+        ((mImgCheck && auth.verifyMediaToken(decodeURIComponent(mImgCheck[1]), mediaToken)) ||
+          (mMaskCheck && auth.verifyMediaToken(`mask:${decodeURIComponent(mMaskCheck[1])}`, mediaToken)) ||
+          (mTempCheck && auth.verifyMediaToken(auth.tempMediaSubject(decodeURIComponent(mTempCheck[1])), mediaToken)));
+      if (!hasValidMediaToken) {
+        return sendJson(res, 401, { error: '未登录或会话已过期' });
+      }
+    }
+  }
+
+  if (pathname === '/auth/me' && req.method === 'GET') {
+    return sendJson(res, 200, { success: true, data: sessionUser });
+  }
+
+  // ===== 创作库配方 (Studio Presets / Recipes) =====
+  if (pathname === '/studio/presets' && req.method === 'GET') {
+    try {
+      const category = urlObj.searchParams.get('category') || 'all';
+      // 内置种子（懒建表时插入）显式标记为 builtin=1，保持全局可见
+      try { studioPresets.ensureStudioPresetsTable(db); } catch (e) {}
+      try { db.exec("UPDATE studio_presets SET builtin=1 WHERE id IN ('preset_1','preset_2','preset_3','preset_4') AND COALESCE(builtin,0)=0;"); } catch (e) {}
+      // 读隔离：本人 + 全局 builtin（user_id=0 且 builtin=1）
+      const curUid = Number(sessionUser?.id || 0);
+      const list = studioPresets.listPresets(db, category).filter((r) => {
+        if (r.user_id === undefined) return true; // 列缺失（懒建表）→ 视为内置全局，避免误清空
+        const uid = Number(r.user_id || 0);
+        return uid === curUid || (uid === 0 && Number(r.builtin || 0) === 1);
+      });
+      return sendJson(res, 200, { success: true, data: list });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  if (pathname === '/studio/presets' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '需要管理员权限（SEC-007）' });
+    try {
+      const body = await parseBody(req);
+      const created = studioPresets.createPreset(db, body);
+      // 写入强制归属当前用户（createPreset 不带 user_id），且不标记为全局 builtin
+      try {
+        db.prepare('UPDATE studio_presets SET user_id=?, builtin=0 WHERE id=?')
+          .run(sessionUser.id, created.id);
+      } catch (e) {}
+      return sendJson(res, 200, { success: true, data: created });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  const mPresetDel = pathname.match(/^\/studio\/presets\/([^\/]+)$/);
+  if (mPresetDel && req.method === 'DELETE') {
+    if (!isAdmin) return sendJson(res, 403, { error: '需要管理员权限（SEC-007）' });
+    try {
+      const ok = studioPresets.deletePreset(db, mPresetDel[1]);
+      return sendJson(res, 200, { success: true, deleted: ok });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // ===== FFmpeg 媒体实用工具 (视频抽帧、格式转换、音频分离) =====
+  // SEC-002：客户端直传的 videoPath 必须落在受控目录（dataDir/nasDir）内，
+  // 防止未受信路径被塞进 ffmpeg 读取任意本地文件；fid 解析路径为服务端自产，免检。
+  const isAllowedMediaPath = (p) => {
+    try {
+      const resolved = path.resolve(String(p));
+      const roots = [path.resolve(config.dataDir || '')];
+      if (config.nasDir) roots.push(path.resolve(config.nasDir));
+      return roots.some((r) => r && (resolved === r || resolved.startsWith(r + path.sep)));
+    } catch {
+      return false;
+    }
+  };
+
+  // 独立媒体工具免入库纯临时文件上传（支持格式转换、纯音频提炼、压缩等工坊使用）
+  if (pathname === '/tools/upload' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    if (contentLengthExceeds(req, ML_MAX_UPLOAD_BYTES)) {
+      return sendJson(res, 413, { success: false, error: 'payload_too_large' });
+    }
+    const { handleToolTempUpload } = require('./stream-upload');
+    try {
+      const data = await handleToolTempUpload(services, req);
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, e.statusCode || 400, { error: e.message });
+    }
+  }
+
+  if (pathname === '/tools/extract-frames' && req.method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      let videoPath = body.videoPath;
+      if (videoPath && !isAllowedMediaPath(videoPath)) {
+        return sendJson(res, 403, { error: 'videoPath 超出允许的目录范围' });
+      }
+      if (!videoPath && body.fid) {
+        const deriv = db.prepare("SELECT * FROM derivatives WHERE asset_fid=? ORDER BY CASE kind WHEN 'origin' THEN 0 ELSE 1 END LIMIT 1").get(body.fid);
+        if (deriv) videoPath = await resolveDerivativeFile(services, deriv);
+      }
+      if (!videoPath || !fs.existsSync(videoPath)) {
+        return sendJson(res, 400, { error: '未找到有效视频文件，请提供有效 fid 或 videoPath' });
+      }
+      const tempDir = path.join(config.dataDir, 'cache', 'frames', String(Date.now()));
+      const result = await mediaTools.extractFrames({
+        videoPath,
+        destDir: tempDir,
+        mode: body.mode || 'interval',
+        intervalSeconds: Number(body.intervalSeconds) || 2,
+        maxFrames: Number(body.maxFrames) || 16,
+      });
+      return sendJson(res, 200, { success: true, data: result });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 浏览器解不了 HEVC / ProRes 时，抽帧工作台改走这里。fid 由服务端解析路径。
+  const resolveToolVideo = async (body) => {
+    let videoPath = body && body.videoPath ? String(body.videoPath) : '';
+    if (videoPath && !isAllowedMediaPath(videoPath)) {
+      const err = new Error('videoPath 超出允许的目录范围');
+      err.statusCode = 403;
+      throw err;
+    }
+    if (!videoPath && body && body.fid) {
+      const deriv = db.prepare("SELECT * FROM derivatives WHERE asset_fid=? ORDER BY CASE kind WHEN 'origin' THEN 0 ELSE 1 END LIMIT 1").get(body.fid);
+      if (deriv) videoPath = await resolveDerivativeFile(services, deriv);
+    }
+    if (!videoPath || !fs.existsSync(videoPath)) {
+      const err = new Error('未找到有效视频文件，请提供有效 fid 或 videoPath');
+      err.statusCode = 400;
+      throw err;
+    }
+    return videoPath;
+  };
+
+  if (pathname === '/tools/video-probe' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const body = await parseBody(req);
+      const videoPath = await resolveToolVideo(body);
+      const meta = await mediaTools.probeVideo(videoPath);
+      return sendJson(res, 200, { success: true, data: meta });
+    } catch (e) {
+      return sendJson(res, e.statusCode || 500, { error: e.message });
+    }
+  }
+
+  if (pathname === '/tools/filmstrip' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const body = await parseBody(req);
+      const videoPath = await resolveToolVideo(body);
+      const proxyDir = path.join(config.dataDir, 'cache', 'temp');
+      const described = mediaTools.describeBrowserProxy(videoPath, proxyDir);
+      const src = described.ready ? described.path : videoPath;
+      const meta = await mediaTools.probeVideo(videoPath);
+      const cacheRoot = path.join(config.dataDir, 'cache', 'frame-gop');
+      const frames = await mediaTools.readFilmstrip(src, {
+        count: Number(body.count) || 12,
+        maxEdge: 280,
+        cacheRoot,
+        duration: meta.duration || 0,
+      });
+      return sendJson(res, 200, {
+        success: true,
+        data: frames.map((frame) => ({
+          time: frame.time,
+          dataUrl: `data:image/jpeg;base64,${frame.buffer.toString('base64')}`,
+        })),
+      });
+    } catch (e) {
+      return sendJson(res, e.statusCode || 500, { error: e.message });
+    }
+  }
+
+  // 打开抽帧：首帧和元数据一起返回，代理在后台转，不挡住画面。
+  if (pathname === '/tools/video-open' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const body = await parseBody(req);
+      const videoPath = await resolveToolVideo(body);
+      const cacheRoot = path.join(config.dataDir, 'cache', 'frame-gop');
+      const proxyDir = path.join(config.dataDir, 'cache', 'temp');
+      const session = await mediaTools.openScrubSession(videoPath, { cacheRoot, proxyDir, maxEdge: 960 });
+      const meta = session.meta || {};
+      const proxy = session.proxy || {};
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          browserPlayable: !!meta.browserPlayable,
+          codec: meta.codec || '',
+          pixFmt: meta.pixFmt || '',
+          width: meta.width || 0,
+          height: meta.height || 0,
+          fps: meta.fps || 0,
+          duration: meta.duration || 0,
+          gopSec: meta.gopSec || 2,
+          frames: meta.frames || 0,
+          frame0: session.preview ? `data:image/jpeg;base64,${session.preview.toString('base64')}` : '',
+          proxyUrl: proxy.ready ? `/api/cache/temp/${proxy.fileName}` : '',
+          pendingProxy: !meta.browserPlayable && !proxy.ready,
+        },
+      });
+    } catch (e) {
+      return sendJson(res, e.statusCode || 500, { error: e.message });
+    }
+  }
+
+  // 代理状态：已转好就给地址；没好就确保后台任务在跑，马上返回。
+  if (pathname === '/tools/browser-proxy' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const body = await parseBody(req);
+      const videoPath = await resolveToolVideo(body);
+      const destDir = path.join(config.dataDir, 'cache', 'temp');
+      if (body.wait) {
+        const result = await mediaTools.ensureBrowserProxy(videoPath, { destDir, maxEdge: 1280 });
+        const meta = result.meta || {};
+        const source = result.source || meta;
+        return sendJson(res, 200, {
+          success: true,
+          data: {
+            proxied: !!result.proxied,
+            pending: false,
+            url: result.proxied ? `/api/cache/temp/${result.fileName}` : '',
+            width: meta.width || 0,
+            height: meta.height || 0,
+            fps: meta.fps || 0,
+            duration: meta.duration || 0,
+            codec: meta.codec || '',
+            sourceCodec: source.codec || '',
+            sourceWidth: source.width || 0,
+            sourceHeight: source.height || 0,
+          },
+        });
+      }
+      const described = mediaTools.describeBrowserProxy(videoPath, destDir);
+      if (!described.ready) mediaTools.kickBrowserProxy(videoPath, destDir);
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          proxied: described.ready,
+          pending: !described.ready,
+          url: described.ready ? `/api/cache/temp/${described.fileName}` : '',
+        },
+      });
+    } catch (e) {
+      return sendJson(res, e.statusCode || 500, { error: e.message });
+    }
+  }
+
+  if (pathname === '/tools/frame-at' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const body = await parseBody(req);
+      const videoPath = await resolveToolVideo(body);
+      const purpose = String(body.purpose || 'preview');
+      const time = Math.max(0, Number(body.time) || 0);
+      const gopSec = Number(body.gopSec) > 0 ? Number(body.gopSec) : 2;
+      const fps = Number(body.fps) > 0 ? Number(body.fps) : 30;
+      const duration = Number(body.duration) > 0 ? Number(body.duration) : 0;
+      const cacheRoot = path.join(config.dataDir, 'cache', 'frame-gop');
+
+      let buffer;
+      let mime = 'image/jpeg';
+      let extra = {};
+      if (purpose === 'original') {
+        buffer = await mediaTools.readOriginalJpeg(videoPath, {
+          cacheRoot, time, gopSec, fps, duration,
+        });
+        mime = 'image/jpeg';
+      } else if (purpose === 'full') {
+        const dest = path.join(cacheRoot, `full_${crypto.randomBytes(6).toString('hex')}.png`);
+        buffer = await mediaTools.grabFullPng(videoPath, { time, gopSec, duration, destPath: dest });
+        mime = 'image/png';
+        try { fs.unlinkSync(dest); } catch (_) {}
+      } else if (purpose === 'thumb') {
+        const edge = Math.max(64, Math.min(640, Number(body.maxEdge) || 320));
+        const dest = path.join(cacheRoot, `thumb_${crypto.randomBytes(6).toString('hex')}.jpg`);
+        buffer = await mediaTools.grabFastThumb(videoPath, { time, maxEdge: edge, destPath: dest });
+        try { fs.unlinkSync(dest); } catch (_) {}
+      } else {
+        const edge = Math.max(64, Math.min(1920, Number(body.maxEdge) || 960));
+        const hit = await mediaTools.readPreviewFrame(videoPath, {
+          cacheRoot, time, gopSec, fps, maxEdge: edge, duration,
+        });
+        buffer = hit.buffer;
+        extra = { index: hit.index, gopStart: hit.gopStart, gopCount: hit.count, frameTime: hit.time };
+      }
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          time,
+          mime,
+          dataUrl: `data:${mime};base64,${buffer.toString('base64')}`,
+          ...extra,
+        },
+      });
+    } catch (e) {
+      return sendJson(res, e.statusCode || 500, { error: e.message });
+    }
+  }
+
+  // ===== AI 唇同步全流程引擎 (LatentSync / MuseTalk + 分片缝合 + GFPGAN，为后续画布预留) =====
+  if (pathname === '/tools/lip-sync/status' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const { getGpuStatus } = require('./vram-arbiter');
+      const status = await getGpuStatus();
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          engine: 'latentsync',
+          supportedEngines: ['latentsync', 'musetalk'],
+          defaultOffsetMs: 50,
+          chunkSeconds: 15,
+          faceEnhanceAvailable: true,
+          gpu: status.gpu,
+          serverOnline: status.online
+        }
+      });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 任务内存注册表（带自动 TTL 淘汰）
+  global.__LIP_SYNC_TASKS = global.__LIP_SYNC_TASKS || new Map();
+
+  if (pathname.startsWith('/tools/lip-sync/tasks/') && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const taskId = pathname.replace('/tools/lip-sync/tasks/', '');
+    const task = global.__LIP_SYNC_TASKS.get(taskId);
+    if (!task) return sendJson(res, 404, { error: '任务不存在或已过期' });
+    return sendJson(res, 200, { success: true, data: task });
+  }
+
+  if (pathname === '/tools/lip-sync' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const b = await parseBody(req);
+      const toWslPath = (p) => {
+        if (!p || typeof p !== 'string') return p;
+        const m = p.match(/^([a-zA-Z]):[\/\\](.*)/);
+        if (m && process.platform !== 'win32') {
+          return `/mnt/${m[1].toLowerCase()}/${m[2].replace(/\\/g, '/')}`;
+        }
+        return p;
+      };
+      let videoPath = toWslPath(b.videoPath);
+      let audioPath = toWslPath(b.audioPath);
+
+      // 若传入视频 fid 则通过资产表查找
+      if (!videoPath && b.videoFid) {
+        const deriv = db.prepare("SELECT * FROM derivatives WHERE asset_fid=? ORDER BY CASE kind WHEN 'origin' THEN 0 ELSE 1 END LIMIT 1").get(b.videoFid);
+        if (deriv) videoPath = await resolveDerivativeFile(services, deriv);
+      }
+      // 若传入音频 fid 则通过资产表查找
+      if (!audioPath && b.audioFid) {
+        const deriv = db.prepare("SELECT * FROM derivatives WHERE asset_fid=? ORDER BY CASE kind WHEN 'origin' THEN 0 ELSE 1 END LIMIT 1").get(b.audioFid);
+        if (deriv) audioPath = await resolveDerivativeFile(services, deriv);
+      }
+
+      if (!videoPath || !fs.existsSync(videoPath)) {
+        return sendJson(res, 400, { error: '未找到有效视频文件，请提供有效 videoFid 或 videoPath' });
+      }
+      if (!audioPath || !fs.existsSync(audioPath)) {
+        return sendJson(res, 400, { error: '未找到有效配音音频文件，请提供有效 audioFid 或 audioPath' });
+      }
+
+      const taskId = 'lipsync_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+      const outputDir = path.join(config.dataDir, 'cache', 'temp', 'lipsync', taskId);
+      fs.mkdirSync(outputDir, { recursive: true });
+
+      const taskRecord = {
+        taskId,
+        status: 'queued',
+        progress: 0,
+        stage: '任务已进入队列',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        downloadUrl: null,
+        error: null
+      };
+      global.__LIP_SYNC_TASKS.set(taskId, taskRecord);
+
+      // 异步触发分片唇同步与人脸修复流水线
+      const { runLipSyncPipeline } = require('./lip-sync-runner');
+      runLipSyncPipeline({
+        videoPath,
+        audioPath,
+        outputDir,
+        engine: b.engine || 'latentsync',
+        offsetMs: b.offsetMs != null ? Number(b.offsetMs) : 50,
+        chunkSeconds: b.chunkSeconds != null ? Number(b.chunkSeconds) : 15,
+        faceEnhance: b.faceEnhance !== false,
+        onProgress: (pct, stage) => {
+          taskRecord.status = 'processing';
+          taskRecord.progress = pct;
+          taskRecord.stage = stage;
+          taskRecord.updatedAt = Date.now();
+        }
+      }).then((result) => {
+        taskRecord.status = 'success';
+        taskRecord.progress = 100;
+        taskRecord.stage = '对口型渲染完成';
+        taskRecord.updatedAt = Date.now();
+        taskRecord.downloadUrl = `/api/cache/temp/lipsync/${taskId}/${path.basename(result.outputPath)}`;
+      }).catch((err) => {
+        taskRecord.status = 'failed';
+        taskRecord.error = err.message || String(err);
+        taskRecord.updatedAt = Date.now();
+      });
+
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          taskId,
+          status: 'queued',
+          message: '唇同步对口型任务已成功创建并排队执行'
+        }
+      });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  if (pathname === '/tools/convert-video' && req.method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      let videoPath = body.videoPath;
+      if (videoPath && !isAllowedMediaPath(videoPath)) {
+        return sendJson(res, 403, { error: 'videoPath 超出允许的目录范围' });
+      }
+      if (!videoPath && body.fid) {
+        const deriv = db.prepare("SELECT * FROM derivatives WHERE asset_fid=? ORDER BY CASE kind WHEN 'origin' THEN 0 ELSE 1 END LIMIT 1").get(body.fid);
+        if (deriv) videoPath = await resolveDerivativeFile(services, deriv);
+      }
+      if (!videoPath) {
+        const sampleCandidate = path.join(config.dataDir, 'cache', 'temp', 'gen_1789653572125_a6ba8d28.mp4');
+        if (fs.existsSync(sampleCandidate)) videoPath = sampleCandidate;
+      }
+      if (!videoPath || !fs.existsSync(videoPath)) {
+        return sendJson(res, 400, { error: '未找到有效视频文件，请提供有效 fid 或 videoPath' });
+      }
+      const outDir = path.join(config.dataDir, 'cache', 'temp');
+      const result = await mediaTools.convertVideo({
+        videoPath,
+        destDir: outDir,
+        targetFormat: body.targetFormat || 'mp4',
+        crf: Number(body.crf) || 23,
+        extractAudio: !!body.extractAudio,
+        cleanVocal: Boolean(body.cleanVocal),
+      });
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          ...result,
+          downloadUrl: `/api/cache/temp/${result.outputFile}`,
+        }
+      });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // ===== 官方创作模型目录与 Schema 契约 (唯一权威源) =====
+  // ===== 动态配置服务端工作室默认值 (GET/POST) =====
+  if (pathname === '/studio/defaults') {
+    const { getStudioDefaultSettings, updateStudioDefaultSettings } = require('./studio-defaults');
+    if (req.method === 'GET') {
+      return sendJson(res, 200, { success: true, data: getStudioDefaultSettings(db) });
+    }
+    if (req.method === 'POST') {
+      if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+      try {
+        const body = await parseBody(req);
+        const updated = updateStudioDefaultSettings(db, body);
+        _studioCatalogCache.clear();
+        try {
+          const { invalidateUnifiedSchemasMap } = require('./models-contract');
+          invalidateUnifiedSchemasMap();
+        } catch (_) {}
+        return sendJson(res, 200, { success: true, data: updated });
+      } catch (e) {
+        return sendJson(res, 400, { success: false, error: e.message });
+      }
+    }
+  }
+
+  if (pathname === '/studio/catalog' && req.method === 'GET') {
+    const { getModelPublicCatalog } = require('./models-contract');
+    const { MODEL_SCHEMAS } = require('./model-schemas');
+    const { getStudioDefaultSettings } = require('./studio-defaults');
+    const defaults = getStudioDefaultSettings(db);
+    const aclKey = studioCatalogAclKey(sessionUser);
+    const cached = getStudioCatalogCache(db, aclKey);
+    if (cached) {
+      cached.defaults = defaults;
+      return sendJson(res, 200, { success: true, data: cached });
+    }
+    // 按用户可见集合过滤；allow_all_models=1 时 resolveVisibleModels 返回 null（不过滤）
+    const visibleModelIds = studioAcl.resolveVisibleModels(sessionUser);
+    const cat = getModelPublicCatalog(db, visibleModelIds);
+    if (cat && cat.studio) {
+      if (defaults?.models?.image && cat.studio.image) cat.studio.image.defaultModel = defaults.models.image;
+      if (defaults?.models?.video && cat.studio.video) cat.studio.video.defaultModel = defaults.models.video;
+      if (defaults?.models?.chat && cat.studio.chat) cat.studio.chat.defaultModel = defaults.models.chat;
+    }
+    if (visibleModelIds) {
+      for (const d of Object.keys(cat?.studio || {})) {
+        const block = cat.studio[d];
+        if (!block) continue;
+        if (Array.isArray(block.models)) block.models = block.models.filter(m => visibleModelIds.has(m.id));
+        if (block.defaultModel && !visibleModelIds.has(block.defaultModel)) {
+          block.defaultModel = (block.models && block.models[0] && block.models[0].id) || null;
+        }
+      }
+      if (Array.isArray(cat.models)) cat.models = cat.models.filter(m => visibleModelIds.has(m.id));
+    }
+    const payload = {
+      studio: cat.studio,
+      schemas: cat.schemas || MODEL_SCHEMAS,
+      models: cat.models,
+      defaults,
+    };
+    setStudioCatalogCache(aclKey, payload);
+    return sendJson(res, 200, { success: true, data: payload });
+  }
+
+  // ===== 素材删除 + 全局黑名单（viewer/admin） =====
+  const mAssetDel = pathname.match(/^\/assets\/([^\/]+)$/);
+  if (mAssetDel && req.method === 'DELETE') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    // 幂等解码：素材 fid 含 `|` 时客户端可能编两次（%257C），
+    // 单次 decodeURIComponent 会得到字面量 "%7C" → 查不到 → 误报「素材不存在」
+    const fid = decodeParamLoose(mAssetDel[1]);
+    try {
+      const out = assetsDelete.softDeleteAsset(services, fid, {
+        deletedBy: sessionUser?.username || 'user',
+      });
+      return sendJson(res, 200, { success: true, data: out });
+    } catch (e) {
+      if (e.code === 'not_found') {
+        // 区分「从未存在」/「已删除可恢复」/「已清理」，
+        // 让客户端能给用户「去回收站」的可行动提示
+        const { missingAssetBody } = require('./asset-missing');
+        const body = missingAssetBody(db, fid);
+        return sendJson(res, body.code, body);
+      }
+      // 被剪辑工程引用：409 + 引用方清单
+      if (e.status === 409) {
+        return sendJson(res, 409, { error: e.message, code: e.code, usedBy: e.usedBy || [] });
+      }
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+  const mAssetDel2 = pathname.match(/^\/assets\/([^\/]+)\/delete$/);
+  if (mAssetDel2 && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const fid = decodeParamLoose(mAssetDel2[1]);
+    try {
+      const out = assetsDelete.softDeleteAsset(services, fid, {
+        deletedBy: sessionUser?.username || 'user',
+      });
+      return sendJson(res, 200, { success: true, data: out });
+    } catch (e) {
+      if (e.code === 'not_found') {
+        const { missingAssetBody } = require('./asset-missing');
+        const body = missingAssetBody(db, fid);
+        return sendJson(res, body.code, body);
+      }
+      // 被剪辑工程引用：409 + 引用方清单，前端据此提示"先解除引用"
+      if (e.status === 409) {
+        return sendJson(res, 409, { error: e.message, code: e.code, usedBy: e.usedBy || [] });
+      }
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  // POST /assets/batch-delete — 批量软删（素材库多选删除）：逐项容错，
+  // 被剪辑工程引用的素材单独记入 failed（409 + usedBy），不影响其余项。
+  if (pathname === '/assets/batch-delete' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    const raw = Array.isArray(b.fids) ? b.fids : (b.fid ? [b.fid] : []);
+    const fids = raw.map((f) => String(f || '').trim()).filter(Boolean).slice(0, 500);
+    if (!fids.length) return sendJson(res, 400, { error: '缺少素材 fid' });
+    const out = { ok: [], failed: [] };
+    for (const fid of fids) {
+      try {
+        const r = assetsDelete.softDeleteAsset(services, fid, {
+          deletedBy: sessionUser?.username || 'user',
+        });
+        // 已在回收站（幂等）：同样算成功，避免重复点击报错
+        out.ok.push(fid);
+        if (r?.alreadyDeleted) {
+          if (!out.already) out.already = [];
+          out.already.push(fid);
+        }
+      } catch (e) {
+        out.failed.push({
+          fid,
+          error: e.message,
+          code: e.code || (e.status === 409 ? 'referenced_by_clip_projects' : ''),
+          usedBy: e.usedBy || []
+        });
+      }
+    }
+    return sendJson(res, 200, { success: true, data: out });
+  }
+  if (pathname === '/assets/blacklist' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      assetsDelete.ensureTables(db);
+      return sendJson(res, 200, { success: true, data: assetsDelete.listBlacklist(db) });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // GET /assets/trash — 回收站列表（保留窗口按处置来源分档）
+  if (pathname === '/assets/trash' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const page = parseInt(urlObj.searchParams.get('page'), 10) || 1;
+      const pageSize = parseInt(urlObj.searchParams.get('pageSize'), 10) || 30;
+      const source = String(urlObj.searchParams.get('source') || '').trim();
+      const sort = String(urlObj.searchParams.get('sort') || '').trim();
+      const keyword = String(urlObj.searchParams.get('keyword') || '').trim().slice(0, 100);
+      const data = assetsDelete.listTrash(services, { page, pageSize, source, sort, keyword });
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // GET /assets/trash/:fid — 回收站单条详情（含「为何进入回收站」判定原文与判定标准）
+  // 注意：这条路由必须在 /assets/:fid 详情之前匹配，否则会被当成普通素材详情。
+  const mTrashDetail = pathname.match(/^\/assets\/trash\/([^/]+)$/);
+  if (mTrashDetail && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const fid = decodeParamLoose(mTrashDetail[1]);
+      const data = assetsDelete.getTrashDetail(services, fid);
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      const code = e.code === 'not_found' ? 404 : 500;
+      return sendJson(res, code, { error: e.message });
+    }
+  }
+
+  const mFavorite = pathname.match(/^\/assets\/([^\/]+)\/favorite$/);
+  if (mFavorite && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    try {
+      const { setFavorite } = require('./favorites');
+      const fid = decodeParamLoose(mFavorite[1]);
+      const onParam = (b && typeof b.on !== 'undefined') ? (b.on !== false && b.on !== 0) : undefined;
+      const data = setFavorite(db, fid, onParam);
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      const code = e.code === 'not_found' ? 404 : 400;
+      return sendJson(res, code, { error: e.message });
+    }
+  }
+
+  const mPrep = pathname.match(/^\/assets\/([^\/]+)\/library-prep$/);
+  if (mPrep && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    try {
+      const { runLibraryPrep } = require('./library-prep');
+      const data = await runLibraryPrep(services, decodeURIComponent(mPrep[1]), b || {}, sessionUser);
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      const code = e.code === 'not_found' ? 404 : 400;
+      return sendJson(res, code, { error: e.message });
+    }
+  }
+
+  if (pathname === '/assets/trash/rehome-gate' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const data = assetsDelete.rehomeGateRejects(services);
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  // POST /assets/shelf — 在原素材、精修素材、成品素材之间移动
+  if (pathname === '/assets/shelf' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureAssetShelfColumns(db);
+    const body = await parseBody(req);
+    const shelf = String(body.shelf || '');
+    const fids = [].concat(body.fids || body.fid || []).filter(Boolean);
+    if (!['original', 'retouched', 'finished'].includes(shelf)) {
+      return sendJson(res, 400, { error: 'shelf 只能是 original、retouched、finished' });
+    }
+    const stmt = db.prepare('UPDATE assets SET library_shelf=?, updated_at=? WHERE fid=?');
+    const now = Date.now();
+    for (const fid of fids) stmt.run(shelf, now, fid);
+    return sendJson(res, 200, { ok: true, count: fids.length, shelf });
+  }
+
+  // POST /assets/classify — 人工改分类并锁住，闸门不再覆盖
+  if (pathname === '/assets/classify' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureAssetShelfColumns(db);
+    const body = await parseBody(req);
+    const fid = String(body.fid || '');
+    const category = String(body.category || '');
+    const allowed = ['interior', 'exterior', 'furniture', 'clothing', 'portrait', 'finished'];
+    if (!fid) return sendJson(res, 400, { error: '缺少素材' });
+    let space = null;
+    if (category) {
+      if (!allowed.includes(category)) return sendJson(res, 400, { error: '分类不在允许范围内' });
+      db.prepare('UPDATE assets SET category=?, category_locked=1, updated_at=? WHERE fid=?').run(category, Date.now(), fid);
+    }
+    if (body.space) {
+      try {
+        space = require('./shelf-lineage').setManualSpace(db, fid, body.space);
+      } catch (e) {
+        return sendJson(res, e.code === 404 ? 404 : 400, { error: e.message });
+      }
+    }
+    const dims = body.dims && typeof body.dims === 'object' ? body.dims : null;
+    const savedDims = {};
+    if (dims) {
+      try {
+        const { setManualTag } = require('./shelf-lineage');
+        for (const [dim, label] of Object.entries(dims)) {
+          if (!label) continue;
+          savedDims[dim] = setManualTag(db, fid, dim, label);
+        }
+      } catch (e) {
+        return sendJson(res, e.code === 404 ? 404 : 400, { error: e.message });
+      }
+    }
+    if (!category && !space && !Object.keys(savedDims).length) return sendJson(res, 400, { error: '要改分类或空间' });
+    return sendJson(res, 200, { ok: true, fid, category: category || null, space, dims: savedDims });
+  }
+
+  if (pathname === '/assets/retag' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const body = await parseBody(req);
+    try {
+      const data = require('./shelf-lineage').requeueRetag(db, String(body.fid || ''));
+      const row = db.prepare('SELECT kind, parent_fid FROM assets WHERE fid=?').get(data.fid);
+      if (row?.kind === 'video') {
+        const videoTags = require('./video-tags');
+        if (row.parent_fid && videoTags.parentHasSceneTags(db, row.parent_fid)) {
+          require('./shelf-lineage').inheritTags(db, row.parent_fid, data.fid);
+        } else if (services.interpreter) {
+          try {
+            await services.interpreter.triggerRun({ assetFids: [data.fid], trigger: 'retag' });
+          } catch (err) {
+            services.logger?.warn?.(`[retag] 视频重打未入队: ${err.message}`);
+          }
+        }
+      }
+      return sendJson(res, 200, { ok: true, ...data });
+    } catch (e) {
+      return sendJson(res, e.code === 404 ? 404 : 400, { error: e.message });
+    }
+  }
+
+  if (pathname === '/assets/from-generation' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const body = await parseBody(req);
+    try {
+      const data = await require('./shelf-lineage').registerGenerated(services, body || {});
+      return sendJson(res, 200, { ok: true, ...data });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  // ===== 替换原图（覆盖但留历史版本）/ 一键还原 =====
+  const mReplaceImage = pathname.match(/^\/assets\/([^\/]+)\/replace-image$/);
+  if (mReplaceImage && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const fid = decodeParamLoose(mReplaceImage[1]);
+    const b = await parseBody(req, 64 * 1024 * 1024);
+    if (b.__bodyTooLarge) return sendJson(res, 413, { error: '请求数据过大，超出上限' });
+    try {
+      let buf = null;
+      if (typeof b.dataUrl === 'string' && b.dataUrl) {
+        const m = /^data:([^;,]+)?(;base64)?,([\s\S]*)$/.exec(b.dataUrl);
+        if (!m || !m[2]) {
+          const e = new Error('dataUrl 必须是 base64 编码');
+          e.status = 400; e.code = 'invalid_data_url';
+          throw e;
+        }
+        buf = Buffer.from(m[3], 'base64');
+      } else if (typeof b.base64 === 'string' && b.base64) {
+        const raw = b.base64.includes(',') ? b.base64.slice(b.base64.indexOf(',') + 1) : b.base64;
+        buf = Buffer.from(raw, 'base64');
+      }
+      if (!buf || !buf.length) return sendJson(res, 400, { error: '缺少 dataUrl 或 base64 图片数据' });
+      const out = await require('./asset-replace').replaceAssetImage(services, fid, buf, { force: !!b.force });
+      return sendJson(res, 200, out);
+    } catch (e) {
+      return sendJson(res, e.status || 500, { error: e.message, code: e.code });
+    }
+  }
+
+  const mRestoreVersion = pathname.match(/^\/assets\/([^\/]+)\/restore-version$/);
+  if (mRestoreVersion && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const fid = decodeParamLoose(mRestoreVersion[1]);
+    const b = await parseBody(req);
+    try {
+      const out = await require('./asset-replace').restoreAssetVersion(services, fid, b.versionId);
+      return sendJson(res, 200, out);
+    } catch (e) {
+      return sendJson(res, e.status || 500, { error: e.message, code: e.code });
+    }
+  }
+
+  // POST /assets/trash/restore — 从回收站恢复素材（支持 fid 或 fids 批量）
+  if (pathname === '/assets/trash/restore' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    const list = Array.isArray(b.fids) ? b.fids : (b.fid ? [b.fid] : []);
+    if (!list.length) return sendJson(res, 400, { error: '缺少素材 fid' });
+    try {
+      const out = assetsDelete.restoreTrashAsset(services, list);
+      return sendJson(res, 200, { success: true, data: out });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  // POST /assets/trash/purge — 彻底粉碎删除（支持 fid 或 fids 批量）
+  if (pathname === '/assets/trash/purge' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '需要管理员权限（SEC-007）' });
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    const list = Array.isArray(b.fids) ? b.fids : (b.fid ? [b.fid] : []);
+    if (!list.length) return sendJson(res, 400, { error: '缺少素材 fid' });
+    try {
+      const out = assetsDelete.purgeTrashAsset(services, list);
+      return sendJson(res, 200, { success: true, data: out });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  // ── 相似处理工作台 (Similarity Workbench) ──
+  if (pathname === '/assets/similarity-workbench' && req.method === 'GET') {
+    try {
+      const { scanSimilarityWorkbench } = require('./similarity-workbench');
+      const mode = urlObj.searchParams.get('mode') || 'visual';
+      const maxDist = urlObj.searchParams.get('maxDist') || urlObj.searchParams.get('max_dist');
+      const category = urlObj.searchParams.get('category') || 'all';
+      const sort = urlObj.searchParams.get('sort') || 'similarity';
+      const result = await scanSimilarityWorkbench(services, { mode, maxDist, category, sort });
+      return sendJson(res, 200, { success: true, data: result });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  if (pathname === '/assets/similarity-workbench/resolve' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '需要管理员权限' });
+    try {
+      const body = await parseBody(req);
+      const { resolveSimilarityCluster } = require('./similarity-workbench');
+      const result = await resolveSimilarityCluster(services, { ...body, actor: sessionUser?.username || 'admin' });
+      return sendJson(res, 200, { success: true, data: result });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  if (pathname === '/assets/similarity-workbench/clean-exact' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '需要管理员权限' });
+    try {
+      const { cleanExactDuplicates } = require('./similarity-workbench');
+      const result = await cleanExactDuplicates(services, { actor: sessionUser?.username || 'admin' });
+      return sendJson(res, 200, { success: true, data: result });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  if (pathname === '/assets/similarity-workbench/ignored' && req.method === 'GET') {
+    try {
+      const { listIgnoredPairs } = require('./similarity-workbench');
+      const result = listIgnoredPairs(db);
+      return sendJson(res, 200, { success: true, data: result });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  if (pathname === '/assets/similarity-workbench/ignored' && req.method === 'DELETE') {
+    if (!isAdmin) return sendJson(res, 403, { error: '需要管理员权限' });
+    try {
+      const body = await parseBody(req);
+      const { removeIgnoredPair } = require('./similarity-workbench');
+      removeIgnoredPair(db, body.fidA || body.fid_a, body.fidB || body.fid_b);
+      return sendJson(res, 200, { success: true });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 指纹去重扫描：MD5/SHA/pHash，对比原图 + 全部衍生（含 9:16/3:4）
+  if (pathname === '/assets/dedupe-scan' && req.method === 'POST') {
+    try {
+      const fp = require('./fingerprint');
+      fp.ensureFingerprintColumns(db);
+      const { hamming } = require('./qc');
+      const body = await parseBody(req);
+      const phashThreshold = Number(body.phashThreshold) > 0 ? Number(body.phashThreshold) : 5;
+      const includeNear = body.includeNear !== false;
+      const nearThreshold = Number(body.nearThreshold) > 0 ? Number(body.nearThreshold) : 8;
+
+      const assets = db.prepare(`
+        SELECT fid, file_name, size, width, height, sha256, md5, phash,
+               created_at, main_derivative_id
+        FROM assets
+        WHERE status IS NULL OR status != 'deleted'
+        ORDER BY COALESCE(created_at, 0) ASC, fid ASC
+      `).all();
+
+      const derivs = db.prepare(`
+        SELECT id, asset_fid, kind, width, height, sha256, md5, phash
+        FROM derivatives
+        WHERE (phash IS NOT NULL AND phash != '') OR (md5 IS NOT NULL AND md5 != '') OR (sha256 IS NOT NULL AND sha256 != '')
+      `).all();
+
+      // 收集每个资产的「内容指纹集」= 自身 + 其衍生
+      const byFid = new Map();
+      for (const a of assets) {
+        byFid.set(a.fid, {
+          ...a,
+          hashes: new Set(),
+          phashes: [],
+          restageKinds: new Set(),
+        });
+        const slot = byFid.get(a.fid);
+        if (a.sha256) slot.hashes.add(String(a.sha256).toLowerCase());
+        if (a.md5) slot.hashes.add(String(a.md5).toLowerCase());
+        if (a.phash) slot.phashes.push({ phash: a.phash, kind: 'origin', id: null });
+      }
+      for (const d of derivs) {
+        const slot = byFid.get(d.asset_fid);
+        if (!slot) continue;
+        if (String(d.kind || '').startsWith('restage_')) slot.restageKinds.add(d.kind);
+        if (d.sha256) slot.hashes.add(String(d.sha256).toLowerCase());
+        if (d.md5) slot.hashes.add(String(d.md5).toLowerCase());
+        if (d.phash) slot.phashes.push({ phash: d.phash, kind: d.kind, id: d.id });
+      }
+
+      const list = [...byFid.values()];
+      const pairs = [];
+      const deletedSet = new Set();
+
+      const rankKeep = (a, b) => {
+        // 保留：有 restage 衍生 / 衍生更多 / 更早（CONFLICT-002：代表图概念已退役）
+        const score = (x) =>
+          (x.restageKinds.size > 0 ? 4 : 0) +
+          (x.phashes.length > 1 ? 2 : 0) +
+          (x.main_derivative_id ? 1 : 0);
+        const sa = score(a);
+        const sb = score(b);
+        if (sa !== sb) return sb - sa;
+        return (Number(a.created_at) || 0) - (Number(b.created_at) || 0);
+      };
+
+      for (let i = 0; i < list.length; i++) {
+        const a = list[i];
+        if (deletedSet.has(a.fid)) continue;
+        for (let j = i + 1; j < list.length; j++) {
+          const b = list[j];
+          if (deletedSet.has(b.fid)) continue;
+
+          let reason = '';
+          let dist = null;
+
+          // 精确字节哈希
+          for (const h of a.hashes) {
+            if (b.hashes.has(h)) {
+              reason = h.length === 32 ? 'md5' : 'sha256';
+              dist = 0;
+              break;
+            }
+          }
+
+          // 感知哈希：资产自身 + 各自衍生互相比较
+          if (!reason) {
+            let bestDist = 64;
+            for (const pa of a.phashes) {
+              for (const pb of b.phashes) {
+                const d = hamming(pa.phash, pb.phash);
+                if (d < bestDist) bestDist = d;
+              }
+            }
+            if (bestDist <= phashThreshold) {
+              reason = `phash:${bestDist}`;
+              dist = bestDist;
+            } else if (includeNear && bestDist <= nearThreshold) {
+              reason = `phash_near:${bestDist}`;
+              dist = bestDist;
+            }
+          }
+
+          if (!reason) continue;
+
+          const ordered = rankKeep(a, b) >= 0 ? [a, b] : [b, a];
+          const keep = ordered[0];
+          const drop = ordered[1];
+          pairs.push({
+            keepFid: keep.fid,
+            keepName: keep.file_name,
+            dropFid: drop.fid,
+            dropName: drop.file_name,
+            reason,
+            dist,
+            dropHasRestage: drop.restageKinds.size > 0,
+            keepHasRestage: keep.restageKinds.size > 0,
+          });
+          deletedSet.add(drop.fid);
+        }
+      }
+
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          scanned: list.length,
+          pairs,
+          matched: pairs.length,
+          phashThreshold,
+          nearThreshold,
+          phashReady: list.filter((x) => x.phashes.length > 0).length,
+        },
+      });
+    } catch (e) {
+      console.error('[dedupe-scan]', e);
+      return sendJson(res, 500, { error: e.message || '指纹扫描失败' });
+    }
+  }
+
+  // ===== 拒收箱 =====
+  if (pathname === '/rejected' && req.method === 'GET') {
+    try {
+      const page = Number(urlObj.searchParams.get('page')) || 1;
+      const pageSize = Number(urlObj.searchParams.get('pageSize')) || 30;
+      const data = require('./reject-box').listRejected(db, { page, pageSize });
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  const mRejectRestore = pathname.match(/^\/rejected\/([^\/]+)\/restore$/);
+  if (mRejectRestore && req.method === 'POST') {
+    try {
+      const fid = decodeURIComponent(mRejectRestore[1]);
+      const b = await parseBody(req);
+      if (!b.reason) return sendJson(res, 400, { error: '请选择恢复原因' });
+      const data = require('./reject-box').restore(db, fid, {
+        reason: b.reason,
+        note: b.note || '',
+        actor: sessionUser?.username || 'user',
+      });
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      const code = e.code === 'not_found' ? 404 : e.code === 'not_rejected' ? 400 : 500;
+      return sendJson(res, code, { error: e.message });
+    }
+  }
+
+  if (pathname === '/rejected/restore-batch' && req.method === 'POST') {
+    try {
+      const b = await parseBody(req);
+      const fids = Array.isArray(b.fids) ? b.fids : [];
+      if (!fids.length) return sendJson(res, 400, { error: '缺少 fids' });
+      if (!b.reason) return sendJson(res, 400, { error: '请选择恢复原因' });
+      const data = require('./reject-box').restoreBatch(db, fids, {
+        reason: b.reason,
+        note: b.note || '',
+        actor: sessionUser?.username || 'user',
+      });
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  const mRejectedOne = pathname.match(/^\/rejected\/([^\/]+)$/);
+  if (mRejectedOne && req.method === 'GET') {
+    try {
+      const fid = decodeURIComponent(mRejectedOne[1]);
+      const data = require('./reject-box').getRejectedDetail(db, fid);
+      if (!data) return sendJson(res, 404, { error: '拒收件不存在' });
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 网关配置（读：所有登录用户；写：管理员，见下方非 viewer 路由）
+  if (pathname === '/gateway/config' && req.method === 'GET') {
+    try {
+      const data = require('./gateway').getConfig(db);
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 全库图片多手段去重：原图×原图×衍生（MD5/SHA/pHash/导出标记/血缘）
+  // body: { apply?: boolean, phashStrict?, phashNear?, readExportTags? }
+  if (pathname === '/assets/dedupe-library' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const body = await parseBody(req);
+      const apply = body.apply === true;
+      if (apply && !isAdmin) return sendJson(res, 403, { error: '应用全库去重需要管理员权限（SEC-007）' });
+      const { scanLibraryDuplicates, applyDedupePairs, formatReportCsv } = require('./dedupe-library');
+      const report = scanLibraryDuplicates(services, {
+        dryRun: !apply,
+        phashStrict: Number(body.phashStrict) || undefined,
+        phashNear: Number(body.phashNear) || undefined,
+        readExportTags: body.readExportTags !== false,
+      });
+      if (!apply) {
+        return sendJson(res, 200, { success: true, data: { ...report, applied: false } });
+      }
+      const applied = applyDedupePairs(services, report.pairs || []);
+      return sendJson(res, 200, {
+        success: true,
+        data: { ...report, dryRun: false, applied: true, applyResult: applied },
+      });
+    } catch (e) {
+      console.error('[dedupe-library]', e);
+      return sendJson(res, 500, { error: e.message || '全库去重失败' });
+    }
+  }
+
+  // 夸克授权状态
+  if (pathname === '/auth/quark-status' && req.method === 'GET') {
+    const q = new Quark(config.cliPath);
+    return sendJson(res, 200, { success: true, data: await q.getUserInfo() });
+  }
+  if (pathname === '/auth/quark-login' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const b = await parseBody(req);
+    const q = new Quark(config.cliPath);
+    return sendJson(res, 200, { success: true, data: await q.loginToken(b.code) });
+  }
+  // 一键安装夸克 Skill + CAC 授权（失败自动回滚旧 CLI）
+  if (pathname === '/auth/quark-install' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const b = await parseBody(req);
+    const { installQuarkSkill } = require('./quark-install');
+    const r = await installQuarkSkill({
+      url: b.url,
+      code: b.code,
+      cliPath: config.cliPath,
+    });
+    if (!r.success) return sendJson(res, 400, { success: false, error: r.error });
+    // 刷新进程内 cliPath（下次 Quark 实例用新路径）
+    try {
+      const { resolveQuarkCli } = require('./quark');
+      config.cliPath = resolveQuarkCli() || config.cliPath;
+    } catch {}
+    return sendJson(res, 200, { success: true, data: r });
+  }
+
+  if (pathname === '/auth/reset' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const b = await parseBody(req);
+    if (!b.fid) return sendJson(res, 400, { error: '缺少 fid' });
+    db.prepare("UPDATE assets SET auth_state=NULL, auth_matched_at=NULL, auth_frozen_at=NULL, auth_revoked_at=NULL, updated_at=? WHERE fid=?").run(Date.now(), b.fid);
+    const { applyGovernance } = require('./governance');
+    // 传 dataDir，治理才能按 storage_ref 真正删掉人像/服装的历史 restage 文件，而不只删表行
+    applyGovernance(db, Date.now(), services?.config?.dataDir || null);
+    return sendJson(res, 200, { success: true });
+  }
+
+  // 检索接口
+  if (pathname === '/assets' && req.method === 'GET') {
+    const q = Object.fromEntries(urlObj.searchParams);
+    if (q.all && !isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    return sendJson(res, 200, { success: true, data: queryAssets(db, q) });
+  }
+
+  // 侧边时间轴精准天数统计
+  if (pathname === '/assets/timeline-days' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const mediaType = urlObj.searchParams.get('media_type');
+      const category = urlObj.searchParams.get('category');
+      const whereParts = [BROWSE_READY_SQL, AUTH_VISIBLE_SQL];
+      const args = [];
+      if (category === 'interior_exterior' || category === 'interior') {
+        whereParts.push("(a.kind = 'image' AND COALESCE(a.category, 'interior') IN ('interior', 'exterior'))");
+      } else if (category === 'portrait') {
+        whereParts.push("a.category = 'portrait'");
+      } else if (category === 'clothing') {
+        whereParts.push("a.category = 'clothing'");
+      } else if (category === 'figure') {
+        whereParts.push("a.category IN ('portrait', 'clothing')");
+      } else if (category === 'furniture') {
+        whereParts.push("(a.category = 'furniture' OR a.kind = 'furniture')");
+      } else if (mediaType === 'image') {
+        whereParts.push("a.kind = 'image'");
+      } else if (mediaType === 'video' || category === 'video') {
+        whereParts.push("a.kind = 'video'");
+      } else if (mediaType === 'music' || mediaType === 'audio' || category === 'music') {
+        whereParts.push("(a.kind = 'audio' OR a.category = 'music')");
+      }
+      const sql = `
+        SELECT 
+          date(COALESCE(a.created_at, a.discovered_at, a.updated_at)/1000, 'unixepoch', 'localtime') as day,
+          count(*) as count
+        FROM assets a
+        WHERE ${whereParts.join(' AND ')}
+        GROUP BY day
+        ORDER BY day DESC
+        LIMIT 150
+      `;
+      const rows = db.prepare(sql).all(...args);
+      return sendJson(res, 200, { success: true, data: rows });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  if (pathname === '/stats' && req.method === 'GET') {
+    return sendJson(res, 200, { success: true, data: getStats(db) });
+  }
+
+  // 相册快照直收：合并版 App（素材库）推送全量相册清单；任意登录账号可推（仅写本设备清单，非破坏性）
+  if (pathname === '/snapshot' && req.method === 'POST') {
+    const b = await parseBody(req);
+    const { ingestSnapshot } = require('./snapshot');
+    const { applyGovernance } = require('./governance');
+    try {
+      const data = ingestSnapshot(db, b);
+      applyGovernance(db, Date.now(), services?.config?.dataDir || null);
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  // ===== 相册删除对账（高级配置，破坏性操作）=====
+  // preview 只统计无副作用；apply 会把条目移入回收站（可恢复）。
+  // 不自动执行：素材库是共享资产，必须由用户主动触发。
+  if (pathname === '/sync/reconcile' && (req.method === 'POST' || req.method === 'GET')) {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = req.method === 'POST' ? await parseBody(req) : {};
+    const q = urlObj.searchParams;
+    const apply = req.method === 'POST' && (b.apply === true || b.apply === 'true');
+    if (apply && !isAdmin) return sendJson(res, 403, { error: '执行相册对账删除需要管理员权限（SEC-007）' });
+    const deviceId = String(b.deviceId || q.get('deviceId') || sessionUser?.device_id || '').trim();
+    if (!deviceId) return sendJson(res, 400, { error: '缺少设备 ID（请先执行一次相册同步）' });
+    const graceRaw = b.graceDays !== undefined ? b.graceDays : q.get('graceDays');
+    const graceDays = graceRaw === null || graceRaw === undefined || graceRaw === ''
+      ? null : Number(graceRaw);
+    try {
+      const albumReconcile = require('./album-reconcile');
+      if (apply) {
+        const out = albumReconcile.applyReconcile(services, {
+          deviceId,
+          graceDays,
+          limit: b.limit,
+          actor: sessionUser?.username || 'user',
+        });
+        try {
+          const { eventBus, EVENTS } = require('./events');
+          eventBus.emit(EVENTS.RECONCILE_DONE, { deviceId, out });
+        } catch (_) {}
+        return sendJson(res, 200, { success: true, data: out });
+      }
+      const out = albumReconcile.previewReconcile(services, { deviceId, graceDays });
+      return sendJson(res, 200, { success: true, data: out });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  // 手机端相册媒体文件直传落盘 NAS（单文件流式/multipart）
+  if (pathname === '/sync/upload' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    if (contentLengthExceeds(req, ML_MAX_UPLOAD_BYTES)) {
+      return sendJson(res, 413, { success: false, error: 'payload_too_large' });
+    }
+    const { handleDirectUpload } = require('./stream-upload');
+    try {
+      const data = await handleDirectUpload(services, req);
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, e.statusCode || 400, { error: e.message });
+    }
+  }
+
+  // 手机端大视频/大文件分片上传
+  if (pathname === '/sync/chunk' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const { handleChunkUpload, MAX_CHUNK_BYTES } = require('./stream-upload');
+    // 单片 64MB + 1MB multipart 封装修边
+    if (contentLengthExceeds(req, MAX_CHUNK_BYTES + 1024 * 1024)) {
+      return sendJson(res, 413, { success: false, error: 'payload_too_large' });
+    }
+    const uploadId = req.headers['x-upload-id'] || urlObj.searchParams.get('upload_id');
+    const chunkIndex = req.headers['x-chunk-index'] || urlObj.searchParams.get('chunk_index');
+    const totalChunks = req.headers['x-total-chunks'] || urlObj.searchParams.get('total_chunks');
+    try {
+      const data = await handleChunkUpload(services, req, { uploadId, chunkIndex, totalChunks });
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, e.statusCode || 400, { error: e.message });
+    }
+  }
+
+  // 手机端大视频/大文件分片合并完成
+  if (pathname === '/sync/complete' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    const { handleCompleteChunkUpload } = require('./stream-upload');
+    try {
+      const data = await handleCompleteChunkUpload(services, {
+        uploadId: b.uploadId || b.upload_id,
+        fileName: b.fileName || b.file_name,
+        totalChunks: b.totalChunks || b.total_chunks,
+        dateModified: b.dateModified || b.date_modified || b.taken_at,
+        clientAssetId: b.clientAssetId || b.client_asset_id,
+        source: b.source || 'sync'
+      });
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  // 快捷处理预设（viewer 只读；admin 可管理）
+  if (pathname === '/presets' && req.method === 'GET') {
+    const gatewayReady = processSvc.isGatewayConfigured(processSvc.getGatewayAdapter(db));
+    // 读隔离：本人 + 全局 builtin（user_id=0 且 builtin=1）
+    const curUid = Number(sessionUser?.id || 0);
+    const visible = new Set(
+      db.prepare('SELECT id FROM presets WHERE user_id=? OR (builtin=1 AND user_id=0)')
+        .all(curUid).map((r) => r.id)
+    );
+    const presets = processSvc.listPresets(db).filter((p) => visible.has(p.id));
+    return sendJson(res, 200, { success: true, data: { presets, gatewayReady } });
+  }
+
+  if (pathname === '/presets' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const b = await parseBody(req);
+    if (!b.id || !b.label || !b.action) return sendJson(res, 400, { error: '缺少 id/label/action' });
+    try {
+      processSvc.upsertPreset(db, { ...b, builtin: false });
+      // 写入强制归属当前用户
+      try {
+        db.prepare('UPDATE presets SET user_id=? WHERE id=?').run(sessionUser.id, b.id);
+      } catch (e) {}
+      return sendJson(res, 200, { success: true });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  const mDelPreset = pathname.match(/^\/presets\/([^\/]+)$/);
+  if (mDelPreset && req.method === 'DELETE') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const ok = processSvc.deletePreset(db, decodeURIComponent(mDelPreset[1]));
+      return sendJson(res, ok ? 200 : 404, ok ? { success: true } : { error: '预设不存在' });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  // 管理端：发布更新元数据
+  if (pathname === '/app/update' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const b = await parseBody(req);
+      const manifest = appUpdate.publishUpdate(config, b);
+      return sendJson(res, 200, { success: true, data: manifest });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  // 管理端：一键强制推送（不重新打包，只把已发布包标 force，手机下次检查立刻弹）
+  if (pathname === '/app/update/quick-push' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const { forcePush } = require('./app-quick-push');
+      const b = await parseBody(req);
+      const manifest = forcePush(config, b);
+      return sendJson(res, 200, { success: true, data: manifest.latest });
+    } catch (e) {
+      const code = e.code === 'no_package' ? 400 : 400;
+      return sendJson(res, code, { error: e.message, code: e.code || null });
+    }
+  }
+
+  // 管理端：上传 wgt/apk 并自动写入清单
+  if (pathname === '/app/update/upload' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    if (contentLengthExceeds(req, ML_MAX_UPLOAD_BYTES)) {
+      return sendJson(res, 413, { success: false, error: 'payload_too_large' });
+    }
+    // B6：raw/multipart 流式落 dataDir 临时文件后交给 publishFile（tmpPath copy），
+    // 不再 chunks+Buffer.concat 整个安装包；JSON base64 是少见路径，仍按封顶缓冲处理。
+    const { streamToTempFile, streamMultipartFile } = require('./stream-upload');
+    const { readRequestBuffer } = require('./ingest');
+    const tmpDir = path.join(config.dataDir, 'cache', 'temp_upload');
+    fs.mkdirSync(tmpDir, { recursive: true });
+    const tmpPath = path.join(tmpDir, `appupdate_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+    let streamed = false;
+    try {
+      let fileName = urlObj.searchParams.get('fileName') || `app-${Date.now()}.wgt`;
+      const fields = {};
+      let buffer = null;
+      const ctype = String(req.headers['content-type'] || '');
+      if (ctype.includes('multipart/form-data')) {
+        const m = ctype.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+        if (!m) return sendJson(res, 400, { error: '缺少 multipart boundary' });
+        const parsed = await streamMultipartFile(req, tmpPath, (m[1] || m[2]).trim(), {
+          maxBytes: ML_MAX_UPLOAD_BYTES,
+          extraFileNames: [],
+        });
+        streamed = true;
+        fileName = parsed.file.filename || fileName;
+        Object.assign(fields, parsed.fields);
+      } else if (ctype.includes('application/json')) {
+        // JSON 包 base64（少见路径）：整体封顶 ML_MAX_UPLOAD_BYTES，超限抛 413
+        const raw = await readRequestBuffer(req, ML_MAX_UPLOAD_BYTES);
+        const j = JSON.parse(raw.toString('utf8'));
+        if (j.fileName) fileName = j.fileName;
+        if (j.buffer || j.base64) buffer = Buffer.from(j.buffer || j.base64, 'base64');
+        Object.assign(fields, j.fields || {
+          versionCode: j.versionCode,
+          versionName: j.versionName,
+          wgtVersion: j.wgtVersion,
+          force: j.force,
+          note: j.note,
+          channel: j.channel,
+        });
+      } else {
+        // raw 二进制（application/octet-stream + ?fileName=，pack-studio/curl 走这条）
+        // B6：流式落盘替代整包 Buffer.concat；rolloutPct（B8）随查询字段一并透传给 publishUpdate
+        await streamToTempFile(req, tmpPath, { maxBytes: ML_MAX_UPLOAD_BYTES });
+        streamed = true;
+        for (const k of ['versionCode', 'versionName', 'wgtVersion', 'force', 'note', 'channel', 'releaseMode', 'targetDevices', 'rolloutPct']) {
+          const v = urlObj.searchParams.get(k);
+          if (v != null) fields[k] = v;
+        }
+      }
+      const out = await appUpdate.publishFile(config, { fileName, tmpPath: streamed ? tmpPath : null, buffer, fields });
+      return sendJson(res, 200, { success: true, data: out });
+    } catch (e) {
+      return sendJson(res, e.statusCode || 400, { error: e.message });
+    } finally {
+      if (streamed) { try { fs.unlinkSync(tmpPath); } catch (_) {} }
+    }
+  }
+
+  // R10：/app/update/state 的重复分支已删除（首份完整实现在本文件前部，永不抵达此处）。
+
+  // 管理端：一键将当前灰度版本转正为全量正式发布
+  if (pathname === '/app/update/promote' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const manifest = appUpdate.promoteCanary(config);
+      return sendJson(res, 200, { success: true, data: manifest.latest });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  // 管理端：撤回当前灰度版本
+  if (pathname === '/app/update/revoke-canary' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const manifest = appUpdate.revokeCanary(config);
+      return sendJson(res, 200, { success: true, data: manifest });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  // 管理端：灰度设备名册（最近 check-in 的设备，便于复制设备号进白名单；含设备标识，不公开）
+  if (pathname === '/app/update/devices' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      return sendJson(res, 200, { success: true, data: { devices: appUpdate.listDevices(config) } });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // ===== AI 试验场 (/api/lab) =====
+  // 能力目录：动态告知前端当前有哪些工作流/入口可用
+  if (pathname === '/lab/capabilities' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      return sendJson(res, 200, { success: true, data: labSvc.getCapabilityCatalog(services) });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // ★ 扁平模型能力表：客户端唯一真相源（caps.region.kind 决定坐标/mask/vlm 走向）
+  // 客户端启动拉一次并缓存；离线用内置兜底表，联网后以本接口为准。
+  if (pathname === '/lab/model-caps' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const { buildModelCapsMap } = require('./lab');
+      return sendJson(res, 200, {
+        success: true,
+        data: { caps: buildModelCapsMap(), generatedAt: Date.now() },
+      });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // ★ 快捷操作 / 编辑op 的模型配置表：每个 op 的「默认模型 + 可选模型池」。
+  //   与 /lab/model-caps 的分工：
+  //     model-caps 回答「这个模型会什么」（region能力）；
+  //     本接口回答「这个操作默认用谁、用户能换成谁」（治理配置）。
+  //   客户端 quick/*.vue与 edit.vue 的模型下拉一律以此为准。
+  if (pathname === '/lab/quick-models' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const genGov = require('./gen-governance');
+      const jobs = genGov.listJobBindings(db)
+        .filter((j) => j.group === 'quick')
+        .map((j) => ({
+          job_id: j.job_id,
+          label: j.label,
+          default_model: j.model_id,
+          selectable: (j.selectable || []).map((m) => ({
+            id: m.id,
+            name: m.name,
+            model_code: m.model_code || '',
+            provider: m.provider || '',
+            free: !!m.free,
+          })),
+          updated_at: j.updated_at || 0,
+        }));
+      return sendJson(res, 200, {
+        success: true,
+        data: { jobs, generatedAt: Date.now() },
+      });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // ★ 面向客户端的「当前生效筛选词表」（viewer 权限即可，不需要管理员）。
+  //   客户端据此动态重建筛选器，不再依赖本地硬编码兜底表：
+  //   - active：当前生效的全部标签（含库中还没用到的，usage_count=0 也返回）
+  //   - deprecated：已移除的旧标签 → 客户端比对素材上的风格，命中即视为「需重新评估」
+  if (pathname === '/lab/filter-vocabulary' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const tagGov = require('./tag-governance');
+      const dimension = urlObj.searchParams.get('dimension') || null;
+      const catParam = urlObj.searchParams.get('library') || urlObj.searchParams.get('category') || null;
+      const data = tagGov.filterVocabulary(db, dimension, catParam);
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 上传前看一眼闸门建议。不入库、不改库。
+  if (pathname === '/lab/gate-preview' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const b = await parseBody(req, 16 * 1024 * 1024);
+      if (b && b.__bodyTooLarge) return sendJson(res, 413, { error: '图片过大' });
+      const dataUrl = String((b && b.dataUrl) || '');
+      if (!/^data:image\/[a-zA-Z0-9.+-]+;base64,/.test(dataUrl)) {
+        return sendJson(res, 400, { error: '需要 data:image base64' });
+      }
+      const { previewGateCategory } = require('./nodes');
+      const data = await previewGateCategory(services, dataUrl);
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message || '识别失败' });
+    }
+  }
+
+  // ★ 校验某个素材的风格标签是否已失效（风格重评估后老素材仍挂旧风格）。
+  //   返回 needRetag 与失效标签；客户端据此提示「该素材风格已过期，重新评估中」，
+  //   并在评估完成前按 fallbackLabel（默认「混搭」）当作当前风格展示。
+  if (pathname === '/lab/stale-tags' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const b = await parseBody(req);
+      const labels = Array.isArray(b.labels) ? b.labels.map(String).filter(Boolean) : [];
+      if (!labels.length) return sendJson(res, 200, { success: true, data: { stale: [], needRetag: false } });
+      const deprecated = new Set();
+      const rows = db.prepare(`SELECT label FROM tag_dict WHERE deprecated=1`).all();
+      for (const r of rows) deprecated.add(r.label);
+      const stale = labels.filter((l) => deprecated.has(l));
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          stale,
+          needRetag: stale.length > 0,
+          fallbackLabel: b.fallbackLabel || '其他风格',
+        },
+      });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 端侧本地模型目录（元数据；推理在客户端）
+  if (pathname === '/lab/local-models' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const localModels = require('./local-models');
+      const data = await localModels.listLocalModels(config);
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  const mLocalDl = pathname.match(/^\/lab\/local-models\/([^\/]+)\/download$/);
+  if (mLocalDl && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const localModels = require('./local-models');
+      const assetKind = urlObj.searchParams.get('asset') || '';
+      const hit = localModels.resolveDownload(config, decodeURIComponent(mLocalDl[1]), assetKind);
+      if (!hit) return sendJson(res, 404, { error: '模型文件不存在或未发布到服务端' });
+      const st = fs.statSync(hit.filePath);
+      const etag = `"${hit.meta.id}-${hit.meta.version}-${st.size}-${assetKind || 'param'}"`;
+      if (req.headers['if-none-match'] === etag) {
+        res.writeHead(304, { ETag: etag });
+        return res.end();
+      }
+      const range = req.headers.range;
+      const headers = {
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': String(st.size),
+        'Content-Disposition': `attachment; filename="${hit.fileName || hit.meta.fileName}"`,
+        ETag: etag,
+        'X-Model-Version': hit.meta.version,
+        'X-Model-Id': hit.meta.id,
+        'Accept-Ranges': 'bytes',
+      };
+      if (range) {
+        const m = /bytes=(\d*)-(\d*)/.exec(range);
+        if (m) {
+          const start = m[1] ? parseInt(m[1], 10) : 0;
+          const end = m[2] ? parseInt(m[2], 10) : st.size - 1;
+          if (start <= end && start < st.size) {
+            res.writeHead(206, {
+              ...headers,
+              'Content-Range': `bytes ${start}-${end}/${st.size}`,
+              'Content-Length': String(end - start + 1),
+            });
+            return fs.createReadStream(hit.filePath, { start, end }).pipe(res);
+          }
+        }
+      }
+      res.writeHead(200, headers);
+      return fs.createReadStream(hit.filePath).pipe(res);
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 统一提交试验场运行
+  if (pathname === '/lab/runs' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    if (!b.entryId) return sendJson(res, 400, { error: '缺少 entryId' });
+    try {
+      const run = await labSvc.submitLabRun(services, {
+        entryId: b.entryId,
+        fid: b.fid || null,
+        fids: b.fids || b.source_fids || null,
+        params: b.params || {},
+        createdBy: sessionUser?.username || 'user',
+        userId: sessionUser?.id || 0,
+        userRole: sessionUser?.role || ''
+      });
+      return sendJson(res, 200, { success: true, data: run });
+    } catch (e) {
+      const status = e.code === 'not_found' || e.code === 'fid_missing' ? 404
+        : e.code === 'not_ready' || e.code === 'unknown_entry' || e.code === 'missing_fid'
+          || e.code === 'too_many_fids' || e.code === 'missing_adapter' || e.code === 'adapter_missing'
+          ? 400
+          : e.code === 'gen_failed' ? 200 : 400;
+      // gen 同步失败仍 200，便于前端展示 result.error
+      if (e.code === 'gen_failed') {
+        return sendJson(res, 200, {
+          success: false,
+          error: e.message,
+          data: {
+            engine: 'gen',
+            runId: e.runId,
+            mode: 'sync',
+            status: 'failed',
+            result: e.result || null
+          }
+        });
+      }
+      return sendJson(res, status, {
+        success: false,
+        error: e.message,
+        code: e.code || null,
+        data: e.entry || null
+      });
+    }
+  }
+
+  // 轮询试验场运行状态
+  const mLabRun = pathname.match(/^\/lab\/runs\/([^\/]+)\/([^\/]+)$/);
+  if (mLabRun && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const engine = decodeURIComponent(mLabRun[1]);
+    const runId = decodeURIComponent(mLabRun[2]);
+    try {
+      const st = labSvc.getLabRunStatus(services, engine, runId);
+      return sendJson(res, 200, { success: true, data: st });
+    } catch (e) {
+      const status = e.code === 'not_found' ? 404 : 400;
+      return sendJson(res, status, { success: false, error: e.message, code: e.code || null });
+    }
+  }
+
+  // process 任务单查（试验场 / 运维共用）
+  const mProcJob = pathname.match(/^\/process\/jobs\/([^\/]+)$/);
+  if (mProcJob && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const id = Number(decodeURIComponent(mProcJob[1]));
+    if (!Number.isFinite(id)) return sendJson(res, 400, { error: '非法任务 ID' });
+    const job = processSvc.getProcessJob(db, id);
+    if (!job) return sendJson(res, 404, { error: '处理任务不存在' });
+    return sendJson(res, 200, { success: true, data: job });
+  }
+
+  // ===== 企业级 AI 对话流持久化 (/api/chat/*) =====
+  // 1. 会话列表
+  // ===== Chat 会话与消息 =====
+  // 严格用户隔离：仅属主可读写。管理员不自动放行；会话不存在 / user_id=0 不再视为共享。
+  const chatSessionOwned = (sId) => {
+    if (!sessionUser) return false;
+    const row = db.prepare('SELECT user_id FROM chat_sessions WHERE id=?').get(String(sId || ''));
+    if (!row) return false;
+    return Number(row.user_id || 0) === Number(sessionUser.id);
+  };
+
+  if (pathname === '/chat/sessions' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const q = String(urlObj.searchParams.get('q') || '').trim().slice(0, 100);
+    const tag = String(urlObj.searchParams.get('tag') || '').trim().slice(0, 20);
+    const modality = String(urlObj.searchParams.get('modality') || '').trim().toLowerCase();
+    const rawLimit = parseInt(urlObj.searchParams.get('limit') || '', 10);
+    const rawDays = urlObj.searchParams.get('days');
+    // scope: 'active' (近3天), 'archived' (3天前早期历史), 'all' (全部)；带有搜索词或标签筛选时搜全部历史
+    const scope = String(urlObj.searchParams.get('scope') || (q || tag ? 'all' : 'active')).trim().toLowerCase();
+    const days = rawDays !== null && rawDays !== undefined && !Number.isNaN(Number(rawDays)) ? Number(rawDays) : 3;
+    const limit = Math.max(1, Math.min(500, Number.isFinite(rawLimit) ? rawLimit : (q ? 200 : 100)));
+
+    const now = Date.now();
+    const threshold = now - (days > 0 ? days : 3) * 24 * 3600 * 1000;
+
+    // 轻量统计元数据 (走复合索引 user_id, updated_at DESC)
+    let meta = {
+      recent_count: 0,
+      archived_count: 0,
+      stale_empty_count: 0
+    };
+    try {
+      const recentRow = db.prepare('SELECT COUNT(*) as c FROM chat_sessions WHERE user_id=? AND updated_at >= ?').get(sessionUser.id, threshold);
+      const archivedRow = db.prepare('SELECT COUNT(*) as c FROM chat_sessions WHERE user_id=? AND updated_at < ?').get(sessionUser.id, threshold);
+      const staleEmptyRow = db.prepare(`
+        SELECT COUNT(*) as c FROM chat_sessions s
+        WHERE s.user_id=? AND s.updated_at < ? AND NOT EXISTS (
+          SELECT 1 FROM chat_messages m WHERE m.session_id = s.id
+        )
+      `).get(sessionUser.id, threshold);
+      meta = {
+        recent_count: recentRow?.c || 0,
+        archived_count: archivedRow?.c || 0,
+        stale_empty_count: staleEmptyRow?.c || 0
+      };
+    } catch (_) {}
+
+    const baseParams = [sessionUser.id];
+    let whereClause = 'WHERE s.user_id = ?';
+    if (scope === 'active' && days > 0) {
+      whereClause += ' AND s.updated_at >= ?';
+      baseParams.push(threshold);
+    } else if (scope === 'archived' && days > 0) {
+      whereClause += ' AND s.updated_at < ?';
+      baseParams.push(threshold);
+    }
+    if (q) {
+      whereClause += ` AND (LOWER(COALESCE(s.title,'')) LIKE ? OR EXISTS (
+        SELECT 1 FROM chat_messages m WHERE m.session_id = s.id AND LOWER(COALESCE(m.prompt,'')) LIKE ?
+      ))`;
+      const like = `%${q.toLowerCase()}%`;
+      baseParams.push(like, like);
+    }
+    if (tag) {
+      whereClause += ' AND COALESCE(s.action_tag, \'\') = ?';
+      baseParams.push(tag);
+    }
+    if (['chat', 'image', 'video'].includes(modality)) {
+      // 与前端 getSessionModality 保持同一口径：last_mode 优先，旧数据回退标题关键词
+      whereClause += ` AND (CASE
+        WHEN LOWER(COALESCE((SELECT m.mode FROM chat_messages m WHERE m.session_id = s.id ORDER BY m.created_at DESC LIMIT 1),'')) = 'chat' THEN 'chat'
+        WHEN LOWER(COALESCE((SELECT m.mode FROM chat_messages m WHERE m.session_id = s.id ORDER BY m.created_at DESC LIMIT 1),'')) LIKE '%video%' THEN 'video'
+        WHEN LOWER(COALESCE((SELECT m.mode FROM chat_messages m WHERE m.session_id = s.id ORDER BY m.created_at DESC LIMIT 1),'')) LIKE '%image%' THEN 'image'
+        WHEN COALESCE(s.title,'') LIKE '%视频%' OR COALESCE(s.title,'') LIKE '%运镜%' OR COALESCE(s.title,'') LIKE '%动画%' THEN 'video'
+        WHEN COALESCE(s.title,'') LIKE '%生图%' OR COALESCE(s.title,'') LIKE '%图%' OR COALESCE(s.title,'') LIKE '%画%' OR COALESCE(s.title,'') LIKE '%扩图%' OR COALESCE(s.title,'') LIKE '%精修%' THEN 'image'
+        ELSE 'chat' END) = ?`;
+      baseParams.push(modality);
+    }
+
+    // 先对 chat_sessions 分页切出前 N 条（LIMIT ?），避免对全量会话跑 4 重关联子查询
+    const sessSql = `SELECT s.* FROM chat_sessions s ${whereClause} ORDER BY s.updated_at DESC LIMIT ?`;
+    baseParams.push(limit);
+    const sessions = db.prepare(sessSql).all(...baseParams);
+
+    if (sessions.length > 0) {
+      const sids = sessions.map(s => s.id);
+      const placeholders = sids.map(() => '?').join(',');
+
+      // 批量聚合 1: message_count 与 product_count
+      const counts = db.prepare(`
+        SELECT 
+          session_id,
+          COUNT(*) as message_count,
+          SUM(CASE WHEN (
+            (result_json IS NOT NULL AND result_json != '' AND result_json != 'null') OR
+            (mode IN ('text_to_image', 'image_to_image', 'omni_reference', 'text_to_video', 'video') AND role = 'assistant')
+          ) THEN 1 ELSE 0 END) as product_count
+        FROM chat_messages
+        WHERE session_id IN (${placeholders})
+        GROUP BY session_id
+      `).all(...sids);
+      const countsMap = new Map();
+      for (const c of counts) {
+        countsMap.set(c.session_id, {
+          message_count: Number(c.message_count || 0),
+          product_count: Number(c.product_count || 0)
+        });
+      }
+
+      // 批量聚合 2: last_mode 与 last_model (engine)
+      const latestMsgs = db.prepare(`
+        SELECT session_id, mode, engine
+        FROM (
+          SELECT session_id, mode, engine,
+                 ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY created_at DESC) as rn
+          FROM chat_messages
+          WHERE session_id IN (${placeholders})
+        )
+        WHERE rn = 1
+      `).all(...sids);
+      const latestMap = new Map();
+      for (const m of latestMsgs) {
+        latestMap.set(m.session_id, {
+          mode: m.mode || null,
+          engine: m.engine || ''
+        });
+      }
+
+      for (const s of sessions) {
+        const c = countsMap.get(s.id);
+        s.product_count = c ? c.product_count : 0;
+        s.message_count = c ? c.message_count : 0;
+        const lat = latestMap.get(s.id);
+        s.last_mode = lat ? lat.mode : null;
+        s.last_model = s.last_model || (lat ? lat.engine : '') || '';
+      }
+    }
+
+    return sendJson(res, 200, { success: true, data: sessions, meta });
+  }
+
+  // 一键清理过期废弃会话 (3天前无产物会话，或全量3天前会话)
+  if (pathname === '/chat/sessions/clean-stale' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    const mode = b.mode || 'empty_only'; // 'empty_only' (默认) 或 'all_stale'
+    const days = Number(b.days) || 3;
+    const threshold = Date.now() - days * 24 * 3600 * 1000;
+
+    let targetSessions = [];
+    if (mode === 'all_stale') {
+      targetSessions = db.prepare('SELECT id FROM chat_sessions WHERE user_id=? AND updated_at < ?')
+        .all(sessionUser.id, threshold);
+    } else {
+      // 默认 empty_only: 3天前且一条消息都没有的废弃空壳会话（保留用户有真实提问/草稿的会话）
+      targetSessions = db.prepare(`
+        SELECT s.id FROM chat_sessions s
+        WHERE s.user_id=? AND s.updated_at < ? AND NOT EXISTS (
+          SELECT 1 FROM chat_messages m WHERE m.session_id = s.id
+        )
+      `).all(sessionUser.id, threshold);
+    }
+
+    const sessionIds = targetSessions.map((r) => r.id);
+    if (sessionIds.length > 0) {
+      const deleteMsgStmt = db.prepare('DELETE FROM chat_messages WHERE session_id=?');
+      const deleteSessStmt = db.prepare('DELETE FROM chat_sessions WHERE id=?');
+      const cleanTx = db.transaction((ids) => {
+        for (const id of ids) {
+          deleteMsgStmt.run(id);
+          deleteSessStmt.run(id);
+        }
+      });
+      cleanTx(sessionIds);
+    }
+
+    return sendJson(res, 200, {
+      success: true,
+      cleaned_count: sessionIds.length,
+      mode
+    });
+  }
+
+  // 2. 创建或更新会话
+  if (pathname === '/chat/sessions' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    const sessionId = b.id || `sess_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+    const title = (b.title || '新创作会话').slice(0, 50);
+    const now = Date.now();
+    // 强制归属当前用户；已存在但不属于当前用户的会话不允许越权改写。
+    const existing = db.prepare('SELECT user_id FROM chat_sessions WHERE id=?').get(sessionId);
+    if (existing && Number(existing.user_id) !== Number(sessionUser.id)) {
+      return sendJson(res, 403, { error: '无权操作该会话' });
+    }
+    const paramsJson = b.params_json != null
+      ? (typeof b.params_json === 'string' ? b.params_json : JSON.stringify(b.params_json))
+      : (b.params != null ? JSON.stringify(b.params) : null);
+    db.prepare(`
+      INSERT INTO chat_sessions (id, user_id, title, params_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        title=excluded.title,
+        updated_at=excluded.updated_at,
+        params_json=COALESCE(excluded.params_json, chat_sessions.params_json)
+    `).run(sessionId, sessionUser.id, title, paramsJson, now, now);
+    return sendJson(res, 200, { success: true, data: { id: sessionId, title, params_json: paramsJson, updated_at: now } });
+  }
+
+  // 2.0 获取单条会话详情
+  const mGetSess = pathname.match(/^\/chat\/sessions\/([^\/]+)$/);
+  if (mGetSess && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const sId = decodeURIComponent(mGetSess[1]);
+    if (!chatSessionOwned(sId)) return sendJson(res, 403, { error: '无权操作该会话' });
+    const row = db.prepare('SELECT * FROM chat_sessions WHERE id=?').get(sId);
+    if (!row) return sendJson(res, 404, { error: '会话不存在' });
+    return sendJson(res, 200, { success: true, data: row });
+  }
+
+  // 2.1 只更新会话参数快照 / 标题（不动 updated_at，除非显式 touch）
+  // 为什么要单独开 PATCH：POST /chat/sessions 无条件把 updated_at 顶到最新，
+  // 前端每拖一次参数条就把会话推到列表最前，正好复现「界面跳到别的对话」。
+  const mPatchSess = pathname.match(/^\/chat\/sessions\/([^\/]+)$/);
+  if (mPatchSess && req.method === 'PATCH') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const pId = decodeURIComponent(mPatchSess[1]);
+    if (!chatSessionOwned(pId)) return sendJson(res, 403, { error: '无权操作该会话' });
+    const b = await parseBody(req);
+    const paramsJson = b.params_json != null
+      ? (typeof b.params_json === 'string' ? b.params_json : JSON.stringify(b.params_json))
+      : null;
+    const title = b.title != null ? String(b.title).slice(0, 50) : null;
+    const touch = b.touch === true;
+    // 手改标题 = manual：此后自动起名永不再覆盖（也阻止旧客户端把标题改回提示词）
+    const markManual = title != null;
+    db.prepare(`
+      UPDATE chat_sessions SET
+        params_json = COALESCE(?, params_json),
+        title = COALESCE(?, title),
+        title_source = CASE WHEN ? = 1 THEN 'manual' ELSE title_source END,
+        updated_at = CASE WHEN ? = 1 THEN ? ELSE updated_at END
+      WHERE id=?
+    `).run(paramsJson, title, markManual ? 1 : 0, touch ? 1 : 0, Date.now(), pId);
+    return sendJson(res, 200, { success: true, data: { id: pId, title, params_json: paramsJson, title_source: markManual ? 'manual' : null } });
+  }
+
+  // 2.2 视觉池动作起名：生成请求发出后由前端 fire-and-forget 调用
+  const mAutoTitle = pathname.match(/^\/chat\/sessions\/([^\/]+)\/auto-title$/);
+  if (mAutoTitle && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const aId = decodeURIComponent(mAutoTitle[1]);
+    if (!chatSessionOwned(aId)) return sendJson(res, 403, { error: '无权操作该会话' });
+    ensureIsolationSchema(db);
+    const row = db.prepare('SELECT * FROM chat_sessions WHERE id=?').get(aId);
+    if (!row) return sendJson(res, 404, { error: '会话不存在' });
+    const PLACEHOLDERS = ['新创作会话', '空间美学创作会话', 'AI 创作会话', ''];
+    if (row.title_source === 'manual') return sendJson(res, 200, { success: true, data: { named: false, reason: 'manual' } });
+    if (row.title_source === 'auto') return sendJson(res, 200, { success: true, data: { named: false, reason: 'already_named' } });
+    if (!PLACEHOLDERS.includes(String(row.title || ''))) {
+      return sendJson(res, 200, { success: true, data: { named: false, reason: 'already_titled' } });
+    }
+
+    const b = await parseBody(req);
+    const prompt = String(b.prompt || '').trim().slice(0, 3000);
+    if (!prompt) return sendJson(res, 200, { success: true, data: { named: false, reason: 'no_material' } });
+    const images = Array.isArray(b.images) ? b.images.filter((x) => typeof x === 'string' && x).slice(0, 2) : [];
+    // 测试与断网环境：不触网，仍允许下次发送再试
+    if (String(process.env.ML_DISABLE_AUTO_TITLE || '') === '1') {
+      return sendJson(res, 200, { success: true, data: { named: false, reason: 'disabled' } });
+    }
+
+    const now = Date.now();
+    db.prepare('UPDATE chat_sessions SET title_attempted_at=? WHERE id=?').run(now, aId);
+    let named = null;
+    try {
+      const namer = typeof services.titleNamer === 'function'
+        ? services.titleNamer
+        : async ({ prompt: p, images: imgs }) => {
+            const { defaultTitleNamer } = require('./chat-auto-title');
+            return defaultTitleNamer({
+              prompt: p,
+              images: imgs,
+              fallbackModel: services.config?.titleFallbackModel || 'gemini-flash-lite-latest',
+              call: async (model, messages, imgs2) => {
+                const data = await executeChatCompletion(db, config, {
+                  model, messages, images: imgs2, max_tokens: 200, timeoutMs: 20000,
+                });
+                return data?.choices?.[0]?.message?.content || '';
+              },
+            });
+          };
+      named = await namer({ prompt, images, mode: String(b.mode || '') , sessionId: aId });
+    } catch (e) {
+      console.warn('[chat-auto-title] 起名失败:', e.message);
+    }
+    if (!named || !named.title) {
+      return sendJson(res, 200, { success: true, data: { named: false, reason: 'failed' } });
+    }
+    const title = Array.from(String(named.title)).slice(0, 16).join('');
+    const actionTag = String(named.action_tag || '其他');
+    // 条件更新：用户如果在这期间手改了标题（title_source='manual'），自动名不覆盖
+    const info = db.prepare(`
+      UPDATE chat_sessions SET title=?, action_tag=?, title_source='auto'
+      WHERE id=? AND (title_source IS NULL OR title_source='')
+    `).run(title, actionTag, aId);
+    if (info.changes === 0) {
+      return sendJson(res, 200, { success: true, data: { named: false, reason: 'manual' } });
+    }
+    return sendJson(res, 200, { success: true, data: { named: true, title, action_tag: actionTag, title_source: 'auto' } });
+  }
+
+  // 3. 删除会话
+  const mDelSess = pathname.match(/^\/chat\/sessions\/([^\/]+)$/);
+  if (mDelSess && req.method === 'DELETE') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const sId = decodeURIComponent(mDelSess[1]);
+    if (!chatSessionOwned(sId)) return sendJson(res, 403, { error: '无权操作该会话' });
+    db.prepare('DELETE FROM chat_messages WHERE session_id=?').run(sId);
+    db.prepare('DELETE FROM chat_sessions WHERE id=?').run(sId);
+    return sendJson(res, 200, { success: true });
+  }
+
+  // 4. 获取会话消息流（默认拉取最新的一批消息正序返回，支持 before 游标往上翻页）
+  if (pathname === '/chat/messages' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const sId = urlObj.searchParams.get('sessionId') || 'default_session';
+    const sessRow = db.prepare('SELECT user_id FROM chat_sessions WHERE id=?').get(String(sId || ''));
+    if (!sessRow) {
+      // 会话尚不存在（前端临时生成或尚未落库第一条消息）：平滑返回空消息列表，避免 403 阻断初始化
+      return sendJson(res, 200, { success: true, ok: true, hasMore: false, oldestCreatedAt: null, data: [] });
+    }
+    if (Number(sessRow.user_id || 0) !== Number(sessionUser.id)) {
+      return sendJson(res, 403, { error: '无权读取该会话' });
+    }
+    const limit = Math.min(200, parseInt(urlObj.searchParams.get('limit') || '100', 10));
+    const before = urlObj.searchParams.get('before');
+
+    let messages = [];
+    if (before) {
+      const beforeTime = Number(before) || 0;
+      messages = db.prepare(`
+        SELECT * FROM (
+          SELECT * FROM chat_messages
+          WHERE session_id=? AND created_at < ?
+          ORDER BY created_at DESC LIMIT ?
+        ) sub ORDER BY created_at ASC
+      `).all(sId, beforeTime, limit);
+    } else {
+      messages = db.prepare(`
+        SELECT * FROM (
+          SELECT * FROM chat_messages
+          WHERE session_id=?
+          ORDER BY created_at DESC LIMIT ?
+        ) sub ORDER BY created_at ASC
+      `).all(sId, limit);
+    }
+    const oldestCreatedAt = messages.length > 0 ? messages[0].created_at : null;
+    const hasMore = oldestCreatedAt ? Boolean(db.prepare('SELECT 1 FROM chat_messages WHERE session_id=? AND created_at < ? LIMIT 1').get(sId, oldestCreatedAt)) : false;
+
+    return sendJson(res, 200, {
+      success: true,
+      hasMore,
+      oldestCreatedAt,
+      data: messages.map(m => {
+      let params = {};
+      let images = [];
+      let result = null;
+      try { params = JSON.parse(m.params_json || '{}'); } catch {}
+      try { images = JSON.parse(m.images_json || '[]'); } catch {}
+      try { result = JSON.parse(m.result_json || 'null'); } catch {}
+
+      // 瘦身脱敏投影：剔除巨型 Base64 wireframeUrl 与调试快照
+      if (params && typeof params === 'object') {
+        if (Array.isArray(params.refs)) {
+          const { enrichRefVersions } = require('./chat-screen');
+          params.refs = enrichRefVersions(db, params.refs).map((r) => {
+            if (!r || typeof r !== 'object') return r;
+            if (r.wireframeUrl && String(r.wireframeUrl).startsWith('data:image/')) {
+              const { wireframeUrl, ...rest } = r;
+              return { ...rest, wireframeOmitted: true };
+            }
+            return r;
+          });
+        }
+        if (params.requestSnapshot) delete params.requestSnapshot;
+        if (params.outbound) delete params.outbound;
+      }
+
+      // 瘦身脱敏投影：剥离 raw 里的巨型 inlineData Base64（已落盘为文件）
+      if (result && typeof result === 'object' && result.raw) {
+        try {
+          if (JSON.stringify(result.raw).length > 8192) {
+            delete result.raw;
+          }
+        } catch (_) {
+          delete result.raw;
+        }
+      }
+
+      // 不再向前端回传重复的 params_json/result_json/images_json 原始字符串大字段
+      const { params_json, result_json, images_json, ...rest } = m;
+      const projected = { ...rest, params, images, result };
+      return urlObj.searchParams.get('view') === 'screen' ? screenMessage(projected) : projected;
+    }) });
+  }
+
+  // 5. 新增/更新单条消息
+  if (pathname === '/chat/messages' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req, 64 * 1024 * 1024);
+    if (b.__bodyTooLarge) return sendJson(res, 413, { error: '请求数据过大，超出上限' });
+    const sessionId = b.sessionId || `sess_auto_${sessionUser.id || '0'}_${Date.now()}`;
+    // 严格隔离下 chatSessionOwned 不再放行「不存在的会话」：新会话先以当前 user_id 建行，
+    // 之后属主校验才能通过；已存在的他人会话仍会 403。
+    const _sessRow = db.prepare('SELECT user_id FROM chat_sessions WHERE id=?').get(sessionId);
+    if (!_sessRow) {
+      db.prepare(`
+        INSERT INTO chat_sessions (id, user_id, title, created_at, updated_at)
+        VALUES (?, ?, '新创作会话', ?, ?)
+        ON CONFLICT(id) DO NOTHING
+      `).run(sessionId, sessionUser.id, Date.now(), Date.now());
+    }
+    if (!chatSessionOwned(sessionId)) return sendJson(res, 403, { error: '无权写入该会话' });
+    const msgId = b.id || `msg_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+    const now = Date.now();
+    const role = b.role || 'user';
+    const mode = b.mode || 'text_to_image';
+    const prompt = b.prompt || '';
+    let cleanParams = b.params || {};
+    if (cleanParams && typeof cleanParams === 'object') {
+      try {
+        cleanParams = { ...cleanParams };
+        if (Array.isArray(cleanParams.refs)) {
+          cleanParams.refs = cleanParams.refs.map((r) => {
+            if (!r || typeof r !== 'object') return r;
+            if (r.wireframeUrl && String(r.wireframeUrl).startsWith('data:image/')) {
+              const { wireframeUrl, ...rest } = r;
+              return { ...rest, wireframeOmitted: true };
+            }
+            return r;
+          });
+        }
+        if (cleanParams.requestSnapshot) delete cleanParams.requestSnapshot;
+        if (cleanParams.outbound) delete cleanParams.outbound;
+      } catch (_) {}
+    }
+    const paramsJson = JSON.stringify(cleanParams);
+    const imagesJson = JSON.stringify(b.images || []);
+    const status = b.status || 'done';
+    const runId = b.runId || null;
+    const engine = b.engine || null;
+    // 终态消息不再持久化占位卡的 isGenerating:true，否则刷新后成片仍被画成「渲染中」
+    let resultForStore = b.result || null;
+    if (resultForStore && status !== 'generating') {
+      try {
+        resultForStore = { ...resultForStore };
+        delete resultForStore.isGenerating;
+      } catch (e) { resultForStore = b.result; }
+    }
+    const resultJson = resultForStore ? JSON.stringify(resultForStore) : null;
+    const lastModel = String(b.engine || (b.params && b.params.model) || b.model || '').slice(0, 120);
+
+    db.prepare(`
+      INSERT INTO chat_messages (id, session_id, user_id, role, mode, prompt, params_json, images_json, status, run_id, engine, result_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        status=excluded.status,
+        result_json=COALESCE(excluded.result_json, chat_messages.result_json),
+        -- 只补空值：worker 先落库时前端补 params/refs，前端先落库时 worker 不覆盖前端更全的字段
+        prompt=CASE WHEN COALESCE(chat_messages.prompt,'')='' THEN excluded.prompt ELSE chat_messages.prompt END,
+        params_json=CASE WHEN COALESCE(chat_messages.params_json,'') IN ('','{}') THEN excluded.params_json ELSE chat_messages.params_json END,
+        images_json=CASE WHEN COALESCE(chat_messages.images_json,'') IN ('','[]') THEN excluded.images_json ELSE chat_messages.images_json END,
+        run_id=COALESCE(chat_messages.run_id, excluded.run_id),
+        engine=COALESCE(chat_messages.engine, excluded.engine),
+        updated_at=excluded.updated_at
+    `).run(msgId, sessionId, sessionUser?.id || 0, role, mode, prompt, paramsJson, imagesJson, status, runId, engine, resultJson, b.createdAt || now, now);
+
+    if (b.generate === true && role === 'user' && prompt) {
+      try {
+        const { packHistory } = require('./chat-context');
+        const { OFFICIAL_STUDIO, resolveModelCode } = require('./studio-catalog');
+        const rows = db.prepare(
+          'SELECT role, prompt FROM chat_messages WHERE session_id=? ORDER BY created_at ASC'
+        ).all(sessionId);
+        const packed = packHistory(rows);
+        let messages = packed.messages.slice();
+        if (packed.overflow && packed.olderText) {
+          const summed = await executeChatCompletion(db, config, {
+            model: 'workflow_vision',
+            messages: [{ role: 'user', content: `把下面的对话压成一段中文摘要，不要编造：\n${packed.olderText.slice(0, 8000)}` }],
+            max_tokens: 400,
+            timeoutMs: 60000,
+          });
+          const summary = summed?.choices?.[0]?.message?.content || packed.olderText.slice(0, 800);
+          messages = [{ role: 'system', content: `更早对话摘要：${summary}` }, ...messages];
+        }
+        const chatCode = resolveModelCode(b.model || OFFICIAL_STUDIO.chat.defaultModel) || b.model;
+        const data = await executeChatCompletion(db, config, {
+          model: chatCode,
+          messages,
+          images: Array.isArray(b.images) ? b.images : [],
+          max_tokens: b.max_tokens || 4096,
+          timeoutMs: b.timeoutMs || 90000,
+        });
+        const reply = data?.choices?.[0]?.message?.content || '';
+        const asstId = `msg_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+        const asstNow = Date.now();
+        db.prepare(`
+          INSERT INTO chat_messages (id, session_id, user_id, role, mode, prompt, params_json, images_json, status, run_id, engine, result_json, created_at, updated_at)
+          VALUES (?, ?, ?, 'assistant', ?, ?, '{}', '[]', 'done', NULL, 'chat', NULL, ?, ?)
+        `).run(asstId, sessionId, sessionUser?.id || 0, mode, reply, asstNow, asstNow);
+        return sendJson(res, 200, { success: true, data: { id: msgId, reply, status: 'done', updated_at: asstNow } });
+      } catch (e) {
+        return sendJson(res, 200, { success: true, data: { id: msgId, reply: '', error: e.message, status: 'failed' } });
+      }
+    }
+
+    // 只维护最后活动时间与最后模型；标题交给视觉池动作起名（不再用提示词截断抢占占位标题）
+    db.prepare(`
+      INSERT INTO chat_sessions (id, user_id, title, last_model, created_at, updated_at)
+      VALUES (?, ?, '新创作会话', ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        updated_at=excluded.updated_at,
+        last_model=CASE WHEN excluded.last_model != '' THEN excluded.last_model ELSE chat_sessions.last_model END
+    `).run(sessionId, sessionUser?.id || 0, lastModel, now, now);
+
+    return sendJson(res, 200, { success: true, data: { id: msgId, status, updated_at: now } });
+  }
+
+  // 6. 清空会话内消息
+  if (pathname === '/chat/messages' && req.method === 'DELETE') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const sId = urlObj.searchParams.get('sessionId') || 'default_session';
+    if (!chatSessionOwned(sId)) return sendJson(res, 403, { error: '无权操作该会话' });
+    db.prepare('DELETE FROM chat_messages WHERE session_id=?').run(sId);
+    return sendJson(res, 200, { success: true });
+  }
+
+  // 7. 按生成模型系统提示词优化（无万能稿）
+  if (pathname === '/chat/optimize-prompt' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    const rawPrompt = (b.prompt || '').trim();
+    if (!rawPrompt) return sendJson(res, 400, { error: '提示词不能为空' });
+    const modelId = String(b.modelId || b.model_id || '').trim();
+    const mode = String(b.mode || '').trim() || 'default';
+    if (!modelId) return sendJson(res, 400, { error: '必须提供 modelId' });
+    const polish = genGov.polishFor(db, modelId);
+    const customPrompt = typeof b.draftPrompt === 'string' ? b.draftPrompt.trim() : (typeof b.customSkillPrompt === 'string' ? b.customSkillPrompt.trim() : '');
+    let systemPrompt = customPrompt || polish.prompt;
+    if (!systemPrompt) return sendJson(res, 400, { error: `模型 ${modelId} 没有系统提示词` });
+
+    // 按需叠加勾选的公共提示词积木（如《室内实拍真实感与反塑料感》），不污染未勾选的视频/音乐/人像/服装
+    const requestedSnippets = Array.isArray(b.snippetIds)
+      ? b.snippetIds
+      : (b.includeInteriorRealism ? ['snippet_interior_realism'] : []);
+    if (requestedSnippets.length) {
+      try {
+        const { resolveSnippets } = require('./prompt-compiler');
+        const snips = resolveSnippets(db, requestedSnippets);
+        if (snips.length) {
+          const posBlock = snips.map(s => s.positive_text).filter(Boolean).join('\n');
+          const negBlock = snips.map(s => s.negative_text).filter(Boolean).join(', ');
+          systemPrompt += `\n\n【本次生成附加画面真实感与质量积木要求（请自然融入改写结果，不要生硬照抄标题）】：\n${posBlock}`;
+          if (negBlock) {
+            systemPrompt += `\n【严禁出现的负面元素与空话】：${negBlock}`;
+          }
+        }
+      } catch (_) {}
+    }
+    const opt = genGov.resolveOptimizerModel(db, modelId);
+    const chosenModel = b.optimizerModelId || opt.modelCode || opt.modelId;
+    const slots = b.slots || {};
+    const locked = b.locked || b.params || {};
+    const refImages = [
+      ...(Array.isArray(b.imageUrls) ? b.imageUrls : []),
+      ...(Array.isArray(b.images) ? b.images : []),
+      ...(b.image ? [b.image] : [])
+    ].filter(Boolean);
+    // 优化只吃「当前提示词 + 本次上传的图片」，不再携带会话上下文
+    const userMsg = [
+      `原文：\n${rawPrompt}`,
+      `当前生成模型: ${modelId}`,
+      `当前模式: ${mode}`,
+      `已挂槽位: ${JSON.stringify(slots)}`,
+      refImages.length ? `已挂载参考图 ${refImages.length} 张。请结合图片里的真实空间、材质和光影来写。正文必须保留 @图片1 到 @图片${refImages.length}，每个编号都要出现，不要删掉，也不要改成「参考图」「这张图」或「图1」。` : '',
+      `已锁定参数（不要写进提示词）: ${JSON.stringify(locked)}`,
+    ].filter(Boolean).join('\n');
+
+    try {
+      const data = await executeChatCompletion(db, config, {
+        model: chosenModel,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userMsg }
+        ],
+        images: refImages,
+        temperature: opt.temperature,
+        max_tokens: 2048,
+        timeoutMs: opt.timeoutMs || 90000
+      });
+      const content = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || '').trim();
+      if (!content) return sendJson(res, 502, { error: '优化器未返回内容' });
+      const optimized = content.replace(/^["'“”]+|["'“”]+$/g, '');
+      // ★ 管线 A 最后一道闸门：分辨率 / 时长 / 画幅比属于参数，不得留在提示词正文里
+      const check = require('./prompt-validate').validateOptimizedPrompt(optimized);
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          original: rawPrompt,
+          optimized: check.text,
+          mode,
+          modelId,
+          warnings: check.warnings,
+          stripped: check.stripped,
+        },
+      });
+    } catch (e) {
+      const msg = e.name === 'AbortError' || /timeout/i.test(e.message || '') ? '提示词优化超时，请重试' : (e.message || '优化失败');
+      return sendJson(res, 502, { error: msg });
+    }
+  }
+
+    // ===== 创作库分区 (区只收已置顶作品；一件同时只在一个区) =====
+  if (pathname === '/creation-sections' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationLibrarySchema(db);
+    const rows = db.prepare(`
+      SELECT id, name, sort_order, created_at, updated_at
+      FROM creation_sections WHERE user_id=? ORDER BY sort_order ASC, id ASC
+    `).all(sessionUser.id);
+    return sendJson(res, 200, { success: true, data: rows });
+  }
+
+  if (pathname === '/creation-sections' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationLibrarySchema(db);
+    const b = await parseBody(req);
+    const name = String(b.name || '').trim().slice(0, 20);
+    if (!name) return sendJson(res, 400, { error: '区名不可为空' });
+    const dup = db.prepare('SELECT id FROM creation_sections WHERE user_id=? AND name=?').get(sessionUser.id, name);
+    if (dup) return sendJson(res, 409, { error: '同名分区已存在' });
+    const id = `sec_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+    const now = Date.now();
+    const max = db.prepare('SELECT MAX(sort_order) AS m FROM creation_sections WHERE user_id=?').get(sessionUser.id);
+    const sortOrder = Number(max?.m || 0) + 1;
+    db.prepare(`
+      INSERT INTO creation_sections (id, user_id, name, sort_order, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(id, sessionUser.id, name, sortOrder, now, now);
+    return sendJson(res, 200, { success: true, data: { id, name, sort_order: sortOrder, created_at: now, updated_at: now } });
+  }
+
+  if (pathname === '/creation-sections/order' && req.method === 'PUT') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationLibrarySchema(db);
+    const b = await parseBody(req);
+    const ids = Array.isArray(b.ids) ? b.ids.map((x) => String(x)).filter(Boolean).slice(0, 200) : [];
+    const now = Date.now();
+    const own = db.prepare('SELECT id FROM creation_sections WHERE id=? AND user_id=?');
+    const upd = db.prepare('UPDATE creation_sections SET sort_order=?, updated_at=? WHERE id=?');
+    const tx = db.transaction(() => {
+      ids.forEach((id, idx) => {
+        if (own.get(id, sessionUser.id)) upd.run(idx, now, id);
+      });
+    });
+    tx();
+    return sendJson(res, 200, { success: true });
+  }
+
+  const mSect = pathname.match(/^\/creation-sections\/([^\/]+)$/);
+  if (mSect && req.method === 'PATCH') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationLibrarySchema(db);
+    const sId = decodeURIComponent(mSect[1]);
+    const row = db.prepare('SELECT * FROM creation_sections WHERE id=?').get(sId);
+    if (!row || Number(row.user_id) !== Number(sessionUser.id)) return sendJson(res, 403, { error: '无权操作该分区' });
+    const b = await parseBody(req);
+    const name = b.name != null ? String(b.name).trim().slice(0, 20) : null;
+    if (name != null && !name) return sendJson(res, 400, { error: '区名不可为空' });
+    if (name != null) {
+      const dup = db.prepare('SELECT id FROM creation_sections WHERE user_id=? AND name=? AND id!=?').get(sessionUser.id, name, sId);
+      if (dup) return sendJson(res, 409, { error: '同名分区已存在' });
+    }
+    const now = Date.now();
+    db.prepare('UPDATE creation_sections SET name=COALESCE(?, name), updated_at=? WHERE id=?').run(name, now, sId);
+    return sendJson(res, 200, { success: true, data: { id: sId, name: name != null ? name : row.name, updated_at: now } });
+  }
+
+  if (mSect && req.method === 'DELETE') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationLibrarySchema(db);
+    const sId = decodeURIComponent(mSect[1]);
+    const row = db.prepare('SELECT * FROM creation_sections WHERE id=?').get(sId);
+    if (!row || Number(row.user_id) !== Number(sessionUser.id)) return sendJson(res, 403, { error: '无权操作该分区' });
+    const now = Date.now();
+    const tx = db.transaction(() => {
+      // 区删了，作品回未分区，仍然是置顶
+      db.prepare('UPDATE creation_templates SET section_id=NULL, updated_at=? WHERE section_id=? AND deleted_at IS NULL').run(now, sId);
+      db.prepare('DELETE FROM creation_sections WHERE id=?').run(sId);
+    });
+    tx();
+    return sendJson(res, 200, { success: true, data: { id: sId } });
+  }
+
+  // 区/未分区内整体排序：ids 按显示顺序给出，逐条写 section_id + pin_order
+  if (pathname === '/creation-templates/section-order' && req.method === 'PUT') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationLibrarySchema(db);
+    const b = await parseBody(req);
+    const sectionId = b.section_id ? String(b.section_id) : null;
+    const ids = Array.isArray(b.ids) ? b.ids.map((x) => String(x)).filter(Boolean).slice(0, 1000) : [];
+    if (sectionId) {
+      const sec = db.prepare('SELECT id FROM creation_sections WHERE id=? AND user_id=?').get(sectionId, sessionUser.id);
+      if (!sec) return sendJson(res, 404, { error: '分区不存在' });
+    }
+    const now = Date.now();
+    const own = db.prepare('SELECT id, is_pinned FROM creation_templates WHERE id=? AND user_id=? AND deleted_at IS NULL');
+    const upd = db.prepare('UPDATE creation_templates SET section_id=?, pin_order=?, is_pinned=1, updated_at=? WHERE id=?');
+    const tx = db.transaction(() => {
+      ids.forEach((id, idx) => {
+        const r = own.get(id, sessionUser.id);
+        if (r) upd.run(sectionId, idx, now, id);
+      });
+    });
+    tx();
+    return sendJson(res, 200, { success: true });
+  }
+
+  // ===== 创作库回收（不自动过期，只软删；清空才删记录与私有文件） =====
+  if (pathname === '/creation-trash' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationLibrarySchema(db);
+    const rows = db.prepare(`
+      SELECT t.id, t.title, t.prompt, t.type, t.aspect_ratio, t.origin_images, t.result_images,
+             t.is_pinned, t.pin_order, t.section_id, t.trashed_section_id, t.media_dir,
+             t.created_at, t.updated_at, t.deleted_at, s.name AS section_name
+      FROM creation_templates t
+      LEFT JOIN creation_sections s ON s.id = t.trashed_section_id
+      WHERE t.user_id=? AND t.deleted_at IS NOT NULL
+      ORDER BY t.deleted_at DESC LIMIT 500
+    `).all(sessionUser.id);
+    const data = rows.map((r) => {
+      let result_images = [];
+      let origin_images = [];
+      try { result_images = JSON.parse(r.result_images || '[]'); } catch {}
+      try { origin_images = JSON.parse(r.origin_images || '[]'); } catch {}
+      return { ...r, origin_images, result_images };
+    });
+    return sendJson(res, 200, { success: true, data });
+  }
+
+  if (pathname === '/creation-trash/restore' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationLibrarySchema(db);
+    const b = await parseBody(req);
+    const ids = Array.isArray(b.ids) ? b.ids.map((x) => String(x)).filter(Boolean).slice(0, 200) : [];
+    const maxRow = db.prepare('SELECT MAX(updated_at) AS m FROM creation_templates').get();
+    const updatedAt = Math.max(Date.now(), Number(maxRow?.m || 0) + 1);
+    const own = db.prepare('SELECT * FROM creation_templates WHERE id=? AND user_id=? AND deleted_at IS NOT NULL');
+    const secExists = db.prepare('SELECT id FROM creation_sections WHERE id=? AND user_id=?');
+    const restored = [];
+    const tx = db.transaction(() => {
+      for (const id of ids) {
+        const row = own.get(id, sessionUser.id);
+        if (!row) continue;
+        const backSection = row.trashed_section_id && secExists.get(row.trashed_section_id, sessionUser.id)
+          ? row.trashed_section_id : null;
+        db.prepare(`
+          UPDATE creation_templates
+          SET deleted_at=NULL, section_id=?, trashed_section_id=NULL, updated_at=?
+          WHERE id=?
+        `).run(backSection, updatedAt, id);
+        // 恢复后删掉墓碑：否则仍按旧删除游标同步的设备会再删一次
+        db.prepare('DELETE FROM creation_template_tombstones WHERE id=?').run(id);
+        restored.push(id);
+      }
+    });
+    tx();
+    return sendJson(res, 200, { success: true, data: { restored, updated_at: updatedAt } });
+  }
+
+  if (pathname === '/creation-trash/purge' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationLibrarySchema(db);
+    const b = await parseBody(req);
+    const all = b.all === true;
+    const ids = Array.isArray(b.ids) ? b.ids.map((x) => String(x)).filter(Boolean).slice(0, 500) : [];
+    const own = db.prepare('SELECT id FROM creation_templates WHERE id=? AND user_id=? AND deleted_at IS NOT NULL');
+    const { removeTemplateMedia } = require('./creation-library');
+    const purged = [];
+    const tx = db.transaction(() => {
+      const targets = all
+        ? db.prepare('SELECT id FROM creation_templates WHERE user_id=? AND deleted_at IS NOT NULL').all(sessionUser.id).map((r) => r.id)
+        : ids;
+      for (const id of targets) {
+        if (!all && !own.get(id, sessionUser.id)) continue;
+        db.prepare('DELETE FROM creation_templates WHERE id=?').run(id);
+        db.prepare('DELETE FROM creation_template_tombstones WHERE id=?').run(id);
+        purged.push(id);
+      }
+    });
+    tx();
+    for (const id of purged) removeTemplateMedia(services, id);
+    return sendJson(res, 200, { success: true, data: { purged } });
+  }
+
+  // 配方私有媒体：/creation-templates/:id/media/<origin|result|poster>/<idx>
+  const mTplMedia = pathname.match(/^\/creation-templates\/([^\/]+)\/media\/(origin|result|poster)\/(\d+)$/);
+  if (mTplMedia && (req.method === 'GET' || req.method === 'HEAD')) {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationLibrarySchema(db);
+    const tplId = decodeURIComponent(mTplMedia[1]);
+    const row = db.prepare('SELECT id FROM creation_templates WHERE id=?').get(tplId);
+    if (!row) return sendJson(res, 404, { error: '配方不存在' });
+    const { templateMediaFile, mimeForFile } = require('./creation-library');
+    const file = templateMediaFile(services, tplId, mTplMedia[2], Number(mTplMedia[3]));
+    if (!file) return sendJson(res, 404, { error: '媒体不存在' });
+    res.writeHead(200, {
+      'Content-Type': mimeForFile(file),
+      'Cache-Control': 'private, max-age=3600',
+      'Content-Length': fs.statSync(file).size,
+    });
+    if (req.method === 'HEAD') return res.end();
+    fs.createReadStream(file).pipe(res);
+    return;
+  }
+
+    // ===== 企业级 AI 创作库 (配方模板、原图、目标图、分类筛选与参数复用) (/api/creation-templates) =====
+  if (pathname === '/creation-templates' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+
+    ensureCreationTemplatesSchema(db);
+
+    const hasSince = urlObj.searchParams.has('since');
+    const hasSinceId = urlObj.searchParams.has('since_id');
+    const hasDeletedSince = urlObj.searchParams.has('deleted_since');
+    const hasDeletedSinceId = urlObj.searchParams.has('deleted_since_id');
+
+    // 缺少必填对齐游标报 400
+    if (hasSince && !hasSinceId) {
+      return sendJson(res, 400, { success: false, error: 'since_id_required' });
+    }
+    if (hasDeletedSince && !hasDeletedSinceId) {
+      return sendJson(res, 400, { success: false, error: 'deleted_since_id_required' });
+    }
+
+    const since = hasSince ? Number(urlObj.searchParams.get('since')) : null;
+    const sinceId = hasSinceId ? urlObj.searchParams.get('since_id') : null;
+    const deletedSince = hasDeletedSince ? Number(urlObj.searchParams.get('deleted_since')) : null;
+    const deletedSinceId = hasDeletedSinceId ? urlObj.searchParams.get('deleted_since_id') : null;
+
+    const serverTime = Date.now();
+    const ninetyDaysAgo = serverTime - 90 * 24 * 60 * 60 * 1000;
+    const needResync = (hasSince && since < ninetyDaysAgo) || (hasDeletedSince && deletedSince < ninetyDaysAgo);
+
+    if (needResync) {
+      try {
+        db.prepare('DELETE FROM creation_template_tombstones WHERE deleted_at < ?').run(ninetyDaysAgo);
+      } catch (e) {}
+      console.log(`[creation-sync] mode=resync rows=0 tombs=0 ms=${Date.now() - serverTime} resync=true`);
+      return sendJson(res, 200, {
+        success: true,
+        data: [],
+        has_more: false,
+        next_since: hasSince ? { updated_at: since, id: sinceId } : null,
+        deleted_ids: [],
+        deleted_has_more: false,
+        deleted_next: hasDeletedSince ? { deleted_at: deletedSince, id: deletedSinceId } : null,
+        resync: true,
+        server_time: serverTime
+      });
+    }
+
+    const kw = (urlObj.searchParams.get('q') || '').trim();
+    const filterType = (urlObj.searchParams.get('type') || '').trim(); // 'image' | 'video' | 'audio'
+    const filterSpace = (urlObj.searchParams.get('space') || '').trim();
+    const filterStyle = (urlObj.searchParams.get('style') || '').trim();
+    const pinnedOnly = urlObj.searchParams.get('pinned_only') === '1';
+
+    // 读隔离：本人 + 全局 builtin（user_id=0 且 builtin=1）
+    const curUid = Number(sessionUser?.id || 0);
+    const cardView = urlObj.searchParams.get('view') === 'card';
+    const selectList = cardView
+      ? 'id, title, type, aspect_ratio, poster_w, poster_h, is_pinned, section_id, pin_order, pinned_at, created_at, updated_at, space, style, purpose, channel, use_count, origin_images, result_images'
+      : '*';
+    // 回收里的配方（deleted_at 非空）不参与正常列表/增量同步，只出现在 /creation-trash
+    let sql = `SELECT ${selectList} FROM creation_templates WHERE (user_id = ? OR (builtin = 1 AND user_id = 0)) AND deleted_at IS NULL`;
+    const params = [curUid];
+
+    if (filterType && filterType !== 'all') {
+      sql += ' AND type = ?';
+      params.push(filterType);
+    }
+    if (filterSpace && filterSpace !== 'all' && filterSpace !== '全部空间') {
+      sql += ' AND space = ?';
+      params.push(filterSpace);
+    }
+    if (filterStyle && filterStyle !== 'all' && filterStyle !== '全部风格') {
+      sql += ' AND style = ?';
+      params.push(filterStyle);
+    }
+    if (pinnedOnly) {
+      sql += ' AND is_pinned = 1';
+    }
+    if (kw) {
+      sql += ' AND (LOWER(title) LIKE ? OR LOWER(prompt) LIKE ? OR LOWER(tags) LIKE ? OR LOWER(space) LIKE ? OR LOWER(style) LIKE ?)';
+      params.push(`%${kw.toLowerCase()}%`, `%${kw.toLowerCase()}%`, `%${kw.toLowerCase()}%`, `%${kw.toLowerCase()}%`, `%${kw.toLowerCase()}%`);
+    }
+
+    let rows = [];
+    let hasMore = false;
+    let nextSince = null;
+
+    if (!hasSince) {
+      // 与增量同一把游标：(updated_at, id) 升序分页，客户端循环到 has_more=false。
+      // 以前固定 LIMIT 1000 且 has_more 恒为 false，超过 1000 条的旧配方再也拉不回来。
+      sql += ' ORDER BY updated_at ASC, id ASC LIMIT 1000';
+      rows = db.prepare(sql).all(...params);
+      hasMore = rows.length === 1000;
+      nextSince = rows.length > 0
+        ? { updated_at: rows[rows.length - 1].updated_at, id: rows[rows.length - 1].id }
+        : { updated_at: serverTime, id: '' };
+    } else {
+      sql += ' AND ((updated_at > ?) OR (updated_at = ? AND id > ?))';
+      params.push(since, since, sinceId);
+      sql += ' ORDER BY updated_at ASC, id ASC LIMIT 1000';
+      rows = db.prepare(sql).all(...params);
+      hasMore = rows.length === 1000;
+
+      nextSince = rows.length > 0
+        ? { updated_at: rows[rows.length - 1].updated_at, id: rows[rows.length - 1].id }
+        : { updated_at: since, id: sinceId };
+    }
+
+    let deletedIds = [];
+    let deletedHasMore = false;
+    let deletedNext = null;
+
+    if (hasDeletedSince) {
+      const tombSql = `
+        SELECT id, deleted_at
+        FROM creation_template_tombstones
+        WHERE user_id = ?
+          AND ((deleted_at > ?) OR (deleted_at = ? AND id > ?))
+        ORDER BY deleted_at ASC, id ASC
+        LIMIT 1000
+      `;
+      const tombRows = db.prepare(tombSql).all(curUid, deletedSince, deletedSince, deletedSinceId);
+      deletedHasMore = tombRows.length === 1000;
+      deletedNext = tombRows.length > 0
+        ? { deleted_at: tombRows[tombRows.length - 1].deleted_at, id: tombRows[tombRows.length - 1].id }
+        : { deleted_at: deletedSince, id: deletedSinceId };
+      deletedIds = tombRows.map(t => ({ id: t.id, deleted_at: t.deleted_at }));
+    }
+
+    try {
+      db.prepare('DELETE FROM creation_template_tombstones WHERE deleted_at < ?').run(ninetyDaysAgo);
+    } catch (e) {}
+
+    let data = rows.map(mapCreationTemplateRow);
+    if (cardView) data = data.map(toCreationCard);
+
+    const mode = hasSince ? 'delta' : 'full';
+    console.log(`[creation-sync] mode=${mode} rows=${data.length} tombs=${deletedIds.length} ms=${Date.now() - serverTime} resync=false`);
+
+    return sendJson(res, 200, {
+      success: true,
+      data,
+      has_more: hasMore,
+      next_since: nextSince,
+      deleted_ids: deletedIds,
+      deleted_has_more: deletedHasMore,
+      deleted_next: deletedNext,
+      resync: false,
+      server_time: serverTime
+    });
+  }
+
+  // 保存/收藏创作配方 (新建或全量保存)
+  if (pathname === '/creation-templates' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationTemplatesSchema(db);
+    const b = await parseBody(req);
+    const title = (b.title || '').trim();
+    const prompt = (b.prompt || '').trim();
+    if (!title || !prompt) return sendJson(res, 400, { error: '创作标题与提示词不可为空' });
+
+    const id = b.id || `tpl_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+    const aspectRatio = b.aspect_ratio || b.aspectRatio || '16:9';
+    let originList = b.origin_images || b.originImages || [];
+    if (!Array.isArray(originList)) originList = [];
+    const type = b.type || 'image'; // image / video / audio
+    let resultList = b.result_images || b.resultImages || [];
+    if (!Array.isArray(resultList)) resultList = [];
+    if (type === 'video') {
+      resultList = await attachLocalVideoPoster(services, resultList);
+    }
+    // 源图与产物各复制一份到配方私有目录，素材库永远看不到这些副本
+    const { copyTemplateMedia } = require('./creation-library');
+    const media = await copyTemplateMedia(services, id, originList, resultList);
+    originList = media.originImages;
+    resultList = media.resultImages;
+    const originImages = JSON.stringify(originList);
+    const resultImages = JSON.stringify(resultList);
+    const mediaDir = media.mediaDir;
+    const paramsJson = JSON.stringify(b.params || {});
+    const tagsJson = JSON.stringify(b.tags || ['用户自定义']);
+    const space = (b.space || '').trim();
+    const style = (b.style || '').trim();
+    const purpose = (b.purpose || '').trim();
+    const isPinned = b.is_pinned ? 1 : 0;
+    const useCount = Number(b.use_count || 0);
+    const posterW = b.poster_w !== undefined && b.poster_w !== null ? Number(b.poster_w) : (b.posterW !== undefined && b.posterW !== null ? Number(b.posterW) : null);
+    const posterH = b.poster_h !== undefined && b.poster_h !== null ? Number(b.poster_h) : (b.posterH !== undefined && b.posterH !== null ? Number(b.posterH) : null);
+    // 新置顶出现在「未分区」第一位
+    let pinOrder = null;
+    let pinnedAt = null;
+    if (isPinned) {
+      const minRow = db.prepare(`
+        SELECT MIN(pin_order) AS m FROM creation_templates
+        WHERE user_id=? AND section_id IS NULL AND is_pinned=1 AND deleted_at IS NULL
+      `).get(sessionUser.id);
+      pinOrder = Number.isFinite(minRow?.m) ? Number(minRow.m) - 1 : 0;
+      pinnedAt = Date.now();
+    }
+
+    // 严格隔离：携带已存在的他人配方 id 时不允许覆盖
+    const _tplExisting = db.prepare('SELECT user_id FROM creation_templates WHERE id=?').get(id);
+    if (_tplExisting && Number(_tplExisting.user_id) !== Number(sessionUser.id)) {
+      return sendJson(res, 403, { error: '无权覆盖他人配方' });
+    }
+
+    const postTx = db.transaction(() => {
+      const maxRow = db.prepare('SELECT MAX(updated_at) as max_u FROM creation_templates').get();
+      const now = Date.now();
+      const maxU = maxRow && maxRow.max_u ? maxRow.max_u : 0;
+      const updated_at = Math.max(now, maxU + 1);
+      const created_at = b.createdAt || b.created_at || now;
+
+      db.prepare(`
+        INSERT INTO creation_templates (id, user_id, title, prompt, aspect_ratio, origin_images, result_images, params_json, tags, type, space, style, purpose, is_pinned, pin_order, pinned_at, media_dir, use_count, created_at, updated_at, poster_w, poster_h)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          title=excluded.title,
+          prompt=excluded.prompt,
+          aspect_ratio=excluded.aspect_ratio,
+          origin_images=excluded.origin_images,
+          result_images=excluded.result_images,
+          params_json=excluded.params_json,
+          tags=excluded.tags,
+          type=excluded.type,
+          space=excluded.space,
+          style=excluded.style,
+          purpose=excluded.purpose,
+          is_pinned=excluded.is_pinned,
+          pin_order=COALESCE(creation_templates.pin_order, excluded.pin_order),
+          pinned_at=COALESCE(creation_templates.pinned_at, excluded.pinned_at),
+          media_dir=COALESCE(excluded.media_dir, creation_templates.media_dir),
+          use_count=excluded.use_count,
+          deleted_at=NULL,
+          trashed_section_id=NULL,
+          updated_at=excluded.updated_at,
+          poster_w=COALESCE(creation_templates.poster_w, excluded.poster_w),
+          poster_h=COALESCE(creation_templates.poster_h, excluded.poster_h)
+      `).run(id, sessionUser.id, title, prompt, aspectRatio, originImages, resultImages, paramsJson, tagsJson, type, space, style, purpose, isPinned, pinOrder, pinnedAt, mediaDir, useCount, created_at, updated_at, posterW, posterH);
+
+      return updated_at;
+    });
+    const finalUpdatedAt = postTx.immediate();
+
+    return sendJson(res, 200, {
+      success: true,
+      data: {
+        id, title, prompt, type, space, style, purpose, is_pinned: isPinned,
+        use_count: useCount, poster_w: posterW, poster_h: posterH,
+        aspect_ratio: aspectRatio, updated_at: finalUpdatedAt,
+        origin_images: originList, result_images: resultList, media_dir: mediaDir
+      }
+    });
+  }
+
+  // 点开一条配方时再取提示词和整包图片。列表走 view=card，不带这些字段。
+  const mTplById = pathname.match(/^\/creation-templates\/([^\/]+)$/);
+  if (mTplById && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationTemplatesSchema(db);
+    const tplId = decodeURIComponent(mTplById[1]);
+    const row = db.prepare('SELECT * FROM creation_templates WHERE id=? AND deleted_at IS NULL').get(tplId);
+    if (!row) return sendJson(res, 404, { error: '作品配方不存在' });
+    const owner = Number(row.user_id);
+    const builtin = Number(row.builtin) === 1 && owner === 0;
+    if (!isAdmin && owner !== Number(sessionUser?.id) && !builtin) {
+      return sendJson(res, 403, { error: '无权读取该配方' });
+    }
+    return sendJson(res, 200, { success: true, data: mapCreationTemplateRow(row) });
+  }
+
+  // 快捷更新创作配方 (重命名、置顶/常用切换、复用自增、修改标签、按需更新画幅)
+  const mPatchTpl = pathname.match(/^\/creation-templates\/([^\/]+)$/);
+  if (mPatchTpl && req.method === 'PATCH') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationTemplatesSchema(db);
+    const tplId = decodeURIComponent(mPatchTpl[1]);
+    const b = await parseBody(req);
+    const existing = db.prepare('SELECT * FROM creation_templates WHERE id=?').get(tplId);
+    if (!existing) return sendJson(res, 404, { error: '作品配方不存在' });
+    // SEC-007：仅属主或管理员可改他人配方（标常用/置顶与复用频次累加为全局交互，任何登录用户均可操作）
+    const isPinOrUseOnly = (
+      (b.is_pinned !== undefined || b.action === 'use' || b.use_count !== undefined || b.section_id !== undefined) &&
+      b.title === undefined &&
+      b.prompt === undefined &&
+      b.tags === undefined &&
+      b.type === undefined &&
+      b.space === undefined &&
+      b.style === undefined &&
+      b.purpose === undefined
+    );
+    if (!isAdmin && !isPinOrUseOnly && Number(existing.user_id) !== Number(sessionUser?.id)) {
+      return sendJson(res, 403, { error: '无权修改他人配方' });
+    }
+
+    const isAspectOnly = (
+      (b.poster_w !== undefined || b.poster_h !== undefined || b.aspect_ratio !== undefined) &&
+      b.title === undefined &&
+      b.is_pinned === undefined &&
+      b.section_id === undefined &&
+      b.action !== 'use' &&
+      b.use_count === undefined &&
+      b.space === undefined &&
+      b.style === undefined &&
+      b.purpose === undefined &&
+      b.type === undefined &&
+      b.prompt === undefined &&
+      b.tags === undefined
+    );
+
+    // 如果只是写入画幅，而已有 poster_w，则直接忽略并不改 updated_at
+    if (isAspectOnly && existing.poster_w !== null && existing.poster_w !== undefined) {
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          id: tplId,
+          title: existing.title,
+          is_pinned: Number(existing.is_pinned || 0),
+          use_count: Number(existing.use_count || 0),
+          space: existing.space || '',
+          style: existing.style || '',
+          purpose: existing.purpose || '',
+          type: existing.type || 'image',
+          aspect_ratio: existing.aspect_ratio || '16:9',
+          poster_w: Number(existing.poster_w),
+          poster_h: Number(existing.poster_h),
+          updated_at: existing.updated_at
+        }
+      });
+    }
+
+    let newTitle = b.title !== undefined ? String(b.title).trim() : existing.title;
+    if (!newTitle) return sendJson(res, 400, { error: '作品名称不可为空' });
+    let newIsPinned = b.is_pinned !== undefined ? (b.is_pinned ? 1 : 0) : Number(existing.is_pinned || 0);
+    let newUseCount = Number(existing.use_count || 0);
+    if (b.action === 'use') {
+      newUseCount += 1;
+    } else if (b.use_count !== undefined) {
+      newUseCount = Number(b.use_count) || 0;
+    }
+    let newSpace = b.space !== undefined ? String(b.space).trim() : (existing.space || '');
+    let newStyle = b.style !== undefined ? String(b.style).trim() : (existing.style || '');
+    let newPurpose = b.purpose !== undefined ? String(b.purpose).trim() : (existing.purpose || '');
+    let newType = b.type !== undefined ? String(b.type).trim() : (existing.type || 'image');
+    let newPrompt = b.prompt !== undefined ? String(b.prompt).trim() : existing.prompt;
+    let newTags = b.tags !== undefined ? JSON.stringify(b.tags) : existing.tags;
+
+    // 置顶/分区：区只收已置顶作品，一件同时只在一个区；新置顶进未分区第一位
+    let newSectionId = existing.section_id || null;
+    let newPinOrder = existing.pin_order !== null && existing.pin_order !== undefined ? Number(existing.pin_order) : null;
+    let newPinnedAt = existing.pinned_at !== null && existing.pinned_at !== undefined ? Number(existing.pinned_at) : null;
+    const wasPinned = Number(existing.is_pinned || 0) === 1;
+    if (b.is_pinned !== undefined) {
+      if (!b.is_pinned) {
+        newIsPinned = 0;
+        newSectionId = null;
+        newPinOrder = null;
+        newPinnedAt = null;
+      } else {
+        newIsPinned = 1;
+        if (!wasPinned) {
+          newSectionId = null;
+          const minRow = db.prepare(`
+            SELECT MIN(pin_order) AS m FROM creation_templates
+            WHERE user_id=? AND section_id IS NULL AND is_pinned=1 AND deleted_at IS NULL
+          `).get(sessionUser.id);
+          newPinOrder = Number.isFinite(minRow?.m) ? Number(minRow.m) - 1 : 0;
+          newPinnedAt = Date.now();
+        } else if (!newPinnedAt) {
+          newPinnedAt = Date.now();
+        }
+      }
+    }
+    if (b.section_id !== undefined) {
+      const target = b.section_id === null || b.section_id === '' ? null : String(b.section_id);
+      if (target) {
+        const sec = db.prepare('SELECT id FROM creation_sections WHERE id=? AND user_id=?').get(target, sessionUser.id);
+        if (!sec) return sendJson(res, 404, { error: '分区不存在' });
+        newSectionId = target;
+        const maxRow = db.prepare(`
+          SELECT MAX(pin_order) AS m FROM creation_templates
+          WHERE section_id=? AND is_pinned=1 AND deleted_at IS NULL
+        `).get(target);
+        newPinOrder = Number.isFinite(maxRow?.m) ? Number(maxRow.m) + 1 : 0;
+      } else {
+        newSectionId = null;
+        const maxRow = db.prepare(`
+          SELECT MAX(pin_order) AS m FROM creation_templates
+          WHERE user_id=? AND section_id IS NULL AND is_pinned=1 AND deleted_at IS NULL
+        `).get(sessionUser.id);
+        newPinOrder = Number.isFinite(maxRow?.m) ? Number(maxRow.m) + 1 : 0;
+      }
+      // 「放到」隐含置顶：区只收已置顶作品
+      newIsPinned = 1;
+      if (!newPinnedAt) newPinnedAt = Date.now();
+    }
+
+    // 仅当 existing.poster_w 为 null 时才允许写入画幅
+    let newPosterW = existing.poster_w;
+    let newPosterH = existing.poster_h;
+    let newAspectRatio = existing.aspect_ratio || '16:9';
+    if (existing.poster_w === null || existing.poster_w === undefined) {
+      if (b.poster_w !== undefined) newPosterW = b.poster_w !== null ? Number(b.poster_w) : null;
+      if (b.poster_h !== undefined) newPosterH = b.poster_h !== null ? Number(b.poster_h) : null;
+      if (b.aspect_ratio !== undefined) newAspectRatio = String(b.aspect_ratio);
+    }
+
+    const patchTx = db.transaction(() => {
+      const maxRow = db.prepare('SELECT MAX(updated_at) as max_u FROM creation_templates').get();
+      const now = Date.now();
+      const maxU = maxRow && maxRow.max_u ? maxRow.max_u : 0;
+      const updated_at = Math.max(now, maxU + 1);
+
+      db.prepare(`
+        UPDATE creation_templates
+        SET title=?, is_pinned=?, section_id=?, pin_order=?, pinned_at=?, use_count=?, space=?, style=?, purpose=?, type=?, prompt=?, tags=?, poster_w=?, poster_h=?, aspect_ratio=?, updated_at=?
+        WHERE id=?
+      `).run(newTitle, newIsPinned, newSectionId, newPinOrder, newPinnedAt, newUseCount, newSpace, newStyle, newPurpose, newType, newPrompt, newTags, newPosterW, newPosterH, newAspectRatio, updated_at, tplId);
+
+      return updated_at;
+    });
+    const finalUpdatedAt = patchTx.immediate();
+
+    return sendJson(res, 200, {
+      success: true,
+      data: {
+        id: tplId,
+        title: newTitle,
+        is_pinned: newIsPinned,
+        section_id: newSectionId,
+        pin_order: newPinOrder,
+        pinned_at: newPinnedAt,
+        use_count: newUseCount,
+        space: newSpace,
+        style: newStyle,
+        purpose: newPurpose,
+        type: newType,
+        poster_w: newPosterW !== null && newPosterW !== undefined ? Number(newPosterW) : null,
+        poster_h: newPosterH !== null && newPosterH !== undefined ? Number(newPosterH) : null,
+        aspect_ratio: newAspectRatio,
+        updated_at: finalUpdatedAt
+      }
+    });
+  }
+
+  // 删除创作配方 (同事务写入墓碑)
+  const mDelTpl = pathname.match(/^\/creation-templates\/([^\/]+)$/);
+  if (mDelTpl && req.method === 'DELETE') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationTemplatesSchema(db);
+    const tplId = decodeURIComponent(mDelTpl[1]);
+    // SEC-007：仅属主或管理员可删
+    const tplRow = db.prepare('SELECT user_id FROM creation_templates WHERE id=?').get(tplId);
+    if (tplRow && !isAdmin && Number(tplRow.user_id) !== Number(sessionUser?.id)) {
+      return sendJson(res, 403, { error: '无权删除他人配方' });
+    }
+
+    const delTx = db.transaction(() => {
+      const maxRow = db.prepare('SELECT MAX(deleted_at) as max_d FROM creation_template_tombstones').get();
+      const now = Date.now();
+      const maxD = maxRow && maxRow.max_d ? maxRow.max_d : 0;
+      const deleted_at = Math.max(now, maxD + 1);
+
+      db.prepare(`
+        INSERT OR REPLACE INTO creation_template_tombstones (id, user_id, deleted_at)
+        VALUES (?, ?, ?)
+      `).run(tplId, tplRow ? tplRow.user_id : (sessionUser?.id || 1), deleted_at);
+
+      // 软删进创作库自己的回收：记录与私有文件都留着，恢复时整包回来
+      db.prepare(`
+        UPDATE creation_templates
+        SET deleted_at=?, trashed_section_id=COALESCE(section_id, trashed_section_id)
+        WHERE id=?
+      `).run(deleted_at, tplId);
+      return deleted_at;
+    });
+    const deletedAt = delTx.immediate();
+
+    return sendJson(res, 200, { success: true, data: { id: tplId, deleted_at: deletedAt } });
+  }
+
+  // 主动拉取/同步外部数据源创作资产 (POST /api/creation-templates/pull-external)
+  if (pathname === '/creation-templates/pull-external' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationTemplatesSchema(db);
+    const b = await parseBody(req).catch(() => ({}));
+    try {
+      const baResource = require('./ba-resource');
+      const keywords = Array.isArray(b.keywords) && b.keywords.length ? b.keywords : (b.keyword ? [String(b.keyword)] : undefined);
+      const summary = await baResource.syncBaCreationCatalog(services, {
+        keywords,
+        size: Math.min(50, Math.max(1, Number(b.size) || 50)),
+        maxPages: Math.min(5, Math.max(1, Number(b.maxPages) || 2)),
+        type: b.type || 'all'
+      });
+      // 若有新资产入库，广播事件
+      try {
+        if (summary.cards > 0 && typeof services.broadcastAssetChange === 'function') {
+          services.broadcastAssetChange({ type: 'creation_templates', count: summary.cards });
+        }
+      } catch {}
+      return sendJson(res, 200, { success: true, count: summary.cards, summary });
+    } catch (err) {
+      const isUnconfigured = /未配置/.test(err.message);
+      if (isUnconfigured) {
+        return sendJson(res, 200, {
+          success: false,
+          unconfigured: true,
+          count: 0,
+          error: '外部数据源未配置，已跳过主动同步'
+        });
+      }
+      console.warn('[creation-templates] 主动拉取外部数据源异常:', err.message);
+      return sendJson(res, 200, {
+        success: false,
+        error: err.message,
+        count: 0
+      });
+    }
+  }
+
+    // ===== 基础属性库 (/api/base-library/*) =====
+  if (pathname.startsWith('/base-library/')) {
+        const { handleBaseLibraryRoutes } = require('./base-library/routes');
+    const handled = await handleBaseLibraryRoutes(services, req, res, pathname, urlObj, {
+      sessionUser,
+      isAdmin,
+      isViewerOrAdmin,
+      parseBody,
+      sendJson
+    });
+    if (handled !== false) return;
+  }
+
+  // 8. 快捷实例分割 (YOLO-seg 探测 + 顺时针透视四点 quad 与多边形 polygon 提取)
+  if ((pathname === '/ai/segment' || pathname === '/ai/detect') && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    const yoloHost = process.env.YOLO_SEG_URL || 'http://127.0.0.1:5001/detect';
+    
+    // 默认高精度室内家具 Fallback 数据 (符合客户端吸附与替换规范)
+    const buildFallbackDetections = () => [
+      {
+        id: 'det_sofa_001',
+        label: '意式三人真皮沙发',
+        class_name: 'sofa',
+        confidence: 0.94,
+        bbox: { x1: 150, y1: 420, x2: 780, y2: 890 },
+        quad: [[170, 440], [760, 425], [750, 875], [160, 885]],
+        polygon: [[170, 440], [300, 435], [520, 430], [760, 425], [770, 600], [750, 875], [450, 880], [160, 885]],
+        mask_url: '/api/viewer/ai/masks/seg_sofa_001.png'
+      },
+      {
+        id: 'det_table_002',
+        label: '极简悬浮岩板茶几',
+        class_name: 'dining table',
+        confidence: 0.89,
+        bbox: { x1: 320, y1: 720, x2: 680, y2: 980 },
+        quad: [[330, 730], [670, 725], [660, 970], [325, 975]],
+        polygon: [[330, 730], [500, 726], [670, 725], [665, 850], [660, 970], [490, 973], [325, 975], [328, 850]]
+      },
+      {
+        id: 'det_chair_003',
+        label: '意式轻奢休闲单椅',
+        class_name: 'chair',
+        confidence: 0.86,
+        bbox: { x1: 50, y1: 450, x2: 240, y2: 750 },
+        quad: [[60, 460], [230, 455], [225, 740], [55, 745]],
+        polygon: [[60, 460], [145, 458], [230, 455], [228, 600], [225, 740], [140, 743], [55, 745], [58, 600]]
+      }
+    ];
+
+    try {
+      if (b.image) {
+        let imgBuf = null;
+        const rawImg = String(b.image).trim();
+        if (rawImg.startsWith('data:image')) {
+          const parts = rawImg.split(',');
+          if (parts.length === 2) imgBuf = Buffer.from(parts[1], 'base64');
+        } else if (/^https?:\/\//i.test(rawImg)) {
+          const r = await fetch(rawImg, { signal: AbortSignal.timeout(3000) });
+          if (r.ok) imgBuf = Buffer.from(await r.arrayBuffer());
+        } else {
+          // LOGIC-003：原实现走 HTTP 自环 fetch，且引用了本模块不存在的 PORT 变量——
+          // 必然 ReferenceError 被空 catch 吞掉，imgBuf 恒为 null，YOLO 必失败，
+          // 最终退回 buildFallbackDetections 的硬编码假坐标。改为进程内直接解析：
+          // 缩略图优先（与原 /image 端点行为一致），缺失时回退主产物/origin。
+          try {
+            const thumb = path.join(config.dataDir, 'cache', 'thumbs', `${rawImg}.jpg`);
+            if (fs.existsSync(thumb)) {
+              imgBuf = fs.readFileSync(thumb);
+            } else {
+              let deriv = db.prepare("SELECT * FROM derivatives WHERE asset_fid=? AND kind='origin' LIMIT 1").get(rawImg);
+              if (!deriv) {
+                const a = db.prepare('SELECT main_derivative_id FROM assets WHERE fid=?').get(rawImg);
+                if (a?.main_derivative_id) deriv = db.prepare('SELECT * FROM derivatives WHERE id=?').get(a.main_derivative_id);
+              }
+              if (!deriv) {
+                deriv = db.prepare("SELECT * FROM derivatives WHERE asset_fid=? ORDER BY CASE kind WHEN 'origin' THEN 0 ELSE 1 END LIMIT 1").get(rawImg);
+              }
+              if (deriv) {
+                const fp = await resolveDerivativeFile(services, deriv);
+                if (fp && fs.existsSync(fp)) imgBuf = fs.readFileSync(fp);
+              }
+            }
+          } catch (e) {}
+        }
+
+        if (imgBuf && imgBuf.length > 0) {
+          const form = new FormData();
+          const blob = new Blob([imgBuf], { type: 'image/jpeg' });
+          form.append('image', blob, 'input.jpg');
+          if (b.conf) form.append('conf', String(b.conf));
+          if (b.iou) form.append('iou', String(b.iou));
+
+          const controller = new AbortController();
+          const tId = setTimeout(() => controller.abort(), 6000);
+          const yoloRes = await fetch(yoloHost, {
+            method: 'POST',
+            body: form,
+            signal: controller.signal
+          }).finally(() => clearTimeout(tId));
+
+          if (yoloRes.ok) {
+            const yoloData = await yoloRes.json();
+            if (yoloData.success && Array.isArray(yoloData.detections)) {
+              // 提取并补齐 quad 与 polygon
+              const detections = yoloData.detections.map((d, idx) => {
+                const bx = d.bbox || {};
+                const x1 = bx.x1 ?? 0;
+                const y1 = bx.y1 ?? 0;
+                const x2 = bx.x2 ?? 100;
+                const y2 = bx.y2 ?? 100;
+                const quad = d.quad || [
+                  [Math.round(x1), Math.round(y1)],
+                  [Math.round(x2), Math.round(y1)],
+                  [Math.round(x2), Math.round(y2)],
+                  [Math.round(x1), Math.round(y2)]
+                ];
+                const polygon = d.polygon || [
+                  [Math.round(x1), Math.round(y1)],
+                  [Math.round((x1 + x2) / 2), Math.round(y1)],
+                  [Math.round(x2), Math.round(y1)],
+                  [Math.round(x2), Math.round((y1 + y2) / 2)],
+                  [Math.round(x2), Math.round(y2)],
+                  [Math.round((x1 + x2) / 2), Math.round(y2)],
+                  [Math.round(x1), Math.round(y2)],
+                  [Math.round(x1), Math.round((y1 + y2) / 2)]
+                ];
+                return {
+                  id: `det_${d.class_name || 'obj'}_${idx + 1}`,
+                  label: d.label || d.class_name || '家具对象',
+                  class_name: d.class_name || 'object',
+                  confidence: d.score ?? d.confidence ?? 0.9,
+                  bbox: { x1, y1, x2, y2 },
+                  quad,
+                  polygon,
+                  mask_url: d.mask_png || undefined
+                };
+              });
+
+              return sendJson(res, 200, {
+                success: true,
+                data: {
+                  detections,
+                  fallback: false,
+                  inference_time: yoloData.inference_time
+                }
+              });
+            }
+          }
+        }
+      }
+    } catch (e) {}
+
+    return sendJson(res, 200, {
+      success: true,
+      data: {
+        detections: buildFallbackDetections(),
+        fallback: true
+      }
+    });
+  }
+
+  // 9. 产品模型预置列表与预览图/GLB下载
+  if (pathname === '/products/presets' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    let rows = [];
+    try {
+      rows = db.prepare('SELECT * FROM product_presets WHERE enabled=1 ORDER BY sort ASC, id ASC').all();
+    } catch (e) {}
+    
+    if (!rows || rows.length === 0) {
+      rows = [
+        {
+          id: 'sofa_electric_single',
+          name: '极简单人电动真皮沙发',
+          category: 'furniture',
+          facing: 45,
+          preview_file: 'sofa_single.png',
+          model_file: 'sofa_electric_single.glb',
+          tags_json: JSON.stringify(['单人位', '电动展开', '意大利头层牛皮', '极简奶油风']),
+          dimensions_json: JSON.stringify({ width: 950, depth: 1050, height: 920 }),
+          snapshots_json: JSON.stringify({
+            right_45: '/api/viewer/products/previews/sofa_electric_single_right_45.png',
+            front: '/api/viewer/products/previews/sofa_electric_single_front.png',
+            front_0: '/api/viewer/products/previews/sofa_electric_single_front_0.png',
+            right_90: '/api/viewer/products/previews/sofa_electric_single_right_90.png'
+          })
+        }
+      ];
+    }
+
+    const presets = rows.map(r => {
+      let tags = [];
+      let dimensions = null;
+      let snapshots = {};
+      try { tags = JSON.parse(r.tags_json || '[]'); } catch {}
+      try { dimensions = JSON.parse(r.dimensions_json || '{}'); } catch {}
+      try { snapshots = JSON.parse(r.snapshots_json || '{}'); } catch {}
+      if ((!snapshots || Object.keys(snapshots).length === 0) && r.preview_file) {
+        snapshots = {
+          right_45: `/api/viewer/products/previews/${r.preview_file}`
+        };
+      }
+      return {
+        id: r.id,
+        name: r.name,
+        category: r.category,
+        facing: typeof r.facing === 'number' ? r.facing : 180,
+        preview_url: `/api/viewer/products/previews/${r.preview_file || (r.id + '.png')}`,
+        model_url: `/api/viewer/products/models/${r.model_file || 'sofa_default.glb'}`,
+        tags,
+        dimensions,
+        snapshots
+      };
+    });
+    return sendJson(res, 200, { success: true, data: presets });
+  }
+
+  const mProdPreview = pathname.match(/^\/(?:viewer\/)?products\/previews\/([^\/]+)$/);
+  if (mProdPreview && req.method === 'GET') {
+    // SEC-003：先解码再取 basename，杜绝 ..%2F..%2F 型 URL 编码路径穿越。
+    const fn = path.basename(decodeURIComponent(mProdPreview[1]));
+    if (!fn || fn === '.' || fn === '..') return sendJson(res, 400, { error: '非法文件名' });
+    const candidateDirs = [
+      path.join(__dirname, '../data/previews'),
+      path.join(process.env.ML_DATA_DIR || path.join(require('os').homedir(), '.dsh-material-library'), 'previews'),
+      path.join('/mnt/c/Users/lrp/DevEcoStudioProjects/MaterialLibraryServer/data/previews'),
+      path.join('C:/Users/lrp/DevEcoStudioProjects/MaterialLibraryServer/data/previews')
+    ];
+    let found = null;
+    for (const d of candidateDirs) {
+      const cp = path.join(d, fn);
+      if (fs.existsSync(cp)) { found = cp; break; }
+    }
+    if (!found) return sendJson(res, 404, { error: '预览图未找到' });
+    // 快照上传后统一存为 .png 文件名，但内容可能是 WebP（前端压缩降采样），
+    // 按魔数嗅探真实类型，避免固定 image/png 与实际字节不符。
+    let previewType = 'image/png';
+    try {
+      const fd = fs.openSync(found, 'r');
+      const head = Buffer.alloc(12);
+      fs.readSync(fd, head, 0, 12, 0);
+      fs.closeSync(fd);
+      if (head.subarray(0, 4).toString('hex') === '89504e47') previewType = 'image/png';
+      else if (head.subarray(0, 4).toString('ascii') === 'RIFF' && head.subarray(8, 12).toString('ascii') === 'WEBP') previewType = 'image/webp';
+      else if (head.subarray(0, 3).toString('hex') === 'ffd8ff') previewType = 'image/jpeg';
+    } catch (_) {}
+    res.writeHead(200, {
+      'Content-Type': previewType,
+      'X-Content-Type-Options': 'nosniff',
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'public, max-age=86400'
+    });
+    if (req.method === 'HEAD') return res.end();
+    return fs.createReadStream(found).pipe(res);
+  }
+
+  const mThumb = pathname.match(/^\/thumbs\/([^\/]+)$/);
+  if (mThumb && (req.method === 'GET' || req.method === 'HEAD')) {
+    const rawFn = decodeURIComponent(mThumb[1]);
+    const fn = path.basename(rawFn);
+    if (!fn || fn === '.' || fn === '..') return sendJson(res, 400, { error: '非法文件名' });
+    const candidateDirs = [
+      path.join(__dirname, '../data/cache/thumbs'),
+      path.join(process.env.ML_DATA_DIR || path.join(require('os').homedir(), '.dsh-material-library'), 'cache/thumbs'),
+      path.join(__dirname, '../data/previews'),
+    ];
+    let found = null;
+    for (const d of candidateDirs) {
+      const cp = path.join(d, fn);
+      if (fs.existsSync(cp)) { found = cp; break; }
+    }
+    if (!found) {
+      const fid = fn.replace(/\.[a-zA-Z0-9]+$/, '');
+      const asset = db.prepare('SELECT fid, storage_ref, storage_type, mime_type FROM assets WHERE fid = ?').get(fid);
+      if (asset && asset.storage_ref) {
+        const assetDirs = [
+          path.join(__dirname, '../data/originals'),
+          path.join(process.env.ML_DATA_DIR || path.join(require('os').homedir(), '.dsh-material-library'), 'originals'),
+        ];
+        for (const ad of assetDirs) {
+          const ap = path.join(ad, asset.storage_ref);
+          if (fs.existsSync(ap)) { found = ap; break; }
+        }
+      }
+    }
+    if (found && /\.(mp4|mov|webm|mkv|m4v)$/i.test(found)) found = null;
+    if (!found) {
+      const fid = fn.replace(/\.[a-zA-Z0-9]+$/, '');
+      try {
+        const deriv = db.prepare(`
+          SELECT * FROM derivatives
+          WHERE asset_fid=? AND (mime LIKE 'video/%' OR file_name LIKE '%.mp4' OR file_name LIKE '%.mov' OR file_name LIKE '%.webm')
+          ORDER BY id DESC LIMIT 1
+        `).get(fid);
+        if (deriv) {
+          const ok = await ensureVideoThumbAsync(services, fid, deriv);
+          const dataDir = services?.config?.dataDir || process.env.ML_DATA_DIR || path.join(require('os').homedir(), '.dsh-material-library');
+          const out = path.join(dataDir, 'cache', 'thumbs', `${fid}.jpg`);
+          if (ok && fs.existsSync(out)) found = out;
+        }
+      } catch (err) {
+        console.warn('[api] 缩略图抽帧失败', fn, err.message);
+      }
+    }
+    if (!found) {
+      return sendJson(res, 404, { error: '缩略图未找到' });
+    }
+    const ext = path.extname(found).toLowerCase();
+    const mime = ext === '.png' ? 'image/png' : (ext === '.webp' ? 'image/webp' : 'image/jpeg');
+    res.writeHead(200, {
+      'Content-Type': mime,
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'public, max-age=86400'
+    });
+    if (req.method === 'HEAD') return res.end();
+    return fs.createReadStream(found).pipe(res);
+  }
+  const mProdGlb = pathname.match(/^\/(?:viewer\/)?products\/models\/([^\/]+)$/);
+  if (mProdGlb && req.method === 'GET') {
+    // SEC-003：同 previews，basename 防穿越。
+    const fn = path.basename(decodeURIComponent(mProdGlb[1]));
+    if (!fn || fn === '.' || fn === '..') return sendJson(res, 400, { error: '非法文件名' });
+    const candidatePaths = [
+      path.join(__dirname, '../data/models', fn),
+      path.join(process.env.ML_DATA_DIR || path.join(require('os').homedir(), '.dsh-material-library'), 'models', fn),
+      path.join('Y:/home/lrp/my_folder/smu/KX2BFK_umbra_quick', fn),
+      path.join('/mnt/c/Users/lrp/DevEcoStudioProjects/MaterialLibraryServer/data/models', fn),
+      path.join('C:/Users/lrp/DevEcoStudioProjects/MaterialLibraryServer/data/models', fn),
+      path.join('C:/Users/lrp/Doubao/chats/2026-09-04/new-chat', fn),
+      path.join('/mnt/c/Users/lrp/Doubao/chats/2026-09-04/new-chat', fn)
+    ];
+    let found = null;
+    for (const cp of candidatePaths) {
+      if (fs.existsSync(cp)) { found = cp; break; }
+    }
+    if (!found) return sendJson(res, 404, { error: '3D 模型文件未找到' });
+    res.writeHead(200, {
+      'Content-Type': 'model/gltf-binary',
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'public, max-age=86400'
+    });
+    return fs.createReadStream(found).pipe(res);
+  }
+
+  // 上传单品 GLB / 预览
+  // POST /products/upload  { name, model_b64, preview_b64?, snapshots?, tags?, dimensions? }
+  if (pathname === '/products/upload' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    // GLB base64 会膨胀 ~33%，叠加多张高分辨率快照后 64MB 很容易爆，超限旧逻辑直接
+    // destroy socket，30002 代理侧表现为 ECONNRESET。这里对齐全局上传上限并优雅回 413。
+    const b = await parseBody(req, ML_MAX_UPLOAD_BYTES);
+    if (b && b.__bodyTooLarge) {
+      return sendJson(res, 413, { success: false, error: `模型包过大（超过 ${Math.round(ML_MAX_UPLOAD_BYTES / 1024 / 1024)}MB JSON 上限），请精简 GLB 或减少快照后重试` });
+    }
+    try {
+      const name = String(b.name || '自定义单品').slice(0, 80);
+      const id = 'custom_' + Date.now().toString(36);
+      let modelFile = id + '.glb';
+      const modelB64 = String(b.model_b64 || b.modelB64 || '').replace(/^data:[^,]+,/, '');
+      if (!modelB64) return sendJson(res, 400, { error: '缺少 model_b64（GLB）' });
+      const modelsDir = path.join(
+        process.env.ML_DATA_DIR || path.join(require('os').homedir(), '.dsh-material-library'),
+        'models'
+      );
+      fs.mkdirSync(modelsDir, { recursive: true });
+      const modelPath = path.join(modelsDir, modelFile);
+      fs.writeFileSync(modelPath, Buffer.from(modelB64, 'base64'));
+
+      const previewsDir = path.join(
+        process.env.ML_DATA_DIR || path.join(require('os').homedir(), '.dsh-material-library'),
+        'previews'
+      );
+      fs.mkdirSync(previewsDir, { recursive: true });
+
+      const localPreviewsDir = path.join(__dirname, '../data/previews');
+      if (fs.existsSync(localPreviewsDir)) {
+        try { fs.mkdirSync(localPreviewsDir, { recursive: true }); } catch (_) {}
+      }
+
+      let previewFile = '';
+      const previewB64 = String(b.preview_b64 || b.previewB64 || '').replace(/^data:[^,]+,/, '');
+      if (previewB64) {
+        previewFile = id + '.png';
+        const pBuf = Buffer.from(previewB64, 'base64');
+        fs.writeFileSync(path.join(previewsDir, previewFile), pBuf);
+        if (fs.existsSync(localPreviewsDir)) {
+          try { fs.writeFileSync(path.join(localPreviewsDir, previewFile), pBuf); } catch (_) {}
+        }
+      }
+
+      // 处理多角度快照或根据 preview_b64 构造快照映射
+      const snapshotsMap = {};
+      if (b.snapshots && typeof b.snapshots === 'object') {
+        for (const [angleKey, b64Data] of Object.entries(b.snapshots)) {
+          if (!b64Data) continue;
+          const safeAngle = String(angleKey).replace(/[^a-zA-Z0-9_\-\u4e00-\u9fa5]/g, '_') || 'default';
+          const raw = String(b64Data).replace(/^data:[^,]+,/, '');
+          // id 来自 URL decode，path.basename 纵深防御编码斜杠穿越（DB 查询仍用原 id）
+          const snapFileName = `${path.basename(String(id))}_${safeAngle}.png`;
+          const sBuf = Buffer.from(raw, 'base64');
+          fs.writeFileSync(path.join(previewsDir, snapFileName), sBuf);
+          if (fs.existsSync(localPreviewsDir)) {
+            try { fs.writeFileSync(path.join(localPreviewsDir, snapFileName), sBuf); } catch (_) {}
+          }
+          snapshotsMap[angleKey] = `/api/viewer/products/previews/${snapFileName}`;
+        }
+      }
+      if (previewFile && !snapshotsMap.right_45 && !snapshotsMap.front) {
+        snapshotsMap.right_45 = `/api/viewer/products/previews/${previewFile}`;
+      }
+      if (!previewFile && (snapshotsMap.right_45 || snapshotsMap.front || snapshotsMap.front_0)) {
+        const primarySnap = snapshotsMap.right_45 || snapshotsMap.front || snapshotsMap.front_0;
+        previewFile = path.basename(primarySnap);
+      }
+
+      try {
+        db.prepare(`
+          CREATE TABLE IF NOT EXISTS product_presets (
+            id TEXT PRIMARY KEY,
+            name TEXT,
+            category TEXT,
+            facing REAL DEFAULT 45,
+            preview_file TEXT,
+            model_file TEXT,
+            tags_json TEXT,
+            dimensions_json TEXT,
+            snapshots_json TEXT,
+            enabled INTEGER DEFAULT 1,
+            sort INTEGER DEFAULT 100,
+            created_at INTEGER,
+            updated_at INTEGER
+          )
+        `).run();
+        try {
+          db.prepare('ALTER TABLE product_presets ADD COLUMN snapshots_json TEXT').run();
+        } catch (_) {}
+
+        db.prepare(`
+          INSERT INTO product_presets (id, name, category, facing, preview_file, model_file, tags_json, dimensions_json, snapshots_json, enabled, sort, created_at)
+          VALUES (?,?,?,?,?,?,?,?,?,1,?,?)
+        `).run(
+          id,
+          name,
+          b.category || 'furniture',
+          Number(b.facing || 45),
+          previewFile,
+          modelFile,
+          JSON.stringify(b.tags || []),
+          JSON.stringify(b.dimensions || {}),
+          JSON.stringify(snapshotsMap),
+          100,
+          Date.now()
+        );
+      } catch (e) {
+        return sendJson(res, 500, { error: '入库失败: ' + e.message });
+      }
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          id,
+          name,
+          model_url: `/api/viewer/products/models/${modelFile}`,
+          preview_url: previewFile ? `/api/viewer/products/previews/${previewFile}` : null,
+          snapshots: snapshotsMap
+        },
+      });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 3D 单品家具单项管理：PUT / PATCH /products/presets/:id
+  const mPutPreset = pathname.match(/^\/products\/presets\/([^\/]+)$/);
+  if (mPutPreset && (req.method === 'PUT' || req.method === 'PATCH')) {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const id = decodeURIComponent(mPutPreset[1]);
+    const b = await parseBody(req);
+    try {
+      const existing = db.prepare('SELECT * FROM product_presets WHERE id=?').get(id);
+
+      const name = b.name !== undefined ? String(b.name).slice(0, 80) : (existing ? existing.name : '未命名单品');
+      const category = b.category !== undefined ? String(b.category) : (existing ? existing.category : 'furniture');
+      const facing = b.facing !== undefined ? Number(b.facing) : (existing ? existing.facing : 45);
+      const enabled = b.enabled !== undefined ? (b.enabled ? 1 : 0) : (existing ? existing.enabled : 1);
+      const sort = b.sort !== undefined ? Number(b.sort) : (existing ? existing.sort : 100);
+      const tags_json = b.tags ? JSON.stringify(b.tags) : (existing ? existing.tags_json : '[]');
+      const dimensions_json = b.dimensions ? JSON.stringify(b.dimensions) : (existing ? existing.dimensions_json : '{}');
+
+      let previewFile = existing ? existing.preview_file : (b.preview_file || '');
+      const previewB64 = String(b.preview_b64 || b.previewB64 || '').replace(/^data:[^,]+,/, '');
+      if (previewB64) {
+        previewFile = id + '.png';
+        const previewsDir = path.join(
+          process.env.ML_DATA_DIR || path.join(require('os').homedir(), '.dsh-material-library'),
+          'previews'
+        );
+        fs.mkdirSync(previewsDir, { recursive: true });
+        fs.writeFileSync(path.join(previewsDir, previewFile), Buffer.from(previewB64, 'base64'));
+      }
+
+      let snapshots_json = existing ? (existing.snapshots_json || '{}') : '{}';
+      if (b.snapshots) {
+        snapshots_json = JSON.stringify(b.snapshots);
+        if (!previewFile && (b.snapshots.right_45 || b.snapshots.front || b.snapshots.front_0)) {
+          const prim = b.snapshots.right_45 || b.snapshots.front || b.snapshots.front_0;
+          previewFile = path.basename(prim);
+        }
+      }
+
+      try {
+        db.prepare('ALTER TABLE product_presets ADD COLUMN snapshots_json TEXT').run();
+      } catch (_) {}
+
+      if (existing) {
+        db.prepare(`
+          UPDATE product_presets
+          SET name=?, category=?, facing=?, preview_file=?, tags_json=?, dimensions_json=?, snapshots_json=?, enabled=?, sort=?, updated_at=?
+          WHERE id=?
+        `).run(name, category, facing, previewFile, tags_json, dimensions_json, snapshots_json, enabled, sort, Date.now(), id);
+      } else {
+        db.prepare(`
+          INSERT INTO product_presets (id, name, category, facing, preview_file, model_file, tags_json, dimensions_json, snapshots_json, enabled, sort, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(id, name, category, facing, previewFile, b.model_file || '', tags_json, dimensions_json, snapshots_json, enabled, sort, Date.now(), Date.now());
+      }
+
+      const updated = db.prepare('SELECT * FROM product_presets WHERE id=?').get(id);
+      return sendJson(res, 200, { success: true, data: updated, message: '更新 3D 单品成功' });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 3D 单品家具删除：DELETE /products/presets/:id
+  if (mPutPreset && req.method === 'DELETE') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const id = decodeURIComponent(mPutPreset[1]);
+    try {
+      db.prepare('DELETE FROM product_presets WHERE id=?').run(id);
+      return sendJson(res, 200, { success: true, deleted: id, message: '已删除 3D 单品' });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 3D 单品家具标准视角快照存储：POST /products/presets/:id/snapshots 或 /snapshot
+  const mSnapshots = pathname.match(/^\/products\/presets\/([^\/]+)\/snapshots?$/);
+  if (mSnapshots && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const id = decodeURIComponent(mSnapshots[1]);
+    const b = await parseBody(req, 32 * 1024 * 1024);
+    try {
+      const existing = db.prepare('SELECT * FROM product_presets WHERE id=?').get(id);
+      if (!existing) return sendJson(res, 404, { error: '未找到该 3D 模型单品' });
+
+      // snapshots: { front_0?: base64, right_45?: base64, right_90?: base64, ... } 或单张 { angle?: 'right_45', snapshot_b64?: base64 }
+      let incomingSnapshots = {};
+      if (b.snapshots && typeof b.snapshots === 'object') {
+        incomingSnapshots = { ...b.snapshots };
+      }
+      if (b.snapshot_b64 || b.snapshot || b.image) {
+        const ang = b.angle || b.view || 'right_45';
+        incomingSnapshots[ang] = b.snapshot_b64 || b.snapshot || b.image;
+      }
+
+      const previewsDir = path.join(
+        process.env.ML_DATA_DIR || path.join(require('os').homedir(), '.dsh-material-library'),
+        'previews'
+      );
+      fs.mkdirSync(previewsDir, { recursive: true });
+
+      const localPreviewsDir = path.join(__dirname, '../data/previews');
+      if (fs.existsSync(localPreviewsDir)) {
+        try { fs.mkdirSync(localPreviewsDir, { recursive: true }); } catch (_) {}
+      }
+
+      let currentMap = {};
+      try { currentMap = JSON.parse(existing.snapshots_json || '{}'); } catch (_) {}
+
+      // \u65f6\u95f4\u6233\u65b0\u6587\u4ef6\u540d\u4f1a\u8ba9\u88ab\u9876\u66ff\u7684\u65e7 PNG \u6b8b\u7559\u5728\u76d8\u4e0a\uff0c\u8bb0\u5f55\u540e\u7edf\u4e00\u6e05\u7406
+      const replacedFiles = [];
+      let mainPreviewCandidate = null;
+      for (const [angleKey, b64Data] of Object.entries(incomingSnapshots)) {
+        if (!b64Data) continue;
+        const prevUrl = currentMap[angleKey];
+        if (typeof prevUrl === 'string') {
+          const prevName = path.basename(prevUrl);
+          if (prevName) replacedFiles.push(prevName);
+        }
+        const safeAngle = String(angleKey).replace(/[^a-zA-Z0-9_\-\u4e00-\u9fa5]/g, '_') || 'default';
+        const raw = String(b64Data).replace(/^data:[^,]+,/, '');
+        // 文件名带时间戳，避免浏览器把上一张棚拍图按旧地址缓存下来。
+        const snapFileName = `${id}_${safeAngle}_${Date.now().toString(36)}.png`;
+        const snapBuf = Buffer.from(raw, 'base64');
+        fs.writeFileSync(path.join(previewsDir, snapFileName), snapBuf);
+        if (fs.existsSync(localPreviewsDir)) {
+          try { fs.writeFileSync(path.join(localPreviewsDir, snapFileName), snapBuf); } catch (_) {}
+        }
+        currentMap[angleKey] = `/api/viewer/products/previews/${snapFileName}`;
+        if (angleKey === 'right_45' || !mainPreviewCandidate) {
+          mainPreviewCandidate = snapFileName;
+        }
+      }
+
+      // 仅清理已不在任何角度映射中、且不是当前主预览的旧文件
+      if (replacedFiles.length) {
+        const stillReferenced = new Set([
+          ...Object.values(currentMap)
+            .map((u) => (typeof u === 'string' ? path.basename(u) : ''))
+            .filter(Boolean),
+          existing.preview_file,
+        ]);
+        for (const oldName of replacedFiles) {
+          if (stillReferenced.has(oldName)) continue;
+          for (const dir of [previewsDir, localPreviewsDir]) {
+            try { fs.unlinkSync(path.join(dir, oldName)); } catch (_) {}
+          }
+        }
+      }
+
+      try {
+        db.prepare('ALTER TABLE product_presets ADD COLUMN snapshots_json TEXT').run();
+      } catch (_) {}
+
+      // 同步 preview_file 仅当未设置或是占位色块；补传 right_90 等角度不得顶替主预览
+      const previewNeedsUpdate = !existing.preview_file ||
+        existing.preview_file.endsWith('.svg') ||
+        existing.preview_file === 'sofa_single.png';
+
+      if (mainPreviewCandidate && previewNeedsUpdate) {
+        db.prepare('UPDATE product_presets SET snapshots_json=?, preview_file=?, updated_at=? WHERE id=?')
+          .run(JSON.stringify(currentMap), mainPreviewCandidate, Date.now(), id);
+      } else {
+        db.prepare('UPDATE product_presets SET snapshots_json=?, updated_at=? WHERE id=?')
+          .run(JSON.stringify(currentMap), Date.now(), id);
+      }
+
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          snapshots: currentMap,
+          preview_file: mainPreviewCandidate || existing.preview_file,
+          preview_url: `/api/viewer/products/previews/${mainPreviewCandidate || existing.preview_file}`
+        }
+      });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 按需处理任务：提交 / 查询
+  const mProc = pathname.match(/^\/assets\/([^\/]+)\/process$/);
+  if (mProc && req.method === 'POST') {
+    const fid = decodeURIComponent(mProc[1]);
+    const b = await parseBody(req);
+    try {
+      const job = processSvc.enqueueProcessJob(db, {
+        assetFid: fid,
+        presetId: b.preset_id || null,
+        action: b.action,
+        params: b.params,
+        createdBy: sessionUser?.username || 'viewer'
+      });
+      return sendJson(res, 200, { success: true, data: job });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+  if (mProc && req.method === 'GET') {
+    const fid = decodeURIComponent(mProc[1]);
+    return sendJson(res, 200, { success: true, data: { items: processSvc.listProcessJobs(db, fid) } });
+  }
+
+  // GET /ai/masks/:id — 引擎拉取涂抹/四点栅格化遮罩
+  const mAiMask = pathname.match(/^\/ai\/masks\/([^\/]+)$/);
+  if (mAiMask && req.method === 'GET') {
+    const maskId = decodeURIComponent(mAiMask[1]);
+    const filePath = umbra.resolveMaskFile(config, maskId);
+    if (!filePath) return sendJson(res, 404, { success: false, error: '遮罩不存在' });
+    const ext = path.extname(filePath).toLowerCase();
+    const contentType = ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : ext === '.webp' ? 'image/webp' : 'image/png';
+    res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'public, max-age=300' });
+    fs.createReadStream(filePath).pipe(res);
+    return;
+  }
+
+  // POST /ai/upload — 精修贴图/遮罩临时上传，返回引擎可拉 URL
+  if (pathname === '/ai/upload' && req.method === 'POST') {
+    try {
+      const { parseMultipart, readRequestBuffer } = require('./ingest');
+      const ct = String(req.headers['content-type'] || '');
+      if (!ct.includes('multipart/form-data')) {
+        return sendJson(res, 400, { success: false, error: '需要 multipart file' });
+      }
+      const buf = await readRequestBuffer(req, 40 * 1024 * 1024);
+      const { files } = parseMultipart(buf, ct);
+      const file = files.find((f) => f.name === 'file') || files[0];
+      if (!file || !file.data) return sendJson(res, 400, { success: false, error: '缺少 file' });
+      const ext = path.extname(file.filename || '') || '.png';
+      const saved = await umbra.persistUploadedBuffer(db, config, file.data, ext);
+      return sendJson(res, 200, { success: true, data: { id: saved.maskId, url: saved.url } });
+    } catch (e) {
+      return sendJson(res, e.statusCode || 400, { success: false, error: e.message });
+    }
+  }
+
+  // ===== 快捷操作能力注册表与就绪状态查询 =====
+  // GET /ai/capabilities
+  if (pathname === '/ai/capabilities' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const caps = getCapabilities(db);
+    return sendJson(res, 200, { success: true, data: caps });
+  }
+
+  if (pathname === '/exports/register' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req, 16 * 1024 * 1024);
+    try {
+      const { registerExport } = require('./export-registry');
+      const crypto = require('crypto');
+      let sha = String(b.sha256 || '').trim().toLowerCase();
+      let md5 = String(b.md5 || '').trim().toLowerCase();
+      let phash = String(b.phash || '').trim();
+      const raw = b.image || b.imageBase64 || '';
+      if (raw) {
+        const cleaned = String(raw).replace(/^data:image\/\w+;base64,/, '');
+        const buf = Buffer.from(cleaned, 'base64');
+        if (!buf.length) return sendJson(res, 400, { error: '图片为空' });
+        sha = crypto.createHash('sha256').update(buf).digest('hex');
+        md5 = crypto.createHash('md5').update(buf).digest('hex');
+        try {
+          const fp = require('./fingerprint');
+          const info = await fp.computeFingerprints(buf, 'export.jpg');
+          phash = info.phash || phash;
+        } catch (_) {}
+      }
+      if (!/^[a-f0-9]{64}$/.test(sha)) return sendJson(res, 400, { error: '缺少有效 sha256' });
+      const row = registerExport(services.db, {
+        sha256: sha,
+        md5,
+        phash,
+        sourceFid: b.sourceFid || b.fid || '',
+        kind: b.kind || 'edit',
+        marker: b.marker || '',
+      });
+      return sendJson(res, 200, { success: true, data: row });
+    } catch (e) {
+      return sendJson(res, 500, { success: false, error: e.message || '登记失败' });
+    }
+  }
+
+  // ===== 统一精修 /edit/run 与 /edit/preview（共用同一段组装逻辑） =====
+  // POST /edit/run  { assetFid|image, op, region, prompt?, glb?, product? }
+  const buildEditRunArgs = async (b) => {
+    const aiTasksMod = require('./ai-tasks');
+    // 复用素材解析
+    const resolveAssetBuffer = aiTasksMod.resolveAssetBuffer || (async (svc, raw) => {
+      if (!raw) return null;
+      const s = String(raw).trim();
+      if (s.startsWith('data:image/')) return Buffer.from(s.split(',')[1], 'base64');
+      const asset = db.prepare('SELECT * FROM assets WHERE fid=?').get(s);
+      if (!asset) return null;
+      const { ensureOriginalFile } = require('./originals');
+      const p = await ensureOriginalFile(services, asset);
+      return p ? fs.readFileSync(p) : null;
+    });
+    const sourceImgRaw = b.image || b.imageUrl || b.url || b.src || b.assetFid || b.fid;
+    const requestedDerivId = b.derivId || b.derivativeId || null;
+    let sceneImageBuffer = null;
+    // 显式指定衍生版本时按版本取图；仅允许同素材的版本，杜绝跨素材注入
+    if (requestedDerivId && sourceImgRaw) {
+      const asset = db.prepare('SELECT fid FROM assets WHERE fid=?').get(String(sourceImgRaw).trim());
+      if (asset) {
+        const deriv = getDerivativeById(db, requestedDerivId);
+        if (deriv && deriv.asset_fid === asset.fid) {
+          const p = await resolveDerivativeFile(services, deriv);
+          if (p && fs.existsSync(p)) sceneImageBuffer = fs.readFileSync(p);
+        }
+      }
+    }
+    if (!sceneImageBuffer) sceneImageBuffer = await resolveAssetBuffer(services, sourceImgRaw);
+    if (!sceneImageBuffer) { const e = new Error('无法读取源图'); e.clientCode = 400; throw e; }
+
+    let refImageBuffer = null;
+    if (b.refImage || b.ref_image || (b.glb && b.glb.viewDataUrl)) {
+      refImageBuffer = await resolveAssetBuffer(services, b.refImage || b.ref_image || (b.glb && b.glb.viewDataUrl));
+    }
+    let productImageBuffer = null;
+    if (b.productImage || b.product_image) {
+      productImageBuffer = await resolveAssetBuffer(services, b.productImage || b.product_image);
+    }
+
+    return {
+      sceneImageBuffer,
+      op: b.op,
+      region: b.region,
+      prompt: b.prompt,
+      productName: b.subject || b.productName,
+      targetStyle: b.targetStyle || b.style || b.target_style,
+      sourceStyle: b.sourceStyle || b.source_style,
+      strengthLevel: b.strengthLevel || b.strength,
+      stylePrompt: b.stylePrompt || b.style_prompt || b.styleDescription,
+      extraPrompt: b.extraPrompt || b.extra_prompt,
+      assetFid: b.assetFid || b.fid,
+      sourceDerivId: requestedDerivId || null,
+      yaw: (b.glb && b.glb.yaw) != null ? b.glb.yaw : (b.yaw != null ? b.yaw : b.modelYaw),
+      refImageBuffer,
+      productImageBuffer,
+      glbFid: (b.glb && b.glb.modelUrl) || b.glbFid,
+      pasteback: b.pasteback,
+      installMode: b.installMode || b.fidelity || 'B',
+      expandRatios: b.expandRatios,
+      expandRatio: b.expandRatio,
+      useJimeng: b.useJimeng !== false,
+      model: b.model,
+      targetClarity: b.targetClarity || b.clarity || null,
+      removeWatermark: b.removeWatermark === true || b.remove_watermark === true,
+      vlmInfo: b.vlmInfo || b.vlm_info || null,
+      describeRegion: b.describeRegion,
+      avoidBBox: b.avoidBBox || b.clearBBox,
+      gapPct: b.gapPct || b.addGapPct,
+      // 出图参数：档位/画幅按字面传下去，由 handlers/edit-size 依据模型契约换算
+      size: b.size || null,
+      ratio: b.ratio || null,
+      bindings: b.bindings,
+      regions: b.regions,
+      light_mode: b.light_mode || b.lightMode,
+      kelvin: b.kelvin,
+      light_clause: b.light_clause || b.lightClause,
+    };
+  };
+
+  if (pathname === '/edit/run' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    try {
+      const { handleEditRun } = require('./handlers/edit-run');
+      const out = await handleEditRun(services, await buildEditRunArgs(b));
+
+      let previewUrl = '';
+      try {
+        const outFileName = `edit_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.jpg`;
+        const tempDir = path.join(services.config.dataDir, 'cache', 'temp');
+        if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+        const outFilePath = path.join(tempDir, outFileName);
+        fs.writeFileSync(outFilePath, out.buffer);
+        previewUrl = `/api/cache/temp/${outFileName}`;
+      } catch (err) {
+        console.warn('[edit/run] 缓存临时结果失败:', err.message);
+      }
+
+      return sendJson(res, 200, {
+        success: true,
+        url: previewUrl,
+        imageUrl: previewUrl,
+        outputUrl: previewUrl,
+        previewUrl,
+        data: {
+          image: { b64: out.buffer.toString('base64') },
+          url: previewUrl,
+          imageUrl: previewUrl,
+          outputUrl: previewUrl,
+          previewUrl,
+          apiBox: out.apiBox,
+          untouchedDiff: out.untouchedDiff,
+          prompt: out.prompt,
+          // ★ 真正生效的出图参数（档位/画幅/像素/是否贴回），客户端原样回显
+          outSize: out.outSize || null,
+          ref_dropped: out.refDropped || [],
+          // ★ 选区出口 / 是否降级 / 降级原因；客户端必须把 regionNote 原样展示给用户
+          region: out.region || null,
+          regionNote: out.regionNote || '',
+          // ★ 服务端落盘的衍生图 id；App 可据此跳转素材详情
+          derivativeId: out.derivativeFid || null,
+        },
+      });
+    } catch (e) {
+      console.error('[edit/run] 执行失败:', e);
+      return sendJson(res, e.clientCode || 502, { success: false, error: e.message });
+    }
+  }
+
+  // POST /edit/preview — 精准编辑「预览请求」：与 /edit/run 共用同一段组装逻辑，
+  // 直到供应商调用前为止；不生成图片、不落任何衍生记录。
+  if (pathname === '/edit/preview' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    try {
+      const { handleEditRun } = require('./handlers/edit-run');
+      const args = await buildEditRunArgs(b);
+      const out = await handleEditRun(services, Object.assign(args, { dryRun: true }));
+      return sendJson(res, 200, { success: true, data: out });
+    } catch (e) {
+      return sendJson(res, e.clientCode || 502, { success: false, error: e.message });
+    }
+  }
+
+  // ===== 自定义风格库（风格迁移） =====
+  if (pathname === '/custom-styles' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const { listCustomStyles } = require('./custom-styles');
+      return sendJson(res, 200, { success: true, data: listCustomStyles(db) });
+    } catch (e) {
+      return sendJson(res, 500, { success: false, error: e.message || '自定义风格读取失败' });
+    }
+  }
+  if (pathname === '/custom-styles' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    try {
+      const { createCustomStyle } = require('./custom-styles');
+      const row = createCustomStyle(db, {
+        name: b.name,
+        description: b.description || b.desc,
+        aiPrompt: b.aiPrompt || b.ai_prompt,
+        actor: sessionUser?.username || '',
+      });
+      return sendJson(res, 200, { success: true, data: row });
+    } catch (e) {
+      return sendJson(res, 400, { success: false, error: e.message || '自定义风格保存失败' });
+    }
+  }
+  const mCustomStyle = pathname.match(/^\/custom-styles\/([^/]+)$/);
+  if (mCustomStyle && (req.method === 'PUT' || req.method === 'DELETE')) {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const styleId = decodeURIComponent(mCustomStyle[1]);
+    const styleStore = require('./custom-styles');
+    const existing = styleStore.getCustomStyle(db, styleId);
+    if (!existing) return sendJson(res, 404, { success: false, error: '自定义风格不存在' });
+    if (!isAdmin && existing.createdBy && existing.createdBy !== (sessionUser?.username || '')) {
+      return sendJson(res, 403, { success: false, error: '只能修改自己创建的风格' });
+    }
+    try {
+      if (req.method === 'DELETE') {
+        styleStore.deleteCustomStyle(db, styleId);
+        return sendJson(res, 200, { success: true, data: { id: styleId } });
+      }
+      const b = await parseBody(req);
+      const row = styleStore.updateCustomStyle(db, styleId, {
+        name: b.name,
+        description: b.description != null ? b.description : b.desc,
+        aiPrompt: b.aiPrompt != null ? b.aiPrompt : b.ai_prompt,
+      });
+      return sendJson(res, 200, { success: true, data: row });
+    } catch (e) {
+      return sendJson(res, 400, { success: false, error: e.message || '自定义风格更新失败' });
+    }
+  }
+
+  // ★ 用一次 LLM 把自定义风格翻译成生图模型更吃透的「风格锚定描述」
+  if (pathname === '/ai/style/analyze' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    const name = String(b.name || '').trim();
+    if (!name) return sendJson(res, 400, { success: false, error: '请先填写风格名称' });
+    const description = String(b.description || b.desc || '').trim();
+    try {
+      const { STYLE_ANALYZER_PROMPT, buildStyleAnalyzerUserMessage } = require('./custom-styles');
+      const opt = genGov.resolveOptimizerModel(db, '');
+      const data = await executeChatCompletion(db, config, {
+        model: b.optimizerModelId || opt.modelCode || opt.modelId,
+        messages: [
+          { role: 'system', content: STYLE_ANALYZER_PROMPT },
+          { role: 'user', content: buildStyleAnalyzerUserMessage(name, description) },
+        ],
+        temperature: 0.5,
+        max_tokens: 800,
+        timeoutMs: opt.timeoutMs || 90000,
+      });
+      const content = ((data && data.choices && data.choices[0] && data.choices[0].message
+        && data.choices[0].message.content) || '').trim().replace(/^["'“”]+|["'“”]+$/g, '');
+      if (!content) return sendJson(res, 502, { success: false, error: 'AI 未返回风格描述' });
+      return sendJson(res, 200, { success: true, data: { name, description, aiPrompt: content } });
+    } catch (e) {
+      console.error('[ai/style/analyze] 执行失败:', e);
+      return sendJson(res, 502, { success: false, error: e.message || 'AI 风格解析失败' });
+    }
+  }
+
+  if (pathname === '/ai/expand-jimeng' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    try {
+      const { expandWithJimeng, jimengReady } = require('./handlers/jimeng-expand');
+      if (!jimengReady(services)) {
+        return sendJson(res, 500, {
+          error: '未配置火山引擎 AK/SK：请在服务端设置 VOLC_ACCESSKEY / VOLC_SECRETKEY（即梦视觉与方舟 Ark Key 不是同一套）'
+        });
+      }
+      let imgB64 = b.image || b.imageB64 || '';
+      if (!imgB64 && (b.image_url || b.imageUrl)) {
+        const u = b.image_url || b.imageUrl;
+        if (u.startsWith('data:image')) {
+          imgB64 = u;
+        } else if (u.startsWith('http://') || u.startsWith('https://')) {
+          const fetchRes = await fetch(u);
+          const buf = await fetchRes.arrayBuffer();
+          imgB64 = Buffer.from(buf).toString('base64');
+        }
+      }
+
+      let top = b.top !== undefined ? Number(b.top) : 0;
+      let bottom = b.bottom !== undefined ? Number(b.bottom) : 0;
+      let left = b.left !== undefined ? Number(b.left) : 0;
+      let right = b.right !== undefined ? Number(b.right) : 0;
+
+      // 如果提供了 ratio (如 '16:9', '21:9', '4:3') 但未指定具体数值，自动按画幅居中外扩
+      if (!b.mask && !b.maskB64 && top === 0 && bottom === 0 && left === 0 && right === 0 && b.ratio) {
+        const ratioMap = {
+          '16:9': 16 / 9,
+          '21:9': 21 / 9,
+          '4:3': 4 / 3,
+          '1:1': 1.0,
+          '9:16': 9 / 16,
+          '3:2': 3 / 2,
+          '2:3': 2 / 3
+        };
+        const targetRatio = ratioMap[b.ratio] || 16 / 9;
+        // 假定基准为 1:1 或 4:3 扩展
+        if (targetRatio > 1.2) {
+          left = Math.min(0.5, (targetRatio - 1) / 2);
+          right = left;
+        } else if (targetRatio < 0.8) {
+          top = Math.min(0.5, (1 / targetRatio - 1) / 2);
+          bottom = top;
+        } else {
+          top = 0.15; bottom = 0.15; left = 0.15; right = 0.15;
+        }
+      }
+
+      const out = await expandWithJimeng(services, {
+        imageB64: imgB64,
+        maskB64: b.mask || b.maskB64,
+        top,
+        bottom,
+        left,
+        right,
+        prompt: b.prompt,
+      });
+      const dataUrl = `data:image/png;base64,${out.b64}`;
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          b64_json: out.b64,
+          url: dataUrl,
+          image_url: dataUrl,
+          task_id: out.taskId
+        }
+      });
+    } catch (e) {
+      console.error('[edit/run] 执行失败:', e);
+      return sendJson(res, 502, { success: false, error: e.message });
+    }
+  }
+
+  // ===== VLM 选区描述（无局部编辑能力时优化提示词） =====
+  // POST /ai/vlm-describe  { assetFid | image, region? }
+  if (pathname === '/ai/vlm-describe' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    try {
+      // LOGIC-004：原实现把 services 当 completeChat 首参传入（其签名是单对象解构），
+      // 100% 抛「LiteLLM 未配置 base_url」后退化为空兜底。改用 chatVision + 治理台端点解析。
+      const { chatVision } = require('./vlm');
+      const genGov = require('./gen-governance');
+      const ep = genGov.resolveVlmEndpoint(services.db, services.config, b.model);
+      const prompt =
+        '识别图中指定区域（若有 bbox 则为该框内）的家具/物件。只返回 JSON：' +
+        '{"name_cn":"中文名","attributes":"材质/颜色/风格一句话","summary":"一句定位描述"}' +
+        (b.region ? `\nbbox=${JSON.stringify(b.region)}` : '');
+      let info = null;
+      if (b.image && ep && ep.baseUrl) {
+        info = await chatVision({
+          baseUrl: ep.baseUrl,
+          apiKey: ep.apiKey,
+          model: ep.modelCode || b.model,
+          prompt,
+          images: [String(b.image)],
+        }).catch(() => null);
+      }
+      if (!info || !info.name_cn) {
+        info = { name_cn: b.fallbackName || '目标物体', attributes: '', summary: '' };
+      }
+      return sendJson(res, 200, { success: true, data: info });
+    } catch (e) {
+      return sendJson(res, 200, {
+        success: true,
+        data: { name_cn: b.fallbackName || '目标物体', attributes: '', summary: '', fallback: true, error: e.message },
+      });
+    }
+  }
+
+  // ===== 空间漫游三段式双确认接口 =====
+  // 1. 段 1：照片拓扑推断 (2-6张空间照片推导房间与门洞连接)
+  // POST /ai/walkthrough/infer-topology
+  if (pathname === '/ai/walkthrough/infer-topology' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    try {
+      const topo = await inferRoomTopology(services, {
+        photoFids: b.photo_fids || b.fids || [],
+        photoUrls: b.photo_urls || [],
+        photosBase64: b.photos_base64 || b.photosBase64 || b.images || [],
+        photos: b.photos || [],
+        model: b.model || null,
+      });
+      return sendJson(res, 200, { success: true, data: topo });
+    } catch (e) {
+      return sendJson(res, 400, { success: false, error: e.message });
+    }
+  }
+
+  // 1.5 建筑 3D 几何挤出生成
+  // POST /ai/walkthrough/generate-3d
+  if (pathname === '/ai/walkthrough/generate-3d' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    try {
+      const scene3D = generatePascal3DGeometry(b.plan || b, b.options || {});
+      return sendJson(res, 200, { success: true, data: scene3D });
+    } catch (e) {
+      return sendJson(res, 400, { success: false, error: e.message });
+    }
+  }
+
+  // 2. 确认 1：人工确认/微调房间连接示意图
+  // POST /ai/walkthrough/confirm-topology
+  if (pathname === '/ai/walkthrough/confirm-topology' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    // 校验输入结构完整性并透传确认后的拓扑数据
+    if (!Array.isArray(b.rooms) || !b.rooms.length) {
+      return sendJson(res, 400, { success: false, error: '拓扑确认必须包含至少一个房间' });
+    }
+    return sendJson(res, 200, {
+      success: true,
+      data: {
+        confirmed_topology: {
+          rooms: b.rooms,
+          connections: b.connections || [],
+          photos: b.photos || []
+        },
+        confirmed_at: Date.now()
+      }
+    });
+  }
+
+  // 3. 段 2：由确认后的拓扑推导运镜序列
+  // POST /ai/walkthrough/infer-sequence
+  if (pathname === '/ai/walkthrough/infer-sequence' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    try {
+      const seq = await inferCameraSequence(services, {
+        rooms: b.rooms || [],
+        connections: b.connections || [],
+        photos: b.photos || []
+      });
+      return sendJson(res, 200, { success: true, data: seq });
+    } catch (e) {
+      return sendJson(res, 400, { success: false, error: e.message });
+    }
+  }
+
+  // 4. 确认 2：确认镜头顺序、画幅、每段时长、运镜风格，并直接创建渲染任务
+  // POST /ai/walkthrough/confirm-sequence
+  if (pathname === '/ai/walkthrough/confirm-sequence' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    const photoFids = b.photo_fids || b.fids || [];
+    const mainFid = photoFids[0] || b.fid;
+    if (!mainFid) {
+      return sendJson(res, 400, { success: false, error: '缺少主要照片 fid' });
+    }
+    try {
+      const task = aiTasks.enqueueAiTask(db, {
+        fid: mainFid,
+        type: 'spatial_walkthrough',
+        taskId: b.task_id || b.taskId || null,
+        title: `全景漫游·${(b.shots || []).length || photoFids.length}镜头`,
+        sourceFids: photoFids,
+        payload: {
+          sequence_data: {
+            aspect_ratio: b.aspect_ratio || '16:9',
+            duration_per_shot: b.duration_per_shot || 4,
+            style: b.style || '平稳向前推进',
+            shots: b.shots || []
+          },
+          ...b
+        },
+        createdBy: sessionUser?.username || 'viewer'
+      });
+      return sendJson(res, 200, { success: true, data: aiTasks.toPublicTask(task) });
+    } catch (e) {
+      return sendJson(res, 400, { success: false, error: e.message });
+    }
+  }
+
+  // ===== AI 任务调度 (/api/viewer/ai/tasks) =====
+  // POST /ai/tasks — 提交（兼容客户端 task_id + type）
+  if (pathname === '/ai/tasks' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    try {
+      const task = aiTasks.enqueueAiTask(db, {
+        fid: b.fid,
+        type: b.type,
+        taskId: b.task_id || b.taskId || null,
+        title: b.title || '',
+        sourceFids: b.source_fids || b.sourceFids || null,
+        payload: b.payload || b,
+        createdBy: sessionUser?.username || 'viewer'
+      });
+      // 异步由 worker 消费；提交失败会在 start 时落 failed
+      return sendJson(res, 200, { success: true, data: aiTasks.toPublicTask(task) });
+    } catch (e) {
+      return sendJson(res, 400, { success: false, error: e.message });
+    }
+  }
+
+  // GET /ai/tasks/:taskId — 按任务 ID 查询
+  const mAiTask = pathname.match(/^\/ai\/tasks\/([^\/]+)$/);
+  if (mAiTask && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const taskId = decodeURIComponent(mAiTask[1]);
+    const task = aiTasks.getAiTask(db, taskId);
+    if (!task) return sendJson(res, 404, { success: false, error: '任务不存在' });
+    return sendJson(res, 200, { success: true, data: aiTasks.toPublicTask(task) });
+  }
+
+  // GET /assets/:fid/ai/tasks — 该素材最新一条 AI 任务（客户端轮询）
+  const mFidAiTasks = pathname.match(/^\/assets\/([^\/]+)\/ai\/tasks$/);
+  if (mFidAiTasks && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const fid = decodeURIComponent(mFidAiTasks[1]);
+    const type = urlObj.searchParams.get('type') || null;
+    const task = aiTasks.listLatestByFid(db, fid, type);
+    if (!task) {
+      return sendJson(res, 200, { success: true, data: { status: 'idle', progress: 0, error: null } });
+    }
+    return sendJson(res, 200, { success: true, data: aiTasks.toPublicTask(task) });
+  }
+
+  // 视频封面
+  const mPoster = pathname.match(/^\/assets\/([^\/]+)\/poster$/);
+  if (mPoster && (req.method === 'GET' || req.method === 'HEAD')) {
+    const fid = decodeParamLoose(mPoster[1]);
+    const visCheck = db.prepare('SELECT auth_state, poster_path, kind, main_derivative_id FROM assets WHERE fid=?').get(fid);
+    if (!visCheck) return sendJson(res, 404, { error: '资产不存在' });
+    if (visCheck.auth_state && !['live', 'frozen'].includes(visCheck.auth_state)) {
+      return sendJson(res, 404, { error: '资产不可见' });
+    }
+    const candidates = [];
+    if (visCheck.poster_path) candidates.push(path.join(config.dataDir, visCheck.poster_path));
+    candidates.push(path.join(config.dataDir, 'cache', 'thumbs', `${fid}.jpg`));
+    // poster derivative
+    try {
+      const posterDeriv = db.prepare("SELECT * FROM derivatives WHERE asset_fid=? AND kind='poster' ORDER BY id DESC LIMIT 1").get(fid);
+      if (posterDeriv) {
+        const p = await resolveDerivativeFile(services, posterDeriv);
+        if (p) candidates.unshift(p);
+      }
+    } catch {}
+    for (const p of candidates) {
+      if (p && fs.existsSync(p)) {
+        return pipeFileStream(req, res, p, 'image/jpeg', null, 'public, max-age=86400');
+      }
+    }
+
+    // 磁盘上没有海报时立刻回占位图。抽帧、云端缩略图、回收站抽帧都放到后台，
+    // 占位响应用短缓存，真帧写到同一路径后下一次请求才能换上。
+    if (visCheck.kind === 'video' || visCheck.main_derivative_id) {
+      const vidDeriv = db.prepare(`
+        SELECT * FROM derivatives 
+        WHERE asset_fid=? AND (mime LIKE 'video/%' OR file_name LIKE '%.mp4' OR file_name LIKE '%.mov' OR file_name LIKE '%.webm')
+        ORDER BY id DESC LIMIT 1
+      `).get(fid) || (visCheck.main_derivative_id
+        ? db.prepare('SELECT * FROM derivatives WHERE id=?').get(visCheck.main_derivative_id)
+        : null);
+
+      if (vidDeriv) {
+        const pending = await videoPosterPlaceholderBuffer();
+        res.writeHead(200, {
+          'Content-Type': 'image/jpeg',
+          'Content-Length': pending.length,
+          'Cache-Control': 'no-cache, max-age=0'
+        });
+        setImmediate(() => {
+          fillVideoPosterFile(services, fid, visCheck).catch((err) => {
+            console.warn(`[api] 后台视频海报失败 (${fid}):`, err.message);
+          });
+        });
+        if (req.method === 'HEAD') return res.end();
+        return res.end(pending);
+      }
+    }
+
+    return sendJson(res, 404, { error: '海报不存在' });
+  }
+
+  // 单个资产详情
+  const mDetail = pathname.match(/^\/assets\/([^\/]+)$/);
+  if (mDetail && req.method === 'GET') {
+    const fid = decodeParamLoose(mDetail[1]);
+    const detail = getAssetDetail(services, fid, {
+      includeSimilar: urlObj.searchParams.get('include_similar') === '1',
+    });
+    if (!detail) {
+      // 区分「从未存在」/「已删除可恢复」/「已清理」，
+      // 客户端据此展示「去回收站」按钮而不是一句「资产不存在」
+      const { missingAssetBody } = require('./asset-missing');
+      const body = missingAssetBody(db, fid);
+      return sendJson(res, body.code, body);
+    }
+    return sendJson(res, 200, { success: true, data: detail });
+  }
+
+  // 单个资产向量相似
+  const mSim = pathname.match(/^\/assets\/([^\/]+)\/similar$/);
+  if (mSim && req.method === 'GET') {
+    const fid = decodeURIComponent(mSim[1]);
+    const limit = +(urlObj.searchParams.get('limit') || 8);
+    const items = searchSimilar(services, fid, { limit });
+    return sendJson(res, 200, { success: true, data: items });
+  }
+
+  // 素材质量评估（9 维，只读）+ pHash 相似组提示
+  const mQuality = pathname.match(/^\/assets\/([^\/]+)\/quality$/);
+  if (mQuality && req.method === 'GET') {
+    const fid = decodeParamLoose(mQuality[1]);
+    try {
+      const qs = require('./quality-score');
+      const quality = await qs.computeAssetQuality(services, fid, {
+        force: urlObj.searchParams.get('force') === '1',
+      });
+      if (!quality) return sendJson(res, 404, { error: '资产不存在' });
+      const similar = qs.findSimilarGroups(services, fid, {
+        maxDist: urlObj.searchParams.get('maxDist') || 8,
+        limit: urlObj.searchParams.get('limit') || 12,
+      });
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          fid,
+          total: quality.total,
+          max: quality.max,
+          dims: quality.dims,
+          similar,
+        },
+      });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 人工打标
+  const mTag = pathname.match(/^\/assets\/([^\/]+)\/tags$/);
+  if (mTag && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const fid = decodeURIComponent(mTag[1]);
+    const b = await parseBody(req);
+    return sendJson(res, 200, { success: applyHumanTag(db, fid, b.dimension, b.dir) });
+  }
+
+  // 单个资产主动触发 AI 重构 (3:4 & 9:16 双画幅净画生图)
+  const mRestage = pathname.match(/^\/assets\/([^\/]+)\/restage$/);
+  if (mRestage && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const fid = decodeURIComponent(mRestage[1]);
+    const asset = db.prepare('SELECT * FROM assets WHERE fid=?').get(fid);
+    if (!asset) return sendJson(res, 404, { error: '资产不存在' });
+    if (asset.status === 'deleted') return sendJson(res, 410, { error: '素材已删除，不能重构' });
+    if (asset.category === 'portrait' || asset.category === 'clothing') {
+      return sendJson(res, 400, { error: '人像与服装类目仅保留原图，禁止执行画幅重构以防人脸重建触发安全围栏' });
+    }
+    try {
+      const { isBlacklisted } = require('./assets-delete');
+      if (isBlacklisted(db, { fid, sha256: asset.sha256, clientAssetId: asset.client_asset_id })) {
+        return sendJson(res, 410, { error: '素材已在黑名单，不能重构' });
+      }
+    } catch (_) {}
+
+    const { executeRestageDual } = require('./nodes/index');
+    const b = await parseBody(req);
+    let cfg = {
+      adapterId: 'agnes_image',
+      model: 'agnes-image-2.5-flash',
+      promptTemplate: '图生图，沿用参考图整体色调、光影质感、画面风格，远景镜头，完整保留原有场景结构，画面干净，不含任何文字、标识、水印。延展必须是真实场景延续，严禁黑边、白边、letterbox、模糊条带或纯色衬底。',
+      ratios: ['9:16', '3:4'],
+      sizePreset: '1080p',
+      mainRatio: '9:16',
+      skipIfAlreadyExact: false
+    };
+    try {
+      const wf = db.prepare("SELECT graph_json FROM workflows WHERE id='default'").get();
+      const graph = JSON.parse(wf.graph_json);
+      const node = (graph.nodes || []).find(n => n.type === 'restage_dual')
+        || (graph.nodes || []).find(n => n.type === 'restage_9_16');
+      if (node?.config) cfg = { ...cfg, ...node.config };
+    } catch { /* keep defaults */ }
+    if (b && typeof b === 'object') {
+      if (Array.isArray(b.ratios) && b.ratios.length) cfg.ratios = b.ratios;
+      if (b.sizePreset) cfg.sizePreset = b.sizePreset;
+      if (b.mainRatio) cfg.mainRatio = b.mainRatio;
+      if (b.adapterId) cfg.adapterId = b.adapterId;
+      if (b.model) cfg.model = b.model;
+      if (b.promptTemplate) cfg.promptTemplate = b.promptTemplate;
+      if (b.skipIfAlreadyExact != null) cfg.skipIfAlreadyExact = !!b.skipIfAlreadyExact;
+      if (b.extraPrompt != null) cfg.extraPrompt = String(b.extraPrompt || '').trim();
+      if (b.replaceExisting != null) cfg.replaceExisting = !!b.replaceExisting;
+      if (b.forceMember != null) cfg.forceMember = !!b.forceMember;
+    }
+    cfg.skipIfAlreadyExact = false;
+    cfg.replaceExisting = cfg.replaceExisting !== false;
+    cfg.forceMember = true;
+    // ★ 手动单次请求（用户在资产选择器里点「9:16 待生成」）一律走火山方舟 Seedream 5.0 Flash。
+    // default 工作流的 restage_dual 可能为省成本把 modelIds 挂到本机免费模型（qwen2.1-image 等），
+    // 批量灌入排队无所谓，但手动点的人是盯着插槽等出图的 —— 只要请求体没显式指定模型，
+    // 就强制切到付费快通道，别把人排进本机 GPU 长队。批量灌入（node 直跑）不走这里，保持原样。
+    const bodyObj = b && typeof b === 'object' ? b : {};
+    const explicitModel = Boolean(bodyObj.model) || (Array.isArray(bodyObj.modelIds) && bodyObj.modelIds.length > 0);
+    if (!explicitModel) {
+      cfg.adapterId = 'ark_seedream';
+      // 目录 id，executeAdapter 会归一成 doubao-seedream-5-0-flash-260915 再下发
+      cfg.model = 'seedream5flash';
+      // 本机 GPU 队列里手动请求排在高位：restage 节点默认写死 low 让出队头，
+      // 用户主动点的图不该被批量灌入压在后面。
+      cfg.gpuPriority = 'high';
+      delete cfg.modelIds;
+      delete cfg.fallbackFirst;
+    }
+    let target = asset;
+    // CONFLICT-002：重复组退役，不再重定向到组长，直接对素材本身执行；显式标记 isManual: true 供节点鉴权
+    const resRestage = await executeRestageDual(services, cfg, target, { lastOutput: {}, isManual: true });
+    const updatedDetail = getAssetDetail(services, fid);
+
+    // 契约：只有真的产出了合格衍生图才算成功。
+    // 历史上这里无条件 success:true，导致上游 429/503/网络失败时客户端照样弹「画幅已生成」，
+    // 但库里一个 restage_* 都没有 —— 用户看到的就是「提示成功、进去仍未生成」。
+    const producedKinds = Object.entries((resRestage && resRestage.output && resRestage.output.derivatives) || {})
+      .filter(([, v]) => v && v.id && !v.reused)
+      .map(([k]) => k);
+    const queueFull = !!(resRestage && resRestage.requeue);
+    // 每一档实际走的通道与模型（kind -> { adapterId, model }），前端据此回显
+    const usedChannels = (resRestage && resRestage.output && resRestage.output.channels) || {};
+
+    // 失败原因分层：限流/队列满给可重试语义，其余给真实错误原文（截断防超长）
+    let failReason = String((resRestage && (resRestage.error || resRestage.reason)) || '').trim();
+    if (!failReason) {
+      const errs = (resRestage && resRestage.output && resRestage.output.genErrors) || [];
+      failReason = errs.length ? errs.join(' | ') : '未能生成任何画幅';
+    }
+    if (/429|rate.?limit|速率限制/i.test(failReason)) failReason = '生图服务限流（429），请稍后重试';
+    else if (/503|queue is full|队列已满/i.test(failReason)) failReason = '生图队列已满（503），请稍后重试';
+    failReason = failReason.slice(0, 200);
+
+    if (!producedKinds.length) {
+      if (resRestage && resRestage.skipped) {
+        return sendJson(res, 409, { error: `该素材无需画幅重构（${resRestage.reason || 'skipped'}）` });
+      }
+      return sendJson(res, queueFull ? 503 : 502, {
+        error: failReason,
+        data: {
+          restage: resRestage,
+          detail: updatedDetail,
+          produced: [],
+          // 失败也要告诉前端走了哪条通道：被降级到本机模型时用户看得见
+          channels: usedChannels,
+        },
+      });
+    }
+
+    return sendJson(res, 200, {
+      success: true,
+      data: {
+        restage: resRestage,
+        detail: updatedDetail,
+        produced: producedKinds,
+        channels: usedChannels,
+      },
+    });
+  }
+
+  // 流式输出图片 / 视频 / 音频 / 原始文件
+  const mImg = pathname.match(/^\/assets\/([^\/]+)\/(image|file|video)(?:\/([^\/]+))?$/);
+  if (mImg && (req.method === 'GET' || req.method === 'HEAD')) {
+    const fid = decodeParamLoose(mImg[1]);
+    const actionType = mImg[2]; // 'image' | 'file' | 'video'
+    const requestedFileName = mImg[3] ? decodeURIComponent(mImg[3]) : null;
+    const isFileOrVideo = actionType === 'file' || actionType === 'video';
+    const visCheck = db.prepare('SELECT auth_state FROM assets WHERE fid=?').get(fid);
+    if (!visCheck) return sendJson(res, 404, { error: '资产不存在' });
+    if (visCheck.auth_state && !['live', 'frozen'].includes(visCheck.auth_state)) {
+      return sendJson(res, 404, { error: '资产不可见' });
+    }
+    const derivativeId = urlObj.searchParams.get('derivative');
+    const tier = urlObj.searchParams.get('tier') || '';
+    const isDl = urlObj.searchParams.get('dl') === '1' || urlObj.searchParams.get('download') === '1' || (actionType === 'file' && urlObj.searchParams.get('download') === '1') || !!requestedFileName;
+    const isRaw = urlObj.searchParams.get('raw') === '1' || isFileOrVideo;
+    const forceLocal = urlObj.searchParams.get('local') === '1';
+    const thumb = path.join(config.dataDir, 'cache', 'thumbs', `${fid}.jpg`);
+    const gridPath = path.join(config.dataDir, 'cache', 'grid', `${fid}.jpg`);
+    const gridWebpPath = path.join(config.dataDir, 'cache', 'grid', `${fid}.webp`);
+    const previewJpegPath = path.join(config.dataDir, 'cache', 'preview', `${fid}.jpg`);
+    const previewWebpPath = path.join(config.dataDir, 'cache', 'preview', `${fid}.webp`);
+    const acceptHeader = String(req.headers['accept'] || '').toLowerCase();
+    const formatParam = String(urlObj.searchParams.get('format') || '').toLowerCase();
+    const wantsWebp = !isFileOrVideo && !isDl && (formatParam === 'webp' || acceptHeader.includes('image/webp'));
+    const assetRow = db.prepare('SELECT thumb_url, main_derivative_id, kind, file_name, category FROM assets WHERE fid=?').get(fid);
+
+    const buildStandardDisposition = (targetName, defaultExt = '.jpg', kind = 'origin') => {
+      let ext = path.extname(targetName || '') || defaultExt;
+      // 权威扩展名纠偏：严防视频/音频被错误命名为 .jpg
+      const rowKind = String(assetRow?.kind || '').toLowerCase();
+      const isTargetVideo = /\.(mp4|mov|webm|avi|mkv|m4v)$/i.test(targetName || '') || rowKind === 'video' || kind === 'video' || kind === 'gen_video';
+      const isTargetAudio = /\.(mp3|wav|m4a|aac|flac|ogg)$/i.test(targetName || '') || rowKind === 'audio' || kind === 'audio' || kind === 'music';
+      if (isTargetVideo && !/\.(mp4|mov|webm|avi|mkv|m4v)$/i.test(ext)) {
+        ext = '.mp4';
+      } else if (isTargetAudio && !/\.(mp3|wav|m4a|aac|flac|ogg)$/i.test(ext)) {
+        ext = '.mp3';
+      }
+
+      const safeFid = String(fid).replace(/[^A-Za-z0-9_-]/g, '');
+      const safeVar = String(kind || 'origin').replace(/[^A-Za-z0-9_-]/g, '');
+      let baseName = requestedFileName || targetName;
+      if (!baseName || !baseName.toLowerCase().startsWith('ml_saved_')) {
+        baseName = `ML_SAVED_${safeFid}_${safeVar}${ext}`;
+      } else {
+        // 如果客户端传了 ML_SAVED_xxx.jpg，但实际是视频/音频，强制校正后缀
+        const reqExt = path.extname(baseName).toLowerCase();
+        if (isTargetVideo && reqExt !== ext) {
+          baseName = baseName.replace(/\.[^.]+$/, '') + ext;
+        } else if (isTargetAudio && reqExt !== ext) {
+          baseName = baseName.replace(/\.[^.]+$/, '') + ext;
+        }
+      }
+      const asciiExportName = baseName.replace(/[^\w.-]/g, '_');
+      const utf8ExportName = baseName;
+      const dispositionType = (isDl || urlObj.searchParams.get('download') === '1' || urlObj.searchParams.get('export') === '1') ? 'attachment' : 'inline';
+      return `${dispositionType}; filename="${asciiExportName}"; filename*=UTF-8''${encodeURIComponent(utf8ExportName)}`;
+    };
+
+    // 回收站素材：原文件被 rename 到 dataDir/trash/，derivatives 仍指向旧路径。
+    // 必须在 302 thumb_url 之前回读，否则文件已清理的记录会先跳到失效外链、整片空白。
+    if (!isFileOrVideo && !isDl && !isRaw && !derivativeId) {
+      if (await serveTrashImage(services, fid, req, res, { tier, wantsWebp })) return;
+    }
+
+    // 仅在「公网隧道且未指定产物」时 302 外链；内网/本机直接读 NAS，更快
+    const host = String(req.headers.host || '').split(':')[0] || '';
+    const isPrivateHost =
+      host === '127.0.0.1' || host === 'localhost' || host === '::1'
+      || /^192\.168\./.test(host) || /^10\./.test(host)
+      || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
+    if (!isFileOrVideo && !isDl && !isRaw && !derivativeId && !forceLocal && !isPrivateHost && tier !== 'grid' && tier !== 'preview' && assetRow?.thumb_url && !fs.existsSync(thumb)) {
+      res.writeHead(302, {
+        'Location': assetRow.thumb_url,
+        'Cache-Control': 'public, max-age=3600'
+      });
+      return res.end();
+    }
+
+    let deriv = null;
+    if (derivativeId) {
+      deriv = getDerivativeById(db, derivativeId);
+      if (deriv && deriv.asset_fid !== fid) deriv = null;
+    } else {
+      // 网格档 (256px)：有小图就直接发。没有就先回缩略图或灰块，256px 在后台生成。
+      if (!isFileOrVideo && !isDl && !isRaw && tier === 'grid') {
+        const longCache = 'public, max-age=86400';
+        const fresh = 'no-cache, max-age=0';
+        if (wantsWebp && fs.existsSync(gridWebpPath)) {
+          const gridDisp = buildStandardDisposition(`ML_SAVED_${fid}_grid.webp`, '.webp', 'grid');
+          return pipeFileStream(req, res, gridWebpPath, 'image/webp', gridDisp, longCache);
+        }
+        if (fs.existsSync(gridPath)) {
+          const gridDisp = buildStandardDisposition(`ML_SAVED_${fid}_grid.jpg`, '.jpg', 'grid');
+          return pipeFileStream(req, res, gridPath, 'image/jpeg', gridDisp, longCache);
+        }
+        if (fs.existsSync(thumb)) {
+          enqueueGridFill(`grid:${fid}`, async () => {
+            if (wantsWebp) {
+              const { ensureGridWebpFromThumb } = require('./derivatives');
+              await ensureGridWebpFromThumb(thumb, gridWebpPath);
+            } else {
+              const { ensureGridFromThumb } = require('./derivatives');
+              await ensureGridFromThumb(thumb, gridPath);
+            }
+          });
+          const thumbDisp = buildStandardDisposition(`ML_SAVED_${fid}_thumb.jpg`, '.jpg', 'thumb');
+          return pipeFileStream(req, res, thumb, 'image/jpeg', thumbDisp, fresh);
+        }
+        enqueueGridFill(`grid:${fid}`, () => fillGridFromSource(services, fid, wantsWebp));
+        res.writeHead(200, {
+          'Content-Type': 'image/jpeg',
+          'Content-Length': GRID_PLACEHOLDER_JPEG.length,
+          'Cache-Control': fresh,
+        });
+        if (req.method === 'HEAD') return res.end();
+        return res.end(GRID_PLACEHOLDER_JPEG);
+      }
+      // 预览档 (1280px)：命中缓存时零解码、零原图读取直接返回
+      if (!isFileOrVideo && !isDl && !isRaw && tier === 'preview') {
+        if (wantsWebp && fs.existsSync(previewWebpPath)) {
+          const previewDisp = buildStandardDisposition(`ML_SAVED_${fid}_preview.webp`, '.webp', 'preview');
+          return pipeFileStream(req, res, previewWebpPath, 'image/webp', previewDisp, 'private, max-age=3600, must-revalidate');
+        }
+        if (!wantsWebp && fs.existsSync(previewJpegPath)) {
+          const previewDisp = buildStandardDisposition(`ML_SAVED_${fid}_preview.jpg`, '.jpg', 'preview');
+          return pipeFileStream(req, res, previewJpegPath, 'image/jpeg', previewDisp, 'private, max-age=3600, must-revalidate');
+        }
+      }
+      // 浏览网格：无 derivative 时允许共享缩略图；raw=1 时强制拉高清原图
+      if (!isFileOrVideo && !isDl && !isRaw && tier !== 'preview' && !wantsWebp && fs.existsSync(thumb)) {
+        const thumbDisp = buildStandardDisposition(`ML_SAVED_${fid}_thumb.jpg`, '.jpg', 'thumb');
+        return pipeFileStream(req, res, thumb, 'image/jpeg', thumbDisp, 'public, max-age=86400');
+      }
+      const isPortraitOrClothing = assetRow?.category === 'portrait' || assetRow?.category === 'clothing';
+      if (isRaw || isPortraitOrClothing) {
+        deriv = db.prepare("SELECT * FROM derivatives WHERE asset_fid=? AND kind='origin' LIMIT 1").get(fid);
+      }
+      if (!deriv && !isPortraitOrClothing) {
+        const asset = db.prepare('SELECT main_derivative_id FROM assets WHERE fid=?').get(fid);
+        if (asset?.main_derivative_id) {
+          deriv = getDerivativeById(db, asset.main_derivative_id);
+        }
+      }
+      if (!deriv) {
+        deriv = db.prepare("SELECT * FROM derivatives WHERE asset_fid=? AND kind='origin' LIMIT 1").get(fid);
+      }
+    }
+
+    if (!deriv && !(assetRow?.category === 'portrait' || assetRow?.category === 'clothing')) {
+      // 详情优先本地产物，避免 origin=quark 现场下载超时导致「图片丢失」
+      const localDeriv = db.prepare(`
+        SELECT * FROM derivatives
+        WHERE asset_fid=? AND storage_type='local_cache'
+        ORDER BY CASE kind
+          WHEN 'clean' THEN 0 WHEN 'restage_9_16' THEN 1 WHEN 'restage_3_4' THEN 2
+          WHEN 'origin' THEN 3 ELSE 4 END
+        LIMIT 1
+      `).get(fid);
+      if (localDeriv) deriv = localDeriv;
+    }
+
+    if (!deriv) {
+      if (!isRaw && fs.existsSync(thumb)) {
+        return pipeFileStream(req, res, thumb, 'image/jpeg', null, 'public, max-age=86400');
+      }
+      return sendJson(res, 404, { error: '文件或产物不存在' });
+    }
+
+    // 列表/详情的 <img> 会带上 video/audio 的 main_derivative_id。
+    // 非下载、非播放时不能把 mp4/mp3 当图片流回去，否则前端裂图。
+    const derivMime = String(deriv.mime || '').toLowerCase();
+    const derivName = String(deriv.file_name || '').toLowerCase();
+    const isMediaNonImage =
+      derivMime.includes('video') || derivMime.includes('audio')
+      || deriv.kind === 'gen_video'
+      || /\.(mp4|mov|m4v|webm|avi|mp3|wav|m4a|aac|flac|ogg)$/.test(derivName);
+    const wantPlay = isFileOrVideo || urlObj.searchParams.get('play') === '1' || !!req.headers.range;
+    if (!isDl && isMediaNonImage && !wantPlay && actionType === 'image') {
+      const serveThumbIfAny = () => {
+        if (fs.existsSync(thumb)) {
+          const thumbDisp = buildStandardDisposition(`ML_SAVED_${fid}_thumb.jpg`, '.jpg', 'thumb');
+          pipeFileStream(req, res, thumb, 'image/jpeg', thumbDisp, 'public, max-age=86400');
+          return true;
+        }
+        return false;
+      };
+      if (serveThumbIfAny()) return;
+      // 视频：立刻回占位图，后台补抽帧，避免列表请求卡在 NAS/ffmpeg
+      const kindRow = db.prepare('SELECT kind FROM assets WHERE fid=?').get(fid);
+      const isVid = kindRow?.kind === 'video' || derivMime.includes('video') || deriv.kind === 'gen_video';
+      if (isVid) {
+        setImmediate(() => {
+          ensureVideoThumbAsync(services, fid, deriv).catch(() => {});
+        });
+      }
+      const placeholder = await ensureMediaPlaceholder(services, fid, kindRow?.kind || (isVid ? 'video' : 'audio'), deriv.file_name || '');
+      if (placeholder && fs.existsSync(placeholder)) {
+        return pipeFileStream(req, res, placeholder, 'image/jpeg', null, 'public, max-age=600');
+      }
+      return sendJson(res, 404, { error: '媒体缩略图不存在' });
+    }
+
+    let filePath = null;
+    try {
+      filePath = await resolveDerivativeFile(services, deriv);
+    } catch (e) {
+      // 本地缩略图 > 回收站原文件 > 外链，避免把已失效的 thumb_url 放在最前
+      if (!isDl && fs.existsSync(thumb)) {
+        return pipeFileStream(req, res, thumb, 'image/jpeg', null, 'public, max-age=600');
+      }
+      if (!isFileOrVideo && !isDl && await serveTrashImage(services, fid, req, res, { tier })) return;
+      if (!isDl && assetRow?.thumb_url) {
+        res.writeHead(302, { Location: assetRow.thumb_url, 'Cache-Control': 'public, max-age=600' });
+        return res.end();
+      }
+      return sendJson(res, 404, { error: e.message || '文件未找到或夸克拉取失败' });
+    }
+    if (!filePath || !fs.existsSync(filePath)) {
+      if (!isDl && fs.existsSync(thumb)) {
+        return pipeFileStream(req, res, thumb, 'image/jpeg', null, 'public, max-age=600');
+      }
+      // 回收站素材：原文件已移到 dataDir/trash/，从那里回读（回收站详情页预览依赖这条）
+      if (!isFileOrVideo && !isDl && await serveTrashImage(services, fid, req, res, { tier })) return;
+      if (!isDl && assetRow?.thumb_url) {
+        res.writeHead(302, { Location: assetRow.thumb_url, 'Cache-Control': 'public, max-age=600' });
+        return res.end();
+      }
+      return sendJson(res, 404, { error: '文件未找到或夸克拉取失败' });
+    }
+
+    if (filePath && !fs.existsSync(thumb)) {
+      const sharp = require('sharp');
+      sharp(filePath).rotate().resize(512, 512, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 80 }).toFile(thumb).catch(() => {});
+    }
+
+    const ext = path.extname(filePath).toLowerCase();
+    const contentType = deriv.mime || MIME[ext] || 'image/jpeg';
+    const fileName = deriv.file_name || path.basename(filePath);
+    const isVideo = (deriv.mime || '').includes('video') || deriv.kind === 'gen_video' || /\.(mp4|mov|m4v|webm|avi|mkv)$/i.test(fileName) || assetRow?.kind === 'video';
+    const isAudio = (deriv.mime || '').includes('audio') || /\.(mp3|wav|m4a|aac|flac|ogg)$/i.test(fileName) || assetRow?.kind === 'audio';
+
+    if (!isDl && !isRaw && !isVideo && !isAudio && actionType === 'image' && tier === 'grid') {
+      try {
+        if (wantsWebp) {
+          const { ensureGridWebp } = require('./derivatives');
+          const grid = await ensureGridWebp(services, fid, filePath, deriv || derivativeId);
+          if (grid && fs.existsSync(grid)) {
+            const gridDisp = buildStandardDisposition(path.basename(grid), '.webp', deriv?.kind || 'grid');
+            return pipeFileStream(req, res, grid, 'image/webp', gridDisp, 'public, max-age=86400');
+          }
+        }
+        const { ensureGridJpeg } = require('./derivatives');
+        const grid = await ensureGridJpeg(services, fid, filePath, deriv || derivativeId);
+        if (grid && fs.existsSync(grid)) {
+          const gridDisp = buildStandardDisposition(path.basename(grid), '.jpg', deriv?.kind || 'grid');
+          return pipeFileStream(req, res, grid, 'image/jpeg', gridDisp, 'public, max-age=86400');
+        }
+      } catch { /* 网格图失败则回落预览图 */ }
+    }
+
+    if (!isDl && !isRaw && !isVideo && !isAudio && actionType === 'image') {
+      try {
+        if (wantsWebp) {
+          const { ensurePreviewWebp } = require('./derivatives');
+          const preview = await ensurePreviewWebp(services, fid, deriv, filePath);
+          if (preview && fs.existsSync(preview)) {
+            const previewDisp = buildStandardDisposition(path.basename(preview), '.webp', deriv?.kind || 'preview');
+            return pipeFileStream(req, res, preview, 'image/webp', previewDisp, 'private, max-age=3600, must-revalidate');
+          }
+        }
+        const preview = await ensurePreviewJpeg(services, fid, deriv, filePath);
+        if (preview && fs.existsSync(preview)) {
+          const previewDisp = buildStandardDisposition(path.basename(preview), '.jpg', deriv?.kind || 'preview');
+          return pipeFileStream(req, res, preview, 'image/jpeg', previewDisp, 'private, max-age=3600, must-revalidate');
+        }
+      } catch { /* 预览失败则回落原文件，仍不走共享 thumb */ }
+    }
+
+    // 视频与音频：Range 分段流（原生播放器视频拖拽与音频平滑播放）
+    if (isVideo || isAudio) {
+      const stat = fs.statSync(filePath);
+      const total = stat.size;
+      const defaultMime = isAudio ? 'audio/mpeg' : 'video/mp4';
+      const mime = (contentType.includes('video') || contentType.includes('audio')) ? contentType : defaultMime;
+      const range = req.headers.range;
+      const acceptRanges = 'bytes';
+      const mediaDisp = buildStandardDisposition(fileName, ext, deriv?.kind || (isVideo ? 'video' : 'audio'));
+
+      if (range) {
+        const m = /^bytes=(\d*)-(\d*)$/.exec(String(range).trim());
+        if (m) {
+          let start = m[1] === '' ? null : parseInt(m[1], 10);
+          let end = m[2] === '' ? null : parseInt(m[2], 10);
+          if (start == null && end != null) {
+            start = Math.max(0, total - end);
+            end = total - 1;
+          } else {
+            if (start == null) start = 0;
+            if (end == null || end >= total) end = total - 1;
+          }
+          if (Number.isFinite(start) && Number.isFinite(end) && start <= end && start < total) {
+            res.writeHead(206, {
+              'Content-Type': mime,
+              'Content-Length': end - start + 1,
+              'Content-Range': `bytes ${start}-${end}/${total}`,
+              'Accept-Ranges': acceptRanges,
+              'Content-Disposition': mediaDisp,
+              'Cache-Control': isDl ? 'private, no-store' : 'private, max-age=3600, must-revalidate'
+            });
+            if (req.method === 'HEAD') return res.end();
+            return fs.createReadStream(filePath, { start, end }).pipe(res);
+          }
+          res.writeHead(416, { 'Content-Range': `bytes */${total}` });
+          return res.end();
+        }
+      }
+
+      res.writeHead(200, {
+        'Content-Type': mime,
+        'Content-Length': total,
+        'Accept-Ranges': acceptRanges,
+        'Content-Disposition': mediaDisp,
+        'Cache-Control': isDl ? 'private, no-store' : 'private, max-age=3600, must-revalidate'
+      });
+      if (req.method === 'HEAD') return res.end();
+      return fs.createReadStream(filePath).pipe(res);
+    }
+
+    const isJpeg = (contentType || '').includes('jpeg') || (contentType || '').includes('jpg') || ext === '.jpg' || ext === '.jpeg';
+    const isExport = (isDl || urlObj.searchParams.get('download') === '1' || urlObj.searchParams.get('export') === '1');
+    const finalDisp = buildStandardDisposition(fileName, ext, deriv?.kind || 'origin');
+    if (isExport && isJpeg) {
+      let outBuf = fs.readFileSync(filePath);
+      try {
+        const { prepareExportableBuffer } = require('./export-tag');
+        outBuf = prepareExportableBuffer(db, outBuf, { fid, variant: deriv?.kind || 'origin', mime: contentType, exportedBy: 'http_export' });
+      } catch (_) {}
+      res.writeHead(200, {
+        'Content-Type': contentType,
+        'Content-Length': outBuf.length,
+        'Content-Disposition': finalDisp,
+        'Cache-Control': 'private, no-store'
+      });
+      if (req.method === 'HEAD') return res.end();
+      return res.end(outBuf);
+    }
+    return pipeFileStream(req, res, filePath, contentType, finalDisp, isDl ? 'private, no-store' : 'private, max-age=3600, must-revalidate');
+  }
+
+  // 临时生成产物预览直出 (用于模型与适配器即时测试生成结果)
+  const mTemp = pathname.match(/^\/cache\/temp\/([^/]+)$/);
+  if (mTemp && (req.method === 'GET' || req.method === 'HEAD')) {
+    const fName = path.basename(decodeURIComponent(mTemp[1]));
+    const tempRoot = path.join(config.dataDir, 'cache', 'temp');
+    const targetPath = path.join(tempRoot, fName);
+    if (!fs.existsSync(targetPath) && fName.endsWith('.poster.jpg')) {
+      const srcName = fName.slice(0, -'.poster.jpg'.length);
+      const srcPath = path.join(tempRoot, srcName);
+      if (srcName && fs.existsSync(srcPath)) {
+        const pending = await videoPosterPlaceholderBuffer();
+        res.writeHead(200, {
+          'Content-Type': 'image/jpeg',
+          'Content-Length': pending.length,
+          'Cache-Control': 'no-cache, max-age=0'
+        });
+        setImmediate(() => {
+          const { prepareChatVideo } = require('./umbra');
+          prepareChatVideo(srcPath).catch((err) => {
+            console.warn('[api] 临时视频封面失败:', err.message);
+          });
+        });
+        if (req.method === 'HEAD') return res.end();
+        return res.end(pending);
+      }
+    }
+    if (!fs.existsSync(targetPath)) {
+      return sendJson(res, 404, { error: '文件未找到' });
+    }
+    const ext = path.extname(targetPath).toLowerCase();
+    const mimeMap = {
+      '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp',
+      '.gif': 'image/gif', '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
+      '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.aac': 'audio/aac', '.flac': 'audio/flac'
+    };
+    const mime = mimeMap[ext] || 'application/octet-stream';
+    if (urlObj.searchParams.get('preview') === '1' && ['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) {
+      const previewPath = `${targetPath}.preview.jpg`;
+      try {
+        if (!fs.existsSync(previewPath) || fs.statSync(previewPath).size < 100) {
+          const sharp = require('sharp');
+          await sharp(targetPath)
+            .rotate()
+            .resize({ width: 960, height: 960, fit: 'inside', withoutEnlargement: true })
+            .jpeg({ quality: 80 })
+            .toFile(previewPath);
+        }
+      } catch (e) {
+        console.warn('[api] 临时图预览失败:', e.message);
+      }
+      if (fs.existsSync(previewPath)) {
+        return pipeFileStream(req, res, previewPath, 'image/jpeg', null, 'private, max-age=86400');
+      }
+    }
+    if ((ext === '.mp4' || ext === '.mov') && req.method === 'GET') {
+      try {
+        const { moovIsEarly, fastStartVideo } = require('./umbra');
+        if (!moovIsEarly(targetPath)) await fastStartVideo(targetPath);
+      } catch (e) {
+        console.warn('[api] 临时视频 faststart 失败:', e.message);
+      }
+    }
+    let total = fs.statSync(targetPath).size;
+    // 原来无条件回 200 却宣称 Accept-Ranges: bytes：视频拖拽/分片请求拿不到 206，
+    // <video> 会停在 0:00 黑屏。这里按 Range 规范回 206。
+    const rangeHdr = req.headers.range;
+    if (rangeHdr && /^bytes=/i.test(rangeHdr)) {
+      const m = rangeHdr.replace(/^bytes=/i, '').split('-');
+      let start = parseInt(m[0], 10);
+      let end = parseInt(m[1], 10);
+      if (Number.isNaN(start) && !Number.isNaN(end)) { start = Math.max(0, total - end); end = total - 1; }
+      else { if (Number.isNaN(end)) end = total - 1; start = Math.max(0, start); }
+      end = Math.min(end, total - 1);
+      if (start > end || start >= total) {
+        res.writeHead(416, { 'Content-Range': `bytes */${total}`, 'Accept-Ranges': 'bytes' });
+        return res.end();
+      }
+      const headers = {
+        'Content-Type': mime,
+        'Content-Range': `bytes ${start}-${end}/${total}`,
+        'Content-Length': end - start + 1,
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': 'private, max-age=86400'
+      };
+      res.writeHead(206, headers);
+      if (req.method === 'HEAD') return res.end();
+      return fs.createReadStream(targetPath, { start, end }).pipe(res);
+    }
+    res.writeHead(200, {
+      'Content-Type': mime,
+      'Content-Length': total,
+      'Cache-Control': 'private, max-age=86400',
+      'Accept-Ranges': 'bytes'
+    });
+    if (req.method === 'HEAD') return res.end();
+    return fs.createReadStream(targetPath).pipe(res);
+  }
+
+  // 管理员专用：扫描
+  if (pathname === '/scan' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const { runScan } = require('./sync');
+    const scanStats = await runScan(services, { manual: true });
+    return sendJson(res, 200, { success: true, data: scanStats });
+  }
+
+  // 管理员专用：工作流管理 (支持 default 图片产线与 video 视频空图产线)
+  // R5：/workflows/default 为精确路由（web 工作流页默认拉它），必须先于正则捕获分支，
+  // default 行缺失时用内置默认图补种；补种仍失败才 404，绝不静默 data:null 让前端空画布。
+  let wfGetId = null;
+  if (req.method === 'GET') {
+    if (pathname === '/workflows/default') {
+      wfGetId = 'default';
+    } else {
+      const mWfGet = pathname.match(/^\/workflows\/([^\/]+)$/);
+      if (mWfGet && mWfGet[1] !== 'catalog' && mWfGet[1] !== 'default') {
+        wfGetId = decodeURIComponent(mWfGet[1]);
+      }
+    }
+  }
+  if (wfGetId) {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const wfId = wfGetId;
+    let wf = db.prepare('SELECT * FROM workflows WHERE id=?').get(wfId);
+    const now = Date.now();
+
+    if (!wf && wfId === 'video') {
+      db.prepare(`
+        INSERT INTO workflows (id, name, version, is_default, graph_json, created_at, updated_at)
+        VALUES ('video', '视频工作流', 1, 0, '{"nodes":[],"edges":[]}', ?, ?)
+      `).run(now, now);
+      wf = db.prepare("SELECT * FROM workflows WHERE id='video'").get();
+    }
+
+    if (!wf && wfId === 'default') {
+      try {
+        const { DEFAULT_WORKFLOW_GRAPH } = require('../scripts/migrate');
+        db.prepare(`
+          INSERT INTO workflows (id, name, version, is_default, graph_json, created_at, updated_at)
+          VALUES ('default', '默认工作流', 1, 1, ?, ?, ?)
+        `).run(JSON.stringify(DEFAULT_WORKFLOW_GRAPH), now, now);
+        wf = db.prepare("SELECT * FROM workflows WHERE id='default'").get();
+      } catch (seedErr) {
+        console.warn('[workflows] 默认工作流补种失败:', seedErr && seedErr.message);
+      }
+    }
+
+    if (!wf) {
+      if (wfId === 'default') {
+        return sendJson(res, 404, { success: false, error: '默认工作流不存在且补种失败' });
+      }
+      return sendJson(res, 200, { success: true, data: null });
+    }
+    let graph = { nodes: [], edges: [] };
+    try { graph = JSON.parse(wf.graph_json || '{"nodes":[],"edges":[]}'); } catch {}
+
+    const lastRun = db.prepare('SELECT id FROM runs WHERE workflow_id=? ORDER BY created_at DESC LIMIT 1').get(wfId);
+    let nodeStats = {};
+    if (lastRun) {
+      const rows = db.prepare(`
+        SELECT node_id, node_type,
+          SUM(CASE WHEN status IN ('queued','running') THEN 1 ELSE 0 END) as queued,
+          SUM(CASE WHEN status='done' THEN 1 ELSE 0 END) as done,
+          SUM(CASE WHEN status='skipped' THEN 1 ELSE 0 END) as skipped,
+          SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed,
+          COUNT(*) as total
+        FROM node_runs WHERE run_id=? GROUP BY node_id, node_type
+      `).all(lastRun.id);
+      rows.forEach(r => { nodeStats[r.node_id] = r; });
+    }
+    const { NODE_CATALOG } = require('./nodes/catalog');
+    const indexNode = (graph.nodes || []).find(n => n.type === 'index');
+    const vectorStatus = getVectorStatus(db, {
+      configuredModel: indexNode?.config?.embeddingModel || 'text-embedding-3-small',
+      configuredProvider: indexNode?.config?.embeddingProvider || 'litellm'
+    });
+
+    let videoStats = null;
+    if (wfId === 'video') {
+      const totalCount = db.prepare("SELECT count(*) as c FROM assets WHERE kind='video' AND status NOT IN ('deleted', 'excluded')").get()?.c || 0;
+      const readyCount = db.prepare("SELECT count(*) as c FROM assets WHERE kind='video' AND status='ready'").get()?.c || 0;
+      videoStats = { total: totalCount, ready: readyCount };
+    }
+
+    return sendJson(res, 200, {
+      success: true,
+      data: { ...wf, graph, nodeStats, lastRunId: lastRun?.id || null, catalog: NODE_CATALOG, vectorStatus, videoStats }
+    });
+  }
+
+  // 视频工作流保存支持 PUT /workflows/video
+  if (pathname === '/workflows/video' && req.method === 'PUT') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const b = await parseBody(req);
+    const wfId = 'video';
+    const currentWf = db.prepare('SELECT version FROM workflows WHERE id=?').get(wfId);
+    const newVersion = (currentWf?.version || 1) + 1;
+    const now = Date.now();
+    const graphJson = JSON.stringify(b.graph || { nodes: [], edges: [] });
+
+    db.prepare(`
+      INSERT INTO workflows (id, name, version, is_default, graph_json, created_at, updated_at)
+      VALUES ('video', '视频工作流', ?, 0, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET version=excluded.version, graph_json=excluded.graph_json, updated_at=excluded.updated_at
+    `).run(newVersion, graphJson, now, now);
+
+    return sendJson(res, 200, { success: true, data: { id: wfId, version: newVersion } });
+  }
+
+  // 视频侧启动：把未删除、未排除、还不是 ready 的视频置为 ready，不写 node_runs；返回可播放列表
+  if (pathname === '/workflows/video/start' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const now = Date.now();
+    const upd = db.prepare(`
+      UPDATE assets SET status='ready', updated_at=?
+      WHERE kind='video' AND status NOT IN ('deleted', 'excluded', 'ready')
+    `).run(now);
+
+    const videos = db.prepare(`
+      SELECT fid, file_name, kind, status, width, height, duration_s, poster_path, created_at, updated_at
+      FROM assets
+      WHERE kind='video' AND status NOT IN ('deleted', 'excluded')
+      ORDER BY updated_at DESC
+      LIMIT 100
+    `).all();
+    const totalCount = db.prepare("SELECT count(*) as c FROM assets WHERE kind='video' AND status NOT IN ('deleted', 'excluded')").get()?.c || 0;
+
+    return sendJson(res, 200, {
+      success: true,
+      data: {
+        newlyReady: upd.changes || 0,
+        totalVideos: totalCount,
+        videos
+      }
+    });
+  }
+
+  // 视频画布列表读取
+  if (pathname === '/workflows/video/assets' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const page = Math.max(1, +(urlObj.searchParams.get('page') || 1));
+    const pageSize = Math.min(100, Math.max(1, +(urlObj.searchParams.get('pageSize') || 24)));
+    const offset = (page - 1) * pageSize;
+
+    const totalCount = db.prepare("SELECT count(*) as c FROM assets WHERE kind='video' AND status NOT IN ('deleted', 'excluded')").get()?.c || 0;
+    const readyCount = db.prepare("SELECT count(*) as c FROM assets WHERE kind='video' AND status='ready'").get()?.c || 0;
+
+    const videos = db.prepare(`
+      SELECT fid, file_name, kind, status, width, height, duration_s, poster_path, created_at, updated_at
+      FROM assets
+      WHERE kind='video' AND status NOT IN ('deleted', 'excluded')
+      ORDER BY updated_at DESC
+      LIMIT ? OFFSET ?
+    `).all(pageSize, offset);
+
+    return sendJson(res, 200, {
+      success: true,
+      data: {
+        total: totalCount,
+        readyCount,
+        page,
+        pageSize,
+        videos
+      }
+    });
+  }
+
+  if (pathname === '/workflows/catalog' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const { NODE_CATALOG } = require('./nodes/catalog');
+    return sendJson(res, 200, { success: true, data: NODE_CATALOG });
+  }
+
+  if (pathname === '/workflows' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const b = await parseBody(req);
+    const wfId = b.id || 'default';
+    const currentWf = db.prepare('SELECT version FROM workflows WHERE id=?').get(wfId);
+    const newVersion = (currentWf?.version || 1) + 1;
+    const now = Date.now();
+    const graphJson = JSON.stringify(b.graph || { nodes: [], edges: [] });
+
+    db.prepare(`
+      INSERT INTO workflows (id, name, version, is_default, graph_json, created_at, updated_at)
+      VALUES (?, ?, ?, 0, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET version=excluded.version, graph_json=excluded.graph_json, updated_at=excluded.updated_at
+    `).run(wfId, wfId === 'video' ? '视频工作流' : '自定义工作流', newVersion, graphJson, now, now);
+
+    return sendJson(res, 200, { success: true, data: { id: wfId, version: newVersion } });
+  }
+
+  // 管理员专用：运行参数 (kv runtime_config 覆盖同名环境变量)
+  if (pathname === '/settings/runtime-config' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const { getRuntimeConfig } = require('./runtime-config');
+    return sendJson(res, 200, { success: true, data: getRuntimeConfig(db) });
+  }
+
+  if (pathname === '/settings/runtime-config' && (req.method === 'PUT' || req.method === 'POST')) {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const b = await parseBody(req);
+    const { setRuntimeConfig } = require('./runtime-config');
+    const updated = setRuntimeConfig(db, b);
+    return sendJson(res, 200, { success: true, data: updated });
+  }
+
+  // 管理员专用：运行批次与异常治理
+  if (pathname === '/runs' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const runs = db.prepare(`
+      SELECT 
+        r.id,
+        r.workflow_id,
+        r.workflow_version,
+        r.trigger,
+        r.status,
+        r.asset_count,
+        r.error,
+        r.created_at,
+        r.started_at,
+        r.finished_at,
+        r.updated_at,
+        COALESCE(ns.done_count, r.success_count, 0) as success_count,
+        COALESCE(ns.failed_count, r.failed_count, 0) as failed_count,
+        COALESCE(ns.pending_count, 0) as pending_count,
+        COALESCE(ns.queued_count, 0) as queued_count,
+        COALESCE(ns.running_count, 0) as running_count,
+        COALESCE(ns.total_nodes, 0) as total_nodes,
+        COALESCE(ast.ready_count, 0) as ready_asset_count,
+        COALESCE(ast.excluded_count, 0) as excluded_asset_count,
+        COALESCE(ast.processing_count, 0) as processing_asset_count
+      FROM runs r
+      LEFT JOIN (
+        SELECT 
+          run_id,
+          COUNT(*) as total_nodes,
+          SUM(CASE WHEN status='done' THEN 1 ELSE 0 END) as done_count,
+          SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed_count,
+          SUM(CASE WHEN status IN ('queued', 'running') THEN 1 ELSE 0 END) as pending_count,
+          SUM(CASE WHEN status='queued' THEN 1 ELSE 0 END) as queued_count,
+          SUM(CASE WHEN status='running' THEN 1 ELSE 0 END) as running_count
+        FROM node_runs
+        GROUP BY run_id
+      ) ns ON ns.run_id = r.id
+      LEFT JOIN (
+        SELECT 
+          nr.run_id,
+          COUNT(DISTINCT CASE WHEN a.status = 'ready' THEN a.fid END) as ready_count,
+          COUNT(DISTINCT CASE WHEN a.status IN ('rejected','excluded') THEN a.fid END) as excluded_count,
+          COUNT(DISTINCT CASE WHEN a.status IN ('discovered','processing') THEN a.fid END) as processing_count
+        FROM node_runs nr
+        JOIN assets a ON a.fid = nr.asset_fid AND a.kind = 'image'
+        GROUP BY nr.run_id
+      ) ast ON ast.run_id = r.id
+      ORDER BY r.created_at DESC LIMIT 50
+    `).all();
+
+    const runIds = runs.map(r => r.id);
+    const summaryMap = {};
+    if (runIds.length > 0) {
+      const placeholders = runIds.map(() => '?').join(',');
+      const batchRows = db.prepare(`
+        SELECT 
+          nr.run_id,
+          COUNT(DISTINCT a.fid) as total_images,
+          COUNT(DISTINCT CASE WHEN a.status = 'excluded' THEN a.fid END) as gate_excluded,
+          COUNT(DISTINCT CASE WHEN a.status != 'excluded' AND a.category = 'interior' THEN a.fid END) as gate_interior,
+          COUNT(DISTINCT CASE WHEN a.status != 'excluded' AND a.category = 'furniture' THEN a.fid END) as gate_furniture,
+          COUNT(DISTINCT CASE WHEN a.status != 'excluded' AND a.category = 'material' THEN a.fid END) as gate_material,
+          COUNT(DISTINCT CASE WHEN a.status != 'excluded' AND a.category = 'exterior' THEN a.fid END) as gate_exterior,
+          COUNT(DISTINCT CASE WHEN a.status = 'ready' THEN a.fid END) as final_ready,
+          COUNT(DISTINCT CASE WHEN a.status IN ('rejected','excluded') THEN a.fid END) as final_excluded,
+          COUNT(DISTINCT CASE WHEN a.status IN ('discovered','processing') THEN a.fid END) as final_processing
+        FROM node_runs nr
+        JOIN assets a ON a.fid = nr.asset_fid AND a.kind = 'image'
+        WHERE nr.run_id IN (${placeholders})
+        GROUP BY nr.run_id
+      `).all(...runIds);
+
+      const failedRows = db.prepare(`
+        SELECT nr.run_id, nr.node_type, COUNT(*) as count
+        FROM node_runs nr
+        JOIN assets a ON a.fid = nr.asset_fid AND a.kind = 'image'
+        WHERE nr.status = 'failed' AND nr.run_id IN (${placeholders})
+        GROUP BY nr.run_id, nr.node_type
+      `).all(...runIds);
+
+      for (const b of batchRows) {
+        summaryMap[b.run_id] = {
+          totalImages: b.total_images || 0,
+          gate: {
+            interior: b.gate_interior || 0,
+            furniture: b.gate_furniture || 0,
+            material: b.gate_material || 0,
+            exterior: b.gate_exterior || 0,
+            excluded: b.gate_excluded || 0
+          },
+          finalStatus: {
+            ready: b.final_ready || 0,
+            excluded: b.final_excluded || 0,
+            processing: b.final_processing || 0
+          },
+          failures: {},
+          totalFailures: 0
+        };
+      }
+
+      for (const f of failedRows) {
+        if (!summaryMap[f.run_id]) {
+          summaryMap[f.run_id] = {
+            totalImages: 0,
+            gate: { interior: 0, furniture: 0, material: 0, exterior: 0, excluded: 0 },
+            finalStatus: { ready: 0, excluded: 0, processing: 0 },
+            failures: {},
+            totalFailures: 0
+          };
+        }
+        summaryMap[f.run_id].failures[f.node_type] = f.count;
+        summaryMap[f.run_id].totalFailures += f.count;
+      }
+    }
+
+    const data = runs.map(r => ({
+      ...r,
+      batchSummary: summaryMap[r.id] || {
+        totalImages: 0,
+        gate: { interior: 0, furniture: 0, material: 0, exterior: 0, excluded: 0 },
+        finalStatus: { ready: 0, excluded: 0, processing: 0 },
+        failures: {},
+        totalFailures: 0
+      }
+    }));
+    return sendJson(res, 200, { success: true, data });
+  }
+
+  if (pathname === '/runs' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const b = await parseBody(req);
+    if (!interpreter) return sendJson(res, 500, { error: '解释器未就绪' });
+    const r = await interpreter.triggerRun({
+      workflowId: b.workflowId || 'default',
+      assetFids: b.assetFids || [],
+      trigger: b.trigger || 'manual',
+      limit: b.limit,
+      mode: b.mode,
+      targetNodeId: b.targetNodeId
+    });
+    return sendJson(res, 200, { success: true, data: r });
+  }
+
+  const mRunGraph = pathname.match(/^\/runs\/([^\/]+)\/graph$/);
+  if (mRunGraph && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const runId = decodeURIComponent(mRunGraph[1]);
+    const run = db.prepare('SELECT * FROM runs WHERE id=?').get(runId);
+    if (!run) return sendJson(res, 404, { error: '批次不存在' });
+    const wf = db.prepare('SELECT * FROM workflows WHERE id=?').get(run.workflow_id || 'default');
+    let graph = { nodes: [], edges: [] };
+    try { graph = JSON.parse(wf?.graph_json || '{}'); } catch { graph = { nodes: [], edges: [] }; }
+    const inspectFid = urlObj.searchParams.get('fid');
+    const agg = db.prepare(`
+      SELECT node_id, node_type,
+        SUM(CASE WHEN status IN ('queued','running') THEN 1 ELSE 0 END) as queued,
+        SUM(CASE WHEN status='running' THEN 1 ELSE 0 END) as running,
+        SUM(CASE WHEN status='done' THEN 1 ELSE 0 END) as done,
+        SUM(CASE WHEN status='skipped' THEN 1 ELSE 0 END) as skipped,
+        SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed,
+        COUNT(*) as total
+      FROM node_runs WHERE run_id=? GROUP BY node_id, node_type
+    `).all(runId);
+    const nodeStats = {};
+    agg.forEach(r => { nodeStats[r.node_id] = r; });
+    let inspect = null;
+    if (inspectFid) {
+      const parse = (s) => { try { return s ? JSON.parse(s) : {}; } catch { return {}; } };
+      const nrs = db.prepare(`
+        SELECT * FROM node_runs WHERE run_id=? AND asset_fid=? ORDER BY id ASC
+      `).all(runId, inspectFid);
+      const asset = db.prepare('SELECT fid, file_name, status FROM assets WHERE fid=?').get(inspectFid) || null;
+      // CONFLICT-002：重复组退役，cluster 信息恒为 null（字段保留兼容旧客户端）
+      const cluster = null;
+      inspect = {
+        fid: inspectFid,
+        asset,
+        cluster,
+        nodes: nrs.map(nr => ({
+          ...nr,
+          input: parse(nr.input_summary),
+          output: parse(nr.output_summary)
+        }))
+      };
+    }
+
+    // 批次内图片专属统计总表
+    const batchRow = db.prepare(`
+      SELECT 
+        COUNT(DISTINCT a.fid) as total_images,
+        COUNT(DISTINCT CASE WHEN a.status = 'excluded' THEN a.fid END) as gate_excluded,
+        COUNT(DISTINCT CASE WHEN a.status != 'excluded' AND a.category = 'interior' THEN a.fid END) as gate_interior,
+        COUNT(DISTINCT CASE WHEN a.status != 'excluded' AND a.category = 'furniture' THEN a.fid END) as gate_furniture,
+        COUNT(DISTINCT CASE WHEN a.status != 'excluded' AND a.category = 'material' THEN a.fid END) as gate_material,
+        COUNT(DISTINCT CASE WHEN a.status != 'excluded' AND a.category = 'exterior' THEN a.fid END) as gate_exterior,
+        COUNT(DISTINCT CASE WHEN a.status = 'ready' THEN a.fid END) as final_ready,
+        COUNT(DISTINCT CASE WHEN a.status IN ('rejected','excluded') THEN a.fid END) as final_excluded,
+        COUNT(DISTINCT CASE WHEN a.status IN ('discovered','processing') THEN a.fid END) as final_processing
+      FROM node_runs nr
+      JOIN assets a ON a.fid = nr.asset_fid AND a.kind = 'image'
+      WHERE nr.run_id = ?
+    `).get(runId);
+
+    const failedRows = db.prepare(`
+      SELECT nr.node_type, COUNT(*) as count
+      FROM node_runs nr
+      JOIN assets a ON a.fid = nr.asset_fid AND a.kind = 'image'
+      WHERE nr.status = 'failed' AND nr.run_id = ?
+      GROUP BY nr.node_type
+    `).all(runId);
+
+    const failures = {};
+    let totalFailures = 0;
+    (failedRows || []).forEach(f => {
+      failures[f.node_type] = f.count;
+      totalFailures += f.count;
+    });
+
+    const batchSummary = {
+      totalImages: batchRow?.total_images || 0,
+      gate: {
+        interior: batchRow?.gate_interior || 0,
+        furniture: batchRow?.gate_furniture || 0,
+        material: batchRow?.gate_material || 0,
+        exterior: batchRow?.gate_exterior || 0,
+        excluded: batchRow?.gate_excluded || 0
+      },
+      finalStatus: {
+        ready: batchRow?.final_ready || 0,
+        excluded: batchRow?.final_excluded || 0,
+        processing: batchRow?.final_processing || 0
+      },
+      failures,
+      totalFailures
+    };
+
+    // 资产列表分页支持（移除 40 张截断限制）
+    const totalCountRow = db.prepare(`
+      SELECT COUNT(DISTINCT nr.asset_fid) as total
+      FROM node_runs nr
+      LEFT JOIN assets a ON a.fid = nr.asset_fid
+      WHERE nr.run_id = ? AND (a.kind = 'image' OR a.kind IS NULL)
+    `).get(runId);
+    const total = totalCountRow?.total || 0;
+    const page = Math.max(1, parseInt(urlObj.searchParams.get('page') || '1', 10));
+    const pageSize = Math.max(1, Math.min(100, parseInt(urlObj.searchParams.get('pageSize') || '24', 10)));
+    const totalPages = Math.ceil(total / pageSize) || 1;
+    const offset = (page - 1) * pageSize;
+
+    const assets = db.prepare(`
+      SELECT nr.asset_fid as fid, a.file_name, a.thumb_url, a.status as asset_status, a.category,
+        CASE
+          WHEN SUM(CASE WHEN nr.status='running' THEN 1 ELSE 0 END) > 0 THEN 'running'
+          WHEN SUM(CASE WHEN nr.status='queued' THEN 1 ELSE 0 END) > 0 THEN 'queued'
+          WHEN SUM(CASE WHEN nr.status='failed' THEN 1 ELSE 0 END) > 0 THEN 'failed'
+          WHEN SUM(CASE WHEN nr.status='done' THEN 1 ELSE 0 END) > 0 THEN 'done'
+          ELSE 'skipped'
+        END as last_status,
+        MAX(nr.id) as last_id
+      FROM node_runs nr
+      LEFT JOIN assets a ON a.fid = nr.asset_fid
+      WHERE nr.run_id=? AND (a.kind = 'image' OR a.kind IS NULL)
+      GROUP BY nr.asset_fid
+      ORDER BY
+        CASE last_status
+          WHEN 'running' THEN 0
+          WHEN 'queued' THEN 1
+          WHEN 'failed' THEN 2
+          WHEN 'done' THEN 3
+          ELSE 4
+        END,
+        last_id DESC
+      LIMIT ? OFFSET ?
+    `).all(runId, pageSize, offset);
+
+    return sendJson(res, 200, {
+      success: true,
+      data: {
+        run,
+        graph,
+        nodeStats,
+        inspect,
+        assets,
+        pagination: {
+          page,
+          pageSize,
+          total,
+          totalPages
+        },
+        batchSummary
+      }
+    });
+  }
+
+  const mRunDetail = pathname.match(/^\/runs\/([^\/]+)$/);
+  if (mRunDetail && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const runId = decodeURIComponent(mRunDetail[1]);
+    const run = db.prepare('SELECT * FROM runs WHERE id=?').get(runId);
+    if (!run) return sendJson(res, 404, { error: '批次不存在' });
+
+    const page = Math.max(1, parseInt(urlObj.searchParams.get('page') || '1', 10));
+    const pageSize = Math.max(1, Math.min(100, parseInt(urlObj.searchParams.get('pageSize') || '20', 10)));
+    const offset = (page - 1) * pageSize;
+
+    const totalRow = db.prepare(`
+      SELECT COUNT(DISTINCT nr.asset_fid) as total
+      FROM node_runs nr
+      LEFT JOIN assets a ON a.fid = nr.asset_fid
+      WHERE nr.run_id = ? AND (a.kind = 'image' OR a.kind IS NULL)
+    `).get(runId);
+    const total = totalRow?.total || 0;
+    const totalPages = Math.ceil(total / pageSize) || 1;
+
+    const assets = db.prepare(`
+      SELECT 
+        nr.asset_fid,
+        a.file_name,
+        a.thumb_url,
+        a.status as asset_status,
+        COUNT(nr.id) as node_count,
+        CASE
+          WHEN SUM(CASE WHEN nr.status='running' THEN 1 ELSE 0 END) > 0 THEN 'running'
+          WHEN SUM(CASE WHEN nr.status='queued' THEN 1 ELSE 0 END) > 0 THEN 'queued'
+          WHEN SUM(CASE WHEN nr.status='failed' THEN 1 ELSE 0 END) > 0 THEN 'failed'
+          WHEN SUM(CASE WHEN nr.status='done' THEN 1 ELSE 0 END) > 0 THEN 'done'
+          ELSE 'skipped'
+        END as last_status
+      FROM node_runs nr
+      LEFT JOIN assets a ON a.fid = nr.asset_fid
+      WHERE nr.run_id = ? AND (a.kind = 'image' OR a.kind IS NULL)
+      GROUP BY nr.asset_fid
+      ORDER BY
+        CASE last_status
+          WHEN 'running' THEN 0
+          WHEN 'queued' THEN 1
+          WHEN 'failed' THEN 2
+          WHEN 'done' THEN 3
+          ELSE 4
+        END,
+        MAX(nr.id) DESC
+      LIMIT ? OFFSET ?
+    `).all(runId, pageSize, offset);
+
+    return sendJson(res, 200, {
+      success: true,
+      data: {
+        run,
+        assets,
+        pagination: { page, pageSize, total, totalPages }
+      }
+    });
+  }
+
+  // ===== 工坊触发单次拆盒与重跑生图 =====
+  const mRunUnpack = pathname.match(/^\/runs\/([^\/]+)\/unpack$/);
+  if (mRunUnpack && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const runId = decodeURIComponent(mRunUnpack[1]);
+    const run = db.prepare('SELECT * FROM runs WHERE id=?').get(runId);
+    if (!run) return sendJson(res, 404, { error: '运行记录不存在' });
+
+    // 拒绝非工坊运行拆盒：入库失败不提供「改中间提示词再重跑」，拆盒仅用于工坊触发
+    if (run.trigger !== 'studio') {
+      return sendJson(res, 400, { error: '入库运行不支持拆盒重跑，事后拆盒仅适用于工坊触发运行' });
+    }
+
+    const nrs = db.prepare('SELECT * FROM node_runs WHERE run_id=? ORDER BY id ASC').all(runId);
+    let visionFields = {};
+    let promptSummary = null;
+    let genSummary = null;
+    let model = 'seedream5flash';
+
+    for (const nr of nrs) {
+      let inp = {};
+      let out = {};
+      try { inp = nr.input_summary ? JSON.parse(nr.input_summary) : {}; } catch (_) {}
+      try { out = nr.output_summary ? JSON.parse(nr.output_summary) : {}; } catch (_) {}
+
+      if (nr.node_type === 'vision' || nr.node_id === 'vision' || nr.node_type === 'gate') {
+        visionFields = {
+          category: out.category || out.room_type || inp.category || '',
+          style: out.style || inp.style || '',
+          materials: out.materials || out.material || inp.materials || '',
+          room_type: out.room_type || inp.room_type || '',
+          description: out.description || out.analysis || inp.description || '',
+          raw: out
+        };
+      } else if (nr.node_type === 'text' || nr.node_id === 'text') {
+        promptSummary = {
+          prompt: out.prompt || out.text || inp.prompt,
+          template: inp.template,
+        };
+      } else if (nr.node_type === 'gen' || nr.node_id === 'gen' || nr.node_type === 'restage' || nr.node_type === 'image') {
+        genSummary = {
+          nodeRunId: nr.id,
+          model: inp.model || out.model || model,
+          prompt: inp.prompt || out.prompt,
+          params: inp.params || inp.extras || {},
+          status: nr.status,
+          error: nr.error,
+          output: out
+        };
+        if (inp.model) model = inp.model;
+      }
+    }
+
+    const finalPrompt = genSummary?.prompt || promptSummary?.prompt || '';
+    return sendJson(res, 200, {
+      success: true,
+      data: {
+        runId,
+        trigger: run.trigger,
+        status: run.status,
+        visionFields,
+        editablePrompt: finalPrompt,
+        finalPrompt,
+        model,
+        params: genSummary?.params || {},
+        lastResult: genSummary?.output || null
+      }
+    });
+  }
+
+  const mRunRerunGen = pathname.match(/^\/runs\/([^\/]+)\/rerun-gen$/);
+  if (mRunRerunGen && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const runId = decodeURIComponent(mRunRerunGen[1]);
+    const run = db.prepare('SELECT * FROM runs WHERE id=?').get(runId);
+    if (!run) return sendJson(res, 404, { error: '运行记录不存在' });
+
+    if (run.trigger !== 'studio') {
+      return sendJson(res, 400, { error: '入库运行不支持拆盒重跑，事后拆盒仅适用于工坊触发运行' });
+    }
+
+    const b = await parseBody(req);
+    const newPrompt = (b.prompt || '').trim();
+    if (!newPrompt) return sendJson(res, 400, { error: '提示词不能为空' });
+
+    const { executeAdapter } = require('./gen');
+    const { resolveModelExecution, assembleModelPayload } = require('./models-contract');
+    const { pickAdapterId, adapterMissingError } = require('./adapter-match');
+    const { engineStatus } = require('./lab');
+
+    const now = Date.now();
+    if (b.visionFields && typeof b.visionFields === 'object') {
+      const visionNode = db.prepare("SELECT * FROM node_runs WHERE run_id=? AND (node_type IN ('vision','gate') OR node_id='vision') ORDER BY id DESC").get(runId);
+      if (visionNode) {
+        let prevOut = {};
+        try { prevOut = JSON.parse(visionNode.output_summary || '{}'); } catch (_) {}
+        const mergedOut = { ...prevOut, ...b.visionFields };
+        db.prepare('UPDATE node_runs SET output_summary=?, updated_at=? WHERE id=?')
+          .run(JSON.stringify(mergedOut), now, visionNode.id);
+      }
+    }
+
+    const genNode = db.prepare("SELECT * FROM node_runs WHERE run_id=? AND (node_type IN ('gen','restage','image') OR node_id='gen') ORDER BY id DESC").get(runId);
+    let genInp = {};
+    try { genInp = genNode?.input_summary ? JSON.parse(genNode.input_summary) : {}; } catch (_) {}
+
+    const targetModel = b.model || genInp.model || 'seedream5flash';
+    const exec = resolveModelExecution(db, targetModel);
+
+    const values = {
+      ...(genInp.params || {}),
+      ...(genInp.extras || {}),
+      ...(b.params || {}),
+      size: b.size || genInp.size || '2K',
+      ratio: b.ratio || genInp.ratio || '1:1',
+    };
+
+    let assembled = null;
+    if (exec?.model) {
+      assembled = assembleModelPayload({
+        modelContract: exec.model,
+        editablePrompt: newPrompt,
+        values
+      });
+    }
+
+    const engines = engineStatus(db);
+    const imgAdapters = engines.gen?.imageAdapters || [];
+    const mCode = String(exec?.model?.vendor_model_id || targetModel);
+    const pickedId = pickAdapterId('image', mCode, imgAdapters);
+    const adapterRow = pickedId ? db.prepare('SELECT * FROM gen_adapters WHERE id=?').get(pickedId) : null;
+    if (!adapterRow) return sendJson(res, 503, { error: adapterMissingError('image', mCode) });
+
+    try {
+      const resData = await executeAdapter(services, adapterRow, {
+        kind: 'image',
+        prompt: assembled?.prompt || newPrompt,
+        model: mCode,
+        size: assembled?.body?.size || values.size,
+        ratio: assembled?.body?.ratio || values.ratio,
+        imageUrls: b.image ? [b.image] : (genInp.imageUrls || []),
+        extras: {
+          ...values,
+          ...(assembled?.body || {})
+        }
+      });
+
+      if (genNode) {
+        db.prepare(`
+          UPDATE node_runs SET
+            status='done',
+            error=NULL,
+            input_summary=?,
+            output_summary=?,
+            updated_at=?
+          WHERE id=?
+        `).run(
+          JSON.stringify({ prompt: newPrompt, model: targetModel, params: values, visionFields: b.visionFields || undefined }),
+          JSON.stringify(resData),
+          now,
+          genNode.id
+        );
+      }
+      db.prepare("UPDATE runs SET status='done', updated_at=? WHERE id=?").run(now, runId);
+
+      return sendJson(res, 200, { success: true, data: resData });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  const mRunAsset = pathname.match(/^\/runs\/([^\/]+)\/assets\/([^\/]+)$/);
+  if (mRunAsset && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const runId = decodeURIComponent(mRunAsset[1]);
+    const fid = decodeURIComponent(mRunAsset[2]);
+    const run = db.prepare('SELECT * FROM runs WHERE id=?').get(runId);
+    if (!run) return sendJson(res, 404, { error: '批次不存在' });
+    const asset = db.prepare('SELECT * FROM assets WHERE fid=?').get(fid);
+    const nodeRuns = db.prepare(`
+      SELECT nr.*, a.file_name
+      FROM node_runs nr
+      LEFT JOIN assets a ON a.fid = nr.asset_fid
+      WHERE nr.run_id=? AND nr.asset_fid=?
+      ORDER BY nr.id ASC
+    `).all(runId, fid);
+    const parse = (s) => { try { return s ? JSON.parse(s) : {}; } catch { return {}; } };
+    const nodes = nodeRuns.map(nr => ({
+      ...nr,
+      input: parse(nr.input_summary),
+      output: parse(nr.output_summary)
+    }));
+    // CONFLICT-002：重复组退役，cluster 信息恒为 null（字段保留兼容旧客户端）
+    const cluster = null;
+    return sendJson(res, 200, { success: true, data: { run, asset, nodes, cluster } });
+  }
+
+  if (pathname === '/exceptions' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    // 治理台异常清单必须只列「真正还需要人管」的条目，否则永远 100 条起步的噪音。
+    // 四类噪音必须剔除：
+    //   1) 历史陈旧 —— 几天前的失败，今天早已无人关心（用 days 窗口，默认 7 天）
+    //   2) 僵尸记录 —— 资产已被硬删/进回收站/拉黑，node_runs 还留着 failed 行，重试必然又是「对应资产记录不存在」
+    //   3) 已恢复   —— 同一节点后来重跑成功了（以「最新一次运行」为准，而非「最新一次失败」）
+    //   4) 确定性错误 —— 缺配置/参数错/模型没部署 这类，重试一万次也是同样结果
+    const scope = String(urlObj.searchParams.get('scope') || 'actionable'); // actionable | all
+    const days = Math.max(1, Math.min(365, parseInt(urlObj.searchParams.get('days') || '7', 10) || 7));
+    const since = Date.now() - days * 86400000;
+    const { isTransientErrorText, isDeterministicErrorText } = require('./nodes/index');
+
+    // 第五类噪音：已废弃来源（2026-10-03 用户决定）
+    // 夸克网盘源已废弃，不再新拉；历史拉取进来的资产保持「已拉取」状态不动它们的数据。
+    // 但它们仍会在流水线里失败（源文件超 50MB 上限、CLI 已不在、连接不通），
+    // 这些失败重试一万次也是同样结果，属于纯噪音，不该占用治理台待治理名额。
+    // 注意：只从「待治理清单」里排除，**不删除资产、不删除 derivatives**——
+    // 它们的源文件仍靠 storage_type='quark' 读取，删了就真的读不到了。
+    const RETIRED_SOURCES = ['quark'];
+
+    // 关键：以「最新一次运行」为准，而不是「最新一次失败」。
+    // 否则 10-02 失败、10-03 重跑成功的节点，今天仍会被当成异常 —— 这正是历史噪音复现的根源。
+    const latestPerNode = `
+      SELECT nr.* FROM node_runs nr
+      JOIN (
+        SELECT asset_fid, node_id, MAX(id) as mid
+        FROM node_runs
+        WHERE updated_at >= ? OR updated_at IS NULL
+        GROUP BY asset_fid, node_id
+      ) x ON x.mid = nr.id
+      WHERE nr.status = 'failed'
+    `;
+    const rows = db.prepare(`
+      SELECT
+        nr.id as node_run_id,
+        a.fid as fid,
+        a.file_name,
+        '/api/assets/' || a.fid || '/image' as thumb_url,
+        a.ready_flags,
+        a.status as asset_status,
+        COALESCE(a.source, '') as asset_source,
+        COALESCE(nr.node_id, 'restage_9_16') as node_id,
+        COALESCE(nr.node_type, nr.node_id, 'restage_9_16') as node_type,
+        COALESCE(nr.status, 'failed') as node_status,
+        COALESCE(nr.error, a.error_note, '包含异常警告标记') as error,
+        COALESCE(nr.updated_at, a.updated_at, a.created_at) as updated_at
+      FROM (${latestPerNode}) nr
+      JOIN assets a ON a.fid = nr.asset_fid
+      LEFT JOIN asset_trash t ON t.fid = a.fid
+      LEFT JOIN (SELECT DISTINCT fid FROM asset_blacklist) b ON b.fid = a.fid
+      WHERE t.fid IS NULL AND b.fid IS NULL
+        AND COALESCE(a.status, '') NOT IN ('deleted', 'rejected', 'excluded')
+      ORDER BY nr.updated_at DESC
+      LIMIT 300
+    `).all(since);
+
+    const existingFids = new Set(rows.map(r => r.fid));
+    const flaggedRows = db.prepare(`
+      SELECT
+        0 as node_run_id,
+        a.fid as fid,
+        a.file_name,
+        '/api/assets/' || a.fid || '/image' as thumb_url,
+        a.ready_flags,
+        a.status as asset_status,
+        COALESCE(a.source, '') as asset_source,
+        'flagged_asset' as node_id,
+        'flagged_asset' as node_type,
+        'failed' as node_status,
+        COALESCE(a.error_note, '包含异常警告标记') as error,
+        COALESCE(a.updated_at, a.created_at) as updated_at
+      FROM assets a
+      LEFT JOIN asset_trash t ON t.fid = a.fid
+      LEFT JOIN (SELECT DISTINCT fid FROM asset_blacklist) b ON b.fid = a.fid
+      WHERE t.fid IS NULL AND b.fid IS NULL
+        AND (a.status = 'ready_with_flags' OR (a.ready_flags IS NOT NULL AND a.ready_flags NOT IN ('', '[]')))
+        AND COALESCE(a.status, '') NOT IN ('deleted', 'rejected', 'excluded')
+      LIMIT 100
+    `).all().filter(r => !existingFids.has(r.fid));
+    rows.push(...flaggedRows);
+
+    const stats = { total: rows.length, actionable: 0, zombie: 0, recovered: 0, deterministic: 0, retired_source: 0 };
+    const list = [];
+
+    for (const r of rows) {
+      // 资产级僵尸：node_run 还在但资产已不可用（上面 SQL 已挡一层，这里兜底防御）
+      if (!r.fid) { stats.zombie++; continue; }
+
+      const isFlagged = r.node_id === 'flagged_asset' || r.asset_status === 'ready_with_flags';
+
+      // 废弃来源：不算待治理，也不重试（数据保持原样，异常标记资产除外）
+      // scope=all 时仍列出（标注 retired_source），保证「废弃源还剩多少」随时可查
+      if (!isFlagged && RETIRED_SOURCES.includes(String(r.asset_source || '').toLowerCase())) {
+        stats.retired_source++;
+        if (scope === 'all') {
+          list.push({
+            ...r,
+            retryable: false,
+            error_kind: 'retired_source',
+            asset_source: r.asset_source,
+          });
+        }
+        continue;
+      }
+
+      // 已恢复判定：restage 类节点看是否已有合格产物（generated=true 且非 recast/垫边）
+      if (String(r.node_type || r.node_id || '').startsWith('restage')) {
+        try {
+          const derivs = db.prepare('SELECT kind, params FROM derivatives WHERE asset_fid=?').all(r.fid);
+          const hasQualified = derivs.some(d => {
+            if (d.kind !== 'restage_9_16' && d.kind !== 'restage_3_4') return false;
+            return isQualifiedAgnes({ kind: d.kind, params: d.params });
+          });
+          // 只有「本次失败后没补出图」才算异常；补出了就是历史噪音
+          const failedAt = Number(r.updated_at || 0);
+          const laterQualified = derivs.some(d => {
+            if (d.kind !== 'restage_9_16' && d.kind !== 'restage_3_4') return false;
+            if (!isQualifiedAgnes({ kind: d.kind, params: d.params })) return false;
+            return Number(d.created_at || 0) >= failedAt;
+          });
+          if (hasQualified && laterQualified) { stats.recovered++; continue; }
+        } catch (_) { /* derivatives 表异常不阻断列表 */ }
+      }
+
+      const isDeterministic = !isFlagged && isDeterministicErrorText(r.error);
+      if (isDeterministic) {
+        stats.deterministic++;
+      } else {
+        stats.actionable++;
+      }
+      list.push({
+        ...r,
+        retryable: !isDeterministic,
+        error_kind: isDeterministic ? 'deterministic' : (isFlagged || isTransientErrorText(r.error) ? 'transient' : 'other'),
+      });
+    }
+
+    // 默认只返回「可重试 + 偶发性」的；其他类噪音可通过 ?scope=all 查看
+    const data = scope === 'all' ? list : list.filter(x => x.retryable && x.error_kind === 'transient');
+    return sendJson(res, 200, { success: true, data, meta: { scope, stats, returned: data.length } });
+  }
+
+  const mRetry = pathname.match(/^\/exceptions\/(\d+)\/retry$/);
+  if (mRetry && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const nrId = +mRetry[1];
+    if (!interpreter) return sendJson(res, 500, { error: '解释器未就绪' });
+    const r = await interpreter.retryNodeRun(nrId);
+    return sendJson(res, 200, { success: true, data: r });
+  }
+
+  // 管理员专用：适配器列表与测试
+  if (pathname === '/adapters' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const { getProtocolManifest, listAllManifests } = require('./gen/builtin-protocols');
+    const { getAdapterModule, listLoadedCustomAdapters } = require('./gen/adapters');
+    const rows = db.prepare('SELECT id, label, kind, builtin, protocol, base_url, secrets_json, config_json, enabled, created_at, updated_at FROM gen_adapters ORDER BY builtin DESC, id ASC').all();
+    const adapters = rows.map((r) => {
+      const manifest = getProtocolManifest(r.protocol) || getAdapterModule(r.protocol) || {};
+      let hasKey = false;
+      let maskedKey = null;
+      try {
+        const sec = JSON.parse(r.secrets_json || '{}');
+        if (sec.apiKey) {
+          hasKey = true;
+          const k = String(sec.apiKey);
+          maskedKey = k.length > 8 ? `${k.slice(0, 4)}••••${k.slice(-4)}` : '••••••••';
+        }
+      } catch (_) {}
+      return {
+        id: r.id,
+        label: r.label,
+        kind: r.kind,
+        builtin: r.builtin,
+        protocol: r.protocol,
+        base_url: r.base_url,
+        config_json: r.config_json,
+        enabled: r.enabled,
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+        method: manifest.method || 'POST',
+        urlTemplate: manifest.urlTemplate || '',
+        paramLocations: manifest.paramLocations || null,
+        hasKey,
+        maskedKey,
+      };
+    });
+    return sendJson(res, 200, {
+      success: true,
+      data: adapters,
+      manifests: listAllManifests().concat(listLoadedCustomAdapters()),
+    });
+  }
+
+  if (pathname === '/adapters' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const b = await parseBody(req);
+    const now = Date.now();
+    const id = b.id || `adp_${Date.now()}`;
+
+    // 适配器不再保存钥匙，鉴权由接入点与环境变量管理
+    db.prepare(`
+      INSERT INTO gen_adapters (id, label, kind, builtin, protocol, base_url, secrets_json, config_json, enabled, created_at, updated_at)
+      VALUES (?, ?, ?, 0, ?, ?, NULL, ?, 1, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        label=excluded.label, kind=excluded.kind, protocol=excluded.protocol,
+        base_url=excluded.base_url, secrets_json=NULL,
+        config_json=excluded.config_json, updated_at=excluded.updated_at
+    `).run(id, b.label, b.kind || 'image', b.protocol, b.base_url, JSON.stringify(b.config || {}), now, now);
+
+    return sendJson(res, 200, { success: true, data: { id } });
+  }
+
+  const mAdpToggle = pathname.match(/^\/adapters\/([^\/]+)\/toggle$/);
+  if (mAdpToggle && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const id = decodeURIComponent(mAdpToggle[1]);
+    const b = await parseBody(req);
+    db.prepare('UPDATE gen_adapters SET enabled=?, updated_at=? WHERE id=?').run(b.enabled ? 1 : 0, Date.now(), id);
+    return sendJson(res, 200, { success: true });
+  }
+
+  const mAdpDel = pathname.match(/^\/adapters\/([^\/]+)$/);
+  if (mAdpDel && req.method === 'DELETE') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const id = decodeURIComponent(mAdpDel[1]);
+    const target = db.prepare('SELECT builtin FROM gen_adapters WHERE id=?').get(id);
+    if (!target) return sendJson(res, 404, { error: '适配器不存在' });
+    if (target.builtin) return sendJson(res, 400, { error: '内置适配器不允许删除' });
+    db.prepare('DELETE FROM gen_adapters WHERE id=?').run(id);
+    return sendJson(res, 200, { success: true, data: { id } });
+  }
+
+  if (pathname === '/adapters/test' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const b = await parseBody(req);
+    const adapter = db.prepare('SELECT * FROM gen_adapters WHERE id=?').get(b.adapterId) || b.adapter;
+    if (!adapter) return sendJson(res, 400, { error: '缺少适配器定义' });
+
+    const start = Date.now();
+    try {
+      const resData = await executeAdapter(services, adapter, {
+        kind: adapter.kind === 'video' ? 'video' : 'image',
+        prompt: b.prompt || '现代极简客厅室内设计效果图',
+        model: b.model
+      });
+      const firstFile = resData.files?.[0];
+      const previewUrl = firstFile?.previewUrl || (firstFile?.localPath ? `/api/cache/temp/${path.basename(firstFile.localPath)}` : null);
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          ...resData,
+          success: true,
+          previewUrl,
+          durationMs: Date.now() - start
+        }
+      });
+    } catch (e) {
+      return sendJson(res, 200, { success: false, error: e.message, durationMs: Date.now() - start });
+    }
+  }
+
+  // ================= 供应商与接入点 (Providers / Endpoints) 接口 =================
+  if (pathname === '/providers' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const { getEndpointsList } = require('./models-contract');
+    return sendJson(res, 200, { success: true, data: getEndpointsList(db) });
+  }
+
+  if (pathname === '/providers/newapi/models' && req.method === 'GET') {
+    // 仅管理端「供应商设置」页调用；viewer 放开会用服务器存储的密钥触发外呼并枚举供应方模型
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const { resolveEndpointAuth } = require('./models-contract');
+      const endpoint = db.prepare("SELECT * FROM llm_endpoints WHERE id='newapi'").get();
+      const auth = endpoint ? resolveEndpointAuth(db, endpoint) : null;
+      const apiKey = auth?.apiKey || process.env.NEWAPI_API_KEY || '';
+      if (!apiKey) return sendJson(res, 503, { success: false, error: 'New API 密钥未配置' });
+      const base = (endpoint?.base_url || process.env.NEWAPI_BASE_URL || 'https://newapi.naite.cc/v1').replace(/\/$/, '');
+      const resp = await fetch(`${base}/models`, { headers: { Authorization: `Bearer ${apiKey}` } });
+      const payload = await resp.json();
+      if (!resp.ok) return sendJson(res, 502, { success: false, error: payload?.error?.message || `New API HTTP ${resp.status}` });
+      const models = (payload.data || []).map((m) => m.id).filter(Boolean).sort();
+      return sendJson(res, 200, { success: true, data: { base_url: base, count: models.length, models } });
+    } catch (e) {
+      return sendJson(res, 502, { success: false, error: e.message });
+    }
+  }
+
+  if (pathname === '/providers/env-keys' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const { getAvailableEnvKeys } = require('./models-contract');
+    return sendJson(res, 200, { success: true, data: getAvailableEnvKeys() });
+  }
+
+  if (pathname === '/providers/env-secrets' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const { inspectEnvKey, KNOWN_SECRET_ENV_SPECS } = require('./env-secrets');
+    const { getAvailableEnvKeys } = require('./models-contract');
+    const keys = getAvailableEnvKeys();
+    return sendJson(res, 200, {
+      success: true,
+      data: {
+        items: keys.map(k => inspectEnvKey(k)),
+        specs: KNOWN_SECRET_ENV_SPECS,
+      }
+    });
+  }
+
+  if (pathname === '/providers/env-secrets' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const b = await parseBody(req);
+      const { writeEnvUpdates } = require('./env-secrets');
+      const result = writeEnvUpdates(b?.updates || {});
+      return sendJson(res, 200, { success: true, data: result });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  if (pathname === '/providers' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const { saveEndpointData } = require('./models-contract');
+    const b = await parseBody(req);
+    try {
+      const p = saveEndpointData(db, b);
+      return sendJson(res, 200, { success: true, data: p });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  const mProvDel = pathname.match(/^\/providers\/([^\/]+)$/);
+  if (mProvDel && req.method === 'DELETE') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const id = decodeURIComponent(mProvDel[1]);
+    try {
+      const { deleteEndpointData } = require('./models-contract');
+      deleteEndpointData(db, id);
+      return sendJson(res, 200, { success: true, data: { id } });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  const mProvToggle = pathname.match(/^\/providers\/([^\/]+)\/toggle$/);
+  if (mProvToggle && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const id = decodeURIComponent(mProvToggle[1]);
+    const b = await parseBody(req);
+    const enabled = b.enabled ? 1 : 0;
+    try {
+      db.prepare('UPDATE llm_endpoints SET enabled=?, updated_at=? WHERE id=?').run(enabled, Date.now(), id);
+      try { db.prepare('UPDATE llm_providers SET enabled=?, updated_at=? WHERE id=?').run(enabled, Date.now(), id); } catch (_) {}
+      return sendJson(res, 200, { success: true, id, enabled: !!b.enabled });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  if (pathname === '/providers/litellm/toggle-batch' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const { toggleLiteLLMBatch } = require('./providers');
+    const b = await parseBody(req);
+    const r = toggleLiteLLMBatch(db, b.enabled);
+    return sendJson(res, 200, r);
+  }
+
+  // ================= 大模型 (Models) 接口 =================
+  if (pathname === '/models' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const { getModels } = require('./providers');
+    const provId = urlObj.searchParams.get('provider_id');
+    const cap = urlObj.searchParams.get('capability');
+    return sendJson(res, 200, { success: true, data: getModels(db, { provider_id: provId, capability: cap }) });
+  }
+
+  if (pathname === '/models' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const { saveModel } = require('./providers');
+    const b = await parseBody(req);
+    try {
+      const m = saveModel(db, b);
+      return sendJson(res, 200, { success: true, data: m });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  const mModelDel = pathname.match(/^\/models\/([^\/]+)$/);
+  if (mModelDel && req.method === 'DELETE') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const { deleteModel } = require('./providers');
+    const id = decodeURIComponent(mModelDel[1]);
+    const r = deleteModel(db, id);
+    return sendJson(res, 200, r);
+  }
+
+  const mModelToggle = pathname.match(/^\/models\/([^\/]+)\/toggle$/);
+  if (mModelToggle && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const { toggleModel } = require('./providers');
+    const id = decodeURIComponent(mModelToggle[1]);
+    const b = await parseBody(req);
+    const r = toggleModel(db, id, b.enabled);
+    return sendJson(res, 200, r);
+  }
+
+  const mModelTest = pathname.match(/^\/models\/([^\/]+)\/test$/);
+  if (mModelTest && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const { testModel } = require('./providers');
+    const id = decodeURIComponent(mModelTest[1]);
+    const b = await parseBody(req);
+    try {
+      const r = await testModel(services, id, b);
+      return sendJson(res, 200, { success: true, data: r });
+    } catch (e) {
+      return sendJson(res, 200, { success: false, error: e.message });
+    }
+  }
+
+  if (pathname === '/models/sync-litellm' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const { syncFromLiteLLM, litellmAdmin } = require('./providers');
+    try {
+      const { baseUrl, apiKey } = litellmAdmin(db, services.config);
+      if (!apiKey) throw new Error('本地网关没有钥匙');
+      const r = await syncFromLiteLLM(db, baseUrl, apiKey);
+      return sendJson(res, 200, { success: true, data: r });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 批量重跑所有失败节点 (一键异常治理重试)
+  if (pathname === '/runs/retry-all-failed' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    // 与 /exceptions 的 actionable 口径保持一致：只重试「资产还活着 + 偶发错误 + 近期」，
+    // 否则会把已删素材的僵尸记录和历史陈旧失败也重跑一遍，白白刷失败数。
+    const days = Math.max(1, Math.min(365, parseInt(urlObj.searchParams.get('days') || '7', 10) || 7));
+    const since = Date.now() - days * 86400000;
+    const { isTransientErrorText, isDeterministicErrorText } = require('./nodes/index');
+    const rows = db.prepare(`
+      SELECT nr.id as id, nr.error, COALESCE(a.source,'') as source FROM node_runs nr
+      JOIN (
+        SELECT asset_fid, node_id, MAX(id) as mid FROM node_runs
+        WHERE updated_at >= ? OR updated_at IS NULL
+        GROUP BY asset_fid, node_id
+      ) x ON x.mid = nr.id
+      JOIN assets a ON a.fid = nr.asset_fid
+      LEFT JOIN asset_trash t ON t.fid = a.fid
+      LEFT JOIN (SELECT DISTINCT fid FROM asset_blacklist) b ON b.fid = a.fid
+      WHERE nr.status = 'failed'
+        AND t.fid IS NULL AND b.fid IS NULL
+        AND COALESCE(a.status, '') NOT IN ('deleted','rejected','excluded')
+      ORDER BY nr.updated_at DESC LIMIT 300
+    `).all(since);
+    // 与 /exceptions 同一口径：废弃来源（夸克）不重试。
+    // 源已废弃，重试必然还是同样错误，纯属白跑。
+    const RETIRED_SOURCES = ['quark'];
+    const afterRetired = rows.filter(r => !RETIRED_SOURCES.includes(String(r.source || '').toLowerCase()));
+    const retiredSkipped = rows.length - afterRetired.length;
+    const ids = afterRetired
+      .filter(r => !isDeterministicErrorText(r.error) && isTransientErrorText(r.error))
+      .map(r => r.id);
+    const skipped = afterRetired.length - ids.length;
+
+    let count = 0;
+    for (const id of ids) {
+      try {
+        await interpreter.retryNodeRun(id);
+        count++;
+      } catch (err) {
+        console.error('[retry-all] 重试节点失败:', id, err.message);
+      }
+    }
+    return sendJson(res, 200, {
+      success: true,
+      data: { retried_count: count, skipped_noise: skipped, skipped_retired_source: retiredSkipped },
+    });
+  }
+
+  // CONFLICT-002：重复组概念已退役——/dup-groups/representative、/dup-groups/ungroup、
+  // /dup-groups/recluster 三条路由连同 cluster.js 模块一并移除。
+  // 旧客户端调用将得到 404（进入下方兜底）。
+
+  // 网关配置写入（管理员，热生效）
+  if (pathname === '/gateway/config' && (req.method === 'PUT' || req.method === 'POST')) {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const b = await parseBody(req);
+      const data = require('./gateway').setConfig(db, b.config || b, { actor: sessionUser?.username || 'admin' });
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 手动触发过期拒收件清理
+  if (pathname === '/gateway/purge' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const b = await parseBody(req);
+      const data = require('./reject-box').purgeExpired(services, { keepDays: Number(b.keepDays) || undefined, limit: Number(b.limit) || 500 });
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 存量已删素材回灌拒收箱（保留 keepDays 天）
+  if (pathname === '/gateway/regurgitate' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const b = await parseBody(req);
+      const data = require('./reject-box').regurgitateDeletedIntoRejected(services, {
+        keepDays: Number(b.keepDays) || 3,
+        limit: Number(b.limit) || 5000,
+      });
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // CONFLICT-002：/dup-groups/recluster 已随重复组退役移除。
+
+  const mMainDeriv = pathname.match(/^\/assets\/([^\/]+)\/main-derivative$/);
+  if (mMainDeriv && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const fid = decodeURIComponent(mMainDeriv[1]);
+    const b = await parseBody(req);
+    if (!b.derivativeId) return sendJson(res, 400, { error: '缺少 derivativeId' });
+    const deriv = getDerivativeById(db, b.derivativeId);
+    if (!deriv || deriv.asset_fid !== fid) return sendJson(res, 404, { error: '衍生图不存在' });
+    if (deriv.kind === 'restage_3_4') {
+      return sendJson(res, 400, { error: '3:4 不能设为列表封面；主图只表示重复组代表照片' });
+    }
+    if (String(deriv.kind || '').startsWith('restage_') && !isQualifiedAgnes(deriv)) {
+      return sendJson(res, 400, { error: '不合格重构图不能作为封面' });
+    }
+    setMainDerivative(services, fid, b.derivativeId);
+    return sendJson(res, 200, { success: true });
+  }
+
+  if (pathname === '/assets/ingest' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const { ingestBuffer, parseMultipart, readRequestBuffer } = require('./ingest');
+    const ct = req.headers['content-type'] || '';
+    try {
+      if (ct.includes('multipart/form-data')) {
+        const buf = await readRequestBuffer(req);
+        const { fields, files } = parseMultipart(buf, ct);
+        const file = files.find(f => f.name === 'file') || files[0];
+        if (!file) return sendJson(res, 400, { error: '缺少 file' });
+        const r = await ingestBuffer(services, {
+          buffer: file.data,
+          fileName: file.filename || fields.filename || 'upload.jpg',
+          source: fields.source || 'upload',
+          clientAssetId: fields.client_asset_id || null,
+          takenAt: fields.taken_at ? Number(fields.taken_at) : null,
+          category: fields.category || null,
+          shelf: fields.shelf || null
+        });
+        return sendJson(res, 200, { success: true, data: r });
+      }
+      if (ct.includes('application/octet-stream') || ct.includes('image/')) {
+        const buf = await readRequestBuffer(req);
+        const r = await ingestBuffer(services, {
+          buffer: buf,
+          fileName: req.headers['x-filename'] || 'upload.jpg',
+          source: req.headers['x-source'] || 'upload',
+          clientAssetId: req.headers['x-client-asset-id'] || null
+        });
+        return sendJson(res, 200, { success: true, data: r });
+      }
+      return sendJson(res, 400, { error: '请使用 multipart/form-data 或 octet-stream 上传原图' });
+    } catch (e) {
+      // B6：readRequestBuffer 超限时带 statusCode=413
+      return sendJson(res, e.statusCode || 400, { error: e.message });
+    }
+  }
+
+  if (pathname === '/tag-vocab' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const dims = ['space', 'style_atom', 'video_purpose'];
+    const stmt = db.prepare(`
+      SELECT dimension, dir, label FROM tag_dict
+      WHERE dimension=? AND (deprecated IS NULL OR deprecated=0)
+      ORDER BY id
+    `);
+    const data = {};
+    for (const dim of dims) data[dim] = stmt.all(dim);
+    return sendJson(res, 200, { success: true, data });
+  }
+
+  if (pathname === '/ba-resource/pull' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '需要管理员权限' });
+    const body = await parseBody(req);
+    try {
+      const summary = await require('./ba-resource').pullBaResources(services, {
+        keyword: body.keyword,
+        type: body.type || 'all',
+        size: body.size,
+      });
+      return sendJson(res, 200, { success: true, data: summary });
+    } catch (err) {
+      const code = err.code === 'captcha' ? 409 : (err.code === 400 ? 400 : 502);
+      return sendJson(res, code, { error: err.message });
+    }
+  }
+
+  if (pathname === '/ba-resource/recent' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '需要管理员权限' });
+    try { require('./ba-resource').pullBaResources; } catch { /* 模块始终可加载 */ }
+    try {
+      db.exec(`CREATE TABLE IF NOT EXISTS ba_resources (
+        remote_id TEXT PRIMARY KEY, type TEXT, url TEXT, context TEXT, info TEXT,
+        create_time TEXT, fid TEXT, status TEXT, error TEXT, updated_at INTEGER
+      )`);
+    } catch { /* 已有 */ }
+    const rows = db.prepare('SELECT remote_id, type, status, error, fid, updated_at FROM ba_resources ORDER BY updated_at DESC LIMIT 20').all();
+    return sendJson(res, 200, { success: true, data: rows });
+  }
+
+  if (pathname === '/settings/backup' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const { getBackupSettings } = require('./ingest');
+    return sendJson(res, 200, { success: true, data: getBackupSettings(db, config) });
+  }
+  if (pathname === '/settings/backup' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const { saveBackupSettings } = require('./ingest');
+    const b = await parseBody(req);
+    return sendJson(res, 200, { success: true, data: saveBackupSettings(db, b, config) });
+  }
+
+  // 管理员专用：快照设备状态（内置直收，取代原外部接收器代理）
+  if (pathname === '/snapshot-status' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const { getSnapshotDevices, getSyncDashboard } = require('./snapshot');
+    const authCounts = db.prepare(`
+      SELECT COALESCE(auth_state, 'unmanaged') AS state, COUNT(*) c FROM assets GROUP BY auth_state
+    `).all();
+    const authStateCounts = {};
+    for (const r of authCounts) authStateCounts[r.state] = r.c;
+    const dash = getSyncDashboard(db, { limit: Number(urlObj.searchParams.get('limit') || 50) });
+    return sendJson(res, 200, {
+      success: true,
+      data: {
+        ok: true,
+        devices: getSnapshotDevices(db),
+        now: Date.now(),
+        authStateCounts,
+        lastSync: dash.lastSync,
+        summary: dash.summary,
+        events: dash.events
+      }
+    });
+  }
+
+  // 管理员：同步变更日志（新增/移除/冻结 × 图/视频）
+  if (pathname === '/sync-log' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const { getSyncDashboard } = require('./snapshot');
+    const limit = Number(urlObj.searchParams.get('limit') || 50);
+    const deviceId = urlObj.searchParams.get('device_id') || '';
+    const type = urlObj.searchParams.get('type') || '';
+    let dash = getSyncDashboard(db, { limit, deviceId });
+    if (type) {
+      dash = { ...dash, events: dash.events.filter((e) => e.type === type) };
+    }
+    return sendJson(res, 200, { success: true, data: dash });
+  }
+
+  if (pathname === '/vectors/status' && req.method === 'GET') {
+    const wf = db.prepare("SELECT graph_json FROM workflows WHERE id='default'").get();
+    let configuredModel = 'text-embedding-3-small';
+    let configuredProvider = 'litellm';
+    try {
+      const g = JSON.parse(wf?.graph_json || '{}');
+      const idx = (g.nodes || []).find(n => n.type === 'index');
+      if (idx?.config?.embeddingModel) configuredModel = idx.config.embeddingModel;
+      if (idx?.config?.embeddingProvider) configuredProvider = idx.config.embeddingProvider;
+    } catch { /* defaults */ }
+    return sendJson(res, 200, { success: true, data: getVectorStatus(db, { configuredModel, configuredProvider }) });
+  }
+
+  if (pathname === '/vectors/recompute' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const wf = db.prepare("SELECT graph_json FROM workflows WHERE id='default'").get();
+    let embeddingModel = 'text-embedding-3-small';
+    let embeddingProvider = 'litellm';
+    try {
+      const g = JSON.parse(wf?.graph_json || '{}');
+      const idx = (g.nodes || []).find(n => n.type === 'index');
+      if (idx?.config?.embeddingModel) embeddingModel = idx.config.embeddingModel;
+      if (idx?.config?.embeddingProvider) embeddingProvider = idx.config.embeddingProvider;
+    } catch { /* defaults */ }
+    const assets = db.prepare(`
+      SELECT fid, file_name FROM assets WHERE status = 'ready'
+    `).all();
+    // PERF-08：一次性批量取标签，避免逐素材 N+1 查询。
+    const allTagRows = db.prepare(`
+      SELECT at.asset_fid, t.dimension, t.label FROM asset_tags at
+      JOIN tag_dict t ON t.id = at.tag_id
+    `).all();
+    const tagsByFid = new Map();
+    for (const t of allTagRows) {
+      if (!tagsByFid.has(t.asset_fid)) tagsByFid.set(t.asset_fid, []);
+      tagsByFid.get(t.asset_fid).push(t);
+    }
+    const jobs = assets.map((a) => {
+      const tagMap = {};
+      for (const t of tagsByFid.get(a.fid) || []) {
+        if (!tagMap[t.dimension]) tagMap[t.dimension] = [];
+        tagMap[t.dimension].push(t.label);
+      }
+      const parts = [];
+      if (tagMap.space) parts.push(`空间:${tagMap.space.join(',')}`);
+      if (tagMap.style_atom) parts.push(`风格:${tagMap.style_atom.join(',')}`);
+      if (tagMap.material_kind) parts.push(`材质:${tagMap.material_kind.join(',')}`);
+      if (tagMap.palette) parts.push(`配色:${tagMap.palette.join(',')}`);
+      if (a.file_name) parts.push(`文件:${a.file_name}`);
+      return { fid: a.fid, caption: parts.join(' ') || '室内设计现代空间素材' };
+    });
+
+    // PERF-08：并发度 6 的批处理池，替代逐条串行等待 Embedding 接口。
+    const CONCURRENCY = 6;
+    let updated = 0;
+    let fallback = 0;
+    let cursor = 0;
+    const worker = async () => {
+      while (true) {
+        const i = cursor++;
+        if (i >= jobs.length) return;
+        const job = jobs[i];
+        const embed = await embedCaption(services, job.caption, { provider: embeddingProvider, model: embeddingModel });
+        storeVector(db, job.fid, embed.vec, embed.model);
+        updated++;
+        if (embed.fallback) fallback++;
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, jobs.length) || 1 }, worker));
+    return sendJson(res, 200, {
+      success: true,
+      data: { updated, fallback, status: getVectorStatus(db, { configuredModel: embeddingModel, configuredProvider: embeddingProvider }) }
+    });
+  }
+
+  if (pathname === '/runs/restage-backfill' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    if (!interpreter) return sendJson(res, 500, { error: '解释器未就绪' });
+    const b = await parseBody(req).catch(() => ({}));
+    const r = await interpreter.queueMissingRestage({ limit: b?.limit || 2000 });
+    return sendJson(res, 200, { success: true, data: r });
+  }
+
+  // 管理员：模型契约治理
+  if (pathname === '/governance/gen-models' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const { getModelContractsList } = require('./models-contract');
+      return sendJson(res, 200, { success: true, data: getModelContractsList(db) });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+  if (pathname === '/governance/litellm-groups' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const { listLiteLlmMembers } = require('./providers');
+      const name = urlObj.searchParams.get('model') || '';
+      const data = await listLiteLlmMembers(db, services.config, name);
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      const err = String(e.message || '')
+        .replace(/sk-[A-Za-z0-9_\-]+/gi, 'sk-***')
+        .replace(/Bearer\s+[A-Za-z0-9._\-]+/gi, 'Bearer ***')
+        .replace(/"(api_?key|secret_?key|password|token|master_?key)"\s*:\s*"[^"]*"/gi, '"$1":"***"')
+        .replace(/(api_?key|secret_?key|password|token|master_?key)\s*=\s*[^\s&]+/gi, '$1=***');
+      return sendJson(res, 400, { error: err });
+    }
+  }
+  const mGroupMember = pathname.match(/^\/governance\/litellm-groups\/([^/]+)\/members$/);
+  if (mGroupMember && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const { addLiteLlmMember } = require('./providers');
+      const b = await parseBody(req);
+      const modelName = decodeURIComponent(mGroupMember[1]);
+      await addLiteLlmMember(db, services.config, modelName, b.upstream);
+      return sendJson(res, 200, { success: true });
+    } catch (e) {
+      const err = String(e.message || '')
+        .replace(/sk-[A-Za-z0-9_\-]+/gi, 'sk-***')
+        .replace(/Bearer\s+[A-Za-z0-9._\-]+/gi, 'Bearer ***')
+        .replace(/"(api_?key|secret_?key|password|token|master_?key)"\s*:\s*"[^"]*"/gi, '"$1":"***"')
+        .replace(/(api_?key|secret_?key|password|token|master_?key)\s*=\s*[^\s&]+/gi, '$1=***');
+      return sendJson(res, 400, { error: err });
+    }
+  }
+  const mGroupRemove = pathname.match(/^\/governance\/litellm-groups\/([^/]+)\/members\/([^/]+)$/);
+  if (mGroupRemove && req.method === 'DELETE') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const { removeLiteLlmMember } = require('./providers');
+      await removeLiteLlmMember(db, services.config, decodeURIComponent(mGroupRemove[1]), decodeURIComponent(mGroupRemove[2]));
+      return sendJson(res, 200, { success: true });
+    } catch (e) {
+      const err = String(e.message || '')
+        .replace(/sk-[A-Za-z0-9_\-]+/gi, 'sk-***')
+        .replace(/Bearer\s+[A-Za-z0-9._\-]+/gi, 'Bearer ***')
+        .replace(/"(api_?key|secret_?key|password|token|master_?key)"\s*:\s*"[^"]*"/gi, '"$1":"***"')
+        .replace(/(api_?key|secret_?key|password|token|master_?key)\s*=\s*[^\s&]+/gi, '$1=***');
+      return sendJson(res, 400, { error: err });
+    }
+  }
+  if (pathname === '/governance/gen-models/preview-convert' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const b = await parseBody(req);
+      const { getModelContractsList, assembleModelPayload } = require('./models-contract');
+      const { previewUnifiedConversion } = require('./converters');
+      const list = getModelContractsList(db).models;
+      const contract = b.contract || list.find(m => m.id === b.model_id) || list[0];
+      const assembled = assembleModelPayload({
+        modelContract: contract,
+        values: b.values || {},
+        editablePrompt: b.prompt || '现代极简客厅，落地窗自然采光，@图片1 沙发细节保留',
+        images: b.images || ['https://example.com/ref1.jpg'],
+      });
+      const converted = previewUnifiedConversion({
+        contract,
+        canonicalInput: {
+          prompt: b.prompt || '现代极简客厅，落地窗自然采光，@图片1 沙发细节保留',
+          negativePrompt: b.negativePrompt || '模糊，伪影，水渍',
+          mode: b.mode || 'text_to_image',
+          params: b.values || {},
+          refs: { images: b.images || ['https://example.com/ref1.jpg'], videos: b.videos || [], audios: b.audios || [] },
+          selection: b.selection || { bbox: [120, 200, 680, 760] },
+        }
+      });
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          assembled,
+          converted,
+        }
+      });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  if (pathname === '/governance/gen-models' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const b = await parseBody(req);
+      const { saveModelContractData } = require('./models-contract');
+      const row = saveModelContractData(db, b);
+      _studioCatalogCache.clear();
+      return sendJson(res, 200, { success: true, data: row });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+  const mCustomSchema = pathname.match(/^\/governance\/gen-models\/([^/]+)\/schema$/);
+  if (mCustomSchema && req.method === 'PUT') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const b = await parseBody(req);
+      const row = genGov.saveCustomFields(db, decodeURIComponent(mCustomSchema[1]), b.fields || b.custom_fields, sessionUser?.username);
+      return sendJson(res, 200, { success: true, data: row });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+  const mCustomDelete = pathname.match(/^\/governance\/gen-models\/([^/]+)$/);
+  if (mCustomDelete && req.method === 'DELETE') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const modelId = decodeURIComponent(mCustomDelete[1]);
+      db.prepare('DELETE FROM model_contracts WHERE id=?').run(modelId);
+      try { db.prepare('DELETE FROM llm_models WHERE id=?').run(modelId); } catch (_) {}
+      return sendJson(res, 200, { success: true, data: { id: modelId } });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+  const mPolish = pathname.match(/^\/governance\/gen-models\/([^/]+)\/polish$/);
+  if (mPolish && req.method === 'PUT') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const b = await parseBody(req);
+      const row = genGov.savePolish(db, decodeURIComponent(mPolish[1]), b, sessionUser?.username);
+      return sendJson(res, 200, { success: true, data: row });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  const mGenModelToggle = pathname.match(/^\/governance\/gen-models\/([^/]+)\/toggle$/);
+  if (mGenModelToggle && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const modelId = decodeURIComponent(mGenModelToggle[1]);
+      const b = await parseBody(req);
+      const enabled = b.enabled ? 1 : 0;
+      db.prepare("UPDATE model_contracts SET enabled=?, updated_at=? WHERE id=? OR vendor_model_id=?").run(enabled, Date.now(), modelId, modelId);
+      try {
+        db.prepare("UPDATE llm_models SET enabled=?, updated_at=? WHERE id=? OR model_code=?").run(enabled, Date.now(), modelId, modelId);
+      } catch (_) {}
+      return sendJson(res, 200, { success: true, modelId, enabled: !!b.enabled });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+  const mPolishReset = pathname.match(/^\/governance\/gen-models\/([^/]+)\/polish\/reset$/);
+  if (mPolishReset && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const row = genGov.resetPolish(db, decodeURIComponent(mPolishReset[1]));
+      return sendJson(res, 200, { success: true, data: row });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  // ================= 工作流 (Workflows) 统一文档接口 =================
+  if (pathname === '/governance/workflows' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const { getWorkflowsDocument } = require('./models-contract');
+      return sendJson(res, 200, { success: true, data: getWorkflowsDocument(db) });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+  if (pathname === '/governance/workflows' && (req.method === 'PUT' || req.method === 'POST')) {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const b = await parseBody(req);
+      const { saveWorkflowsDocument } = require('./models-contract');
+      const doc = saveWorkflowsDocument(db, b);
+      return sendJson(res, 200, { success: true, data: doc });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  // ================= 提示词中心 (Prompts Center) 治理接口 =================
+  if (pathname === '/governance/prompts' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const { getPromptTemplatesList } = require('./models-contract');
+      return sendJson(res, 200, { success: true, data: getPromptTemplatesList(db) });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+  if (pathname === '/governance/prompts' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const b = await parseBody(req);
+      const { savePromptTemplate } = require('./models-contract');
+      const saved = savePromptTemplate(db, b);
+      return sendJson(res, 200, { success: true, data: saved });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+  const mPromptDel = pathname.match(/^\/governance\/prompts\/([^/]+)$/);
+  if (mPromptDel && req.method === 'DELETE') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const id = decodeURIComponent(mPromptDel[1]);
+    try {
+      const { deletePromptTemplate } = require('./models-contract');
+      deletePromptTemplate(db, id);
+      return sendJson(res, 200, { success: true, data: { id } });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+  const mPromptRestore = pathname.match(/^\/governance\/prompts\/([^/]+)\/restore$/);
+  if (mPromptRestore && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const id = decodeURIComponent(mPromptRestore[1]);
+    try {
+      const { restorePromptTemplateDefault } = require('./models-contract');
+      const restored = restorePromptTemplateDefault(db, id);
+      return sendJson(res, 200, { success: true, data: restored });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  // ================= 模块化挂载点与工作流编排 (Mount Points & Modules) 接口 =================
+  if (pathname === '/governance/mount-points' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const { getMountPointsList } = require('./models-contract');
+      return sendJson(res, 200, { success: true, data: getMountPointsList(db) });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+  if (pathname === '/governance/mount-points' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const b = await parseBody(req);
+      const { saveMountPoint } = require('./models-contract');
+      const saved = saveMountPoint(db, b);
+      return sendJson(res, 200, { success: true, data: saved });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+  const mMountDel = pathname.match(/^\/governance\/mount-points\/([^/]+)$/);
+  if (mMountDel && req.method === 'DELETE') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const id = decodeURIComponent(mMountDel[1]);
+    try {
+      const { deleteMountPoint } = require('./models-contract');
+      deleteMountPoint(db, id);
+      return sendJson(res, 200, { success: true, data: { id } });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+  const mMountMods = pathname.match(/^\/governance\/mount-points\/([^/]+)\/modules$/);
+  if (mMountMods && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const mountId = decodeURIComponent(mMountMods[1]);
+    try {
+      const { getMountModules } = require('./models-contract');
+      return sendJson(res, 200, { success: true, data: getMountModules(db, mountId) });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+  if (mMountMods && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const mountId = decodeURIComponent(mMountMods[1]);
+    try {
+      const b = await parseBody(req);
+      const { saveMountModule } = require('./models-contract');
+      const saved = saveMountModule(db, { ...b, mount_point_id: mountId });
+      return sendJson(res, 200, { success: true, data: saved });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+  const mMountModDel = pathname.match(/^\/governance\/mount-points\/([^/]+)\/modules\/([^/]+)$/);
+  if (mMountModDel && req.method === 'DELETE') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const moduleId = decodeURIComponent(mMountModDel[2]);
+    try {
+      const { deleteMountModule } = require('./models-contract');
+      deleteMountModule(db, moduleId);
+      return sendJson(res, 200, { success: true, data: { id: moduleId } });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+  const mMountReorder = pathname.match(/^\/governance\/mount-points\/([^/]+)\/reorder$/);
+  if (mMountReorder && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const mountId = decodeURIComponent(mMountReorder[1]);
+    try {
+      const b = await parseBody(req);
+      const { reorderMountModules } = require('./models-contract');
+      const list = reorderMountModules(db, mountId, b.orderedIds || []);
+      return sendJson(res, 200, { success: true, data: list });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+  // ================= 算子目录、词典宏芯片、公共积木、编译预览与真机沙盒试跑接口 =================
+  if (pathname === '/governance/operators' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const { getOperatorCatalog } = require('./models-contract');
+      return sendJson(res, 200, { success: true, data: getOperatorCatalog() });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  if (pathname === '/governance/dict-macros' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const { getDictMacroChips } = require('./models-contract');
+      return sendJson(res, 200, { success: true, data: getDictMacroChips(db) });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  if (pathname === '/governance/snippets' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const { getPromptSnippetsList } = require('./models-contract');
+      return sendJson(res, 200, { success: true, data: getPromptSnippetsList(db) });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+  if (pathname === '/governance/snippets' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const b = await parseBody(req);
+      const { savePromptSnippet } = require('./models-contract');
+      const saved = savePromptSnippet(db, b);
+      return sendJson(res, 200, { success: true, data: saved });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+  const mSnippetDel = pathname.match(/^\/governance\/snippets\/([^/]+)$/);
+  if (mSnippetDel && req.method === 'DELETE') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const { deletePromptSnippet } = require('./models-contract');
+      const id = decodeURIComponent(mSnippetDel[1]);
+      deletePromptSnippet(db, id);
+      return sendJson(res, 200, { success: true, data: { id } });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+  const mSnippetRestore = pathname.match(/^\/governance\/snippets\/([^/]+)\/restore$/);
+  if (mSnippetRestore && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const { restorePromptSnippetDefault } = require('./models-contract');
+      const id = decodeURIComponent(mSnippetRestore[1]);
+      const restored = restorePromptSnippetDefault(db, id);
+      return sendJson(res, 200, { success: true, data: restored });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  if (pathname === '/governance/prompts/preview-compile' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const b = await parseBody(req);
+      const { compileNodePrompt } = require('./models-contract');
+      const compiled = compileNodePrompt(db, {
+        mountPointId: b.mountPointId || null,
+        nodeId: b.nodeId || null,
+        nodeType: b.nodeType || null,
+        category: b.category || 'interior',
+        promptId: b.promptId || null,
+        promptTemplate: b.promptTemplate || b.template || null,
+        snippetIds: Array.isArray(b.snippetIds) ? b.snippetIds : null,
+        modelId: b.modelId || null,
+        vars: b.vars || {
+          box1Tag: '240 360 760 880',
+          product_name: '意式极简真皮沙发',
+          facing_desc: '正面朝向观察者，四脚平稳贴地',
+          source_style: '（原风格：现代极简）',
+          target_style: '奶油侘寂风',
+          side_a: '左侧',
+          side_b: '右侧',
+          asset: { fid: 'sample_fid_001', file_name: 'living_room_sample.jpg', width: 1920, height: 1080, category: 'interior' },
+        },
+      });
+      return sendJson(res, 200, { success: true, data: compiled });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  if (pathname === '/governance/sandbox/run-node' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const b = await parseBody(req);
+      const { compileNodePrompt } = require('./models-contract');
+      const { NODE_REGISTRY } = require('./nodes');
+      const draftNode = b.draft_node || b.draftNode || null;
+      const draftSnippets = b.draft_snippets || b.draftSnippets || null;
+      const draftDialect = b.draft_dialect || b.draftDialect || null;
+
+      const nodeType = String(
+        draftNode?.node_type || draftNode?.nodeType || b.nodeType || b.node_type || 'gate'
+      ).trim();
+
+      // 支持选 1~3 张已有素材图 (asset_fids / assetFids / assetFid)
+      const rawFids = Array.isArray(b.asset_fids)
+        ? b.asset_fids
+        : Array.isArray(b.assetFids)
+          ? b.assetFids
+          : (b.assetFid || b.fid ? [b.assetFid || b.fid] : []);
+      const requestedFids = rawFids.map(f => String(f || '').trim()).filter(Boolean).slice(0, 3);
+
+      let selectedAssets = [];
+      for (const fid of requestedFids) {
+        const a = db.prepare('SELECT * FROM assets WHERE fid=?').get(fid);
+        if (a) selectedAssets.push(a);
+      }
+      if (!selectedAssets.length) {
+        selectedAssets = db.prepare("SELECT * FROM assets WHERE status='ready' AND kind='image' ORDER BY updated_at DESC LIMIT 1").all();
+        if (!selectedAssets.length) {
+          selectedAssets = db.prepare('SELECT * FROM assets ORDER BY updated_at DESC LIMIT 1').all();
+        }
+      }
+      selectedAssets = selectedAssets.slice(0, 3);
+      const primaryAsset = selectedAssets[0] || null;
+
+      const getBeforeSnapshot = (assetItem) => {
+        if (!assetItem) return { category: null, status: null, tags: [] };
+        let tags = [];
+        try {
+          tags = db.prepare(`
+            SELECT t.dimension, t.dir, t.label, at.confidence
+            FROM asset_tags at JOIN tag_dict t ON t.id = at.tag_id
+            WHERE at.asset_fid = ?
+          `).all(assetItem.fid);
+        } catch (_) {}
+        return {
+          category: assetItem.category || null,
+          status: assetItem.status || null,
+          tags,
+        };
+      };
+
+      const compiled = compileNodePrompt(db, {
+        mountPointId: draftNode?.mount_point_id || b.mountPointId || null,
+        nodeId: draftNode?.id || b.nodeId || null,
+        nodeType,
+        category: b.category || primaryAsset?.category || 'interior',
+        promptId: draftNode?.prompt_id || b.promptId || b.prompt_id || null,
+        promptTemplate: draftNode?.prompt_override || b.promptTemplate || b.prompt_override || null,
+        snippetIds: Array.isArray(draftNode?.snippet_ids)
+          ? draftNode.snippet_ids
+          : Array.isArray(b.snippetIds)
+            ? b.snippetIds
+            : (Array.isArray(b.snippet_ids) ? b.snippet_ids : null),
+        modelId: draftNode?.model_id || b.modelId || b.model_id || null,
+        draftNode,
+        draftSnippets,
+        draftDialect,
+        vars: {
+          ...(b.vars || {}),
+          box1Tag: b.box1Tag || '240 360 760 880',
+          product_name: b.productName || '意式真皮沙发',
+          facing_desc: b.facingDesc || '正面朝向观察者',
+          target_style: b.targetStyle || '中古风',
+          asset: primaryAsset || { fid: 'sandbox_demo', file_name: 'demo.jpg', width: 1080, height: 1440, category: 'interior' },
+        },
+      });
+
+      const startedAt = Date.now();
+      const liveResults = [];
+
+      if (b.executeLive && selectedAssets.length && NODE_REGISTRY[nodeType]) {
+        const nodeCfg = {
+          ...(compiled.nodeParams || {}),
+          ...(draftNode?.params || {}),
+          ...(b.params || {}),
+          model: compiled.modelId || b.modelId,
+          promptId: compiled.promptId,
+          promptTemplate: compiled.prompt,
+          snippetIds: compiled.snippetIds,
+          forceCustomPrompt: true,
+        };
+        for (const assetItem of selectedAssets) {
+          const itemStart = Date.now();
+          const beforeSnap = getBeforeSnapshot(assetItem);
+          let itemLive = null;
+          // ★ 沙盒事务保护点：试跑后无条件回滚任何数据库写入，严禁污染正式库 assets / asset_tags / derivatives
+          try { db.exec('SAVEPOINT sandbox_dry_run'); } catch (_) {}
+          try {
+            const sandboxServices = { ...services, sandbox: true };
+            itemLive = await NODE_REGISTRY[nodeType](sandboxServices, nodeCfg, assetItem, { sandbox: true });
+          } catch (execErr) {
+            itemLive = { success: false, error: execErr.message };
+          } finally {
+            try { db.exec('ROLLBACK TO SAVEPOINT sandbox_dry_run'); } catch (_) {}
+            try { db.exec('RELEASE SAVEPOINT sandbox_dry_run'); } catch (_) {}
+          }
+          liveResults.push({
+            asset: {
+              fid: assetItem.fid,
+              file_name: assetItem.file_name,
+              category: assetItem.category,
+              width: assetItem.width,
+              height: assetItem.height,
+              status: assetItem.status,
+            },
+            before: beforeSnap,
+            live_result: itemLive,
+            duration_ms: Date.now() - itemStart,
+          });
+        }
+      }
+
+      const primaryBefore = getBeforeSnapshot(primaryAsset);
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          node_type: nodeType,
+          sandbox: true,
+          duration_ms: Date.now() - startedAt,
+          asset_count: selectedAssets.length,
+          assets: selectedAssets.map(a => ({
+            fid: a.fid,
+            file_name: a.file_name,
+            category: a.category,
+            width: a.width,
+            height: a.height,
+            status: a.status,
+          })),
+          asset: primaryAsset ? {
+            fid: primaryAsset.fid,
+            file_name: primaryAsset.file_name,
+            category: primaryAsset.category,
+            width: primaryAsset.width,
+            height: primaryAsset.height,
+            status: primaryAsset.status,
+          } : null,
+          before: primaryBefore,
+          compiled: {
+            prompt: compiled.prompt,
+            negativePrompt: compiled.negativePrompt,
+            negative_prompt: compiled.negative_prompt,
+            modelId: compiled.modelId,
+            promptId: compiled.promptId,
+            snippetsUsed: compiled.snippetsUsed,
+            dialect: compiled.dialect,
+          },
+          live_result: liveResults[0]?.live_result || null,
+          live_results: liveResults,
+        },
+      });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  const mMountExec = pathname.match(/^\/governance\/mount-points\/([^/]+)\/execute$/);
+  if (mMountExec && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const mountId = decodeURIComponent(mMountExec[1]);
+    try {
+      const { getMountModules, compileNodePrompt } = require('./models-contract');
+      const mods = getMountModules(db, mountId);
+      const stepReports = mods.filter(m => m.enabled !== 0).map((mod, idx) => {
+        const comp = compileNodePrompt(db, {
+          mountPointId: mountId,
+          nodeId: mod.id,
+          nodeType: mod.node_type,
+          promptId: mod.prompt_id,
+          promptTemplate: mod.prompt_override,
+          snippetIds: mod.snippet_ids,
+          modelId: mod.model_id,
+          vars: {
+            box1Tag: '240 360 760 880',
+            product_name: '测试家具单品',
+            facing_desc: '正面朝向观察者',
+            target_style: '现代极简',
+            asset: { fid: 'test_asset', file_name: 'sample.jpg', width: 1080, height: 1440, category: 'interior' },
+          },
+        });
+        return {
+          step: idx + 1,
+          id: mod.id,
+          name: mod.name,
+          node_type: mod.node_type,
+          condition_expr: mod.condition_expr || '无条件 (默认串行)',
+          // 多模型挂载：显示完整链（第 1 个是主模型，其余是失败自动降级）
+          model_id: (Array.isArray(mod.model_ids) && mod.model_ids.length)
+            ? mod.model_ids.join(' → ')
+            : (comp.modelId || '(本地算子/无需大模型)'),
+          model_chain: Array.isArray(mod.model_ids) ? mod.model_ids : [],
+          prompt_id: comp.promptId || null,
+          snippets_used: comp.snippetsUsed,
+          dialect: comp.dialect,
+          compiled_prompt_preview: comp.prompt ? (comp.prompt.length > 320 ? comp.prompt.slice(0, 320) + '...' : comp.prompt) : '(纯算法节点无提示词)',
+          compiled_prompt_length: comp.prompt ? comp.prompt.length : 0,
+          params: mod.params,
+        };
+      });
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          mount_point_id: mountId,
+          executed_at: Date.now(),
+          modules_count: mods.length,
+          active_steps_count: stepReports.length,
+          steps: stepReports,
+          status: 'success',
+          message: `工作流 ${mountId} 真实编译校验通过 (${stepReports.length} 个启用节点已完成词典芯片展开、公共积木拼接与模型方言转译)`
+        }
+      });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  if (pathname === '/governance/gen-jobs' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      return sendJson(res, 200, { success: true, data: genGov.listJobBindings(db) });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+  const mJob = pathname.match(/^\/governance\/gen-jobs\/([^/]+)$/);
+  if (mJob && req.method === 'PUT') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const b = await parseBody(req);
+      const row = genGov.saveJobBinding(db, decodeURIComponent(mJob[1]), b, sessionUser?.username);
+      return sendJson(res, 200, { success: true, data: row });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+  const mJobReset = pathname.match(/^\/governance\/gen-jobs\/([^/]+)\/reset$/);
+  if (mJobReset && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const row = genGov.resetJobBinding(db, decodeURIComponent(mJobReset[1]), sessionUser?.username);
+      return sendJson(res, 200, { success: true, data: row });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  // ★ 手动工坊各操作的「默认模型 + 可选模型池」覆盖。
+  if (pathname === '/governance/manual-defaults' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      return sendJson(res, 200, { success: true, data: genGov.getManualOverrides(db) });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+  if (pathname === '/governance/manual-defaults' && req.method === 'PUT') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const b = await parseBody(req);
+      const data = genGov.saveManualOverride(db, b || {}, sessionUser?.username);
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  // ================= 文档起草与 Skill 治理 (Drafting & Skills) =================
+  if (pathname === '/governance/draft-from-doc' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const b = await parseBody(req);
+      const row = await genGov.draftSkillFromDocs(db, {
+        docUrls: b.doc_urls || b.docUrls || [],
+        modelCode: b.model_code || b.modelCode,
+        domain: b.domain || 'image',
+        promptNotes: b.prompt_notes || b.promptNotes || '',
+        modelName: b.model_name || b.modelName || ''
+      });
+      return sendJson(res, 200, { success: true, data: row });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  if (pathname === '/governance/skill-drafts' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      return sendJson(res, 200, { success: true, data: genGov.listSkillDrafts(db) });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  const EMPTY_ADAPTER_TEMPLATE = `/**
+ * 自定义生成协议适配器
+ * 必须导出规范的 6 个核心要素：protocol, method, urlTemplate, paramLocations, buildRequest, parseResponse
+ */
+module.exports = {
+  protocol: 'custom_proto',
+  name: '自定义协议',
+  method: 'POST',
+  urlTemplate: '{{baseUrl}}/v1/generate',
+  paramLocations: {
+    prompt: 'body.prompt',
+    image: 'body.image_url',
+    model: 'body.model'
+  },
+  buildRequest(ctx) {
+    const { baseUrl, apiKey, model, prompt, refs, config } = ctx;
+    return {
+      url: \`\${baseUrl.replace(/\\/+$/, '')}/v1/generate\`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(apiKey ? { 'Authorization': \`Bearer \${apiKey}\` } : {})
+      },
+      body: JSON.stringify({
+        model: model || config.defaultModel || 'default',
+        prompt,
+        image_url: refs?.[0]?.dataUrl || undefined
+      })
+    };
+  },
+  parseResponse(data, ctx) {
+    const url = data?.data?.[0]?.url || data?.output_url || data?.url;
+    if (!url) throw new Error('未能从响应中解析出有效的输出 URL');
+    return {
+      status: 'success',
+      files: [{ previewUrl: url }]
+    };
+  }
+};
+`;
+
+  if (pathname === '/governance/skill-drafts' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const b = await parseBody(req);
+      const now = Date.now();
+      const id = b.id || `draft_${Date.now()}`;
+      const kind = b.kind || b.schema_draft?.kind || 'adapter';
+      const modelId = (b.model_id || b.modelId || b.model_code || b.modelCode || id).toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+      const modelCode = b.model_code || b.modelCode || modelId;
+      const domain = b.domain || 'image';
+
+      let skillContent = b.skill_content || b.skillContent || '';
+      let schemaDraft = b.schema_draft || b.schemaDraft || { kind };
+      schemaDraft.kind = kind;
+
+      if (kind === 'adapter') {
+        if (!skillContent) {
+          if (b.dialogue_model && b.prompt) {
+            const systemPrompt = `你是一个生成协议适配器编写专家。请为用户提供一个符合规范的 Node.js 适配器模块。
+必须且仅能导出以下 6 个要素：
+1. protocol: 协议标识字符串（全小写下划线）
+2. method: HTTP 方法（如 'POST' 或 'GET'）
+3. urlTemplate: 请求完整路径或模板，例如 '{{baseUrl}}/v1/generate'
+4. paramLocations: 参数落点说明对象，例如 { prompt: 'body.prompt', image: 'body.image_url' }
+5. buildRequest(ctx): 组装 HTTP 请求对象的函数，返回 { url, method, headers, body }
+6. parseResponse(data, ctx): 解析响应提取媒体产物地址，返回 { status: 'success', files: [{ previewUrl }] }
+
+代码仅使用 CommonJS (module.exports = ...)，不得引用第三方外部包。
+只输出纯 JavaScript 代码（可用 \`\`\`javascript 包裹）。`;
+
+            const chatRes = await executeChatCompletion(db, config, {
+              model: b.dialogue_model,
+              messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: b.prompt }
+              ],
+              temperature: 0.2,
+              max_tokens: 3000,
+              timeoutMs: 90000
+            });
+            const rawContent = chatRes?.choices?.[0]?.message?.content || '';
+            const matchCode = rawContent.match(/```(?:javascript|js)?\s*([\s\S]*?)```/);
+            skillContent = matchCode ? matchCode[1].trim() : rawContent.trim();
+          } else {
+            skillContent = EMPTY_ADAPTER_TEMPLATE.replace(/custom_proto/g, modelId);
+          }
+        }
+      }
+
+      db.prepare(`
+        INSERT INTO gen_skill_drafts
+          (id, model_id, model_code, domain, doc_urls_json, schema_draft_json, polish_draft, skill_content, status, actor, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+      `).run(
+        id,
+        modelId,
+        modelCode,
+        domain,
+        JSON.stringify(b.doc_urls || []),
+        JSON.stringify(schemaDraft),
+        b.polish_draft || '',
+        skillContent,
+        sessionUser?.username || '',
+        now,
+        now
+      );
+
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          id,
+          model_id: modelId,
+          model_code: modelCode,
+          domain,
+          schema_draft: schemaDraft,
+          skill_content: skillContent,
+          status: 'pending'
+        }
+      });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  const mSkillDraftItem = pathname.match(/^\/governance\/skill-drafts\/([^/]+)$/);
+  if (mSkillDraftItem && req.method === 'PUT') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const draftId = decodeURIComponent(mSkillDraftItem[1]);
+      const b = await parseBody(req);
+      const existing = db.prepare('SELECT * FROM gen_skill_drafts WHERE id=?').get(draftId);
+      if (!existing) return sendJson(res, 404, { error: '草稿不存在' });
+
+      const now = Date.now();
+      const schemaDraft = b.schema_draft !== undefined ? JSON.stringify(b.schema_draft) : existing.schema_draft_json;
+      const skillContent = b.skill_content !== undefined ? String(b.skill_content) : existing.skill_content;
+      const polishDraft = b.polish_draft !== undefined ? String(b.polish_draft) : existing.polish_draft;
+
+      db.prepare(`
+        UPDATE gen_skill_drafts
+        SET schema_draft_json=?, skill_content=?, polish_draft=?, actor=?, updated_at=?
+        WHERE id=?
+      `).run(schemaDraft, skillContent, polishDraft, sessionUser?.username || '', now, draftId);
+
+      return sendJson(res, 200, { success: true, data: { id: draftId } });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  if (mSkillDraftItem && req.method === 'DELETE') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const draftId = decodeURIComponent(mSkillDraftItem[1]);
+      db.prepare('DELETE FROM gen_skill_drafts WHERE id=?').run(draftId);
+      return sendJson(res, 200, { success: true, data: { deleted: draftId } });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  const mSkillAccept = pathname.match(/^\/governance\/skill-drafts\/([^/]+)\/accept$/);
+  if (mSkillAccept && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const draftId = decodeURIComponent(mSkillAccept[1]);
+      const r = genGov.acceptSkillDraft(db, draftId, sessionUser?.username);
+      return sendJson(res, 200, { success: true, data: r });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  const mSkillDeprecate = pathname.match(/^\/governance\/models\/([^/]+)\/deprecate-skill$/);
+  if (mSkillDeprecate && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const modelCode = decodeURIComponent(mSkillDeprecate[1]);
+      const r = genGov.deprecateModelSkill(db, modelCode, sessionUser?.username);
+      return sendJson(res, 200, { success: true, data: r });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  // ===== 统一大模型网关适配器 (Media Gen Gateway) =====
+  // 供前端工坊直连与 Umbra 工作流（空间漫游/精准替换/智能消除）统一调用
+  // 空间创作换色配色表查询
+  if (pathname === '/studio/color-schemes' && req.method === 'GET') {
+    try {
+      const rows = db.prepare('SELECT * FROM color_schemes ORDER BY sort_order ASC, updated_at DESC').all();
+      const schemes = rows.map(r => {
+        let roles = [];
+        try { roles = JSON.parse(r.roles_json || '[]'); } catch {}
+        return {
+          id: r.id,
+          name: r.name,
+          kind: r.kind,
+          roles,
+          sort_order: r.sort_order,
+          updated_at: r.updated_at
+        };
+      });
+      return sendJson(res, 200, { success: true, data: schemes });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 空间创作换色配色表更新（仅登录用户/管理可用）
+  if (pathname === '/studio/color-schemes' && req.method === 'PUT') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const b = await parseBody(req);
+      const list = Array.isArray(b.schemes) ? b.schemes : (b.id ? [b] : []);
+      if (!list.length) return sendJson(res, 400, { error: '缺少配色数据' });
+      const upsert = db.prepare(`
+        INSERT INTO color_schemes (id, name, kind, roles_json, sort_order, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          name = excluded.name,
+          kind = excluded.kind,
+          roles_json = excluded.roles_json,
+          sort_order = excluded.sort_order,
+          updated_at = excluded.updated_at
+      `);
+      const now = Date.now();
+      db.transaction(() => {
+        for (const item of list) {
+          const id = item.id || ('scheme_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6));
+          const name = item.name || '未命名配色';
+          const kind = item.kind || 'scheme';
+          const rolesJson = typeof item.roles_json === 'string' ? item.roles_json : JSON.stringify(item.roles || []);
+          const sortOrder = Number(item.sort_order || item.sort || 0);
+          upsert.run(id, name, kind, rolesJson, sortOrder, now);
+        }
+      })();
+      const rows = db.prepare('SELECT * FROM color_schemes ORDER BY sort_order ASC, updated_at DESC').all();
+      const schemes = rows.map(r => ({
+        id: r.id,
+        name: r.name,
+        kind: r.kind,
+        roles: JSON.parse(r.roles_json || '[]'),
+        sort_order: r.sort_order,
+        updated_at: r.updated_at
+      }));
+      return sendJson(res, 200, { success: true, data: schemes });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 空间创作智能建议提示词（双入口：看图给建议 kind=images，接着可以 kind=next）
+  if (pathname === '/chat/suggest-prompts' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const b = await parseBody(req);
+      const kind = b.kind || 'images';
+      const refImages = Array.isArray(b.images) ? b.images : (b.image ? [b.image] : []);
+      let systemPrompt = '';
+      let userMsg = '';
+      let imagesToSend = [];
+      if (kind === 'images') {
+        if (!refImages.length) return sendJson(res, 400, { error: '看图建议必须提供至少一张参考图' });
+        imagesToSend = refImages;
+        systemPrompt = '你是一位顶级室内空间与软装设计专家。请观察用户提供的空间图片，给出3条最专业、最具体、最切合画面现状的空间优化或设计接续建议。要求：每条建议用一句简短精炼的话表述（20-40字内），直接说明具体改动、材质、灯光或氛围调整，避免空泛客套话；严格按 JSON 格式返回：{"suggestions": ["建议1", "建议2", "建议3"]}；不要包含任何 markdown 代码块或额外文字。';
+        userMsg = '请分析当前画面的空间布局与软装材质，给出3条专业改造灵感建议。';
+      } else {
+        imagesToSend = [];
+        const assistantText = String(b.assistantText || b.text || '').trim();
+        if (!assistantText) return sendJson(res, 400, { error: '接续建议必须提供助手上一轮回复正文' });
+        systemPrompt = '你是一位室内设计对话助手。基于刚刚回复给用户的设计方案/操作反馈，提供3个用户最可能继续探索的下一步操作建议。要求：每条建议为简短的操作短句（15-30字内），如“更换为暖色微水泥墙面”、“添加极简落地灯并调整角度”等；严格按 JSON 格式返回：{"suggestions": ["建议1", "建议2", "建议3"]}；不要包含 markdown 或多余文字。';
+        userMsg = `上一轮回复内容：\n${assistantText.slice(0, 1000)}`;
+      }
+      let suggestions = [];
+      try {
+        const data = await executeChatCompletion(db, config, {
+          model: 'qwen3-vl-plus',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userMsg }
+          ],
+          images: imagesToSend,
+          temperature: 0.7,
+          max_tokens: 1024,
+          timeoutMs: 45000
+        });
+        const content = (data?.choices?.[0]?.message?.content || '').trim();
+        const cleaned = content.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+        const parsed = JSON.parse(cleaned);
+        if (Array.isArray(parsed.suggestions)) {
+          suggestions = parsed.suggestions.filter(s => typeof s === 'string' && s.trim()).map(s => s.trim()).slice(0, 3);
+        }
+      } catch (err) {
+        console.warn('[suggest-prompts] 模型解析降级:', err.message);
+      }
+      if (!suggestions.length) {
+        if (kind === 'images') {
+          suggestions = [
+            '将主墙面改为暖灰艺术涂料，增加漫反射层次',
+            '在主休息区添加一盏极简钓鱼落地灯，增强局部氛围',
+            '将现有地面更换为人字拼白橡木木地板，提升自然温馨感'
+          ];
+        } else {
+          suggestions = [
+            '继续调整局部灯光色温为 3000K 暖光',
+            '更换单人休闲椅的皮质面料为深咖色',
+            '将空间整体明暗对比调柔和'
+          ];
+        }
+      }
+      return sendJson(res, 200, { success: true, data: { suggestions } });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // 请求预览：方言编译与出站快照组装（不调用生图适配器，脱敏敏感凭证）
+  if (pathname === '/gen/preview' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const b = await parseBody(req);
+      const rawPrompt = (b.prompt || '').trim();
+      const modelId = String(b.model || 'ark_seedream_5_flash').trim();
+      const { resolveModelExecution, prepareGovernedSubmit, compileModelDialect } = require('./models-contract');
+      const values = {
+        size: b.size || '2K',
+        ratio: b.ratio || '1:1',
+        ...(b.params || {}),
+        ...(b.extras || {})
+      };
+      const rawImages = Array.isArray(b.imageUrls) ? b.imageUrls : (Array.isArray(b.images) ? b.images : (b.image ? [b.image] : []));
+      const prepared = modelId ? prepareGovernedSubmit({
+        db,
+        modelId,
+        editablePrompt: rawPrompt,
+        values,
+        images: rawImages
+      }) : { assembled: null };
+      let compiledPrompt = prepared.assembled?.prompt || rawPrompt;
+      if (!prepared.assembled?.prompt) {
+        compiledPrompt = compileModelDialect({ prompt: rawPrompt, modelId });
+      }
+      const historySet = new Set(Array.isArray(b.historyRefs) ? b.historyRefs : []);
+      const imagesList = rawImages.map((u, idx) => {
+        const cleanUrl = String(u || '').split('?')[0];
+        const isHist = historySet.has(u) || historySet.has(cleanUrl);
+        return {
+          label: `@图${idx + 1}`,
+          source: isHist ? 'history' : 'stage',
+          url: cleanUrl
+        };
+      });
+      const modelExec = resolveModelExecution(db, modelId);
+      const endpoint = modelExec?.endpoint;
+      const targetUrl = endpoint?.base_url ? `${endpoint.base_url.replace(/\/+$/, '')}/images/generations` : 'https://ark.cn-beijing.volces.com/api/v3/images/generations';
+      const sanitizedHeaders = {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ***'
+      };
+      const isVideoModel = modelExec?.model?.domain === 'video' || String(modelId).includes('video') || String(modelId).includes('seedance');
+      const sanitizedBody = {
+        model: modelExec?.model?.vendor_model_id || modelId,
+        prompt: compiledPrompt,
+        ...(isVideoModel ? {} : { size: values.size }),
+        ...(isVideoModel ? {} : { ratio: values.ratio }),
+        ...(prepared.assembled?.body || {})
+      };
+      const curlStr = [
+        `curl -X POST "${targetUrl}" \\`,
+        `  -H "Content-Type: application/json" \\`,
+        `  -H "Authorization: Bearer \$API_KEY" \\`,
+        `  -d '${JSON.stringify(sanitizedBody, null, 2)}'`
+      ].join('\n');
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          prompt: rawPrompt,
+          rawPrompt: rawPrompt,
+          compiledPrompt,
+          dialectPrompt: compiledPrompt,
+          images: imagesList,
+          request: {
+            url: targetUrl,
+            method: 'POST',
+            headers: sanitizedHeaders,
+            body: sanitizedBody,
+            curl: curlStr
+          }
+        }
+      });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+  // ===== 后台生成任务队列（契约固定，前端按此对接）=====
+  // 入队：body = 原 /gen/images 参数 + modality / sessionId / clientRequestId
+  if (pathname === '/gen/jobs' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req, 64 * 1024 * 1024);
+    if (b.__bodyTooLarge) return sendJson(res, 413, { error: '请求数据过大，超出上限' });
+    try {
+      studioAcl.assertModelAllowed(db, sessionUser, b.model);
+    } catch (e) {
+      return sendJson(res, e.status || 403, { error: e.message, code: e.code });
+    }
+    // 会话归属校验：worker 会把结果写进 session_id，不校验就能往他人会话注入 assistant 消息。
+    // 与 /chat/messages 一致：缺行先按当前用户建，已存在且非属主则 403。
+    if (b.sessionId) {
+      const sessRow = db.prepare('SELECT user_id FROM chat_sessions WHERE id=?').get(String(b.sessionId));
+      if (!sessRow) {
+        db.prepare(`
+          INSERT INTO chat_sessions (id, user_id, title, created_at, updated_at)
+          VALUES (?, ?, '新创作会话', ?, ?)
+          ON CONFLICT(id) DO NOTHING
+        `).run(String(b.sessionId), sessionUser.id, Date.now(), Date.now());
+      }
+      if (!chatSessionOwned(b.sessionId)) return sendJson(res, 403, { error: '无权写入该会话' });
+    }
+    try {
+      const modality = ['image', 'video', 'chat', 'music'].includes(b.modality) ? b.modality : 'image';
+      const payload = {
+        ...b,
+        modality,
+        userId: sessionUser.id,
+        sessionId: b.sessionId || '',
+        clientRequestId: b.clientRequestId || '',
+      };
+      const out = require('./gen-jobs').enqueueGenJob(db, payload);
+      if (out.locked) {
+        return sendJson(res, 409, {
+          error: '这一轮视频还在生成，请等它完成后再发',
+          code: 'video_inflight',
+          jobId: out.jobId,
+          status: out.status,
+        });
+      }
+      if (b.sessionId) {
+        const now = Date.now();
+        const placeholderId = 'genmsg_' + out.jobId;
+        const placeholderResult = {
+          role: 'assistant',
+          modality,
+          isGenerating: true,
+          startTime: now,
+          model: b.model || '',
+          modelKey: b.model || '',
+          ratio: b.ratio || (b.params && b.params.ratio) || '9:16',
+          resolution: b.resolution || b.size || (b.params && (b.params.resolution || b.params.size)) || '',
+          userPrompt: b.prompt || '',
+          refs: Array.isArray(b.refs) ? b.refs : (b.imageUrls || b.image ? (b.imageUrls || [b.image]) : []),
+          content: modality === 'video' ? '正在渲染空间影视级动态视频...' : '正在为您渲染超写实空间视效...',
+          isError: false,
+          params: b,
+        };
+        try {
+          db.prepare(`
+            INSERT INTO chat_messages (
+              id, session_id, user_id, role, mode, prompt, params_json, images_json,
+              status, run_id, engine, result_json, created_at, updated_at
+            ) VALUES (?, ?, ?, 'assistant', ?, ?, ?, '[]', 'generating', ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              status='generating',
+              result_json=excluded.result_json,
+              updated_at=excluded.updated_at
+            WHERE chat_messages.status NOT IN ('cancelled', 'succeeded', 'failed')
+          `).run(
+            placeholderId,
+            b.sessionId,
+            sessionUser.id,
+            modality === 'video' ? 'text_to_video' : (modality === 'music' ? 'music' : 'text_to_image'),
+            placeholderResult.content,
+            JSON.stringify(b.params || {}),
+            out.jobId,
+            b.model || '',
+            JSON.stringify(placeholderResult),
+            now,
+            now
+          );
+        } catch (msgErr) {
+          console.warn('[gen-jobs] 写入初始 generating 消息失败:', msgErr.message);
+        }
+      }
+      return sendJson(res, 200, { success: true, jobId: out.jobId, status: 'queued' });
+    } catch (e) {
+      return sendJson(res, e.status || 500, { error: e.message, code: e.code || 'enqueue_failed' });
+    }
+  }
+
+  // 任务取消：POST /gen/jobs/:id/cancel
+  const mGenJobCancel = pathname.match(/^\/gen\/jobs\/([^\/]+)\/cancel$/);
+  if (mGenJobCancel && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const jobId = decodeURIComponent(mGenJobCancel[1]);
+    try {
+      const { cancelGenJob } = require('./gen-jobs');
+      const { abortJob } = require('./gen-jobs-worker');
+      // 先鉴权并落库，再中断执行：旧顺序先 abort 后鉴权，别人可以抢先打断他人的在跑任务、随后才吃 403
+      const out = cancelGenJob(db, jobId, sessionUser.id);
+      // 任务已结束时不能再改消息状态，否则会把成功/失败的结果卡改写成「已取消」
+      if (!out.success) return sendJson(res, 200, out);
+      abortJob(jobId);
+
+      const jobRow = db.prepare('SELECT model, modality, payload_json, result_json FROM gen_jobs WHERE job_id=?').get(jobId);
+      let payloadObj = {};
+      try { payloadObj = JSON.parse(jobRow?.payload_json || '{}'); } catch (_) {}
+      let resultObj = {};
+      try { resultObj = JSON.parse(jobRow?.result_json || '{}'); } catch (_) {}
+      const vTaskId = payloadObj.vendorTaskId || resultObj.vendorTaskId || null;
+      const msgId = 'genmsg_' + jobId;
+
+      // 先把会话消息写成已取消，再去等云端。云端取消可能要几秒，
+      // 这段时间用户一切回会话，不能再从 generating 读出等待卡。
+      const writeCancelledMessage = (extra) => {
+        const existingMsg = db.prepare('SELECT result_json FROM chat_messages WHERE id=?').get(msgId);
+        let cancelResult = {
+          role: 'assistant',
+          isCancelled: true,
+          isGenerating: false,
+          content: '生成已取消',
+          ...(extra || {})
+        };
+        if (existingMsg?.result_json) {
+          try {
+            cancelResult = { ...JSON.parse(existingMsg.result_json), ...cancelResult };
+          } catch (_) {}
+        }
+        const now = Date.now();
+        db.prepare("UPDATE chat_messages SET status='cancelled', prompt='生成已取消', result_json=?, updated_at=? WHERE id=?")
+          .run(JSON.stringify(cancelResult), now, msgId);
+      };
+      try { writeCancelledMessage(); } catch (_) {}
+      try {
+        const { eventBus, EVENTS } = require('./events');
+        eventBus.emit(EVENTS.TASK_UPDATED, { jobId, status: 'cancelled', type: 'gen_job', sessionId: payloadObj.sessionId || '' });
+      } catch (_) {}
+
+      // 真实接线：真正向云端发送取消请求（可真取消则真取消，不可真取消则前端取消，并拉取最新结果）
+      const { cancelVendorTask } = require('./services/vendor-cancel');
+      const cancelAudit = await cancelVendorTask({
+        model: jobRow?.model || payloadObj.model || '',
+        vendorTaskId: vTaskId,
+        jobId
+      });
+
+      // 等云端取消回来之后，若任务已经是 succeeded 或 failed，不再写成 cancelled
+      const freshJob = db.prepare('SELECT status FROM gen_jobs WHERE job_id=?').get(jobId);
+      if (freshJob && (freshJob.status === 'succeeded' || freshJob.status === 'failed')) {
+        return sendJson(res, 200, { success: false, status: freshJob.status, message: '任务已结束，无法取消', cancellationAudit: cancelAudit });
+      }
+
+      const now = Date.now();
+      const updatedResult = {
+        ...(resultObj || {}),
+        isCancelled: true,
+        isGenerating: false,
+        cancellationAudit: cancelAudit
+      };
+      try {
+        db.prepare("UPDATE gen_jobs SET status='cancelled', stage='已取消', result_json=?, updated_at=? WHERE job_id=? AND status='cancelled'")
+          .run(JSON.stringify(updatedResult), now, jobId);
+      } catch (_) {}
+
+      try {
+        writeCancelledMessage({
+          content: cancelAudit.auditSummary || '生成已取消',
+          cancellationAudit: cancelAudit
+        });
+      } catch (_) {}
+
+      try {
+        const { eventBus, EVENTS } = require('./events');
+        eventBus.emit(EVENTS.TASK_UPDATED, { jobId, status: 'cancelled', type: 'gen_job', cancellationAudit: cancelAudit });
+      } catch (_) {}
+
+      return sendJson(res, 200, { success: true, cancellationAudit: cancelAudit, ...out });
+    } catch (e) {
+      return sendJson(res, e.status || 500, { error: e.message });
+    }
+  }
+
+  // 单任务查询：result / error 为解析后的对象
+  const mGenJobGet = pathname.match(/^\/gen\/jobs\/([^\/]+)$/);
+  if (mGenJobGet && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const jobId = decodeURIComponent(mGenJobGet[1]);
+    const row = require('./gen-jobs').getGenJob(db, jobId);
+    if (!row) return sendJson(res, 404, { error: '任务不存在' });
+    if (Number(row.user_id) !== Number(sessionUser.id)) {
+      return sendJson(res, 403, { error: '无权读取该任务' });
+    }
+    let result = null;
+    let error = null;
+    let payload = null;
+    try { result = row.result_json ? JSON.parse(row.result_json) : null; } catch (_) {}
+    try { error = row.error_json ? JSON.parse(row.error_json) : null; } catch (_) {}
+    try { payload = row.payload_json ? JSON.parse(row.payload_json) : null; } catch (_) {}
+    const durationMs = (row.completed_at && row.started_at)
+      ? (row.completed_at - row.started_at)
+      : (row.completed_at && row.created_at ? row.completed_at - row.created_at : null);
+
+    // 取消任务的云端状态与成片核验审计
+    let cancellationAudit = result?.cancellationAudit || null;
+    if (row.status === 'cancelled') {
+      const vTaskId = payload?.vendorTaskId || result?.vendorTaskId || cancellationAudit?.vendorTaskId || null;
+      let cloudContinued = Boolean(cancellationAudit?.cloudContinued || result?.cloudContinued);
+      let vendorStatus = cancellationAudit?.vendorStatus || result?.vendorStatus || 'UNKNOWN';
+      let vendorVideoUrl = cancellationAudit?.vendorVideoUrl || result?.vendorVideoUrl || null;
+      let rawVendorData = cancellationAudit?.latestVendorSnapshot || null;
+
+      if (vTaskId) {
+        try {
+          const { queryWanTask, getWanEnv } = require('./services/wan-video');
+          const env = getWanEnv();
+          if (env) {
+            const liveSnapshot = await queryWanTask(env, vTaskId);
+            if (liveSnapshot?.output) {
+              rawVendorData = liveSnapshot;
+              const st = liveSnapshot.output.task_status;
+              if (st) vendorStatus = st;
+              if (liveSnapshot.output.video_url) {
+                vendorVideoUrl = liveSnapshot.output.video_url;
+                cloudContinued = true;
+              } else if (st === 'SUCCEEDED') {
+                cloudContinued = true;
+              } else if (st === 'CANCELLED') {
+                cloudContinued = false;
+              }
+            }
+          }
+        } catch (_) {}
+      }
+
+      const cancelStatus = Number(cancellationAudit?.cancelHttpStatus || 0);
+      const cancelCode = String(cancellationAudit?.cancelResponseData?.code || '');
+      const cancelSent = Boolean(cancellationAudit?.cancelAttempted) && cancelStatus > 0;
+      const vendorRefusedRunning = cancelSent && (cancelStatus === 400 || cancelCode === 'UnsupportedOperation');
+      const hasVideo = Boolean(vendorVideoUrl) || vendorStatus === 'SUCCEEDED';
+      let auditSummary = cancellationAudit?.auditSummary || '该任务已手动取消。';
+      if (vendorStatus === 'CANCELLED' || cancellationAudit?.realCloudCancelled) {
+        auditSummary = '✅ 云端已确认真实取消（CANCELLED）：取消请求在排队阶段生效，云端未继续解算。';
+      } else if (vendorRefusedRunning) {
+        auditSummary = hasVideo
+          ? '⚠️ 取消请求已送达服务商，但任务当时已是 RUNNING。官方只允许取消 PENDING，所以云端没有停，并已生成视频。'
+          : '⚠️ 取消请求已送达服务商（HTTP 400 UnsupportedOperation）。任务当时已是 RUNNING，官方只允许取消 PENDING，所以云端没有停。这次查询还没有视频地址。';
+      } else if (hasVideo) {
+        auditSummary = '⚠️ 云端在本地取消后仍生成了视频。';
+      } else if (vendorStatus === 'FAILED') {
+        auditSummary = '❌ 云端任务失败（FAILED）：未生成视频。';
+      } else if (vTaskId && !cancelSent) {
+        auditSummary = `云端任务号: ${vTaskId}。这次没有拿到服务商的取消回执。`;
+      }
+
+      cancellationAudit = {
+        ...(cancellationAudit || {}),
+        vendorTaskId: vTaskId,
+        vendorStatus,
+        cloudContinued,
+        videoGenerated: hasVideo,
+        vendorVideoUrl,
+        auditSummary,
+        rawVendorData
+      };
+    }
+
+    return sendJson(res, 200, {
+      success: true,
+      job: {
+        job_id: row.job_id,
+        status: row.status,
+        stage: row.stage || '',
+        progress: Number(row.progress || 0),
+        modality: row.modality,
+        model: row.model,
+        created_at: row.created_at,
+        started_at: row.started_at,
+        completed_at: row.completed_at,
+        duration_ms: durationMs,
+        duration_sec: durationMs ? Number((durationMs / 1000).toFixed(1)) : null,
+        payload,
+        result,
+        error,
+        cancellationAudit,
+      },
+    });
+  }
+
+  // 会话任务列表：仅当前用户
+  if (pathname === '/gen/jobs' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const sessionId = urlObj.searchParams.get('sessionId') || undefined;
+    const jobs = require('./gen-jobs').listGenJobs(db, { sessionId, userId: sessionUser.id }).map((r) => ({
+      job_id: r.job_id,
+      status: r.status,
+      progress: Number(r.progress || 0),
+      modality: r.modality,
+      model: r.model,
+      session_id: r.session_id,
+      created_at: r.created_at,
+      updated_at: r.updated_at,
+      completed_at: r.completed_at,
+    }));
+    return sendJson(res, 200, { success: true, jobs });
+  }
+
+  // ===== 最近使用的素材（跨对话共享，按用户保留最近 50 条）=====
+  if (pathname === '/studio/recent-refs' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const sessionId = urlObj.searchParams.get('sessionId') || '';
+    const limit = Number(urlObj.searchParams.get('limit') || 20);
+    try {
+      const { listRecentRefs } = require('./studio-recent-refs');
+      const data = listRecentRefs(db, sessionUser.id, sessionId, { limit });
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message || '读取最近使用素材失败' });
+    }
+  }
+
+  if (pathname === '/studio/recent-refs' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req);
+    const sessionId = b.sessionId || '';
+    // 归属校验：只能记到自己会话名下
+    if (sessionId) {
+      const owned = db.prepare('SELECT user_id FROM chat_sessions WHERE id=?').get(sessionId);
+      if (owned && Number(owned.user_id) !== Number(sessionUser.id)) {
+        return sendJson(res, 403, { error: '无权写入该会话的最近素材' });
+      }
+    }
+    try {
+      const { recordRecentRefs } = require('./studio-recent-refs');
+      const data = recordRecentRefs(db, sessionUser.id, sessionId, b.items);
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message || '记录最近使用素材失败' });
+    }
+  }
+
+  if (pathname === '/gen/images' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const b = await parseBody(req);
+      studioAcl.assertModelAllowed(db, sessionUser, b.model);
+      const { executeAdapter } = require('./gen');
+      const { engineStatus } = require('./lab');
+      const { resolveModelExecution, prepareGovernedSubmit } = require('./models-contract');
+      const rawPrompt = (b.prompt || '').trim();
+      let finalPrompt = rawPrompt;
+
+      const modelExec = b.model ? resolveModelExecution(db, b.model) : null;
+      const requestedContract = modelExec?.model;
+
+      // 双轨机制：若指定 auto_optimize，调用对应生成模型的 Skill 自动优化
+      let optimizedPrompt = null;
+      if (b.auto_optimize && rawPrompt && b.model) {
+        try {
+          const polish = requestedContract?.optimizer?.prompt ? requestedContract.optimizer : genGov.polishFor(db, b.model);
+          if (polish && polish.prompt) {
+            const opt = genGov.resolveOptimizerModel(db, b.model);
+            const optData = await executeChatCompletion(db, config, {
+              model: opt.modelCode || opt.modelId,
+              messages: [{ role: 'system', content: polish.prompt }, { role: 'user', content: rawPrompt }],
+              temperature: opt.temperature,
+              max_tokens: 2048,
+              timeoutMs: opt.timeoutMs || 90000
+            });
+            const txt = optData?.choices?.[0]?.message?.content?.trim();
+            if (txt) {
+              // 同闸门：剥掉提示词里的分辨率/时长/画幅比（它们由参数项承载）
+              optimizedPrompt = require('./prompt-validate')
+                .validateOptimizedPrompt(txt.replace(/^["'“”]+|["'“”]+$/g, '')).text;
+              finalPrompt = optimizedPrompt;
+            }
+          }
+        } catch (_) {}
+      }
+
+      // 提取输入中的参数（兼容旧字段与对外共有控件）
+      const values = {
+        size: b.size || '2K',
+        ratio: b.ratio || '9:16',
+        ...(b.params || {}),
+        ...(b.extras || {}),
+        ...(b.layer_decomposition != null ? { layer_decomposition: b.layer_decomposition } : {}),
+        ...(b.decompose != null ? { layer_decomposition: b.decompose } : {}),
+        ...(b.background != null ? { background: b.background } : {}),
+        ...(b.output_format != null ? { output_format: b.output_format } : {}),
+        ...(b.format != null ? { output_format: b.format } : {}),
+      };
+
+      const snippetIds = Array.isArray(b.snippetIds) ? b.snippetIds : (Array.isArray(b.snippet_ids) ? b.snippet_ids : null);
+      const prepared = b.model ? prepareGovernedSubmit({
+        db,
+        modelId: b.model,
+        editablePrompt: rawPrompt,
+        optimizedPrompt,
+        values,
+        images: b.imageUrls || (b.image ? [b.image] : []),
+        snippetIds,
+      }) : { contract: requestedContract, assembled: null };
+      const modelContract = prepared.contract || requestedContract;
+      const assembled = prepared.assembled;
+      if (assembled?.prompt) finalPrompt = assembled.prompt;
+
+      const engines = engineStatus(db);
+      const imgAdapters = engines.gen?.imageAdapters || [];
+      const { pickAdapterId, adapterMissingError, isGoogleModel } = require('./adapter-match');
+      const mCode = String(modelContract?.vendor_model_id || b.model || '');
+      const execEndpointId = modelExec?.capability?.endpoint_id || modelExec?.endpoint?.id || '';
+      const pickedId = pickAdapterId('image', mCode, imgAdapters, execEndpointId);
+      let adapterRow = null;
+      if (b.adapterId) {
+        adapterRow = db.prepare('SELECT * FROM gen_adapters WHERE id=?').get(b.adapterId);
+      }
+      if (pickedId && (!adapterRow || (isGoogleModel(mCode) && adapterRow.id !== pickedId))) {
+        adapterRow = db.prepare('SELECT * FROM gen_adapters WHERE id=?').get(pickedId);
+      }
+      if (!adapterRow && pickedId) {
+        adapterRow = db.prepare('SELECT * FROM gen_adapters WHERE id=?').get(pickedId);
+      }
+      if (!adapterRow) return sendJson(res, 503, { error: adapterMissingError('image', mCode) });
+
+      const result = await executeAdapter(services, adapterRow, {
+        kind: 'image',
+        contractId: modelContract?.id || '',
+        prompt: finalPrompt,
+        model: mCode,
+        size: assembled?.body?.size || b.size,
+        ratio: assembled?.body?.ratio || b.ratio || '9:16',
+        imageUrls: b.imageUrls || (b.image ? [b.image] : []),
+        imageLocalPaths: b.imageLocalPaths || [],
+        extras: {
+          ...(b.extras || b.params || {}),
+          ...(assembled?.body || {}),
+          ...(b.mask != null ? { mask: b.mask } : {}),
+          ...(b.bbox != null ? { bbox: b.bbox } : {}),
+        }
+      });
+      return sendJson(res, 200, result);
+    } catch (e) {
+      // 上游错误对象透传：优先 e.status/statusCode，其次从消息里的 HTTP 码推断，
+      // 不再把所有失败统一压成 500；同时带出 upstreamStatus / requestId 便于定位。
+      const msg = String(e?.message || '');
+      const mHttp = /HTTP\s+(\d{3})/.exec(msg);
+      const upstreamStatus = Number(e?.upstreamStatus || e?.status || e?.statusCode) || (mHttp ? Number(mHttp[1]) : null);
+      const mReq = /request_id=([A-Za-z0-9_.:-]+)/.exec(msg);
+      const requestId = e?.requestId || e?.request_id || (mReq ? mReq[1] : null);
+      const explicit = Number(e?.status || e?.statusCode) || 0;
+      const status = explicit || (upstreamStatus && upstreamStatus >= 400 && upstreamStatus < 600 ? upstreamStatus : 500);
+      return sendJson(res, status, {
+        error: e.message,
+        code: e.code || 'error',
+        upstreamStatus: upstreamStatus || null,
+        requestId: requestId || null,
+      });
+    }
+  }
+
+  if (pathname === '/gen/videos' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const b = await parseBody(req);
+      studioAcl.assertModelAllowed(db, sessionUser, b.model);
+      const { executeAdapter } = require('./gen');
+      const { engineStatus } = require('./lab');
+      const { resolveModelExecution, prepareGovernedSubmit } = require('./models-contract');
+      const rawPrompt = (b.prompt || '').trim();
+      let finalPrompt = rawPrompt;
+
+      const modelExec = b.model ? resolveModelExecution(db, b.model) : null;
+      const requestedContract = modelExec?.model;
+
+      let optimizedPrompt = null;
+      if (b.auto_optimize && rawPrompt && b.model) {
+        try {
+          const polish = requestedContract?.optimizer?.prompt ? requestedContract.optimizer : genGov.polishFor(db, b.model);
+          if (polish && polish.prompt) {
+            const opt = genGov.resolveOptimizerModel(db, b.model);
+            const optData = await executeChatCompletion(db, config, {
+              model: opt.modelCode || opt.modelId,
+              messages: [{ role: 'system', content: polish.prompt }, { role: 'user', content: rawPrompt }],
+              temperature: opt.temperature,
+              max_tokens: 2048,
+              timeoutMs: opt.timeoutMs || 90000
+            });
+            const txt = optData?.choices?.[0]?.message?.content?.trim();
+            if (txt) {
+              // 同闸门：剥掉提示词里的分辨率/时长/画幅比（它们由参数项承载）
+              optimizedPrompt = require('./prompt-validate')
+                .validateOptimizedPrompt(txt.replace(/^["'“”]+|["'“”]+$/g, '')).text;
+              finalPrompt = optimizedPrompt;
+            }
+          }
+        } catch (_) {}
+      }
+
+      const values = {
+        ratio: b.ratio || b.aspect_ratio || '16:9',
+        aspect_ratio: b.aspect_ratio || b.ratio || '16:9',
+        duration: b.duration || b.seconds || b.durationSec || 5,
+        seconds: b.seconds || b.duration || b.durationSec || 5,
+        size: b.size || '720P',
+        ...(b.params || {}),
+        ...(b.extras || {}),
+      };
+
+      const snippetIds = Array.isArray(b.snippetIds) ? b.snippetIds : (Array.isArray(b.snippet_ids) ? b.snippet_ids : null);
+      const prepared = b.model ? prepareGovernedSubmit({
+        db,
+        modelId: b.model,
+        editablePrompt: rawPrompt,
+        optimizedPrompt,
+        values,
+        images: b.imageUrls || (b.image ? [b.image] : []),
+        snippetIds,
+      }) : { contract: requestedContract, assembled: null };
+      const modelContract = prepared.contract || requestedContract;
+      const assembled = prepared.assembled;
+      if (assembled?.prompt) finalPrompt = assembled.prompt;
+
+      const engines = engineStatus(db);
+      const vidAdapters = engines.gen?.videoAdapters || [];
+      const { pickAdapterId, adapterMissingError, isGoogleModel } = require('./adapter-match');
+      const mCode = String(modelContract?.vendor_model_id || b.model || '');
+      const { isWanModel, generateWanVideo } = require('./services/wan-video');
+      if (isWanModel(b.model) || isWanModel(mCode) || isWanModel(modelContract?.id)) {
+        const result = await generateWanVideo(services, {
+          prompt: finalPrompt,
+          ratio: assembled?.body?.ratio || b.ratio,
+          resolution: assembled?.body?.resolution || b.resolution || assembled?.body?.size || b.size,
+          duration: assembled?.body?.duration || assembled?.body?.seconds || b.duration || b.durationSec || b.seconds,
+          imageUrls: b.imageUrls || (b.image ? [b.image] : []),
+          firstFrame: b.firstFrame || b.first_frame,
+          lastFrame: b.lastFrame || b.last_frame,
+          genMode: b.genMode || b.mode,
+        });
+        return sendJson(res, 200, result);
+      }
+      const pickedId = pickAdapterId('video', mCode, vidAdapters);
+      let adapterRow = null;
+      if (b.adapterId) {
+        adapterRow = db.prepare('SELECT * FROM gen_adapters WHERE id=?').get(b.adapterId);
+      }
+      if (pickedId && (!adapterRow || (isGoogleModel(mCode) && adapterRow.id !== pickedId))) {
+        adapterRow = db.prepare('SELECT * FROM gen_adapters WHERE id=?').get(pickedId);
+      }
+      if (!adapterRow && pickedId) {
+        adapterRow = db.prepare('SELECT * FROM gen_adapters WHERE id=?').get(pickedId);
+      }
+      if (!adapterRow) return sendJson(res, 503, { error: adapterMissingError('video', mCode) });
+
+      const portraitIds = Array.isArray(b.portraitAssetIds)
+        ? b.portraitAssetIds
+        : (b.extras && Array.isArray(b.extras.portraitAssetIds) ? b.extras.portraitAssetIds : []);
+      const portraitAssets = portraitIds.length ? portraitLib.loadActivePortraits(db, portraitIds) : [];
+      if (portraitAssets.length) assertSeedanceOrEmpty(b.model, portraitAssets);
+
+      const result = await executeAdapter(services, adapterRow, {
+        kind: 'video',
+        contractId: modelContract?.id || '',
+        prompt: finalPrompt,
+        model: mCode,
+        size: assembled?.body?.size || b.size || assembled?.body?.resolution || b.resolution,
+        resolution: assembled?.body?.resolution || b.resolution || assembled?.body?.size || b.size,
+        ratio: assembled?.body?.ratio || b.ratio,
+        durationSec: assembled?.body?.duration || assembled?.body?.seconds || b.durationSec || b.seconds || b.duration,
+        imageUrls: b.imageUrls || (b.image ? [b.image] : []),
+        firstFrame: b.firstFrame || b.first_frame,
+        lastFrame: b.lastFrame || b.last_frame,
+        genMode: b.genMode || b.mode,
+        extras: {
+          ...(b.extras || b.params || {}),
+          ...(assembled?.body || {}),
+          ...(portraitAssets.length ? { portrait_assets: portraitAssets } : {}),
+        },
+        allowPendingTimeout: true,
+        // 云端视频渲染普遍 1~3 分钟，90s 会频繁以 pending 返回，而前端拿不到视频地址只能报错
+        timeoutMs: Number(b.timeoutMs) || 600000,
+      });
+      return sendJson(res, 200, result);
+    } catch (e) {
+      const userFixable = [
+        'seedance_required', 'portrait_missing', 'portrait_not_active',
+        'agnes_keyframe_missing', 'agnes_bad_duration', 'agnes_bad_ratio',
+        'public_base_missing', 'public_base_private', 'wan_env_missing', 'alibailian_key_missing',
+        'frame_blob', 'frame_bad_data_url', 'frame_unresolved',
+      ].includes(e.code);
+      const explicit = Number(e?.status || e?.statusCode) || 0;
+      const status = explicit || (userFixable ? 400 : 500);
+      return sendJson(res, status, {
+        error: e.message,
+        code: e.code || 'error',
+        upstreamStatus: Number(e?.upstreamStatus || e?.status || e?.statusCode) || null,
+        requestId: e?.requestId || e?.request_id || null,
+      });
+    }
+  }
+
+  // ===== 阿里云视频超分辨率 (SuperResolveVideo) 独立调用与轮询端点 =====
+  if (pathname === '/video/super-resolve' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const b = await parseBody(req);
+      const { submitSuperResolveVideo } = require('./services/aliyun-video-sr');
+      const videoUrl = b.videoUrl || b.video_url || b.url;
+      if (!videoUrl) return sendJson(res, 400, { error: 'videoUrl 不能为空' });
+      const jobId = await submitSuperResolveVideo(videoUrl, b.bitRate || b.bit_rate || 10);
+      return sendJson(res, 200, { success: true, jobId });
+    } catch (e) {
+      return sendJson(res, 400, { success: false, error: e.message });
+    }
+  }
+
+  if (pathname === '/video/super-resolve-local' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const b = await parseBody(req);
+      const { superResolveFromPreview } = require('./services/video-sr-local');
+      const data = await superResolveFromPreview(services, b.previewUrl || b.videoUrl || b.url || '', b.vendorUrl || b.remoteUrl || '');
+      return sendJson(res, 200, data);
+    } catch (e) {
+      return sendJson(res, 200, { ok: false, modelVideoUrl: '', error: e.message || '超分失败，已改播模型原片' });
+    }
+  }
+
+  const mSrTask = pathname.match(/^\/video\/super-resolve\/tasks\/([^\/]+)$/);
+  if (mSrTask && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const jobId = decodeURIComponent(mSrTask[1]).trim();
+    try {
+      const { querySuperResolveResult } = require('./services/aliyun-video-sr');
+      const result = await querySuperResolveResult(jobId);
+      return sendJson(res, 200, { success: true, data: result });
+    } catch (e) {
+      return sendJson(res, 500, { success: false, error: e.message });
+    }
+  }
+
+  // ===== 异步生成任务查询与结果兑现端点 =====
+  const mGenTask = pathname.match(/^\/gen\/(?:videos\/)?tasks\/([^\/]+)$/);
+  if (mGenTask && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const taskId = decodeURIComponent(mGenTask[1]).trim();
+    try {
+      const { queryGenTask } = require('./gen/task-query');
+      const result = await queryGenTask(services, taskId);
+      return sendJson(res, 200, result);
+    } catch (e) {
+      return sendJson(res, 500, { success: false, error: e.message });
+    }
+  }
+
+  if (pathname === '/gen/audio' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const b = await parseBody(req, 12 * 1024 * 1024);
+      if (b.__bodyTooLarge) return sendJson(res, 413, { error: '参考音频过大' });
+      const { executeAdapter } = require('./gen');
+      const { engineStatus } = require('./lab');
+      const { resolveModelExecution, prepareGovernedSubmit } = require('./models-contract');
+      const rawPrompt = (b.prompt || '').trim();
+      const modelExec = b.model ? resolveModelExecution(db, b.model) : null;
+      const prepared = b.model ? prepareGovernedSubmit({
+        db,
+        modelId: b.model,
+        editablePrompt: rawPrompt,
+        values: {
+          ...(b.params || {}),
+          ...(b.extras || {}),
+          duration: b.duration || b.durationSec,
+          mode: b.genMode || b.mode,
+        },
+        images: [],
+        snippetIds: Array.isArray(b.snippetIds) ? b.snippetIds : null,
+      }) : { contract: modelExec?.model || null, assembled: null };
+      const modelContract = prepared.contract || modelExec?.model;
+      const assembled = prepared.assembled;
+      const engines = engineStatus(db);
+      const musicAdapters = engines.musicAdapters || [];
+      const { pickAdapterId, adapterMissingError } = require('./adapter-match');
+      const mCode = String(modelContract?.vendor_model_id || b.model || '');
+      const pickedId = pickAdapterId('music', mCode, musicAdapters);
+      const adapterRow = pickedId ? db.prepare('SELECT * FROM gen_adapters WHERE id=?').get(pickedId) : null;
+      if (!adapterRow) return sendJson(res, 503, { error: adapterMissingError('music', mCode) });
+      const audioUrls = []
+        .concat(Array.isArray(b.audioUrls) ? b.audioUrls : [])
+        .concat(Array.isArray(b.audios) ? b.audios : [])
+        .filter(Boolean);
+      const result = await executeAdapter(services, adapterRow, {
+        kind: 'audio',
+        contractId: modelContract?.id || '',
+        prompt: assembled?.prompt || rawPrompt,
+        model: mCode,
+        genMode: b.genMode || b.mode,
+        durationSec: assembled?.body?.audio_duration || assembled?.body?.duration || b.duration || b.durationSec,
+        audioUrls,
+        timeoutMs: 600000,
+        extras: {
+          ...(b.extras || b.params || {}),
+          ...(assembled?.body || {}),
+          mode: b.genMode || b.mode,
+        },
+      });
+      return sendJson(res, 200, result);
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  if (pathname === '/gen/chat' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const b = await parseBody(req);
+      studioAcl.assertModelAllowed(db, sessionUser, b.model);
+      const model = b.model || 'agnes-3.0-flash';
+      const { resolveModelExecution, assembleModelPayload } = require('./models-contract');
+      const { capsFor } = require('./studio-catalog');
+      const { contextBudgetTokens, trimChatMessages } = await import('./chat-context.mjs');
+      const exec = resolveModelExecution(db, model);
+      let messages = Array.isArray(b.messages) ? b.messages.map(m => ({ ...m })) : [];
+      let promptText = String(b.prompt || '');
+      if (!promptText && messages.length) {
+        const lastUser = [...messages].reverse().find(m => m.role === 'user');
+        if (lastUser && typeof lastUser.content === 'string') {
+          promptText = lastUser.content;
+        }
+      }
+      if (exec?.model) {
+        const assembled = assembleModelPayload({
+          modelContract: exec.model,
+          editablePrompt: promptText,
+          values: b
+        });
+        if (assembled?.prompt) {
+          if (messages.length) {
+            const lastUser = [...messages].reverse().find(m => m.role === 'user');
+            if (lastUser && typeof lastUser.content === 'string') {
+              lastUser.content = assembled.prompt;
+            } else if (!lastUser) {
+              messages.push({ role: 'user', content: assembled.prompt });
+            }
+          } else {
+            messages = [{ role: 'user', content: assembled.prompt }];
+          }
+        }
+      } else if (!messages.length) {
+        messages = [{ role: 'user', content: promptText }];
+      }
+
+      const modelCaps = capsFor(model, db);
+      const budget = contextBudgetTokens(modelCaps && modelCaps.contextTokens);
+      const trimmed = trimChatMessages(messages, budget);
+      messages = trimmed.messages.length ? trimmed.messages : messages;
+
+      // 思考档位：只按该模型在官方目录声明的能力组装，未声明则忽略客户端传值
+      const reasoningPayload = buildChatReasoningPayload(modelCaps && modelCaps.reasoning, b);
+
+      const data = splitChatThinking(await executeChatCompletion(db, config, {
+        model,
+        messages,
+        images: b.images,
+        videoUrls: b.videoUrls,
+        temperature: b.temperature ?? 0.4,
+        max_tokens: b.max_tokens ?? 4096,
+        timeoutMs: chatTimeoutMs(modelCaps, b.timeoutMs),
+        reasoning: reasoningPayload,
+      }));
+      const requestedModel = exec?.model?.vendor_model_id || model;
+      const servedModel = data?.model ? String(data.model) : '';
+      const substituted = Boolean(servedModel && requestedModel && servedModel !== String(requestedModel));
+      const finishReason = data?.choices?.[0]?.finish_reason || null;
+      // 封套与其余 viewer 接口对齐：App 的 request() 要求 root.success===true 才 resolve。
+      // web-pro 走 json.data || json、smoke 测试的 chatText 两种形状都认，故此为纯增益改动。
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          ...data,
+          reasoning: data.reasoning || '',
+          requested_model: requestedModel,
+          served_model: servedModel || null,
+          substituted,
+          finish_reason: finishReason,
+          truncated: finishReason === 'length',
+          reasoning_caps: modelCaps && modelCaps.reasoning ? modelCaps.reasoning : null,
+          applied_reasoning: reasoningPayload,
+          image_notes: Array.isArray(data.image_notes) ? data.image_notes : [],
+          context: {
+            kept: trimmed.kept,
+            dropped: trimmed.dropped,
+            tokens: trimmed.tokens,
+            budget: trimmed.budget,
+            modelWindow: modelCaps && modelCaps.contextTokens ? modelCaps.contextTokens : null,
+          },
+        },
+      });
+    } catch (e) {
+      const st = Number(e?.status || e?.statusCode) || 0;
+      return sendJson(res, st >= 400 && st < 600 ? st : 500, {
+        error: e.message,
+        code: e.code || 'error',
+        upstreamStatus: Number(e?.upstreamStatus || e?.status || e?.statusCode) || null,
+        requestId: e?.requestId || e?.request_id || null,
+        image_notes: Array.isArray(e.image_notes) ? e.image_notes : [],
+      });
+    }
+  }
+
+  if (pathname === '/skills/create' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const b = await parseBody(req);
+      const { createSkill } = require('./skill-loader');
+      const out = createSkill(b);
+      return sendJson(res, 200, { success: true, data: out });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  // 管理员专用：标签字典治理
+  if (pathname === '/dict' && req.method === 'GET') {
+    try {
+      const includeDeprecated = urlObj.searchParams.get('include_deprecated') !== '0';
+      const data = tagGov.listDict(db, { includeDeprecated });
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+  if (pathname === '/dict' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const b = await parseBody(req);
+      const row = tagGov.upsertTag(db, b, sessionUser?.username);
+      return sendJson(res, 200, { success: true, data: row });
+    } catch (e) {
+      return sendJson(res, e.status || 500, { error: e.message });
+    }
+  }
+  if (pathname === '/dict/deprecate' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const b = await parseBody(req);
+      const row = tagGov.setDeprecated(db, { ...b, deprecated: true }, sessionUser?.username);
+      return sendJson(res, 200, { success: true, data: row });
+    } catch (e) {
+      return sendJson(res, e.status || 500, { error: e.message });
+    }
+  }
+  if (pathname === '/dict/restore' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const b = await parseBody(req);
+      const row = tagGov.setDeprecated(db, { ...b, deprecated: false }, sessionUser?.username);
+      return sendJson(res, 200, { success: true, data: row });
+    } catch (e) {
+      return sendJson(res, e.status || 500, { error: e.message });
+    }
+  }
+  if (pathname === '/dict/retag/estimate' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const b = await parseBody(req);
+      const dims = Array.isArray(b.dimensions) ? b.dimensions : [b.dimension].filter(Boolean);
+      const est = tagGov.estimateRetag(db, dims);
+      return sendJson(res, 200, { success: true, data: { total: est.total, byDimension: est.byDimension, sampleFids: est.sampleFids } });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+  if (pathname === '/dict/retag' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    try {
+      const b = await parseBody(req);
+      const dims = Array.isArray(b.dimensions) ? b.dimensions : [b.dimension].filter(Boolean);
+      const schedule = b.schedule === 'night' ? 'night' : 'now';
+      const all = !!(b.all || b.forceAll || b.full_library);
+      const est = tagGov.estimateRetag(db, dims, { all });
+      if (schedule === 'now' && est.total > 400 && !b.force) {
+        return sendJson(res, 200, {
+          success: true,
+          data: { needsConfirm: true, estimated: est.total, byDimension: est.byDimension }
+        });
+      }
+      const r = tagGov.enqueueDimensionRetag(db, {
+        dimensions: dims,
+        schedule,
+        all,
+        actor: sessionUser?.username,
+        interpreter,
+        reason: b.reason || (all ? 'full_library_retag' : 'dictionary_change')
+      });
+      return sendJson(res, 200, { success: true, data: r });
+    } catch (e) {
+      return sendJson(res, e.status || 500, { error: e.message });
+    }
+  }
+  if (pathname === '/dict/retag/jobs' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    return sendJson(res, 200, { success: true, data: tagGov.listRetagJobs(db) });
+  }
+  if (pathname === '/dict/audit' && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const dimension = urlObj.searchParams.get('dimension') || null;
+    return sendJson(res, 200, { success: true, data: tagGov.listDictAudit(db, { dimension }) });
+  }
+  if (pathname === '/dict/draft-criteria' && req.method === 'POST') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const b = await parseBody(req);
+    return sendJson(res, 200, { success: true, data: { criteria: tagGov.draftCriteria(b.dimension, b.label) } });
+  }
+  const mAuditAssets = pathname.match(/^\/dict\/audit\/(\d+)\/assets$/);
+  if (mAuditAssets && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    return sendJson(res, 200, { success: true, data: tagGov.assetsAffectedByAudit(db, Number(mAuditAssets[1])) });
+  }
+  const mTagHist = pathname.match(/^\/assets\/([^\/]+)\/tag-history$/);
+  if (mTagHist && req.method === 'GET') {
+    if (!isAdmin) return sendJson(res, 403, { error: '权限不足' });
+    const fid = decodeURIComponent(mTagHist[1]);
+    return sendJson(res, 200, { success: true, data: tagGov.listAssetTagHistory(db, fid) });
+  }
+
+  // 管理员专用：用户管理（严格限定仅超级管理员 admin 可管理用户与密码，naite 账号永久锁定）
+  if (pathname === '/users' && req.method === 'GET') {
+    if (sessionUser?.username !== 'admin') {
+      return sendJson(res, 403, { error: '只有超级管理员 admin 才能管理用户和密码' });
+    }
+    return sendJson(res, 200, { success: true, data: auth.listUsers(db) });
+  }
+  if (pathname === '/users' && req.method === 'POST') {
+    if (sessionUser?.username !== 'admin') {
+      return sendJson(res, 403, { error: '只有超级管理员 admin 才能管理用户和密码' });
+    }
+    const b = await parseBody(req);
+    try {
+      const nu = auth.createUser(db, { username: b.username, password: b.password, role: b.role || 'viewer' }, sessionUser.username);
+      _studioCatalogCache.clear();
+      return sendJson(res, 200, { success: true, data: nu });
+    } catch (err) {
+      return sendJson(res, 400, { error: err.message });
+    }
+  }
+
+  const mUserPwd = pathname.match(/^\/users\/(\d+)\/password$/);
+  if (mUserPwd && (req.method === 'POST' || req.method === 'PUT')) {
+    if (sessionUser?.username !== 'admin') {
+      return sendJson(res, 403, { error: '只有超级管理员 admin 才能管理用户和密码' });
+    }
+    const userId = Number(mUserPwd[1]);
+    const b = await parseBody(req);
+    try {
+      auth.changePassword(db, userId, b.password, sessionUser.username);
+      return sendJson(res, 200, { success: true, message: '密码修改成功' });
+    } catch (err) {
+      return sendJson(res, 400, { error: err.message });
+    }
+  }
+
+  if (pathname === '/users/password' && (req.method === 'POST' || req.method === 'PUT')) {
+    if (sessionUser?.username !== 'admin') {
+      return sendJson(res, 403, { error: '只有超级管理员 admin 才能管理用户和密码' });
+    }
+    const b = await parseBody(req);
+    let userId = b.id ? Number(b.id) : null;
+    if (!userId && b.username) {
+      const u = db.prepare('SELECT id FROM users WHERE username = ?').get(b.username);
+      if (u) userId = u.id;
+    }
+    if (!userId) return sendJson(res, 400, { error: '请指定目标用户 ID 或用户名' });
+    try {
+      auth.changePassword(db, userId, b.password, sessionUser.username);
+      return sendJson(res, 200, { success: true, message: '密码修改成功' });
+    } catch (err) {
+      return sendJson(res, 400, { error: err.message });
+    }
+  }
+
+  const mUserId = pathname.match(/^\/users\/(\d+)$/);
+  if (mUserId && req.method === 'DELETE') {
+    if (sessionUser?.username !== 'admin') {
+      return sendJson(res, 403, { error: '只有超级管理员 admin 才能管理用户和密码' });
+    }
+    const userId = Number(mUserId[1]);
+    try {
+      auth.deleteUser(db, userId, sessionUser.username);
+      _studioCatalogCache.clear();
+      return sendJson(res, 200, { success: true, message: '用户已删除' });
+    } catch (err) {
+      return sendJson(res, 400, { error: err.message });
+    }
+  }
+  if (mUserId && req.method === 'PUT') {
+    if (sessionUser?.username !== 'admin') {
+      return sendJson(res, 403, { error: '只有超级管理员 admin 才能管理用户和密码' });
+    }
+    const userId = Number(mUserId[1]);
+    const b = await parseBody(req);
+    try {
+      const u = auth.updateUser(db, userId, { role: b.role }, sessionUser.username);
+      _studioCatalogCache.clear();
+      return sendJson(res, 200, { success: true, data: u });
+    } catch (err) {
+      return sendJson(res, 400, { error: err.message });
+    }
+  }
+
+  // POST /upload — 剪辑台（OpenCut fork）统一上传入口。
+  // 编辑器侧历史调用为 /api/upload，此前后端未实现，导致「未知的 API 端点: /upload」。
+  // 这里复用流式上传（支持视频/图片、大文件），返回顶层 fid 供前端直接使用。
+  if (pathname === '/upload' && req.method === 'POST') {
+    if (!sessionUser) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    if (contentLengthExceeds(req, ML_MAX_UPLOAD_BYTES)) {
+      return sendJson(res, 413, { success: false, error: 'payload_too_large' });
+    }
+    try {
+      const { handleDirectUpload } = require('./stream-upload');
+      const r = await handleDirectUpload(services, req, { source: 'edit' });
+      if (!r || !r.fid) return sendJson(res, 400, { error: '入库失败' });
+      return sendJson(res, 200, { success: true, ...r });
+    } catch (e) {
+      return sendJson(res, e.statusCode || 400, { error: e.message });
+    }
+  }
+
+  return sendJson(res, 404, { error: `未知的 API 端点: ${pathname}` });
+}
+
+// 供 DSH 插件注册的封装函数
+function register(services) {
+  const { ctx } = services;
+  const router = ctx.router;
+  if (!router || typeof router.all !== 'function') return;
+
+  const P = '/plugins/material/api';
+  router.all(`${P}/(.*)`, async (c) => {
+    // 转换为原生 req/res 兼容对象
+    await new Promise(resolve => {
+      handleApi(services, c.req, c.res, P).then(resolve).catch(err => {
+        const code = Number(err && err.statusCode);
+        c.status = (code >= 400 && code < 500) ? code : 500;
+        // B6：4xx 可回显业务消息；500 不泄漏内部细节
+        c.body = (code >= 400 && code < 500) ? { error: err.message } : { error: '服务器内部错误' };
+        resolve();
+      });
+    });
+  });
+}
+
+module.exports = {
+  handleApi,
+  sendJson,
+  pipeFileStream,
+  register,
+  queryAssets,
+  getAssetDetail,
+  getStats,
+  applyHumanTag,
+  filterOptions,
+  invalidateFilterOptionsCache
+};

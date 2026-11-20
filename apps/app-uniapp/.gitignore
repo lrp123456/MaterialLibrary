@@ -1,0 +1,26 @@
+﻿# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build & Output
+dist/
+build/
+.gradle/
+**/build/
+*.apk
+*.aab
+*.idsig
+
+# IDE
+.idea/
+.vscode/
+*.iml
+local.properties
+.DS_Store
+Thumbs.db
+*.log
+
+# Android runtime generated
+app/src/main/assets/apps/
+app/src/main/assets/local-models/
+nativeplugins/uni-local-infer/android/assets/local-models/

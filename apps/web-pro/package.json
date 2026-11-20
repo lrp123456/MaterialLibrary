@@ -1,0 +1,29 @@
+{
+  "name": "@mls/web-pro",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 30002 --host",
+    "build": "vite build",
+    "preview": "vite preview --port 30002 --host"
+  },
+  "dependencies": {
+    "@google/model-viewer": "^4.4.0",
+    "@mls/shared-core": "workspace:*",
+    "dompurify": "^3.4.17",
+    "jszip": "^3.10.2",
+    "marked": "^12.0.2",
+    "mediabunny": "^1.65.0",
+    "morphicons": "^2.0.2",
+    "vue": "^3.5.0",
+    "vue-router": "^4.4.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.1.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.13",
+    "vite": "^5.4.0"
+  }
+}

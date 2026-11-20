@@ -1,0 +1,1357 @@
+/**
+ * 统一网络通信层与免密/静默登录鉴权
+ * 支持自动认证、401 自动续期重试、媒体 URL Token 自动注入
+ *
+ * 三级回退（同源网关 → 本机 → 局域网 → 公网）由 server-resolve.js 的全局
+ * fetch 守卫透明处理；本模块只负责把相对媒体路径按当前生效 base 转成可用 URL。
+ */
+import { resolveApiUrl, setUnauthorizedHandler } from './server-resolve.js';
+
+const TOKEN_KEY = 'ml_token';
+const USER_KEY = 'ml_user';
+
+export function getToken() {
+  return localStorage.getItem(TOKEN_KEY) || '';
+}
+
+export function getCurrentUser() {
+  try {
+    const raw = localStorage.getItem(USER_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+export function setSession(token, user) {
+  if (token) {
+    localStorage.setItem(TOKEN_KEY, token);
+  } else {
+    localStorage.removeItem(TOKEN_KEY);
+  }
+  if (user) {
+    localStorage.setItem(USER_KEY, JSON.stringify(user));
+  } else {
+    localStorage.removeItem(USER_KEY);
+  }
+}
+
+/**
+ * 鉴权失败错误：调用方据此弹出登录框（区别于网络断线/普通业务错误）。
+ */
+export class AuthRequiredError extends Error {
+  constructor(message = '需要登录') {
+    super(message);
+    this.name = 'AuthRequiredError';
+  }
+}
+
+function notifyAuthRequired(reason = '') {
+  try { window.dispatchEvent(new CustomEvent('ml_auth_required', { detail: reason })); } catch { /* ignore */ }
+}
+
+/**
+ * 服务端说「未授权」时的统一收口：本地那份 token 已经是死串，
+ * 必须清掉再广播 —— 否则 isLoggedIn() 仍为真，登录框永远弹不出来，
+ * 用户只能对着满屏破图（<img> 不走 authFetch，没人替它清会话）。
+ */
+export function reportUnauthorized() {
+  setSession('', null);
+  notifyAuthRequired('expired');
+}
+
+// 注入 server-resolve 全局 fetch 拦截器，确保任何角落的 401 都能统一收口
+setUnauthorizedHandler(reportUnauthorized);
+
+/**
+ * 用户名密码登录：POST /api/auth/login → { token, user }。
+ * 成功后落地 localStorage，并广播登录成功事件供界面刷新。
+ */
+export async function login(username, password) {
+  const res = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || !json?.data?.token) {
+    throw new Error(json.error || `登录失败 HTTP ${res.status}`);
+  }
+  const { token, user } = json.data;
+  setSession(token, user || { username });
+  try { window.dispatchEvent(new CustomEvent('ml_login', { detail: user || { username } })); } catch { /* ignore */ }
+  return { token, user: user || { username } };
+}
+
+export function logout() {
+  // 尽力通知后端销毁会话；网络失败也照常清除本地会话
+  fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+  setSession('', null);
+  notifyAuthRequired();
+}
+
+export function isLoggedIn() {
+  return !!getToken();
+}
+
+/**
+ * 向服务端验一次本地会话。localStorage 里有 token 字符串不等于还活着：
+ * 会话可能被撤销（换密码/被清理），此时页面照常打开、图片全 401 破图。
+ * 进页面和切回页签各验一次，死了就当场要登录，而不是让人对着一屏破图猜。
+ * 网络异常不算掉登录（离线/换源时不该把人踢出去）。
+ */
+export async function verifySession() {
+  if (!getToken()) {
+    notifyAuthRequired();
+    return false;
+  }
+  try {
+    const res = await authFetch('/api/auth/me');
+    return res.status !== 403;
+  } catch (e) {
+    // authFetch 遇到 401 已经清会话 + 广播过了，这里只负责不再往上抛
+    if (e && e.name === 'AuthRequiredError') return false;
+    return true;
+  }
+}
+
+/**
+ * 确保具备有效 Token。web-pro 没有（也不应有）内置口令，
+ * 本地无会话时抛 AuthRequiredError，由全局登录弹窗承接——
+ * 这是局域网新设备之前“空白/未找到素材”的真正原因（localStorage 按源隔离，无 token）。
+ */
+export async function ensureToken() {
+  const token = getToken();
+  if (token) return token;
+  notifyAuthRequired();
+  throw new AuthRequiredError();
+}
+
+/**
+ * 携带鉴权头的通用 fetch；无 token 或 401 时广播 ml_auth_required 并抛 AuthRequiredError。
+ */
+export async function authFetch(url, options = {}) {
+  const token = getToken();
+  const headers = new Headers(options.headers || {});
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  const res = await fetch(url, { ...options, headers });
+
+  if (res.status === 401) {
+    reportUnauthorized();
+    throw new AuthRequiredError('登录已过期，请重新登录');
+  }
+
+  return res;
+}
+
+/**
+ * 获取素材缩略图/大图 URL（双重附带 Token 与 MediaToken，确保 <img> 永不 401）
+ *
+ * tier：
+ *  - 'grid'    列表瀑布流卡片专用：服务端直发 256px grid 档（webp 优先），
+ *              相比默认 1280px preview 档单图省约 30 倍流量；
+ *  - 'preview' 1280px 预览档（默认，详情/全屏/聊天引用使用）。
+ */
+export function getAssetImageUrl(fid, mediaToken = '', tier = '', cacheBust = '') {
+  if (!fid) return '';
+  const token = getToken();
+  const q = new URLSearchParams();
+  if (token) q.set('token', token);
+  if (mediaToken) q.set('media_token', mediaToken);
+  if (tier === 'grid' || tier === 'preview') q.set('tier', tier);
+  // 替换原图后 fid 不变、URL 不变，浏览器会一直显示缓存旧图；用版本号强制换 URL。
+  if (cacheBust) q.set('v', String(cacheBust));
+  const qs = q.toString();
+  return resolveApiUrl(`/api/viewer/assets/${encodeURIComponent(fid)}/image${qs ? `?${qs}` : ''}`);
+}
+
+/**
+ * 重新签发素材 URL。创作配方里存下来的 `/api/.../image?token=xxx` 是当前会话的短期凭证，
+ * 换登录/换 token 后原样回填必然 401；这里只换凭证，derivative 等业务参数原样保留。
+ */
+export function resignAssetUrl(storedUrl) {
+  const url = String(storedUrl || '');
+  if (!url.startsWith('/api/') && !/^https?:\/\//i.test(url)) return url;
+  let u;
+  try {
+    u = new URL(url, window.location.origin);
+  } catch {
+    return url;
+  }
+  if (!/^\/api\/(?:viewer\/)?assets\//.test(u.pathname)) return url;
+  // 跨主机的绝对地址不是我们签的，动不了，原样返回。
+  if (!url.startsWith('/') && u.origin !== window.location.origin) return url;
+  u.searchParams.delete('token');
+  u.searchParams.delete('media_token');
+  const token = getToken();
+  if (token) u.searchParams.set('token', token);
+  return `${u.pathname}${u.search}`;
+}
+
+/**
+ * 获取素材「原始图」URL（raw=1 强制 origin 衍生，绕开默认缩略图 / main_derivative）
+ * 版本选择器里的「原图」必须用它，否则可能拿到被重构过画幅的主衍生图。
+ */
+export function getAssetOriginalUrl(fid, mediaToken = '', cacheBust = '') {
+  if (!fid) return '';
+  const token = getToken();
+  const q = new URLSearchParams();
+  q.set('raw', '1');
+  if (token) q.set('token', token);
+  if (mediaToken) q.set('media_token', mediaToken);
+  // 覆盖原图后 fid/URL 都不变，用内容指纹强制换 URL，避免预览还是旧图
+  if (cacheBust) q.set('v', String(cacheBust));
+  return resolveApiUrl(`/api/viewer/assets/${encodeURIComponent(fid)}/image?${q.toString()}`);
+}
+
+/**
+ * 获取视频海报 URL
+ */
+export function getAssetPosterUrl(fid, mediaToken = '') {
+  if (!fid) return '';
+  const token = getToken();
+  const q = new URLSearchParams();
+  if (token) q.set('token', token);
+  if (mediaToken) q.set('media_token', mediaToken);
+  const qs = q.toString();
+  return resolveApiUrl(`/api/viewer/assets/${encodeURIComponent(fid)}/poster${qs ? `?${qs}` : ''}`);
+}
+
+/**
+ * 获取素材原文件的「可播放流」URL：走 /file（等价 raw=1），服务端按 Range 回 206，
+ * 且不像 getAssetDownloadUrl 那样带 download=1（那会 no-store，逐帧拖拽要反复回源）。
+ */
+export function getAssetPlayableUrl(fid) {
+  if (!fid) return '';
+  const token = getToken();
+  const q = new URLSearchParams();
+  if (token) q.set('token', token);
+  return resolveApiUrl(`/api/viewer/assets/${encodeURIComponent(fid)}/file?${q.toString()}`);
+}
+
+/**
+ * 获取素材原文件下载 URL
+ */
+/**
+ * 获取基础素材图片地址（外链/本地缓存统一调度）
+ * 针对新明珠/冠珠防盗链(newpearl.com, cg1993.com)及本地缓存(cache/base-library/...)
+ * 自动转由服务端中继接口 /api/base-library/items/:id/preview 或 /scene 获取，并自动附带会话 token
+ */
+export function getBaseItemImageUrl(item, isScene = false) {
+  if (!item || !item.id) return '';
+  const targetRel = isScene && item.scene_rel ? item.scene_rel : (item.preview_rel || item.scene_rel);
+  if (!targetRel) return '';
+
+  if (targetRel.startsWith('cache/') || /newpearl\.com|cg1993\.com/i.test(targetRel)) {
+    const token = getToken();
+    const mediaType = isScene && item.scene_rel ? 'scene' : 'preview';
+    const qs = token ? `?token=${encodeURIComponent(token)}` : '';
+    return resolveApiUrl(`/api/base-library/items/${encodeURIComponent(item.id)}/${mediaType}${qs}`);
+  }
+
+  return targetRel;
+}
+
+export function getAssetDownloadUrl(fid, rawNameOrKind, mime) {
+  if (!fid) return '';
+  const token = getToken();
+  const safeFid = String(fid).replace(/[^A-Za-z0-9_-]/g, '');
+  let ext = '.jpg';
+  const testStr = `${rawNameOrKind || ''} ${mime || ''}`.toLowerCase();
+  if (testStr.includes('video') || /\.(mp4|mov|webm|mkv|avi|m4v)$/i.test(testStr)) {
+    ext = '.mp4';
+  } else if (testStr.includes('audio') || testStr.includes('music') || /\.(mp3|wav|m4a|aac|flac|ogg)$/i.test(testStr)) {
+    ext = '.mp3';
+  } else if (testStr.includes('glb') || /\.glb$/i.test(testStr)) {
+    ext = '.glb';
+  }
+  const saveName = `ML_SAVED_${safeFid}_origin${ext}`;
+  const q = new URLSearchParams();
+  q.set('download', '1');
+  if (token) q.set('token', token);
+  return resolveApiUrl(`/api/viewer/assets/${encodeURIComponent(fid)}/file/${encodeURIComponent(saveName)}?${q.toString()}`);
+}
+
+export function getAssetPlayUrl(fid) {
+  if (!fid) return '';
+  const token = getToken();
+  const q = new URLSearchParams();
+  q.set('play', '1');
+  if (token) q.set('token', token);
+  return resolveApiUrl(`/api/viewer/assets/${encodeURIComponent(fid)}/file?${q.toString()}`);
+}
+
+/**
+ * 查询素材列表（支持多维度组合条件）
+ */
+export async function fetchAssets(params = {}) {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== '') {
+      q.set(k, String(v));
+    }
+  }
+  const res = await authFetch(`/api/viewer/assets?${q.toString()}`);
+  if (!res.ok) {
+    throw new Error(`获取素材失败: HTTP ${res.status}`);
+  }
+  const json = await res.json();
+  return json.data || json;
+}
+
+/**
+ * 查询回收站列表
+ */
+export async function fetchTrashAssets(params = {}) {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== '') {
+      q.set(k, String(v));
+    }
+  }
+  const res = await authFetch(`/api/viewer/assets/trash?${q.toString()}`);
+  if (!res.ok) {
+    throw new Error(`获取回收站失败: HTTP ${res.status}`);
+  }
+  const json = await res.json();
+  return json.data || json;
+}
+
+/**
+ * 从回收站恢复素材
+ */
+export async function restoreFromTrash(fids) {
+  const list = Array.isArray(fids) ? fids : [fids];
+  const res = await authFetch('/api/assets/trash/restore', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fids: list })
+  });
+  return res.json();
+}
+
+/**
+ * 彻底粉碎/删除回收站素材
+ */
+export async function purgeFromTrash(fids) {
+  const list = Array.isArray(fids) ? fids : [fids];
+  const res = await authFetch('/api/assets/trash/purge', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fids: list })
+  });
+  return res.json();
+}
+
+/**
+ * 将素材移入回收站
+ */
+export async function deleteAsset(fid, reason = 'web_user_deleted') {
+  const res = await authFetch(`/api/assets/${encodeURIComponent(fid)}/delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason })
+  });
+  return res.json();
+}
+
+/**
+ * 批量将素材移入回收站（素材库多选删除）。
+ * 优先走服务端批量端点 /api/assets/batch-delete（逐项容错，返回 ok/failed 清单）；
+ * 端点不存在或返回结构不符合预期（旧后端 404/400/HTML 兜底页等）时，
+ * 自动回退为小并发逐条删除，保证灰度期兼容。
+ * @returns {Promise<{ok: string[], failed: Array<{fid: string, error: string, code?: string, usedBy?: any[]}>}>}
+ */
+export async function deleteAssets(fids, reason = 'web_user_deleted') {
+  const list = (Array.isArray(fids) ? fids : [fids]).filter(Boolean).map(String);
+  if (!list.length) return { ok: [], failed: [] };
+  try {
+    const res = await authFetch('/api/assets/batch-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fids: list, reason })
+    });
+    let json = null;
+    try { json = await res.json(); } catch (_) { /* 非 JSON 响应（HTML 兜底页等）走回退 */ }
+    const data = json?.data;
+    // 只有结构完整才算批量端点真正生效，否则回退逐条（旧后端不会给出这个结构）
+    if (res.ok && data && Array.isArray(data.ok) && Array.isArray(data.failed)) {
+      return { ok: data.ok, failed: data.failed };
+    }
+  } catch (e) {
+    // 登录过期等真实错误直接抛出，交由全局登录弹窗处理
+    if (e?.name === 'AuthRequiredError') throw e;
+  }
+  // 回退：逐条软删（并发 4，失败项带原因汇总，不中断整批）
+  const ok = [];
+  const failed = [];
+  let cursor = 0;
+  async function worker() {
+    while (cursor < list.length) {
+      const fid = list[cursor++];
+      try {
+        const res = await authFetch(`/api/assets/${encodeURIComponent(fid)}/delete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason })
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          failed.push({ fid, error: json.error || `HTTP ${res.status}`, code: json.code || '', usedBy: json.usedBy || [] });
+        } else {
+          ok.push(fid);
+        }
+      } catch (err) {
+        failed.push({ fid, error: err?.message || String(err) });
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(4, list.length) }, worker));
+  return { ok, failed };
+}
+
+/**
+ * 收藏 / 取消收藏素材
+ */
+export async function toggleFavorite(fid, on) {
+  const options = { method: 'POST' };
+  if (typeof on !== 'undefined') {
+    options.headers = { 'Content-Type': 'application/json' };
+    options.body = JSON.stringify({ on: !!on });
+  }
+  const res = await authFetch(`/api/viewer/assets/${encodeURIComponent(fid)}/favorite`, options);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `收藏操作失败: HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+/**
+ * 获取菜单树字典
+ */
+export async function fetchMenuTree() {
+  const res = await authFetch('/api/viewer/dict/menu-tree');
+  if (!res.ok) return null;
+  const json = await res.json();
+  return json.data || json;
+}
+
+/**
+ * 获取素材完整详情（含 9:16、3:4、精修等全部衍生版本、打标与色卡）
+ */
+export async function fetchAssetDetail(fid) {
+  if (!fid) return null;
+  const res = await authFetch(`/api/viewer/assets/${encodeURIComponent(fid)}`);
+  if (!res.ok) {
+    throw new Error(`获取素材详情失败: HTTP ${res.status}`);
+  }
+  const json = await res.json();
+  return json.data || json;
+}
+
+async function postJson(url, body) {
+  const res = await authFetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {})
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.ok === false) throw new Error(json.error || `请求失败 ${res.status}`);
+  return json;
+}
+
+export function moveAssetShelf(fid, shelf) {
+  return postJson('/api/assets/shelf', { fid, shelf });
+}
+
+export function classifyAsset(body) {
+  return postJson('/api/assets/classify', body);
+}
+
+export function retagAsset(fid) {
+  return postJson('/api/assets/retag', { fid });
+}
+
+export function registerGeneratedAsset(body) {
+  return postJson('/api/assets/from-generation', body);
+}
+
+export async function superResolveLocalVideo(previewUrl, vendorUrl) {
+  const res = await authFetch('/api/video/super-resolve-local', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ previewUrl, vendorUrl: vendorUrl || '' })
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok && !json.modelVideoUrl && json.ok !== false) {
+    throw new Error(json.error || `超分失败 ${res.status}`);
+  }
+  return json;
+}
+
+/**
+ * 触发单张素材的画幅重构（默认 9:16 + 3:4）。
+ *
+ * 后端这条链路是同步的：请求会一直挂到生图返回（几十秒到几分钟），
+ * 调用方必须自己显示「生成中」并禁止重复点击，不能靠 loading 骨架屏猜。
+ * ratios 只传实际缺失的那几档，避免把已经有的画幅重新生成一遍。
+ *
+ * model 显式传 Seedream 5.0 Flash：default 工作流的 restage_dual 可能为省成本挂到
+ * 本机免费模型，手动点的人是盯着插槽等出图的，不能跟着排进本机 GPU 长队。
+ * gpuPriority 同理 —— 手动点的图在 GPU 队列里排高位。
+ */
+export function triggerRestageDerivatives(fid, ratios = ['9:16', '3:4'], model = 'seedream5flash') {
+  const list = Array.isArray(ratios) && ratios.length ? ratios : ['9:16', '3:4'];
+  return postJson(`/api/viewer/assets/${encodeURIComponent(fid)}/restage`, {
+    ratios: list,
+    model,
+    gpuPriority: 'high',
+    forceMember: true,
+  });
+}
+
+/**
+ * 获取指定衍生版本的图片 URL
+ */
+export function getDerivativeImageUrl(fid, derivativeId, mediaToken = '') {
+  if (!fid) return '';
+  const token = getToken();
+  const q = new URLSearchParams();
+  if (derivativeId) q.set('derivative', String(derivativeId));
+  if (token) q.set('token', token);
+  if (mediaToken) q.set('media_token', mediaToken);
+  const qs = q.toString();
+  return resolveApiUrl(`/api/viewer/assets/${encodeURIComponent(fid)}/image${qs ? `?${qs}` : ''}`);
+}
+
+/**
+ * 获取指定衍生版本的原图下载 URL
+ */
+export function getDerivativeDownloadUrl(fid, derivativeId, kind = 'derivative', rawNameOrMime = '', parentKind = '') {
+  if (!fid) return '';
+  const token = getToken();
+  const safeFid = String(fid).replace(/[^A-Za-z0-9_-]/g, '');
+  let ext = '.jpg';
+  const testStr = `${kind || ''} ${rawNameOrMime || ''} ${parentKind || ''}`.toLowerCase();
+  if (testStr.includes('video') || /\.(mp4|mov|webm|mkv|avi|m4v)$/i.test(testStr)) {
+    ext = '.mp4';
+  } else if (testStr.includes('audio') || testStr.includes('music') || /\.(mp3|wav|m4a|aac|flac|ogg)$/i.test(testStr)) {
+    ext = '.mp3';
+  } else if (testStr.includes('glb') || /\.glb$/i.test(testStr)) {
+    ext = '.glb';
+  }
+  const safeKind = String(kind || (ext === '.mp4' ? 'video' : 'derivative')).replace(/[^A-Za-z0-9_-]/g, '');
+  const saveName = `ML_SAVED_${safeFid}_${safeKind}${ext}`;
+  const q = new URLSearchParams();
+  if (derivativeId) q.set('derivative', String(derivativeId));
+  q.set('dl', '1');
+  q.set('download', '1');
+  if (token) q.set('token', token);
+  const routeSegment = (ext === '.mp4' || ext === '.mp3') ? 'file' : 'image';
+  return resolveApiUrl(`/api/viewer/assets/${encodeURIComponent(fid)}/${routeSegment}/${encodeURIComponent(saveName)}?${q.toString()}`);
+}
+
+/**
+ * 获取侧边时间轴精准天数统计列表
+ */
+export async function fetchTimelineDays(params = {}) {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== '') {
+      q.set(k, String(v));
+    }
+  }
+  const res = await authFetch(`/api/viewer/assets/timeline-days?${q.toString()}`);
+  if (!res.ok) return [];
+  const json = await res.json();
+  return json.data || [];
+}
+
+/**
+ * 即梦智能扩图服务 (支持比例扩展与画布+mask扩展)
+ */
+export async function expandJimeng(params) {
+  const res = await authFetch('/api/ai/expand-jimeng', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params)
+  });
+  const json = await res.json();
+  if (!json.success && !json.url && !json.image_url && !json.b64_json && !json.data?.url) {
+    throw new Error(json.error || '即梦扩图失败');
+  }
+  return json.data || json;
+}
+
+/**
+ * 统一精准编辑与全局重绘管线 (/edit/run)
+ * 支持 style_transfer, clarity, remove, replace, insert, add, space, expand
+ */
+export async function runEditPipeline(params) {
+  const res = await authFetch('/api/edit/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params)
+  });
+  const json = await res.json();
+  if (!json.success && !json.data?.image) {
+    throw new Error(json.error || 'AI 图像编辑执行失败');
+  }
+  return json.data || json;
+}
+
+/**
+ * 自定义风格库（风格迁移）
+ */
+export async function fetchCustomStyles() {
+  const res = await authFetch('/api/custom-styles');
+  const json = await res.json();
+  if (!res.ok || json.success === false) throw new Error(json.error || '自定义风格读取失败');
+  return json.data || [];
+}
+
+export async function createCustomStyle(params) {
+  const res = await authFetch('/api/custom-styles', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params)
+  });
+  const json = await res.json();
+  if (!res.ok || json.success === false) throw new Error(json.error || '自定义风格保存失败');
+  return json.data;
+}
+
+export async function updateCustomStyle(id, params) {
+  const res = await authFetch(`/api/custom-styles/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params)
+  });
+  const json = await res.json();
+  if (!res.ok || json.success === false) throw new Error(json.error || '自定义风格更新失败');
+  return json.data;
+}
+
+export async function deleteCustomStyle(id) {
+  const res = await authFetch(`/api/custom-styles/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  const json = await res.json();
+  if (!res.ok || json.success === false) throw new Error(json.error || '自定义风格删除失败');
+  return json.data;
+}
+
+/**
+ * 用一次 LLM 把自定义风格解析成生图模型更容易吃透的「风格锚定描述」
+ */
+export async function analyzeStyle(params) {
+  const res = await authFetch('/api/ai/style/analyze', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params)
+  });
+  const json = await res.json();
+  if (!res.ok || json.success === false) throw new Error(json.error || 'AI 风格解析失败');
+  return json.data || {};
+}
+
+/**
+ * 真实 AI 实例分割/目标检测 (/ai/detect)
+ * @param {{image:string, conf?:number, iou?:number}} params
+ */
+export async function aiDetect(params) {
+  const res = await authFetch('/api/ai/detect', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params)
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.success === false) throw new Error(json.error || 'AI 自动识别失败');
+  return json.data || json;
+}
+
+/**
+ * 真实 AI 生图接口 (/gen/images)
+ */
+export async function fetchLibraryCatalog() {
+  const res = await authFetch('/api/library/catalog');
+  const json = await res.json();
+  if (!res.ok || json.error) throw new Error(json.error || '素材库结构读取失败');
+  return json.data || json;
+}
+
+export async function fetchStudioCatalog() {
+  const res = await authFetch('/api/studio/catalog');
+  const json = await res.json();
+  if (!res.ok || json.error) throw new Error(json.error || '模型参数表读取失败');
+  return json.data || json;
+}
+
+export async function previewAiGeneration(params) {
+  const res = await authFetch('/api/gen/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params)
+  });
+  const json = await res.json();
+  if (!res.ok || json.error) {
+    throw new Error(json.error || `请求预览失败: HTTP ${res.status}`);
+  }
+  return json.data || json;
+}
+
+/**
+ * 图片生成：改走后台任务队列。
+ *
+ * 返回形状与旧 /gen/images 完全一致（{ files, imageUrl, ... }），
+ * 所以 ChatStudio.vue 的调用方无需任何改动。区别在于请求现在是「短入队 + 等结果」：
+ * 任务在服务端 gen_jobs 表持久化，切换对话、刷新页面都不会打断，
+ * worker 完成后会把结果落成 chat_messages，刷新后自然能看到结果卡。
+ */
+export async function generateAiImage(params) {
+  return submitGenerationJob('image', params);
+}
+
+/**
+ * 真实 AI 视频生成接口 (/gen/videos)
+ */
+export async function generateAiAudio(params) {
+  const res = await authFetch('/api/gen/audio', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params)
+  });
+  const json = await res.json();
+  if (!res.ok || json.error) {
+    throw new Error(json.error || `音频生成请求失败: HTTP ${res.status}`);
+  }
+  return json.data || json;
+}
+
+export async function generateAiVideo(params) {
+  return submitGenerationJob('video', params);
+}
+
+/**
+ * 查询异步生成任务状态 (/gen/videos/tasks/:taskId)
+ */
+export async function queryGenTask(taskId) {
+  const res = await authFetch(`/api/gen/videos/tasks/${encodeURIComponent(taskId)}`);
+  const json = await res.json();
+  if (!res.ok || json.error) {
+    throw new Error(json.error || `查询生成任务失败: HTTP ${res.status}`);
+  }
+  return json.data || json;
+}
+
+/**
+ * 真实 AI 对话接口 (/gen/chat)
+ */
+export async function generateAiChat(params) {
+  const res = await authFetch('/api/gen/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params)
+  });
+  const json = await res.json();
+  if (!res.ok || json.error) {
+    throw new Error(json.error || `AI 对话请求失败: HTTP ${res.status}`);
+  }
+  return json.data || json;
+}
+
+/**
+ * 获取聊天会话列表 (/chat/sessions)
+ */
+export async function fetchChatSessions(params = {}) {
+  if (!params || typeof params !== 'object') params = {};
+  const qs = new URLSearchParams();
+  if (params.q) qs.set('q', String(params.q));
+  if (params.tag) qs.set('tag', String(params.tag));
+  if (params.modality && params.modality !== 'all') qs.set('modality', String(params.modality));
+  if (params.limit) qs.set('limit', String(params.limit));
+  if (params.scope) qs.set('scope', String(params.scope));
+  if (params.days !== undefined && params.days !== null) qs.set('days', String(params.days));
+  const query = qs.toString();
+  const res = await authFetch(`/api/chat/sessions${query ? '?' + query : ''}`);
+  if (!res.ok) return [];
+  const json = await res.json();
+  const list = Array.isArray(json.data) ? json.data : [];
+  if (json.meta && typeof json.meta === 'object') {
+    list.meta = json.meta;
+  }
+  return list;
+}
+
+/**
+ * 一键清理过期废弃会话 (默认清理3天前且无产物的草稿/试探会话)
+ */
+export async function cleanStaleChatSessions({ mode = 'empty_only', days = 3 } = {}) {
+  const res = await authFetch('/api/chat/sessions/clean-stale', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode, days })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || '清理过期会话失败');
+  }
+  return await res.json();
+}
+
+/**
+ * 生成请求发出后 fire-and-forget：标题仍是占位时让视觉池起动作标题。
+ * 失败静默（下次发送服务端会再试），绝不阻塞生成。
+ */
+export async function autoTitleChatSession(sessionId, payload = {}) {
+  if (!sessionId) return { named: false };
+  const res = await authFetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}/auto-title`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      prompt: payload.prompt || '',
+      images: Array.isArray(payload.images) ? payload.images.slice(0, 2) : [],
+      mode: payload.mode || ''
+    })
+  });
+  if (!res.ok) return { named: false };
+  const json = await res.json().catch(() => ({}));
+  return json.data || { named: false };
+}
+
+/**
+ * 获取会话中的消息历史 (/chat/messages?sessionId=...)
+ */
+export async function fetchChatMessages(sessionId, limit = 100, opts = {}) {
+  if (!sessionId) return [];
+  const qs = new URLSearchParams({ sessionId: String(sessionId) });
+  if (limit && limit !== 100) qs.set('limit', String(limit));
+  if (opts && opts.screen) qs.set('view', 'screen');
+  if (opts && opts.before) qs.set('before', String(opts.before));
+  const res = await authFetch(`/api/chat/messages?${qs.toString()}`);
+  if (!res.ok) {
+    const err = new Error(`获取消息失败: HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  const json = await res.json();
+  return json.data || [];
+}
+
+/**
+ * 新增/保存单条消息到服务端 (/chat/messages)
+ */
+export async function saveChatMessage(payload) {
+  const res = await authFetch('/api/chat/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    const errJson = await res.json().catch(() => ({}));
+    throw new Error(errJson.error || `保存消息失败: HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+/**
+ * 最近使用的素材（跨对话共享，服务端按用户保留最近 50 条）
+ * 返回 { current: [...本对话], others: [...其他对话] }
+ */
+export async function fetchRecentRefs(sessionId = '', limit = 20) {
+  const qs = new URLSearchParams();
+  if (sessionId) qs.set('sessionId', sessionId);
+  qs.set('limit', String(limit));
+  const res = await authFetch(`/api/studio/recent-refs?${qs.toString()}`);
+  if (!res.ok) return { current: [], others: [] };
+  const json = await res.json();
+  return json.data || { current: [], others: [] };
+}
+
+/** 上报「刚用过/刚生成」的素材；失败静默（不能因为记流水账打断创作） */
+export async function pushRecentRefs(sessionId, items) {
+  if (!Array.isArray(items) || !items.length) return { inserted: 0 };
+  const res = await authFetch('/api/studio/recent-refs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId, items })
+  });
+  if (!res.ok) return { inserted: 0 };
+  const json = await res.json();
+  return json.data || { inserted: 0 };
+}
+
+/** 只更新会话参数快照/标题，不动 updated_at（拖参数条不该把会话顶到列表最前） */
+export async function patchChatSession(sessionId, payload) {
+  const res = await authFetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {})
+  });
+  return await res.json();
+}
+
+/**
+ * 删除会话 (/chat/sessions/:id)
+ */
+export async function deleteChatSession(sessionId) {
+  const res = await authFetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'DELETE'
+  });
+  return await res.json();
+}
+
+// ===== 相似处理工作台 (Similarity Workbench) =====
+export async function fetchSimilarityWorkbench(params = {}) {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== '') q.set(k, String(v));
+  }
+  const res = await authFetch(`/api/assets/similarity-workbench?${q.toString()}`);
+  return res.json();
+}
+
+export async function resolveSimilarityCluster(payload) {
+  const res = await authFetch('/api/assets/similarity-workbench/resolve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  return res.json();
+}
+
+export async function cleanExactDuplicates() {
+  const res = await authFetch('/api/assets/similarity-workbench/clean-exact', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  });
+  return res.json();
+}
+
+export async function fetchSimilarityIgnored() {
+  const res = await authFetch('/api/assets/similarity-workbench/ignored');
+  return res.json();
+}
+
+export async function deleteSimilarityIgnored(fidA, fidB) {
+  const res = await authFetch('/api/assets/similarity-workbench/ignored', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fidA, fidB })
+  });
+  return res.json();
+}
+
+// ===== 系统设置（管理员）=====
+/**
+ * 读取运行时参数 (GET /api/settings/runtime-config，仅 admin)
+ * 返回 kv runtime_config 覆盖同名环境变量后的生效值。
+ */
+export async function getRuntimeConfig() {
+  const res = await authFetch('/api/settings/runtime-config');
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.success === false) {
+    throw new Error(json.error || `读取运行参数失败: HTTP ${res.status}`);
+  }
+  return json.data || {};
+}
+
+/**
+ * 保存运行时参数 (PUT /api/settings/runtime-config，仅 admin)
+ * 只提交白名单字段，敏感项由服务端 .env 单向管理。
+ */
+export async function saveRuntimeConfig(body) {
+  const res = await authFetch('/api/settings/runtime-config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {}),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.success === false) {
+    throw new Error(json.error || `保存运行参数失败: HTTP ${res.status}`);
+  }
+  return json.data || {};
+}
+
+/**
+ * 管理员修改指定用户密码 (POST /api/users/password，仅超级管理员 admin)
+ */
+export async function changeUserPassword(username, password) {
+  const res = await authFetch('/api/users/password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.success === false) {
+    throw new Error(json.error || `修改密码失败: HTTP ${res.status}`);
+  }
+  return json;
+}
+
+/**
+ * 读取灰度更新状态 (GET /api/app/update/state)
+ * 返回 { latest, canary, grayscale, channels }，白名单挂在 grayscale.targetDevices。
+ */
+export async function fetchAppUpdateState() {
+  const res = await authFetch('/api/app/update/state');
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.success === false) {
+    throw new Error(json.error || `读取灰度状态失败: HTTP ${res.status}`);
+  }
+  return json.data || {};
+}
+
+/**
+ * 读取密钥脱敏状态 (GET /api/providers/env-secrets，仅 admin)
+ * 服务端只返回掩码、末 4 位与指纹，绝不回显明文。
+ */
+export async function fetchEnvSecrets() {
+  const res = await authFetch('/api/providers/env-secrets');
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.success === false) {
+    throw new Error(json.error || `读取密钥状态失败: HTTP ${res.status}`);
+  }
+  return json.data || {};
+}
+
+/**
+ * 写入密钥到 .env 并热更新 process.env (POST /api/providers/env-secrets，仅 admin)
+ * @param {Record<string,string>} updates 例如 { ARK_API_KEY: 'xxx' }
+ */
+export async function saveEnvSecrets(updates) {
+  const res = await authFetch('/api/providers/env-secrets', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ updates: updates || {} }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.success === false) {
+    throw new Error(json.error || `更新密钥失败: HTTP ${res.status}`);
+  }
+  return json.data || {};
+}
+
+/**
+ * 空间创作：获取配色方案列表 (GET /api/viewer/studio/color-schemes)
+ */
+export async function fetchColorSchemes() {
+  const res = await authFetch('/api/viewer/studio/color-schemes');
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.success === false) {
+    throw new Error(json.error || `获取配色列表失败: HTTP ${res.status}`);
+  }
+  return json.data || [];
+}
+
+/**
+ * 空间创作：保存/更新配色方案 (PUT /api/viewer/studio/color-schemes)
+ */
+export async function saveColorSchemes(schemes) {
+  const res = await authFetch('/api/viewer/studio/color-schemes', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ schemes }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.success === false) {
+    throw new Error(json.error || `保存配色列表失败: HTTP ${res.status}`);
+  }
+  return json.data || [];
+}
+
+/**
+ * 空间创作：智能建议提示词 (POST /api/viewer/chat/suggest-prompts)
+ * kind: 'images' (看图给建议) | 'next' (接续建议)
+ */
+export async function fetchSuggestPrompts({ kind = 'images', images = [], assistantText = '' } = {}) {
+  const res = await authFetch('/api/viewer/chat/suggest-prompts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kind, images, assistantText }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.success === false) {
+    throw new Error(json.error || `获取建议提示词失败: HTTP ${res.status}`);
+  }
+  return json.data || { suggestions: [] };
+}
+
+/**
+ * 空间创作：出站请求脱敏预览 (POST /api/viewer/gen/preview)
+ */
+export async function fetchGenPreview(payload = {}) {
+  const res = await authFetch('/api/viewer/gen/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.success === false) {
+    throw new Error(json.error || `请求预览生成失败: HTTP ${res.status}`);
+  }
+  return json.data || {};
+}
+
+// ===== 服务端三级回退（转发自 server-resolve.js，组件统一从 api.js 引入）=====
+export { resolveApiUrl };
+export {
+  ensureServerBase,
+  currentBase,
+  currentLabel as serverLabel,
+  isAllDown,
+  listCandidates,
+  listCandidateUrls,
+  setManualServer,
+  getManualServer,
+  onStatusChange as onServerStatusChange,
+} from './server-resolve.js';
+
+
+
+
+export async function pullExternalCreationTemplates(opts = {}) {
+  const res = await authFetch('/api/creation-templates/pull-external', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(opts)
+  });
+  return res.json();
+}
+
+export async function fetchCreationTemplatesIncremental({ since, sinceId, deletedSince, deletedSinceId } = {}) {
+  const params = new URLSearchParams();
+  if (since !== undefined && since !== null) {
+    params.set('since', String(since));
+    params.set('since_id', sinceId || '');
+  }
+  if (deletedSince !== undefined && deletedSince !== null) {
+    params.set('deleted_since', String(deletedSince));
+    params.set('deleted_since_id', deletedSinceId || '');
+  }
+  params.set('view', 'card');
+  const qs = params.toString();
+  const url = `/api/creation-templates?${qs}`;
+  const res = await authFetch(url);
+  return res.json();
+}
+
+export async function fetchCreationSections() {
+  const res = await authFetch('/api/creation-sections');
+  if (!res.ok) return [];
+  const json = await res.json().catch(() => ({}));
+  return json.data || [];
+}
+
+export async function createCreationSection(name) {
+  const res = await authFetch('/api/creation-sections', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name })
+  });
+  return res.json();
+}
+
+export async function updateCreationSection(id, name) {
+  const res = await authFetch(`/api/creation-sections/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name })
+  });
+  return res.json();
+}
+
+export async function deleteCreationSection(id) {
+  const res = await authFetch(`/api/creation-sections/${encodeURIComponent(id)}`, {
+    method: 'DELETE'
+  });
+  return res.json();
+}
+
+export async function reorderCreationSections(ids = []) {
+  const res = await authFetch('/api/creation-sections/order', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids })
+  });
+  return res.json();
+}
+
+export async function reorderSectionTemplates(section_id, ids = []) {
+  const res = await authFetch('/api/creation-templates/section-order', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ section_id, ids })
+  });
+  return res.json();
+}
+
+export async function patchCreationTemplate(id, payload = {}) {
+  const res = await authFetch(`/api/creation-templates/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  return res.json();
+}
+
+export async function patchBaseItem(id, data) {
+  const res = await authFetch(`/api/base-library/items/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+  return res.json();
+}
+
+export async function patchBaseMaterial(id, data) {
+  const res = await authFetch(`/api/base-library/materials/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+  return res.json();
+}
+
+// ===== 后台生成任务队列 =====
+// 生成任务在服务端 gen_jobs 表持久化：切换对话、刷新页面都不会打断，
+// worker 完成后把结果落成 chat_messages，刷新后 fetchChatMessages 即可看到结果卡。
+
+export async function enqueueGenJob(body) {
+  const res = await authFetch('/api/gen/jobs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const json = await res.json();
+  if (res.status === 409 && json.code === 'video_inflight') {
+    const err = new Error(json.error || '这一轮视频还在生成，请等它完成后再发');
+    err.code = 'video_inflight';
+    err.jobId = json.jobId || '';
+    throw err;
+  }
+  if (!res.ok || json.error) {
+    throw new Error(json.error || `生成任务入队失败: HTTP ${res.status}`);
+  }
+  return json;
+}
+
+export async function fetchGenJob(jobId) {
+  const res = await authFetch(`/api/gen/jobs/${encodeURIComponent(jobId)}`);
+  const json = await res.json();
+  if (!res.ok || json.error) {
+    throw new Error(json.error || `查询生成任务失败: HTTP ${res.status}`);
+  }
+  return json;
+}
+
+export async function listGenJobs(sessionId) {
+  const qs = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : '';
+  const res = await authFetch(`/api/gen/jobs${qs}`);
+  const json = await res.json();
+  if (!res.ok || json.error) {
+    throw new Error(json.error || `查询会话任务失败: HTTP ${res.status}`);
+  }
+  return json;
+}
+
+export async function cancelGenJob(jobId) {
+  const res = await authFetch(`/api/gen/jobs/${encodeURIComponent(jobId)}/cancel`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.error) {
+    throw new Error(json.error || `取消任务失败: HTTP ${res.status}`);
+  }
+  return json;
+}
+
+/** 等待任务完成：以轮询为准（不依赖 SSE 事件名匹配），网络抖动不中断。 */
+function waitForGenJob(jobId, { timeoutMs = 15 * 60 * 1000, intervalMs = 2000 } = {}) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timer = 0;
+    let timeout = 0;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearInterval(timer);
+      if (timeout) clearTimeout(timeout);
+      fn(value);
+    };
+    const settle = (job) => {
+      if (!job || settled) return;
+      if (job.status === 'succeeded') {
+        finish(resolve, job.result || { files: [] });
+      } else if (job.status === 'cancelled') {
+        const err = new Error('生成任务已取消');
+        err.isCancelled = true;
+        finish(reject, err);
+      } else if (job.status === 'failed') {
+        const detail = job.error || {};
+        const err = new Error(detail.message || detail.error || `生成任务${job.status}`);
+        err.upstreamStatus = detail.upstreamStatus || detail.status;
+        err.requestId = detail.requestId;
+        err.code = detail.code;
+        finish(reject, err);
+      }
+    };
+    const poll = async () => {
+      if (settled) return;
+      try {
+        const j = await fetchGenJob(jobId);
+        settle(j.job || j);
+      } catch (_) {
+        // 断线/网关抖动：不中断，下一轮继续轮询
+      }
+    };
+    timer = setInterval(poll, intervalMs);
+    timeout = setTimeout(() => {
+      finish(reject, new Error('生成任务超时，结果仍会在后台完成，请稍后回到该会话查看'));
+    }, timeoutMs);
+    poll();
+  });
+}
+
+/** 入队 + 等待，返回 { result, jobId }：jobId 用于和 worker 落库共用同一个消息 id。 */
+export async function submitGenerationJob(modality, params) {
+  const onEnqueued = params && params.onEnqueued;
+  const rest = { ...(params || {}) };
+  delete rest.onEnqueued;
+  const sessionId = rest.sessionId || 'default_session';
+  const body = {
+    ...rest,
+    modality,
+    sessionId,
+    clientRequestId: rest.clientRequestId
+      || `${sessionId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  };
+  const json = await enqueueGenJob(body);
+  if (!json.jobId) throw new Error('生成任务入队失败：未返回 jobId');
+  // 入队一返回就把 jobId 交给界面。取消必须打到这条任务上，不能等整段生成结束才知道编号。
+  if (typeof onEnqueued === 'function') {
+    try { onEnqueued(json.jobId); } catch (_) {}
+  }
+  try {
+    const result = await waitForGenJob(json.jobId);
+    return { result, jobId: json.jobId };
+  } catch (err) {
+    // 入队已成功：把 jobId 带出去，调用方据此认定 worker 已落库，不再重复写一条失败消息
+    if (err && !err.jobId) err.jobId = json.jobId;
+    throw err;
+  }
+}
+
+// ===== 素材库图片替换（覆盖但留历史版本，可一键还原）=====
+
+export function replaceAssetImage(fid, dataUrl, { force = false } = {}) {
+  return postJson(`/api/assets/${encodeURIComponent(fid)}/replace-image`, { dataUrl, force });
+}
+
+export function restoreAssetVersion(fid, versionId) {
+  return postJson(`/api/assets/${encodeURIComponent(fid)}/restore-version`, { versionId });
+}
+

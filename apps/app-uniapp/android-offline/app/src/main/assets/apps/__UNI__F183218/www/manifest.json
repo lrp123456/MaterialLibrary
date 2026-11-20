@@ -1,0 +1,182 @@
+﻿{
+    "@platforms":  [
+                       "android",
+                       "iPhone",
+                       "iPad"
+                   ],
+    "id":  "__UNI__F183218",
+    "name":  "素材库",
+    "version":  {
+                    "name":  "1.0.7",
+                    "code":  "2070003"
+                },
+    "description":  "仅上传相册元数据，不上传照片内容",
+    "developer":  {
+                      "name":  "",
+                      "email":  "",
+                      "url":  ""
+                  },
+    "permissions":  {
+                        "VideoPlayer":  {
+
+                                        },
+                        "UniNView":  {
+                                         "description":  "UniNView原生渲染"
+                                     }
+                    },
+    "plus":  {
+                 "useragent":  {
+                                   "value":  "uni-app",
+                                   "concatenate":  true
+                               },
+                 "splashscreen":  {
+                                      "target":  "id:1",
+                                      "autoclose":  true,
+                                      "waiting":  true,
+                                      "delay":  0
+                                  },
+                 "popGesture":  "close",
+                 "launchwebview":  {
+                                       "id":  "1",
+                                       "kernel":  "WKWebview"
+                                   },
+                 "compatible":  {
+                                    "ignoreVersion":  true
+                                },
+                 "nativePlugins":  {
+                                       "uni-local-infer":  {
+                                                               "__plugin_info__":  {
+                                                                                       "name":  "uni-local-infer",
+                                                                                       "description":  "NCNN EdgeSAM + Real-ESRGAN",
+                                                                                       "platforms":  "Android",
+                                                                                       "android_package_name":  "io.dcloud.uni_modules.unilocalinfer",
+                                                                                       "ios_bundle_id":  "",
+                                                                                       "isCloud":  false,
+                                                                                       "bought":  -1,
+                                                                                       "pid":  "uni-local-infer",
+                                                                                       "parameters":  {
+
+                                                                                                      }
+                                                                                   },
+                                                               "android":  {
+                                                                               "plugins":  [
+                                                                                               {
+                                                                                                   "type":  "module",
+                                                                                                   "name":  "LocalInferNative",
+                                                                                                   "class":  "io.dcloud.uni_modules.unilocalinfer.LocalInferNative"
+                                                                                               }
+                                                                                           ]
+                                                                           }
+                                                           }
+                                   },
+                 "distribute":  {
+                                    "google":  {
+                                                   "permissions":  [
+                                                                       "\u003cuses-permission android:name=\"android.permission.READ_MEDIA_IMAGES\"/\u003e",
+                                                                       "\u003cuses-permission android:name=\"android.permission.READ_MEDIA_VIDEO\"/\u003e",
+                                                                       "\u003cuses-permission android:name=\"android.permission.READ_EXTERNAL_STORAGE\" android:maxSdkVersion=\"32\"/\u003e",
+                                                                       "\u003cuses-permission android:name=\"android.permission.INTERNET\"/\u003e",
+                                                                       "\u003cuses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/\u003e",
+                                                                       "\u003cuses-permission android:name=\"android.permission.POST_NOTIFICATIONS\"/\u003e",
+                                                                       "\u003cuses-permission android:name=\"android.permission.FOREGROUND_SERVICE\"/\u003e",
+                                                                       "\u003cuses-permission android:name=\"android.permission.FOREGROUND_SERVICE_DATA_SYNC\"/\u003e",
+                                                                       "\u003cuses-permission android:name=\"android.permission.WAKE_LOCK\"/\u003e",
+                                                                       "\u003cuses-permission android:name=\"android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS\"/\u003e"
+                                                                   ],
+                                                   "minSdkVersion":  26,
+                                                   "targetSdkVersion":  34,
+                                                   "usesCleartextTraffic":  true
+                                               },
+                                    "apple":  {
+                                                  "dSYMs":  false,
+                                                  "privacyDescription":  {
+                                                                             "NSPhotoLibraryUsageDescription":  "读取相册元数据用于同步到素材库服务器"
+                                                                         }
+                                              },
+                                    "plugins":  {
+                                                    "audio":  {
+                                                                  "mp3":  {
+                                                                              "description":  "Android平台录音支持MP3格式文件"
+                                                                          }
+                                                              }
+                                                }
+                                },
+                 "statusbar":  {
+                                   "immersed":  "supportedDevice",
+                                   "style":  "dark",
+                                   "background":  "#F8FAFC"
+                               },
+                 "allowsInlineMediaPlayback":  true,
+                 "safearea":  {
+                                  "background":  "#FFFFFF",
+                                  "bottom":  {
+                                                 "offset":  "auto"
+                                             }
+                              },
+                 "uni-app":  {
+                                 "control":  "uni-v3",
+                                 "vueVersion":  "3",
+                                 "compilerVersion":  "5.24",
+                                 "nvueCompiler":  "uni-app",
+                                 "renderer":  "auto",
+                                 "nvue":  {
+                                              "flex-direction":  "column"
+                                          },
+                                 "nvueLaunchMode":  "normal",
+                                 "webView":  {
+                                                 "minUserAgentVersion":  "49.0"
+                                             }
+                             },
+                 "tabBar":  {
+                                "position":  "bottom",
+                                "color":  "#94A3B8",
+                                "selectedColor":  "#3B82F6",
+                                "borderStyle":  "rgba(255,255,255,0.4)",
+                                "blurEffect":  "none",
+                                "fontSize":  "11px",
+                                "iconWidth":  "21px",
+                                "spacing":  "3px",
+                                "height":  "50px",
+                                "list":  [
+                                             {
+                                                 "pagePath":  "pages/browse/browse",
+                                                 "text":  "素材库",
+                                                 "iconPath":  "/static/tabbar/home.png",
+                                                 "selectedIconPath":  "/static/tabbar/home_active.png"
+                                             },
+                                             {
+                                                 "pagePath":  "pages/home/home",
+                                                 "text":  "创作",
+                                                 "iconPath":  "/static/tabbar/create.png",
+                                                 "selectedIconPath":  "/static/tabbar/create_active.png"
+                                             },
+                                             {
+                                                 "pagePath":  "pages/settings/settings",
+                                                 "text":  "我的",
+                                                 "iconPath":  "/static/tabbar/mine.png",
+                                                 "selectedIconPath":  "/static/tabbar/mine_active.png"
+                                             }
+                                         ],
+                                "backgroundColor":  "#FFFFFF",
+                                "selectedIndex":  0,
+                                "shown":  true,
+                                "child":  [
+                                              "lauchwebview"
+                                          ],
+                                "selected":  0
+                            }
+             },
+    "app-harmony":  {
+                        "useragent":  {
+                                          "value":  "uni-app",
+                                          "concatenate":  true
+                                      },
+                        "safearea":  {
+                                         "background":  "#FFFFFF",
+                                         "bottom":  {
+                                                        "offset":  "auto"
+                                                    }
+                                     }
+                    },
+    "launch_path":  "__uniappview.html"
+}

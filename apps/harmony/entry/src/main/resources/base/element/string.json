@@ -1,0 +1,8 @@
+{
+  "string": [
+    { "name": "module_desc", "value": "把相册原图直接上传到素材库，跳过夸克中转" },
+    { "name": "EntryAbility_desc", "value": "素材库同步" },
+    { "name": "EntryAbility_label", "value": "素材库同步" },
+    { "name": "read_media_reason", "value": "相册备份/同步到室内设计素材库。一期用系统相册选择器即可；二期申请图库读写 ACL 后可自动发现新照片，场景与百度网盘、夸克网盘同类。" }
+  ]
+}

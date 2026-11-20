@@ -1,0 +1,172 @@
+# ==========================================
+# Dependencies & Package Managers
+# ==========================================
+node_modules/
+*/node_modules/
+*/*/node_modules/
+package-lock.json.bak
+.pnpm-store/
+.yarn/
+
+# ==========================================
+# Sensitive Credentials & Secrets (Security Rule)
+# ==========================================
+.env
+*.env
+!.env.example
+*.env.local
+*.key
+*credentials*
+*secret*
+!src/env-secrets.js
+credentials/
+_credentials_bundle/
+
+# ==========================================
+# Databases & Local Runtime Storage
+# ==========================================
+data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+metadata.db
+
+# ==========================================
+# Large Binary Models, Weights & Media
+# ==========================================
+*.glb
+*.gltf
+*.pth
+*.onnx
+*.bin
+*.param
+tools/ncnn/
+tools/pnnx/
+web-pro/dist/
+web-pro/public/assets-3d/
+web-pro/public/models/
+web-pro/public/sample-video.mp4
+app-uniapp/dist/
+app-uniapp/src_backup/
+# 依赖不入库（npm ci 可复现）；uni_modules 原生 UTS 插件源码入库（自包含，不再软链仓外）
+app-uniapp/node_modules/
+app-uniapp/src/version-state.json
+# 离线 APK Gradle 工程：构建产物/可再生产物不入库（www 由 uni build 拷入，local-models 由 data/ 同步）
+app-uniapp/android-offline/.gradle/
+app-uniapp/android-offline/app/build/
+app-uniapp/android-offline/**/*.log
+app-uniapp/android-offline/app/src/main/assets/apps/
+app-uniapp/android-offline/app/src/main/assets/local-models/
+# 原生插件内的模型资产是 data/local-models 的副本（38M），gradle 出包时自动同步，不重复入库
+app-uniapp/nativeplugins/uni-local-infer/android/assets/local-models/
+# 打包脚本对源码的临时改写备份
+app-uniapp/src/**/*.pack-bak
+pack-studio/zip4j-build/
+pack-studio/_shots/
+pack-studio/*.apk
+pack-studio/*.idsig
+pack-studio/_dev_dcstorage.db
+
+# ==========================================
+# Build Artifacts & Archives
+# ==========================================
+*.zip
+*.tar.gz
+*.7z
+dist/build/
+
+# ==========================================
+# Logs & Process IDs
+# ==========================================
+logs/
+*.log
+*.pid
+_pids.txt
+*.txt
+
+# ==========================================
+# Temporary Caches & IDE Files
+# ==========================================
+.cache/
+.vite/
+.DS_Store
+Thumbs.db
+__pycache__/
+*.pyc
+.quarkclouddrive/
+
+# ==========================================
+# Local Scratch & Diagnostic Scripts
+# ==========================================
+scratch/
+_audit_*
+_backup_*
+_test_*
+_strip_dup.js
+scripts/_*
+scripts/inspect_keys_wsl.py
+scripts/strip-provider-keys.py
+scripts/test_*
+query_*
+/test_*
+patch_mls.js
+
+# ==========================================
+# Next.js build artifacts (编辑器子应用)
+# 构建产物可达数百 MB 且含 source map，绝不入库。
+# 注意：本机因批量删除保护使用 .next-buildN，必须用通配覆盖。
+# ==========================================
+.next/
+.next-build*/
+editor/apps/web/.next*/
+
+# ==========================================
+# WorkBuddy 本地记忆（含用户上下文，不入库）
+# ==========================================
+.workbuddy/
+
+# ==========================================
+# 隐藏目录（. 开头）一律不入库
+# .git 不受影响；已在库中的隐藏目录需 git rm --cached 才停止跟踪
+# ==========================================
+.*/
+
+# Pack Studio 运行时状态（含推送快照，不入库）
+pack-studio/state/
+
+# 逆向规格素材（182MB 二进制预设，只作依据不随仓库走）
+_pr_pack/
+
+# 构建临时目录与上一版产物（回滚用，不入库）
+web-pro/dist-*/
+
+# 三模型评估的素材包（含 init.zip 24MB，只作本地评测依据）
+test01/
+
+# 管理台构建产物（esbuild 输出，hash 文件名每次构建都变，不随仓库走）
+# 重建：node web/build.mjs
+web/dist/
+
+# OSS 临时调试脚本（历史上写过明文凭据，禁止入库；现改为读 OSS_AK / OSS_SK）
+scripts/test_oss.js
+
+# ==========================================
+# AI 会话转录与随手笔记（历史上 sss123.md 含明文 NewAPI 密钥，禁止入库）
+# 根目录临时编号笔记/会话导出一律不入库；正式文档请放 docs/ 并使用描述性文件名
+# ==========================================
+/sss*.md
+/scratch*.md
+/notes*.md
+/tmp*.md
+/draft*.md
+
+# AI 编码工具的会话/状态导出
+*.session.md
+*.session.txt
+*.transcript.md
+claude-session*.md
+.cursor-session*
+
+web-pro
+app-uniapp

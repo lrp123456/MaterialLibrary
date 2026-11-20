@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
+  <defs>
+    <linearGradient id="travBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#E5DCce" />
+      <stop offset="50%" stop-color="#D8CBB7" />
+      <stop offset="100%" stop-color="#CBBCA5" />
+    </linearGradient>
+    <filter id="noise">
+      <feTurbulence type="fractalNoise" baseFrequency="0.04 0.95" numOctaves="3" result="turb" />
+      <feColorMatrix type="matrix" values="0 0 0 0 0   0 0 0 0 0   0 0 0 0 0  0 0 0 0.15 0" />
+    </filter>
+  </defs>
+  <rect width="300" height="300" fill="url(#travBg)" />
+  <rect width="300" height="300" filter="url(#noise)" />
+  <!-- 天然洞石气孔与沉积分层 -->
+  <g fill="rgba(80, 65, 45, 0.25)">
+    <ellipse cx="65" cy="45" rx="22" ry="5" />
+    <ellipse cx="210" cy="55" rx="35" ry="6" />
+    <ellipse cx="140" cy="95" rx="18" ry="4" />
+    <ellipse cx="40" cy="140" rx="28" ry="7" />
+    <ellipse cx="180" cy="165" rx="42" ry="8" />
+    <ellipse cx="260" cy="130" rx="16" ry="4" />
+    <ellipse cx="90" cy="220" rx="30" ry="6" />
+    <ellipse cx="230" cy="245" rx="24" ry="5" />
+    <ellipse cx="150" cy="280" rx="38" ry="7" />
+  </g>
+  <g fill="rgba(255, 255, 255, 0.18)">
+    <ellipse cx="70" cy="47" rx="18" ry="2" />
+    <ellipse cx="215" cy="57" rx="28" ry="2" />
+    <ellipse cx="185" cy="168" rx="34" ry="3" />
+    <ellipse cx="95" cy="222" rx="22" ry="2" />
+  </g>
+</svg>

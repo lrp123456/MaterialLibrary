@@ -1,0 +1,725 @@
+import { drawCssBackground } from "@/gradients";
+import { getMaskDefinition } from "@/masks";
+import { incrementCounter } from "@/diagnostics/render-perf";
+import type { AnyBaseNode } from "../nodes/base-node";
+import type { CanvasRenderer } from "../canvas-renderer";
+import { createCanvasSurface } from "../canvas-utils";
+import { BlurBackgroundNode } from "../nodes/blur-background-node";
+import { ColorNode } from "../nodes/color-node";
+import { EffectLayerNode } from "../nodes/effect-layer-node";
+import {
+	GraphicNode,
+	type ResolvedGraphicNodeState,
+} from "../nodes/graphic-node";
+import { ImageNode } from "../nodes/image-node";
+import { RootNode } from "../nodes/root-node";
+import { StickerNode } from "../nodes/sticker-node";
+import { renderTextToContext, TextNode } from "../nodes/text-node";
+import { TransitionNode } from "../nodes/transition-node";
+import { VideoNode } from "../nodes/video-node";
+import type { ResolvedVisualSourceNodeState } from "../nodes/visual-node";
+import type {
+	FrameDescriptor,
+	FrameItemDescriptor,
+	LayerDescriptor,
+	LayerMaskDescriptor,
+	QuadTransformDescriptor,
+	TextureCanvasDrawFn,
+	TextureUploadDescriptor,
+} from "./types";
+import { DEFAULT_GRAPHIC_SOURCE_SIZE } from "@/graphics";
+
+export async function buildFrameDescriptor({
+	node,
+	renderer,
+}: {
+	node: AnyBaseNode;
+	renderer: CanvasRenderer;
+}): Promise<{
+	frame: FrameDescriptor;
+	textures: TextureUploadDescriptor[];
+}> {
+	const items: FrameItemDescriptor[] = [];
+	const textures = new Map<string, TextureUploadDescriptor>();
+
+	await collectNode({
+		node,
+		renderer,
+		path: "root",
+		items,
+		textures,
+	});
+
+	incrementCounter({ name: "frameItems", by: items.length });
+	incrementCounter({ name: "frameTextures", by: textures.size });
+
+	return {
+		frame: {
+			width: renderer.width,
+			height: renderer.height,
+			clear: {
+				color: [0, 0, 0, 1],
+			},
+			items,
+		},
+		textures: [...textures.values()],
+	};
+}
+
+async function collectNode({
+	node,
+	renderer,
+	path,
+	items,
+	textures,
+}: {
+	node: AnyBaseNode;
+	renderer: CanvasRenderer;
+	path: string;
+	items: FrameItemDescriptor[];
+	textures: Map<string, TextureUploadDescriptor>;
+}): Promise<void> {
+	if (node instanceof RootNode) {
+		// 预扫一遍：处于激活窗口的转场节点会把 from / to 两个片段"吃掉"，
+		// 它们的普通 layer 这一帧不能再单独出，否则画面会重复绘制。
+		const suppressed = new Set<AnyBaseNode>();
+		const pathByChild = new Map<AnyBaseNode, string>();
+		for (let index = 0; index < node.children.length; index++) {
+			const child = node.children[index];
+			pathByChild.set(child, `${path}:${index}`);
+			if (child instanceof TransitionNode && canCollectTransition(child)) {
+				suppressed.add(child.fromNode);
+				suppressed.add(child.toNode);
+			}
+		}
+
+		for (let index = 0; index < node.children.length; index++) {
+			const child = node.children[index];
+			if (suppressed.has(child)) {
+				continue;
+			}
+			if (child instanceof TransitionNode) {
+				if (!canCollectTransition(child)) {
+					continue;
+				}
+				collectTransitionNode({
+					node: child,
+					renderer,
+					fromPath: pathByChild.get(child.fromNode) ?? `${path}:${index}:from`,
+					toPath: pathByChild.get(child.toNode) ?? `${path}:${index}:to`,
+					items,
+					textures,
+				});
+				continue;
+			}
+			await collectNode({
+				node: child,
+				renderer,
+				path: pathByChild.get(child) ?? `${path}:${index}`,
+				items,
+				textures,
+			});
+		}
+		return;
+	}
+
+	if (node instanceof ColorNode) {
+		const textureId = `${path}:color`;
+		const { width, height } = renderer;
+		textures.set(textureId, {
+			kind: "rendered",
+			id: textureId,
+			contentHash: `color:${node.params.color}:${width}x${height}`,
+			width,
+			height,
+			draw: (ctx) => {
+				if (/gradient\(/i.test(node.params.color)) {
+					drawCssBackground({ ctx, width, height, css: node.params.color });
+				} else {
+					ctx.fillStyle = node.params.color;
+					ctx.fillRect(0, 0, width, height);
+				}
+			},
+		});
+		items.push({
+			type: "layer",
+			textureId,
+			transform: fullCanvasTransform(renderer),
+			opacity: 1,
+			blendMode: "normal",
+			effectPassGroups: [],
+			mask: null,
+		});
+		return;
+	}
+
+	if (node instanceof EffectLayerNode) {
+		if (!node.resolved || node.resolved.passes.length === 0) {
+			return;
+		}
+		items.push({
+			type: "sceneEffect",
+			effectPassGroups: [node.resolved.passes],
+		});
+		return;
+	}
+
+	if (node instanceof BlurBackgroundNode) {
+		if (!node.resolved) {
+			return;
+		}
+		const textureId = `${path}:blur-background`;
+		const { width, height } = renderer;
+		const { backdropSource, passes } = node.resolved;
+		// 背景帧同样来自被复用的 canvas，必须带上时间戳才算「内容变了」
+		const contentHash = `blur:${identityKey(backdropSource.source)}:${backdropSource.width}x${backdropSource.height}:${backdropSource.revision ?? "static"}:${width}x${height}`;
+		textures.set(textureId, {
+			kind: "rendered",
+			id: textureId,
+			contentHash,
+			width,
+			height,
+			draw: (ctx) => {
+				const coverScale = Math.max(
+					width / backdropSource.width,
+					height / backdropSource.height,
+				);
+				const scaledWidth = backdropSource.width * coverScale;
+				const scaledHeight = backdropSource.height * coverScale;
+				const offsetX = (width - scaledWidth) / 2;
+				const offsetY = (height - scaledHeight) / 2;
+				ctx.drawImage(
+					backdropSource.source,
+					offsetX,
+					offsetY,
+					scaledWidth,
+					scaledHeight,
+				);
+			},
+		});
+		items.push({
+			type: "layer",
+			textureId,
+			transform: fullCanvasTransform(renderer),
+			opacity: 1,
+			blendMode: "normal",
+			effectPassGroups: [passes],
+			mask: null,
+		});
+		return;
+	}
+
+	if (
+		node instanceof VideoNode ||
+		node instanceof ImageNode ||
+		node instanceof StickerNode ||
+		node instanceof GraphicNode
+	) {
+		await collectVisualSourceNode({
+			node,
+			renderer,
+			path,
+			items,
+			textures,
+		});
+		return;
+	}
+
+	if (node instanceof TextNode) {
+		collectTextNode({
+			node,
+			renderer,
+			path,
+			items,
+			textures,
+		});
+	}
+}
+
+function isVisualSourceNode(
+	node: AnyBaseNode,
+): node is VideoNode | ImageNode | StickerNode | GraphicNode {
+	return (
+		node instanceof VideoNode ||
+		node instanceof ImageNode ||
+		node instanceof StickerNode ||
+		node instanceof GraphicNode
+	);
+}
+
+/**
+ * 生成一个视觉节点的图层描述（纹理登记 + 变换 + 遮罩 + 特效）。
+ * 普通图层与转场 from / to 共用同一份逻辑，保证两条路径的画面完全一致。
+ */
+function buildVisualSourceLayer({
+	node,
+	renderer,
+	path,
+	textures,
+}: {
+	node: VideoNode | ImageNode | StickerNode | GraphicNode;
+	renderer: CanvasRenderer;
+	path: string;
+	textures: Map<string, TextureUploadDescriptor>;
+}): { layer: LayerDescriptor; strokeLayer: LayerDescriptor | null } | null {
+	if (!node.resolved) {
+		return null;
+	}
+
+	const source =
+		node instanceof GraphicNode
+			? node.getSource({ resolvedParams: node.resolved.resolvedParams })
+			: node.resolved.source;
+	if (!source) {
+		return null;
+	}
+
+	const sourceWidth =
+		node instanceof GraphicNode
+			? DEFAULT_GRAPHIC_SOURCE_SIZE
+			: (node.resolved as ResolvedVisualSourceNodeState).sourceWidth;
+	const sourceHeight =
+		node instanceof GraphicNode
+			? DEFAULT_GRAPHIC_SOURCE_SIZE
+			: (node.resolved as ResolvedVisualSourceNodeState).sourceHeight;
+
+	const textureId = `${path}:source`;
+	const revision =
+		node instanceof GraphicNode ? undefined : node.resolved.sourceRevision;
+	textures.set(textureId, {
+		kind: "external",
+		id: textureId,
+		source,
+		width: sourceWidth,
+		height: sourceHeight,
+		// 解码池会循环复用同一批 canvas，只比对象标识会把「换了帧」误判成「没换」，
+		// 于是画面在带特效（每帧更慢、成功渲染正好落在同一张 canvas 上）时定格。
+		contentKey: `${identityKey(source)}:${sourceWidth}x${sourceHeight}:${revision ?? "static"}`,
+	});
+
+	const transform = computeVisualTransform({
+		renderer,
+		resolved: node.resolved,
+		sourceWidth,
+		sourceHeight,
+	});
+	const { mask, strokeLayer } = buildMaskArtifacts({
+		node,
+		renderer,
+		path,
+		transform,
+		textures,
+	});
+
+	return {
+		layer: {
+			type: "layer",
+			textureId,
+			transform,
+			opacity: node.resolved.opacity,
+			blendMode: node.params.blendMode ?? "normal",
+			effectPassGroups: node.resolved.effectPasses,
+			mask,
+		},
+		strokeLayer,
+	};
+}
+
+/** 转场项能否真正建出来：两端都必须是有源纹理的视觉节点且本帧已解析 */
+function canCollectTransition(node: TransitionNode): boolean {
+	return (
+		node.resolved !== null &&
+		isVisualSourceNode(node.fromNode) &&
+		node.fromNode.resolved !== null &&
+		isVisualSourceNode(node.toNode) &&
+		node.toNode.resolved !== null
+	);
+}
+
+/**
+ * 转场帧项：from / to 各出一张图层描述，交给合成器的 transition pass 混合。
+ * 只在 canCollectTransition 为真时调用，保证不会出现"抑制了 A/B 却出不了 item"的空白帧。
+ */
+function collectTransitionNode({
+	node,
+	renderer,
+	fromPath,
+	toPath,
+	items,
+	textures,
+}: {
+	node: TransitionNode;
+	renderer: CanvasRenderer;
+	fromPath: string;
+	toPath: string;
+	items: FrameItemDescriptor[];
+	textures: Map<string, TextureUploadDescriptor>;
+}) {
+	if (!node.resolved) {
+		return;
+	}
+	if (!isVisualSourceNode(node.fromNode) || !isVisualSourceNode(node.toNode)) {
+		return;
+	}
+
+	const from = buildVisualSourceLayer({
+		node: node.fromNode,
+		renderer,
+		path: fromPath,
+		textures,
+	});
+	const to = buildVisualSourceLayer({
+		node: node.toNode,
+		renderer,
+		path: toPath,
+		textures,
+	});
+	if (!from || !to) {
+		return;
+	}
+
+	items.push({
+		type: "transition",
+		from: from.layer,
+		to: to.layer,
+		progress: node.resolved.progress,
+		mode: node.params.mode,
+		scalars: node.params.scalars,
+		direction: node.params.direction,
+	});
+
+	// 遮罩描边是独立图层，转场期间照常叠在上面，否则描边会在窗口内消失
+	if (from.strokeLayer) {
+		items.push(from.strokeLayer);
+	}
+	if (to.strokeLayer) {
+		items.push(to.strokeLayer);
+	}
+}
+
+async function collectVisualSourceNode({
+	node,
+	renderer,
+	path,
+	items,
+	textures,
+}: {
+	node: VideoNode | ImageNode | StickerNode | GraphicNode;
+	renderer: CanvasRenderer;
+	path: string;
+	items: FrameItemDescriptor[];
+	textures: Map<string, TextureUploadDescriptor>;
+}) {
+	const built = buildVisualSourceLayer({ node, renderer, path, textures });
+	if (!built) {
+		return;
+	}
+	items.push(built.layer);
+	if (built.strokeLayer) {
+		items.push(built.strokeLayer);
+	}
+}
+
+function collectTextNode({
+	node,
+	renderer,
+	path,
+	items,
+	textures,
+}: {
+	node: TextNode;
+	renderer: CanvasRenderer;
+	path: string;
+	items: FrameItemDescriptor[];
+	textures: Map<string, TextureUploadDescriptor>;
+}) {
+	if (!node.resolved) {
+		return;
+	}
+
+	const textureId = `${path}:text`;
+	const { width, height } = renderer;
+	// Text output is fully determined by node.params + node.resolved. Both are
+	// plain data we can stringify cheaply; the resolved measured layout is the
+	// expensive part of text setup, so stringifying it here is orders of
+	// magnitude cheaper than re-rasterizing when nothing changed.
+	const contentHash = `text:${width}x${height}:${JSON.stringify({
+		params: node.params,
+		resolved: node.resolved,
+	})}`;
+	textures.set(textureId, {
+		kind: "rendered",
+		id: textureId,
+		contentHash,
+		width,
+		height,
+		draw: (ctx) => {
+			renderTextToContext({ node, ctx });
+		},
+	});
+	items.push({
+		type: "layer",
+		textureId,
+		transform: fullCanvasTransform(renderer),
+		opacity: node.resolved.opacity,
+		blendMode: node.params.blendMode ?? "normal",
+		effectPassGroups: node.resolved.effectPasses,
+		mask: null,
+	});
+}
+
+function computeVisualTransform({
+	renderer,
+	resolved,
+	sourceWidth,
+	sourceHeight,
+}: {
+	renderer: CanvasRenderer;
+	resolved: ResolvedVisualSourceNodeState | ResolvedGraphicNodeState;
+	sourceWidth: number;
+	sourceHeight: number;
+}): QuadTransformDescriptor {
+	const containScale = Math.min(
+		renderer.width / sourceWidth,
+		renderer.height / sourceHeight,
+	);
+	const scaledWidth = sourceWidth * containScale * resolved.transform.scaleX;
+	const scaledHeight = sourceHeight * containScale * resolved.transform.scaleY;
+	const absWidth = Math.abs(scaledWidth);
+	const absHeight = Math.abs(scaledHeight);
+
+	return {
+		centerX: renderer.width / 2 + resolved.transform.position.x,
+		centerY: renderer.height / 2 + resolved.transform.position.y,
+		width: absWidth,
+		height: absHeight,
+		rotationDegrees: resolved.transform.rotate,
+		flipX: scaledWidth < 0,
+		flipY: scaledHeight < 0,
+	};
+}
+
+function fullCanvasTransform(
+	renderer: CanvasRenderer,
+): QuadTransformDescriptor {
+	return {
+		centerX: renderer.width / 2,
+		centerY: renderer.height / 2,
+		width: renderer.width,
+		height: renderer.height,
+		rotationDegrees: 0,
+		flipX: false,
+		flipY: false,
+	};
+}
+
+function buildMaskArtifacts({
+	node,
+	renderer,
+	path,
+	transform,
+	textures,
+}: {
+	node: VideoNode | ImageNode | StickerNode | GraphicNode;
+	renderer: CanvasRenderer;
+	path: string;
+	transform: QuadTransformDescriptor;
+	textures: Map<string, TextureUploadDescriptor>;
+}): {
+	mask: LayerMaskDescriptor | null;
+	strokeLayer: LayerDescriptor | null;
+} {
+	const mask = node.params.masks?.[0];
+	if (!mask) {
+		return { mask: null, strokeLayer: null };
+	}
+
+	const definition = getMaskDefinition(mask.type);
+
+	if (definition.isActive?.(mask.params) === false) {
+		return { mask: null, strokeLayer: null };
+	}
+
+	const { body } = definition.renderer;
+	const usesOpaqueFastPath =
+		body.kind === "drawWithFeather" &&
+		mask.params.feather === 0 &&
+		Boolean(body.opaqueFastPath);
+	// drawWithFeather renderers encode feathering analytically in their canvas output
+	// (e.g. split mask uses a linear gradient instead of JFA). The descriptor feather is
+	// zeroed so the GPU compositor copies the mask texture as-is and does not run a second
+	// JFA feather pass on top of an already-soft texture.
+	const feather = body.kind === "drawWithFeather" ? 0 : mask.params.feather;
+
+	const maskTextureId = `${path}:mask`;
+	const { width: canvasWidth, height: canvasHeight } = renderer;
+	const maskContentHash = `mask:${mask.type}:${JSON.stringify(mask.params)}:${transformHash(transform)}:${canvasWidth}x${canvasHeight}:body=${body.kind}:fastPath=${usesOpaqueFastPath}`;
+	const drawMask: TextureCanvasDrawFn = (ctx) => {
+		const { canvas: elementMaskCanvas, context: elementMaskCtx } =
+			createCanvasSurface({
+				width: Math.round(transform.width),
+				height: Math.round(transform.height),
+			});
+
+		switch (body.kind) {
+			case "fillPath": {
+				const path2d = body.buildPath({
+					resolvedParams: mask.params,
+					width: transform.width,
+					height: transform.height,
+				});
+				elementMaskCtx.fillStyle = "white";
+				elementMaskCtx.fill(path2d);
+				break;
+			}
+			case "drawOpaque":
+				body.drawOpaque({
+					resolvedParams: mask.params,
+					ctx: elementMaskCtx,
+					width: Math.round(transform.width),
+					height: Math.round(transform.height),
+				});
+				break;
+			case "drawWithFeather":
+				if (usesOpaqueFastPath && body.opaqueFastPath) {
+					const path2d = body.opaqueFastPath.buildPath({
+						resolvedParams: mask.params,
+						width: transform.width,
+						height: transform.height,
+					});
+					elementMaskCtx.fillStyle = "white";
+					elementMaskCtx.fill(path2d);
+				} else {
+					body.drawWithFeather({
+						resolvedParams: mask.params,
+						ctx: elementMaskCtx,
+						width: Math.round(transform.width),
+						height: Math.round(transform.height),
+						feather: mask.params.feather,
+					});
+				}
+				break;
+		}
+
+		drawTransformedCanvas({ ctx, source: elementMaskCanvas, transform });
+	};
+	textures.set(maskTextureId, {
+		kind: "rendered",
+		id: maskTextureId,
+		contentHash: maskContentHash,
+		width: canvasWidth,
+		height: canvasHeight,
+		draw: drawMask,
+	});
+
+	const stroke = definition.renderer.stroke;
+	const hasStroke = mask.params.strokeWidth > 0 && Boolean(stroke);
+	let strokeLayer: LayerDescriptor | null = null;
+	if (hasStroke && stroke) {
+		const strokeTextureId = `${path}:mask-stroke`;
+		const strokeContentHash = `stroke:${mask.type}:${JSON.stringify(mask.params)}:${transformHash(transform)}:${canvasWidth}x${canvasHeight}:stroke=${stroke.kind}`;
+		const drawStroke: TextureCanvasDrawFn = (ctx) => {
+			const { canvas: strokeCanvas, context: strokeCtx } = createCanvasSurface({
+				width: Math.round(transform.width),
+				height: Math.round(transform.height),
+			});
+
+			switch (stroke.kind) {
+				case "renderStroke":
+					stroke.renderStroke({
+						resolvedParams: mask.params,
+						ctx: strokeCtx,
+						width: transform.width,
+						height: transform.height,
+					});
+					break;
+				case "strokeFromPath": {
+					const strokePath = stroke.buildStrokePath({
+						resolvedParams: mask.params,
+						width: transform.width,
+						height: transform.height,
+					});
+					strokeCtx.strokeStyle = mask.params.strokeColor;
+					strokeCtx.lineWidth = mask.params.strokeWidth;
+					strokeCtx.stroke(strokePath);
+					break;
+				}
+			}
+
+			drawTransformedCanvas({ ctx, source: strokeCanvas, transform });
+		};
+		textures.set(strokeTextureId, {
+			kind: "rendered",
+			id: strokeTextureId,
+			contentHash: strokeContentHash,
+			width: canvasWidth,
+			height: canvasHeight,
+			draw: drawStroke,
+		});
+		strokeLayer = {
+			type: "layer",
+			textureId: strokeTextureId,
+			transform: fullCanvasTransform(renderer),
+			opacity: 1,
+			blendMode: "normal",
+			effectPassGroups: [],
+			mask: null,
+		};
+	}
+
+	return {
+		mask: {
+			textureId: maskTextureId,
+			feather,
+			inverted: mask.params.inverted,
+		},
+		strokeLayer,
+	};
+}
+
+function drawTransformedCanvas({
+	ctx,
+	source,
+	transform,
+}: {
+	ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+	source: CanvasImageSource;
+	transform: QuadTransformDescriptor;
+}) {
+	const x = transform.centerX - transform.width / 2;
+	const y = transform.centerY - transform.height / 2;
+	const flipX = transform.flipX ? -1 : 1;
+	const flipY = transform.flipY ? -1 : 1;
+	const requiresTransform =
+		transform.rotationDegrees !== 0 || flipX !== 1 || flipY !== 1;
+
+	ctx.save();
+	if (requiresTransform) {
+		ctx.translate(transform.centerX, transform.centerY);
+		ctx.rotate((transform.rotationDegrees * Math.PI) / 180);
+		ctx.scale(flipX, flipY);
+		ctx.translate(-transform.centerX, -transform.centerY);
+	}
+	ctx.drawImage(source, x, y, transform.width, transform.height);
+	ctx.restore();
+}
+
+function transformHash(transform: QuadTransformDescriptor): string {
+	return `${transform.centerX}:${transform.centerY}:${transform.width}:${transform.height}:${transform.rotationDegrees}:${transform.flipX ? 1 : 0}:${transform.flipY ? 1 : 0}`;
+}
+
+// Stable identity key for CanvasImageSource. Using a WeakMap → counter keeps
+// hash string length bounded and avoids holding sources alive.
+const identityKeys = new WeakMap<object, number>();
+let nextIdentity = 1;
+function identityKey(source: CanvasImageSource): string {
+	if (typeof source === "object" && source !== null) {
+		let key = identityKeys.get(source);
+		if (key === undefined) {
+			key = nextIdentity++;
+			identityKeys.set(source, key);
+		}
+		return `@${key}`;
+	}
+	return "@?";
+}

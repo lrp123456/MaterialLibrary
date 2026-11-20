@@ -1,0 +1,244 @@
+/**
+ * 启动时探测并启用全局 HTTP 代理（Clash / 系统代理）。
+ * WSL 里 127.0.0.1:7890 通常经 localhost 转发可达 Windows Clash。
+ * 探测失败后保留候选，供 ensureProxy() 在后续生图/下载前重试。
+ * 必须在任何 fetch / undici 调用之前 require。
+ */
+const fs = require('fs');
+const os = require('os');
+const net = require('net');
+const path = require('path');
+const { spawnSync } = require('child_process');
+
+function parseProxyUrl(raw) {
+  try {
+    const u = new URL(String(raw));
+    if (!u.hostname) return null;
+    const port = Number(u.port) || (u.protocol === 'https:' ? 443 : 80);
+    return { href: u.toString().replace(/\/$/, ''), host: u.hostname, port, protocol: u.protocol };
+  } catch {
+    return null;
+  }
+}
+
+function tcpProbeSync(host, port, timeoutMs = 700) {
+  try {
+    const script = [
+      'const net=require("net");',
+      `const s=net.connect(${Number(port)},${JSON.stringify(host)},()=>process.exit(0));`,
+      `s.setTimeout(${Number(timeoutMs)},()=>process.exit(1));`,
+      's.on("error",()=>process.exit(1));',
+    ].join('');
+    const r = spawnSync(process.execPath, ['-e', script], {
+      timeout: timeoutMs + 400,
+      windowsHide: true,
+    });
+    return r.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+function wslWindowsHost() {
+  const seen = [];
+  try {
+    const txt = fs.readFileSync('/proc/net/route', 'utf8');
+    for (const line of txt.split('\n').slice(1)) {
+      const cols = line.trim().split(/\s+/);
+      if (cols[1] === '00000000' && cols[2] && cols[2] !== '00000000') {
+        const hex = cols[2];
+        const ip = [hex.slice(6, 8), hex.slice(4, 6), hex.slice(2, 4), hex.slice(0, 2)]
+          .map((h) => parseInt(h, 16))
+          .join('.');
+        if (net.isIP(ip) && !ip.startsWith('198.18.') && !seen.includes(ip)) seen.push(ip);
+      }
+    }
+  } catch {}
+  try {
+    const r = spawnSync('ip', ['route', 'show', 'default'], { encoding: 'utf8', timeout: 1200 });
+    const re = /via\s+(\d+\.\d+\.\d+\.\d+)/g;
+    let m;
+    while ((m = re.exec(String(r.stdout || '')))) {
+      if (net.isIP(m[1]) && !seen.includes(m[1])) seen.push(m[1]);
+    }
+  } catch {}
+  return seen;
+}
+
+function readConfigProxy() {
+  const dataDir = process.env.ML_DATA_DIR || path.join(os.homedir(), '.dsh-material-library');
+  for (const name of ['providers.json']) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(path.join(dataDir, name), 'utf8'));
+      const p = (raw.network && raw.network.proxy) || raw.proxy;
+      if (typeof p === 'string' && p.trim()) return p.trim();
+    } catch {}
+  }
+  return '';
+}
+
+const DOMESTIC_NO_PROXY = [
+  '127.0.0.1',
+  'localhost',
+  '::1',
+  '.local',
+  '10.0.0.0/8',
+  '192.168.0.0/16',
+  '172.16.0.0/12',
+  'newapi.naite.cc',
+  'naite.cc',
+  'aliyuncs.com',
+  'aliyun.com',
+  'volces.com',
+  'volcengine.com',
+  'modelscope.cn',
+  'agnes-ai.cn',
+  'api.agnes-ai.cn',
+  'laozhang.ai',
+  'api2.laozhang.ai'
+];
+
+function applyDispatcher(proxyUrl) {
+  process.env.HTTP_PROXY = proxyUrl;
+  process.env.http_proxy = proxyUrl;
+  process.env.HTTPS_PROXY = proxyUrl;
+  process.env.https_proxy = proxyUrl;
+  const rawNp = (process.env.NO_PROXY || process.env.no_proxy || '').split(',').map(s => s.trim()).filter(Boolean);
+  const np = Array.from(new Set([...DOMESTIC_NO_PROXY, ...rawNp])).join(',');
+  process.env.NO_PROXY = np;
+  process.env.no_proxy = np;
+
+  // undici 缺失绝不允许拖垮启动：跨平台共用一棵 node_modules 时它已被误删过两次
+  // （watchdog 每 3 秒拉起、每启必崩 = 循环重启事故）。缺件时降级为「无代理直连」，
+  // 本机/局域网端点照常服务，海外 AI 端点失败，ensureProxy() 后续装回依赖即可恢复。
+  let undici = null;
+  try {
+    undici = require('undici');
+  } catch (e) {
+    console.warn('[proxy] undici 未安装：全局 fetch 代理本次不生效（服务继续运行）。请在 WSL 内 npm install 后重启恢复海外端点代理。');
+    try {
+      const https = require('https');
+      const { HttpsProxyAgent } = require('https-proxy-agent');
+      https.globalAgent = new HttpsProxyAgent(proxyUrl);
+    } catch {}
+    return false;
+  }
+  // ProxyAgent 不看 NO_PROXY，会把 127.0.0.1:4000 也送进 Clash，对话只得到 fetch failed。
+  // EnvHttpProxyAgent 对 NO_PROXY 里的本机地址直连，其余仍走代理。
+  undici.setGlobalDispatcher(new undici.EnvHttpProxyAgent({
+    httpProxy: proxyUrl,
+    httpsProxy: proxyUrl,
+    noProxy: np
+  }));
+  try {
+    const https = require('https');
+    const { HttpsProxyAgent } = require('https-proxy-agent');
+    https.globalAgent = new HttpsProxyAgent(proxyUrl);
+  } catch {}
+  return true;
+}
+
+function rewriteHost(proxyUrl, host) {
+  const u = new URL(proxyUrl);
+  u.hostname = host;
+  return u.toString().replace(/\/$/, '');
+}
+
+function buildCandidates() {
+  const envUrl =
+    process.env.https_proxy ||
+    process.env.HTTPS_PROXY ||
+    process.env.http_proxy ||
+    process.env.HTTP_PROXY ||
+    process.env.all_proxy ||
+    process.env.ALL_PROXY ||
+    '';
+  const cfgUrl = readConfigProxy();
+  const seen = new Set();
+  const candidates = [];
+  const push = (url, why) => {
+    if (!url) return;
+    const parsed = parseProxyUrl(url);
+    if (!parsed) return;
+    if (seen.has(parsed.href)) return;
+    seen.add(parsed.href);
+    candidates.push({ url: parsed.href, why, parsed });
+  };
+
+  // 1) 显式配置
+  push(cfgUrl, 'providers.json');
+  push(envUrl, 'env');
+
+  // 2) WSL 本机 127.0.0.1 优先：localhost 转发到 Windows Clash 在这里最常见
+  push('http://127.0.0.1:7890', 'default-clash');
+
+  // 3) 各默认网关 / 网关改写（兼容 WSL NAT 与 mirrored）
+  const hosts = ['127.0.0.1', ...wslWindowsHost()];
+  const expanded = [];
+  for (const c of candidates) {
+    expanded.push(c);
+    if (c.parsed.host === '127.0.0.1' || c.parsed.host === 'localhost' || c.parsed.host === '::1') {
+      for (const gw of hosts) {
+        if (gw === '127.0.0.1' || gw === 'localhost' || gw === '::1') continue;
+        const u = rewriteHost(c.url, gw);
+        const parsed = parseProxyUrl(u);
+        if (parsed && !seen.has(parsed.href)) {
+          seen.add(parsed.href);
+          expanded.push({ url: parsed.href, why: `host-${gw}`, parsed });
+        }
+      }
+    }
+  }
+  return expanded;
+}
+
+function resolveAndApplyProxy({ quiet = false } = {}) {
+  const expanded = buildCandidates();
+  for (const c of expanded) {
+    if (!c.parsed) continue;
+    if (tcpProbeSync(c.parsed.host, c.parsed.port)) {
+      const ok = applyDispatcher(c.url);
+      if (!ok) break; // undici 缺件是全局问题，换候选无意义
+      if (!quiet) {
+        console.log(`[proxy] 已启用全局 HTTP 代理: ${c.url} (${c.why}) (NO_PROXY: ${process.env.NO_PROXY})`);
+      }
+      return c.url;
+    }
+    if (!quiet) {
+      console.warn(`[proxy] 探测失败 ${c.url} (${c.why})`);
+    }
+  }
+  if (!quiet) {
+    console.warn('[proxy] 未找到可达的 HTTP 代理。Google Gemini 等海外端点可能失败。请设置 https_proxy，或在 providers.json 写 network.proxy');
+  }
+  return '';
+}
+
+// 运行期恢复：启动时探测失败后，后续生图/下载前可再次 ensureProxy()
+let activeProxy = '';
+let lastProbeAt = 0;
+let lastProbeOk = false;
+const PROBE_RETRY_MS = 15000;
+
+function ensureProxy({ force = false, quiet = true } = {}) {
+  if (activeProxy && !force) return activeProxy;
+  const now = Date.now();
+  if (!force && !lastProbeOk && lastProbeAt && now - lastProbeAt < PROBE_RETRY_MS) {
+    return activeProxy;
+  }
+  lastProbeAt = now;
+  const url = resolveAndApplyProxy({ quiet });
+  if (url) {
+    activeProxy = url;
+    lastProbeOk = true;
+  } else {
+    lastProbeOk = false;
+  }
+  return activeProxy;
+}
+
+activeProxy = resolveAndApplyProxy();
+lastProbeAt = Date.now();
+lastProbeOk = !!activeProxy;
+
+module.exports = { resolvedProxy: activeProxy, resolveAndApplyProxy, ensureProxy };

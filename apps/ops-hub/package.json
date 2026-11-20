@@ -1,0 +1,10 @@
+{
+  "name": "@mls/ops-hub",
+  "version": "1.0.0",
+  "description": "Material Library Service Hub & Ops Dashboard",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "material-library-monorepo",
+  "version": "1.0.0",
+  "description": "Material Library / Material Studio Pro Full-Stack Monorepo",
+  "private": true,
+  "packageManager": "pnpm@11.21.0",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm --filter @mls/api test",
+    "contract": "pnpm --filter @mls/api run contract",
+    "contract:check": "pnpm --filter @mls/api run contract:check"
+  }
+}
