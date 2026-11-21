@@ -409,8 +409,7 @@
                       class="block cursor-zoom-in"
                       @click="openMediaPreview(item)"
                     >
-                      <img v-if="mediaKind(item) === 'image'" :src="attachmentPreviewSrc(item)" :alt="item.name || '图片'" class="h-16 w-16 object-contain bg-black/30" loading="lazy" decoding="async" />
-                      <span v-if="mediaKind(item) === 'image'" class="absolute top-0 left-0 px-1 py-px bg-black/80 text-white text-[8px] font-bold leading-tight">{{ versionBadge(item) }}</span>
+                      <img v-if="mediaKind(item) === 'image'" :src="attachmentPreviewSrc(item)" :alt="item.name || '图片'" class="h-16 w-16 object-cover" loading="lazy" decoding="async" />
                       <span v-else-if="mediaKind(item) === 'video'" class="relative flex h-16 w-24 items-center justify-center bg-black/50">
                         <img v-if="attachmentPosterSrc(item)" :src="attachmentPosterSrc(item)" alt="" class="h-16 w-24 object-cover" loading="lazy" />
                         <span class="absolute text-white text-xs">▶</span>
@@ -1089,7 +1088,7 @@
                   @click="selectAtMention(item, idx)"
                   class="w-full px-2.5 py-1.5 rounded-lg hover:bg-studio-800 cursor-pointer text-xs text-slate-200 flex items-center space-x-2.5 transition-colors text-left"
                 >
-                  <img :src="authedMediaUrl(item.url)" class="w-8 h-8 rounded object-contain bg-studio-950 border border-studio-700 shrink-0" />
+                  <img :src="item.thumbUrl || item.url" class="w-8 h-8 rounded object-cover border border-studio-700 shrink-0" />
                   <div class="flex-1 min-w-0">
                     <div class="font-bold text-studio-cyan font-mono flex items-center justify-between">
                       <span>图{{ idx + 1 }} (整图)</span>
@@ -3136,8 +3135,7 @@ import StudioIcon from '../../components/StudioIcon.vue';
 import { onTaskUpdate, onAssetChange } from '../../service/sse.js';
 import { bindOverlays } from '../../service/overlay-stack.js';
 import { resolveParams, buildSessionSnapshot, snapshotFromMessage } from '../../utils/studio-params.js';
-import { adoptEditedPixels, revertEditedPixels } from '../../utils/revive-ref-url.js';
-import { hasExplicitVersion, labelForDerivativeKind, versionBadge } from '../../utils/ref-version.js';
+import { reviveRefUrl as decideReviveRefUrl, adoptEditedPixels, revertEditedPixels } from '../../utils/revive-ref-url.js';
 import DynamicModelParamBar from '../../components/DynamicModelParamBar.vue';
 import AssetPickerModal from '../../components/AssetPickerModal.vue';
 import StudioViewer from './StudioViewer.vue';
@@ -3221,7 +3219,7 @@ const props = defineProps({
   initialPayload: { type: Object, default: null }
 });
 
-const emit = defineEmits(['sendToPrecisionEdit', 'sendToClip', 'payloadConsumed']);
+const emit = defineEmits(['sendToPrecisionEdit', 'sendToClip', 'payloadConsumed', 'openCreationLibrary']);
 
 // 侧栏与基础状态
 // 阶段 1 新增状态机
@@ -3619,33 +3617,6 @@ function modelNeedsWireframe(item, modelKey) {
   return false;
 }
 
-/** 线框要发给模型时，先换成看图区里的那张，这一次不发送。 */
-async function promoteWireframesOntoTray(modelKey) {
-  let changed = 0;
-  for (const item of referenceTray.value) {
-    if (!item || mediaKind(item) !== 'image') continue;
-    if (item.versionLabel === '线框' || item.isWireframe) continue;
-    if (!modelNeedsWireframe(item, modelKey)) continue;
-    let nextUrl = item.wireframeUrl || '';
-    if (!nextUrl) {
-      try {
-        nextUrl = await createWireframeOverlayImage(item.url, item.regions);
-      } catch (_) {
-        nextUrl = '';
-      }
-    }
-    if (!nextUrl || nextUrl === item.url) continue;
-    if (!item.originalUrl) item.originalUrl = item.url;
-    item.url = nextUrl;
-    item.thumbUrl = nextUrl;
-    item.wireframeUrl = nextUrl;
-    item.versionLabel = '线框';
-    item.isWireframe = true;
-    changed += 1;
-  }
-  return changed;
-}
-
 async function resolveDeliveryImageForModel(item, modelKey) {
   if (!item) return { url: '', isWireframe: false };
   const needsVisual = modelNeedsWireframe(item, modelKey);
@@ -3690,10 +3661,19 @@ async function handlePreviewRequest() {
       return u;
     };
 
+    const deliveryTray = await Promise.all(currentTray.map(async (it) => {
+      const resolved = await resolveDeliveryImageForModel(it, currentModel);
+      return {
+        ...it,
+        deliveryUrl: resolved.url,
+        isWireframe: resolved.isWireframe
+      };
+    }));
+
     const imageItems = [];
     const seenUrls = new Set();
-    currentTray.forEach((it) => {
-      const u = it.url;
+    deliveryTray.forEach((it, idx) => {
+      const u = it.deliveryUrl || it.url;
       if (!u || seenUrls.has(u)) return;
       seenUrls.add(u);
       const is3d = Boolean(it.isRefObject || it.origin === '3d_snapshot');
@@ -3707,6 +3687,26 @@ async function handlePreviewRequest() {
         relatedImageIndex: it.relatedImageIndex ?? 0
       });
     });
+
+    // 补充尚未直接展平进 referenceTray 的 silentRefs (如 3D 快照等)
+    for (const it of currentTray) {
+      if (it && Array.isArray(it.silentRefs)) {
+        for (const sr of it.silentRefs) {
+          if (sr?.url && !seenUrls.has(sr.url)) {
+            seenUrls.add(sr.url);
+            imageItems.push({
+              tag: sr.tag || `@图${imageItems.length + 1}`,
+              source: '3d_snapshot',
+              url: sr.url,
+              name: sr.name || '3D模型透视参考',
+              isWireframe: false,
+              isRefObject: true,
+              relatedImageIndex: sr.sourceImageIndex ?? 0
+            });
+          }
+        }
+      }
+    }
 
     const imageUrls = imageItems.map(it => it.url);
 
@@ -4376,8 +4376,7 @@ function onEditApplyRegionsToImage({ imageIndex, regions, recipe, silentRefs, an
           origin: ref.origin || '3d_snapshot',
           isRefObject: true,
           relatedImageIndex: imageIndex,
-          sourceRegionId: ref.targetRegionId || ref.sourceRegionId,
-          versionLabel: '生成结果'
+          sourceRegionId: ref.targetRegionId || ref.sourceRegionId
         });
       }
     }
@@ -4424,7 +4423,6 @@ function onEditApplyOutpaintedImage({ imageIndex, url }) {
   if (!target || !url) return;
   // 扩图是新像素。留下 fid 会在发送时被重签回库原图。
   Object.assign(target, adoptEditedPixels(target, url, { outpainted: true }));
-  target.versionLabel = '生成结果';
 }
 
 // 裁剪/标绘 Base64 异步转存为持久化 URL
@@ -4478,7 +4476,6 @@ async function onEditApplyCustomImage({ imageIndex, dataUrl }) {
   const originalAssetFid = target.fid;
   // 裁剪/标绘合成是新像素。thumbUrl 不更新的话，输入区缩略图仍显示原图。
   Object.assign(target, adoptEditedPixels(target, dataUrl, { annotated: true }));
-  target.versionLabel = '裁剪';
   target.isCustomEdited = true;
   modeUserLocked.value = false;
   syncGenModeWithReferenceTray({ forceDefault: true });
@@ -4826,7 +4823,7 @@ function autoSyncRatioFromImage(url, item = null) {
 }
 
 // 视频模式专属参数
-const videoSubMode = ref('first_last'); // 'first_last' | 'multi_ref' | 'prompt_only'
+const videoSubMode = ref('multi_ref'); // 'first_last' | 'multi_ref' | 'prompt_only'
 const videoModelKey = ref('seedance2_0');
 const videoDuration = ref('5');
 const videoResolution = ref('720px2（超分）');
@@ -5386,13 +5383,10 @@ let recentPushQueue = [];
 const recentBackfilled = new Set();
 let recentPoolSid = '';
 
-/** 服务端存的是去掉 token 的稳定路径，展示前只重签凭证。derivative / raw 必须留着，否则最近使用会把 9:16 显示成另一张图。 */
+/** 服务端存的是去掉 token 的稳定路径，展示/挂载前要重签一次，否则必然 401 */
 function refineRecentItem(item) {
   const fid = item?.fid || '';
-  const stored = String(item?.url || '');
-  const url = (stored.startsWith('/api/') || /^https?:\/\/[^/]+\/api\//i.test(stored))
-    ? resignAssetUrl(stored)
-    : (fid ? getAssetImageUrl(fid) : resignAssetUrl(stored));
+  const url = fid ? getAssetImageUrl(fid) : resignAssetUrl(item?.url || '');
   return {
     ...item,
     fid,
@@ -5703,12 +5697,14 @@ function autoSelectRefMode(kinds) {
     return;
   }
 
-  // 零配置智能调度：若当前在 chat 纯对话，自动切入 image 图像生成板块
-  if (activeModality.value === 'chat') {
-    activeModality.value = 'image';
-  }
+  // 遵循用户规则：不因挂载图片而擅自跨板块切换当前模态，保持用户所选模态不变
+  // 仅在当前模态内部（如生图/生视频）根据有无参考图自适应文生/图生等子模式
 
   nextTick(() => {
+    if (activeModality.value === 'image' && activeGenMode.value === 'image_edit' && tray.some((img) => Array.isArray(img.regions) && img.regions.length > 0)) {
+      dispatchSmartWorkflow({ source: 'autoSelectRefMode_image' });
+      return;
+    }
     syncGenModeWithReferenceTray({ forceDefault: true });
     dispatchSmartWorkflow({ source: 'autoSelectRefMode_refs' });
   });
@@ -5753,7 +5749,7 @@ function modeRefError(tray) {
   if (mode === 'first_last_frame' && count !== 2) return '首尾帧需要两张图，第一张是首帧，第二张是尾帧';
   if (mode === 'expand_fill' && count !== 1) return '扩边填白模式需要一张底图';
   if (mode === 'image_edit' && count < 1) return '局部编辑模式需要至少一张底图';
-  if (['image_to_image', 'image_reference', 'image_to_video', 'omni_reference'].includes(mode) && count < 1) return '这个模式需要至少一张参考图';
+  if (['image_to_image', 'image_reference', 'omni_reference'].includes(mode) && count < 1) return '这个模式需要至少一张参考图';
   return '';
 }
 function declaredParams() {
@@ -6563,8 +6559,9 @@ function templateOriginCoverSrc(tpl) {
 }
 
 function attachmentPreviewSrc(item) {
-  if (!item?.url) return '';
-  return authedMediaUrl(item.url);
+  if (!item) return '';
+  if (item.fid && !String(item.url || '').includes('/api/cache/temp/')) return getAssetImageUrl(item.fid, '', 'grid');
+  return withSmallMediaUrl(item.url);
 }
 
 function attachmentPosterSrc(item) {
@@ -7124,6 +7121,7 @@ async function triggerPullExternal(manual = false) {
 }
 
 function openCreationLibraryModal() {
+  emit('openCreationLibrary');
   const t0 = performance.now();
   libraryMounted.value = true;
   showExpandedLibrary.value = true;
@@ -7254,9 +7252,72 @@ async function consumeIncomingInner(payload) {
     return;
   }
 
+  // 图片分析：新开图片对话，图1 带框，草稿可编辑，不自动发送
+  if (payload.target === 'image-analysis') {
+    await createNewSession({ forceReset: true });
+    activeModality.value = 'image';
+    const image = payload.image || {};
+    mountAssetsFromLibrary([{ ...image, kind: 'image' }]);
+    if (referenceTray.value[0] && payload.region) {
+      referenceTray.value[0].regions = [payload.region];
+    }
+    recipePrompt.value = payload.draft || '';
+    recipeExpanded.value = true;
+    startRecipeEdit();
+    emit('payloadConsumed');
+    return;
+  }
+
+  // creation_reuse 跳转：创作库一键带回对话台复用
+  if (payload.target === 'creation_reuse') {
+    await createNewSession({ forceReset: true });
+    const promptText = payload.prompt || payload.recipePrompt || '';
+    if (promptText) {
+      recipePrompt.value = '';
+      recipeExpanded.value = false;
+      if (richEditorRef.value) richEditorRef.value.innerText = promptText;
+      inputText.value = promptText;
+    }
+    if (payload.originImage && payload.action !== 'apply_new') {
+      mountAssetsFromLibrary([{ ...payload.originImage, kind: 'image' }]);
+    }
+    if (payload.action === 'shoot_video' || payload.action === 'refine_video') {
+      activeModality.value = 'video';
+    } else {
+      activeModality.value = 'image';
+    }
+    emit('payloadConsumed');
+    return;
+  }
+
+  // recipe 跳转：新开生成会话，携带配方提示词，切换模式，托盘空着，不自动发送
+  if (payload.target === 'recipe') {
+    await createNewSession({ forceReset: true });
+    if (payload.genMode) activeTab.value = payload.genMode;
+    if (payload.schemaMode) {
+      if (payload.schemaMode === 'first_last_frame') videoSubMode.value = 'first_last';
+      else if (payload.schemaMode === 'text_to_video') videoSubMode.value = 'prompt_only';
+      else videoSubMode.value = 'multi_ref';
+      setGenMode(payload.schemaMode);
+    }
+    if (payload.recipePrompt) {
+      recipePrompt.value = payload.recipePrompt;
+      isRecipeEditing.value = false;
+    }
+    referenceTray.value = [];
+    emit('payloadConsumed');
+    return;
+  }
+
   const hasServerMessages = await currentSessionServerHasMessages();
-  // 空会话就地挂上；已有消息（哪怕内存里还没载入）一律新开一条「新创作会话」
-  if (!currentSessionId.value || hasServerMessages) {
+  const editorText = richEditorRef.value ? (richEditorRef.value.innerText || '').trim() : '';
+  const hasLocalContent = messages.value.length > 0
+    || referenceTray.value.length > 0
+    || Boolean(recipePrompt.value && recipePrompt.value.trim())
+    || Boolean(globalRecipePrompt.value && globalRecipePrompt.value.trim())
+    || Boolean(editorText);
+  // 空会话就地挂上；已有消息（服务器或本地待发）一律新开一条「新创作会话」
+  if (!currentSessionId.value || hasServerMessages || hasLocalContent) {
     await createNewSession({ forceReset: true });
   }
   mountAssetsFromLibrary(items);
@@ -7684,7 +7745,7 @@ function normalizeTrayAsset(item, idx = 0) {
   const num = idx + 1;
   const rawUrl = typeof item === 'string'
     ? item
-    : (item.url || item.imgUrl || item.imageUrl || '');
+    : (item.url || item.imgUrl || item.imageUrl || item.previewUrl || item.thumbUrl || item.displayUrl || item.fullUrl || item.path || '');
   if (!rawUrl) return null;
   const url = authedMediaUrl(rawUrl);
 
@@ -7806,13 +7867,11 @@ function mountAssetFromLibrary(item) {
     rightDrawerOpen.value = true;
   }
 
-  const stayOnVideo = activeModality.value === 'video' && asset.kind !== 'audio';
-  if (item.category === 'video' || item.kind === 'video' || asset.kind === 'video') {
+  // 用户明确要求：添加图片后不自动跨板块跳转到图片创作，保持用户当前所选模态（chat/video/image等）
+  if ((item.category === 'video' || item.kind === 'video' || asset.kind === 'video') && activeModality.value !== 'chat') {
     activeModality.value = 'video';
-  } else if (item.category === 'audio' || item.kind === 'audio') {
+  } else if ((item.category === 'audio' || item.kind === 'audio') && activeModality.value !== 'chat') {
     activeModality.value = 'music';
-  } else if (!stayOnVideo) {
-    activeModality.value = 'image';
   }
 
   // 用户需求：增加了图片后对话框不自动新增图片引用，取消输入框自动关联
@@ -7858,17 +7917,13 @@ function mountAssetsFromLibrary(items) {
   }
   rememberSessionRefs(referenceTray.value, 'upload', { persist: true });
 
-  // 已经在视频里挂图时留在视频，并按张数取图生 / 全能参考。不要改去文生视频，也不要把视频板块拽到图像。
+  // 用户规则：添加图片后不擅自改动用户当前模态；若当前是视频且挂视频则保留/设为视频，若当前是对话/生图则维持原模态
   const anyVideo = list.some((item) => item.kind === 'video' || item.media_type === 'video');
-  const stayOnVideo = activeModality.value === 'video';
-  if (anyVideo || stayOnVideo) {
+  if (anyVideo && activeModality.value !== 'chat') {
     activeModality.value = 'video';
-    autoSelectRefMode(anyVideo ? ['video'] : ['image']);
-    syncGenModeWithReferenceTray();
-  } else {
-    activeModality.value = 'image';
-    autoSelectRefMode(['image']);
   }
+  autoSelectRefMode(anyVideo ? ['video'] : ['image']);
+  syncGenModeWithReferenceTray();
 
   nextTick(() => {
     // 用户需求：增加了图片后对话框不自动新增图片引用，取消输入框自动关联，只挂载到参考托盘
@@ -8078,19 +8133,50 @@ function syncTrayFromEditor() {
   });
 }
 
+/** 给一个引用地址做"能不能用"的判定并尽量换新凭证；返回 '' 表示彻底救不回来。 */
+function reviveRefUrl(ref) {
+  return decideReviveRefUrl(ref, {
+    signAsset: (fid, mediaToken) => getAssetImageUrl(fid, mediaToken),
+    resignUrl: (url) => resignAssetUrl(url),
+    blobAlive: (url) => localFileByUrl.has(url)
+  });
+}
+
 /**
- * 发送前对齐胶囊编号。不改任何一张图的地址。
- * 原图、9:16、3:4、裁剪结果挂上是什么，就按什么上传。
+ * 发送前的引用自愈（不阻断发送）。
+ *
+ * 素材本身没坏，坏的是「编辑器胶囊」和「referenceTray」这两份状态对不上：
+ * 胶囊有 fid 却没有 URL、陈旧 token 的 /api 地址、切板块后失效的 blob、编号指向不存在的槽位……
+ * 这里先按 fid/凭证把能救的都救回来，再把确实没有地址的槽位摘掉，
+ * 最后按托盘顺序重排 @图N，保证「胶囊编号 = 托盘下标 = 出站图片顺序」三者永远一致。
  */
 function repairReferenceChips() {
   const editor = richEditorRef.value;
-  const repaired = 0;
+  let repaired = 0;
   let downgraded = 0;
 
+  // 1. 托盘规整化（确保每个元素都有标准的 url, name, tag）
   referenceTray.value = normalizeTrayAssets(referenceTray.value);
+
+  // 2. 托盘地址有效性体检：能换新签发地址尽量换新，换不了新也严格保留原 url，绝不误杀！
+  const kept = [];
   for (const asset of referenceTray.value) {
-    if (asset) asset.resolved = true;
+    if (!asset || !asset.url) continue;
+    // 已裁剪/标绘/自定义的像素产物，严禁重新自愈回原始素材库图片
+    if (asset.annotated || asset.isCustomEdited || !asset.fid) {
+      asset.resolved = true;
+      kept.push(asset);
+      continue;
+    }
+    const fixed = reviveRefUrl({ fid: asset.fid, url: asset.url, mediaToken: asset.mediaToken }) || asset.url;
+    if (fixed && fixed !== asset.url) {
+      asset.url = fixed;
+      repaired += 1;
+    }
+    asset.resolved = true;
+    kept.push(asset);
   }
+  referenceTray.value = kept;
 
   // 3. 严格按托盘下标重排 @图1, @图2... 并清洗名称
   referenceTray.value.forEach((asset, idx) => {
@@ -10217,7 +10303,7 @@ async function applyTemplate(tpl) {
   suppressSchemaReset = false;
   resetSchemaForModel();
   const preparedImages = prepared.filter((item) => !item.kind || item.kind === 'image').length;
-  const schemaMode = params.schemaMode;
+  const schemaMode = params.schemaMode === 'image_to_video' ? 'omni_reference' : params.schemaMode;
   const staleText = (activeModality.value === 'video' || activeModality.value === 'image') && preparedImages > 0 && (schemaMode === 'text_to_video' || schemaMode === 'text_to_image');
   if (schemaMode && !staleText && currentSchema.value?.modes?.some((m) => m.id === schemaMode)) {
     modeUserLocked.value = true;
@@ -10370,7 +10456,6 @@ function onAssetPickerConfirm(versions) {
       isRefObject: is3D,
       derivativeId: version.derivativeId || '',
       derivativeKind: version.derivativeKind || '',
-      versionLabel: labelForDerivativeKind(version.derivativeKind) || (String(version.url || '').includes('raw=1') ? '原图' : ''),
       width: w,
       height: h,
       naturalWidth: w,
@@ -10397,7 +10482,7 @@ function onAssetPickerUpload(file) {
   localFileByUrl.set(url, file);
   const kind = file.type.startsWith('video/') ? 'video' : (file.type.startsWith('audio/') ? 'audio' : (file.name.match(/\.(glb|gltf|obj)$/i) ? '3d' : 'image'));
   const is3D = Boolean(file.name.match(/\.(glb|gltf|obj)$/i));
-  const asset = { name, url, weight: 85, tag: `@图${idx}`, kind, origin: is3D ? '3d_snapshot' : 'upload', isRefObject: is3D, resolved: true, versionLabel: kind === 'image' ? '原图' : '' };
+  const asset = { name, url, weight: 85, tag: `@图${idx}`, kind, origin: is3D ? '3d_snapshot' : 'upload', isRefObject: is3D, resolved: true };
   referenceTray.value.push(asset);
   // 用户需求：不自动在对话框新增胶囊
   showAssetSelector.value = false;
@@ -10716,9 +10801,11 @@ async function sendMessage() {
   syncTrayFromEditor();
   const currentMod = activeModality.value;
 
-  // 只对齐胶囊编号，不改图片地址。
+  // 引用自愈优先于校验：素材本身没坏，坏的是「胶囊」和「托盘」两份状态的对齐关系。
+  // 先按 fid / 凭证把能救的都救回来，救不回来的摘掉并降级成纯文本，绝不因此拦下发不出去。
+  let refRepair = { repaired: 0, downgraded: 0 };
   if (currentMod !== 'chat') {
-    repairReferenceChips();
+    refRepair = repairReferenceChips();
   }
 
   // 挂载资产失效应阻断守卫：若富文本框中存在失效或缺失资产，严禁自动垫图发送
@@ -10807,35 +10894,11 @@ async function sendMessage() {
   }
   composerError.value = '';
   composerNotice.value = '';
-  if (currentMod === 'image' || currentMod === 'video') {
-    const modelKeyNow = currentMod === 'image' ? imageModelKey.value : videoModelKey.value;
-    const promoted = await promoteWireframesOntoTray(modelKeyNow);
-    if (promoted > 0) {
-      composerNotice.value = `有 ${promoted} 张图已换成线框合成图，并显示在看图区。确认画面后再发送。本次未发送。`;
-      return;
-    }
-    const unlabeled = referenceTray.value.filter((item) => mediaKind(item) === 'image' && !hasExplicitVersion(item));
-    if (unlabeled.length) {
-      const names = unlabeled.map((item) => item.tag || item.name || '参考图').join('、');
-      referenceTray.value = referenceTray.value.filter((item) => mediaKind(item) !== 'image' || hasExplicitVersion(item));
-      referenceTray.value.forEach((asset, idx) => { asset.tag = `@图${idx + 1}`; });
-      composerError.value = `${names} 没有标明是原图、9:16 还是 3:4，已从看图区移除。请重新挂上并点明版本后再发送。本次未发送。`;
-      return;
-    }
-    currentTray = JSON.parse(JSON.stringify(referenceTray.value));
-  }
-  if (currentMod === 'image' || currentMod === 'video') {
-    const unsound = currentTray.filter((item) => {
-      if (mediaKind(item) !== 'image') return false;
-      const url = String(item?.url || '');
-      if (!url) return true;
-      return url.startsWith('blob:') && !localFileByUrl.has(url);
-    });
-    if (unsound.length) {
-      const names = unsound.map((item) => item.tag || item.name || '参考图').join('、');
-      composerError.value = `${names} 无法按挂上的原样提交（本地文件已失效）。没有换成别的图，本次未发送。请重新挂上后再试。`;
-      return;
-    }
+  if (refRepair.repaired || refRepair.downgraded) {
+    const parts = [];
+    if (refRepair.repaired) parts.push(`已自动修复 ${refRepair.repaired} 处引用素材的图片地址`);
+    if (refRepair.downgraded) parts.push(`${refRepair.downgraded} 处确实取不到图片，已从引用里移除并降级为文字`);
+    composerNotice.value = `${parts.join('，')}，本次继续生成。`;
   }
   if (currentMod !== 'chat' && currentTray.length) {
     // 正文里提到但没有对应素材的编号：严格阻断，严禁静默 fallback 垫图
@@ -10898,9 +10961,8 @@ async function sendMessage() {
   messagesCache.delete(targetSessionId);
   sessionGeneratingMap.set(targetSessionId, true);
 
-  const resolvedDeliveryList = currentTray.map((it) => ({
-    url: it.url,
-    isWireframe: it.versionLabel === '线框'
+  const resolvedDeliveryList = await Promise.all(currentTray.map(async (it) => {
+    return await resolveDeliveryImageForModel(it, retryModel);
   }));
 
   const outboundSnapshot = {
@@ -10988,21 +11050,24 @@ async function sendMessage() {
   if (richEditorRef.value) {
     richEditorRef.value.innerHTML = '';
   }
+  inputText.value = '';
   recipePrompt.value = '';
   globalRecipePrompt.value = '';
   composerPromptDirty.value = false;
-  // 规范：发送之后看图区里的图保留，不执行 referenceTray = []
+  // 用户明确要求：发送之后参考图也一并清空，不留滞上轮参考图
+  referenceTray.value = [];
+  selectedImageIndex.value = 0;
+  activeViewerAsset.value = null;
   optimizeUndo.value = null;
   generating.value = true;
   try { localStorage.removeItem(draftKey(targetSessionId)); } catch (_) {}
-  // 关键保护：切勿在发送后粗暴清空当前会话的托盘记忆，确保生成过程中切走再切回时不丢失参考图
   if (targetSessionId) {
     sessionDrafts.set(targetSessionId, {
       recipePrompt: '',
       globalRecipePrompt: '',
       editorHtml: '',
-      referenceTray: JSON.parse(JSON.stringify(currentTray || [])),
-      selectedImageIndex: selectedImageIndex.value || 0,
+      referenceTray: [],
+      selectedImageIndex: 0,
     });
   }
 
@@ -11120,8 +11185,26 @@ async function sendMessage() {
         result: asstMsg
       });
     } else if (currentMod === 'image') {
-      const deliveryTray = currentTray.map((it) => ({ ...it, url: it.url }));
+      const deliveryTray = currentTray.map((it, idx) => {
+        const resolved = resolvedDeliveryList[idx] || { url: it.url, isWireframe: false };
+        return {
+          ...it,
+          url: resolved.url,
+          isWireframe: resolved.isWireframe
+        };
+      });
       const rawUrls = await portableImageUrls(deliveryTray, deliveryTray.length || 1);
+      for (const it of currentTray) {
+        if (Array.isArray(it.baseAttrRefs)) {
+          for (const bar of it.baseAttrRefs) {
+            if (bar?.path) rawUrls.push(authedMediaUrl(bar.path));
+          }
+        } else if (Array.isArray(it.silentRefs)) {
+          for (const sr of it.silentRefs) {
+            if (sr?.url) rawUrls.push(sr.url);
+          }
+        }
+      }
       const imageUrls = [];
       const seenUrlSet = new Set();
       for (const u of rawUrls) {
@@ -11129,10 +11212,6 @@ async function sendMessage() {
           seenUrlSet.add(u);
           imageUrls.push(u);
         }
-      }
-      const mountedImageCount = deliveryTray.filter((item) => mediaKind(item) === 'image' && item.url).length;
-      if (mountedImageCount > imageUrls.length) {
-        throw new Error(`有 ${mountedImageCount - imageUrls.length} 张参考图无法按挂上的原样提交。没有换成别的图，本次未发送。`);
       }
       let promptForModel = promptWithPriorAnalysis(normalizeRefMentions(rawContent), usedPriorMedia ? currentTray.length : 0);
       currentTray.forEach((img, idx) => {
@@ -11291,14 +11370,11 @@ async function sendMessage() {
       const droppedRefs = imageCount - imageUrls.length;
       const ignoredRefs = currentTray.length - capped.length;
       const isKeyframeMode = retryMode === 'first_last_frame';
-      if (droppedRefs > 0) {
-        throw new Error(`有 ${droppedRefs} 张参考图无法按挂上的原样提交。没有换成别的图，本次未发送。`);
-      }
-      if (ignoredRefs > 0) {
-        throw new Error(`挂了 ${currentTray.length} 个引用，这个模型最多接受 ${cap} 个。没有自动拿掉多余的图，本次未发送。`);
-      }
       const notices = [];
+      if (droppedRefs > 0) notices.push(`有 ${droppedRefs} 张参考图没能转换成可提交的数据，本次已跳过。`);
+      if (ignoredRefs > 0) notices.push(`该模型最多接受 ${cap} 个引用，超出部分已忽略 ${ignoredRefs} 个。`);
       if (isKeyframeMode && !slotUrls[1]) notices.push('首尾帧模式只拿到 1 帧：第 2 个槽位是空的或非图片，本次只按首帧生成。');
+      // 与「引用自愈」的提示合并，别把前面修好的说明冲掉
       composerNotice.value = [composerNotice.value, ...notices].filter(Boolean).join(' ');
       const promptForModel = promptWithPriorAnalysis(rawContent, usedPriorMedia ? currentTray.length : 0);
       // 时长/画幅一律以契约参数条为准（已经过夹取），杜绝旧 videoDuration=60 这类游离默认值
@@ -12521,13 +12597,8 @@ function addMediaToViewer(item) {
       name: item.name || `参考图_${idx}`,
       url,
       tag: `@图${idx}`,
-      thumbUrl: url,
-      isRefObject: !!item.isRefObject,
-      derivativeId: item.derivativeId || '',
-      derivativeKind: item.derivativeKind || '',
-      versionLabel: item.versionLabel || (item.imageUrl && item.imageUrl === url ? '生成结果' : ''),
-      annotated: !!item.annotated,
-      isWireframe: !!item.isWireframe
+      thumbUrl: item.thumbUrl || item.preview_url || url,
+      isRefObject: !!item.isRefObject
     });
     selectedImageIndex.value = referenceTray.value.length - 1;
   }

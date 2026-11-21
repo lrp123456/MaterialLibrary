@@ -130,59 +130,8 @@ function persistBuffer(config, buf, mime) {
 }
 
 /**
- * 衍生行的 storage_ref 能在本机直接读到就返回字节。
- * 夸克等还没落地的版本返回 null，交给调用方走 HTTP，不能改去读别的版本。
- */
-function bufferFromDerivativeRow(config, row) {
-  if (!row?.storage_ref) return null;
-  const fp = path.isAbsolute(row.storage_ref)
-    ? row.storage_ref
-    : path.join(config.dataDir, row.storage_ref);
-  if (!fs.existsSync(fp) || !fs.statSync(fp).isFile()) return null;
-  return {
-    buf: fs.readFileSync(fp),
-    mime: EXT_MIME[path.extname(fp).toLowerCase()] || 'image/jpeg',
-  };
-}
-
-/**
- * URL 写明了哪一版（derivative= 或 raw=1）就只读那一版。
- * 返回 { buf, mime }、{ missing: true }（指定了版本但本机没有，禁止用原图顶上），
- * 或 null（地址没指定版本，走下面的旧兜底）。
- */
-/** 素材图片地址没写 derivative 或 raw=1。这种地址不能拿去上传。 */
-function assetImageWithoutVersion(raw) {
-  try {
-    const u = new URL(String(raw), 'http://local.invalid');
-    if (!/\/image\/?$/.test(u.pathname)) return false;
-    return !u.searchParams.get('derivative') && u.searchParams.get('raw') !== '1';
-  } catch (_) {
-    return false;
-  }
-}
-
-function readExplicitAssetVersion(services, raw, fid) {
-  const { config, db } = services;
-  let query = null;
-  try { query = new URL(String(raw), 'http://local.invalid').searchParams; } catch (_) { return null; }
-  const derivativeId = query.get('derivative') || '';
-  const wantOrigin = query.get('raw') === '1';
-  if (!derivativeId && !wantOrigin) return null;
-  try {
-    const row = derivativeId
-      ? db.prepare('SELECT * FROM derivatives WHERE id=? AND asset_fid=?').get(derivativeId, fid)
-      : db.prepare("SELECT * FROM derivatives WHERE asset_fid=? AND kind='origin' LIMIT 1").get(fid);
-    const hit = bufferFromDerivativeRow(config, row);
-    if (hit) return hit;
-  } catch (_) { /* 查询失败按「这一版还没落地」处理 */ }
-  if (derivativeId) return { missing: true };
-  return null;
-}
-
-/**
  * 从相对路径 / 受控本地路径解析出 buffer。
- * 覆盖：/api/(viewer/)?assets/:fid/image?derivative= （只读该衍生）、
- *      ?raw=1（只读原图）、未指定版本时的旧兜底、/api/cache/temp/:f、
+ * 覆盖：/api/(viewer/)?assets/:fid/image(优先原图/缩略图)、/api/cache/temp/:f、
  *      /api/(viewer/)?ai/masks/:id、受控目录绝对路径。
  */
 function readLocalRef(services, raw) {
@@ -203,20 +152,11 @@ function readLocalRef(services, raw) {
     } catch (_) { /* fall through */ }
   }
 
-  // 2. 素材库图片。地址写了 derivative= / raw=1 时，只读那一版，不用原图或缩略图替换。
+  // 2. 素材库原图相对路径（缩略图也可，供应商只做首帧参考）
   const mAsset = s.match(/\/api\/(?:viewer\/)?assets\/([^/?#]+)/);
   if (mAsset) {
     const fid = decodeURIComponent(mAsset[1]);
-    if (assetImageWithoutVersion(s)) return { refused: true };
-    let wantOrigin = false;
-    try { wantOrigin = new URL(s, 'http://local.invalid').searchParams.get('raw') === '1'; } catch (_) {}
-    const explicit = readExplicitAssetVersion(services, s, fid);
-    if (explicit?.missing) return null;
-    if (explicit?.buf) return explicit;
-    // 版本已经写在地址上，只是文件在 NAS 或还没落到 dataDir。交给图片接口按同一版本去取。
-    if (wantOrigin) return null;
-    if (/\/image\/?$/.test(String(s).split('?')[0])) return { refused: true };
-    // 非图片（视频/文件）仍可走原图缓存。图片没有版本时上面已经拒绝。
+    // 优先缓存原图
     const originals = path.join(config.dataDir, 'cache', 'originals');
     try {
       const hit = fs.readdirSync(originals).find((n) => n.startsWith(fid));
@@ -225,7 +165,6 @@ function readLocalRef(services, raw) {
         return { buf: fs.readFileSync(fp), mime: EXT_MIME[path.extname(hit).toLowerCase()] || 'image/jpeg' };
       }
     } catch (_) { /* fall through */ }
-    if (wantOrigin) return null;
     // 退而求其次：缩略图
     const thumb = path.join(config.dataDir, 'cache', 'thumbs', `${fid}.jpg`);
     if (fs.existsSync(thumb)) return { buf: fs.readFileSync(thumb), mime: 'image/jpeg' };
@@ -317,11 +256,6 @@ async function materializeFrameUrl(services, raw, { label = '参考帧' } = {}) 
     }
   } else {
     decoded = readLocalRef(services, s);
-    if (decoded?.refused) {
-      const e = new Error(`${label}没有写明版本（原图、9:16 或 3:4）。已拒绝改用缩略图、原图缓存或其他衍生。`);
-      e.code = 'frame_version_required';
-      throw e;
-    }
     if (!decoded && s.startsWith('/')) decoded = await fetchLoopback(services, s);
     if (!decoded) {
       const e = new Error(`${label}无法读取（既不是公网 URL，也未能从本机素材库解析），请改用可公网访问的图片地址或重新上传`);

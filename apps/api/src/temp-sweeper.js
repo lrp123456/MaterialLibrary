@@ -111,7 +111,7 @@ function startTempSweeper(services) {
       console.warn('[temp-sweeper] 清理异常:', e.message);
     }
   };
-  run();
+  setImmediate(run);
   _timer = setInterval(run, SWEEP_INTERVAL_MS);
   if (_timer.unref) _timer.unref();
   return _timer;

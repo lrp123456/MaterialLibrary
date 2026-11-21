@@ -54,7 +54,7 @@ const DIMENSIONS = [
 const VALUES = [
   // space（17，玄关门厅拆成门外门廊 / 门内门厅）
   ['porch','门外门廊','space', null, ['门外','门廊']],
-  ['foyer','门内门厅','space', null, ['门厅','玄关','玄关门厅','entryway']],
+  ['foyer','门厅','space', null, ['门内门厅','玄关','玄关门厅','entryway','入户门厅']],
   ['living_room','客厅','space'],
   ['dining_room','餐厅','space'],
   ['kitchen','厨房','space'],
@@ -70,7 +70,8 @@ const VALUES = [
   ['bay_window','飘窗','space'],
   ['detail_closeup','细节特写','space'],
   ['other','其他','space'],
-  ['entryway','玄关门厅','space'],
+  // 废弃已合并至 foyer ('门厅')，杜绝空间词表分裂
+  // ['entryway','玄关门厅','space'],
 
   // style_region（大区，供两层筛选分组；不直接打标）
   ['east_asia','东亚','style_region'],

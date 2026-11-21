@@ -453,6 +453,13 @@ export async function fetchAssetDetail(fid) {
   return json.data || json;
 }
 
+export async function fetchJson(url, options = {}) {
+  const res = await authFetch(url, options);
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || json.ok === false || json.success === false) throw new Error(json.error || `请求失败 ${res.status}`);
+  return json;
+}
+
 async function postJson(url, body) {
   const res = await authFetch(url, {
     method: 'POST',
@@ -460,7 +467,7 @@ async function postJson(url, body) {
     body: JSON.stringify(body || {})
   });
   const json = await res.json().catch(() => ({}));
-  if (!res.ok || json.ok === false) throw new Error(json.error || `请求失败 ${res.status}`);
+  if (!res.ok || json.ok === false || json.success === false) throw new Error(json.error || `请求失败 ${res.status}`);
   return json;
 }
 
@@ -1197,6 +1204,80 @@ export async function patchCreationTemplate(id, payload = {}) {
   return res.json();
 }
 
+export async function deleteCreationTemplate(id) {
+  const res = await authFetch(`/api/creation-templates/${encodeURIComponent(id)}`, {
+    method: 'DELETE'
+  });
+  return res.json();
+}
+
+export async function fetchCreationCards(filters = {}) {
+  const params = new URLSearchParams();
+  params.set('view', 'card');
+  params.set('sort', 'latest');
+  if (filters.q) params.set('q', filters.q);
+  if (filters.time && filters.time !== 'all') params.set('time', filters.time);
+  if (filters.space && filters.space !== 'all') params.set('space', filters.space);
+  if (filters.style && filters.style !== 'all') params.set('style', filters.style);
+  if (filters.operation && filters.operation !== 'all') params.set('operation', filters.operation);
+  if (filters.pinned_only) params.set('pinned_only', '1');
+  const res = await authFetch(`/api/creation-templates?${params.toString()}`);
+  return res.json();
+}
+
+export async function fetchCreationGroup(rootHash) {
+  const res = await authFetch(`/api/creation-groups/${encodeURIComponent(rootHash)}`);
+  return res.json();
+}
+
+export async function setCreationCover(id, isCover = 1) {
+  const res = await authFetch(`/api/creation-templates/${encodeURIComponent(id)}/set-cover`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ is_cover: isCover })
+  });
+  return res.json();
+}
+
+export async function rereadImageReading(sha256) {
+  const res = await authFetch(`/api/image-readings/${encodeURIComponent(sha256)}/reread`, {
+    method: 'POST'
+  });
+  return res.json();
+}
+
+export async function patchImageReading(sha256, payload = {}) {
+  const res = await authFetch(`/api/image-readings/${encodeURIComponent(sha256)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  return res.json();
+}
+
+export async function fetchCreationTrash() {
+  const res = await authFetch('/api/creation-trash');
+  return res.json();
+}
+
+export async function restoreCreationTrash(ids = []) {
+  const res = await authFetch('/api/creation-trash/restore', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids: Array.isArray(ids) ? ids : [ids] })
+  });
+  return res.json();
+}
+
+export async function purgeCreationTrash(ids = []) {
+  const res = await authFetch('/api/creation-trash/purge', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids: Array.isArray(ids) ? ids : [ids] })
+  });
+  return res.json();
+}
+
 export async function patchBaseItem(id, data) {
   const res = await authFetch(`/api/base-library/items/${encodeURIComponent(id)}`, {
     method: 'PATCH',
@@ -1354,4 +1435,95 @@ export function replaceAssetImage(fid, dataUrl, { force = false } = {}) {
 export function restoreAssetVersion(fid, versionId) {
   return postJson(`/api/assets/${encodeURIComponent(fid)}/restore-version`, { versionId });
 }
+
+// ===== 空间创作 · 视频逆向分析 (rea-video) =====
+
+export function getVideoAnalysis(fid) {
+  return fetchJson(`/api/studio/video-analysis?fid=${encodeURIComponent(fid)}`);
+}
+
+export function submitVideoAnalysis(fid, { reanalyze = false, model = '' } = {}) {
+  return postJson('/api/studio/video-analysis', { fid, reanalyze, model });
+}
+
+export function getVideoAnalysisAssetUrl(fid, relPath) {
+  if (!fid || !relPath) return '';
+  const token = getToken();
+  const q = new URLSearchParams({ fid, path: relPath });
+  if (token) q.set('token', token);
+  return resolveApiUrl(`/api/studio/video-analysis/asset?${q.toString()}`);
+}
+
+export function getVideoAnalysisRawReportUrl(fid) {
+  return getVideoAnalysisAssetUrl(fid, 'report.html');
+}
+
+export function getVideoAnalysisRawJsonUrl(fid) {
+  return getVideoAnalysisAssetUrl(fid, 'breakdown.json');
+}
+
+export function getVideoAnalysisHistory(params = {}) {
+  const q = new URLSearchParams();
+  if (params.limit) q.set('limit', String(params.limit));
+  if (params.offset) q.set('offset', String(params.offset));
+  if (params.status) q.set('status', String(params.status));
+  const qs = q.toString();
+  return fetchJson(`/api/studio/video-analysis/history${qs ? '?' + qs : ''}`);
+}
+
+export function deleteVideoAnalysis(fid) {
+  return fetchJson(`/api/studio/video-analysis?fid=${encodeURIComponent(fid)}`, {
+    method: 'DELETE'
+  });
+}
+
+export function getImageAnalysis(fid) {
+  return fetchJson(`/api/studio/image-analysis?fid=${encodeURIComponent(fid)}`);
+}
+
+export function submitImageScene(fid, model) {
+  return postJson('/api/studio/image-analysis/scene', { fid, model });
+}
+
+export function previewImageRegion(fid, selection, phrase) {
+  return postJson('/api/studio/image-analysis/preview', { fid, selection, phrase });
+}
+
+export function submitImageRegion(body) {
+  return postJson('/api/studio/image-analysis/region', body);
+}
+
+export async function downloadSchemePackage(payload) {
+  const token = getToken();
+  const res = await fetch(resolveApiUrl('/api/creation-schemes/export'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    },
+    body: JSON.stringify(payload || {})
+  });
+  if (!res.ok) throw new Error('导出方案包失败');
+  const blob = await res.blob();
+  const cd = res.headers.get('content-disposition') || '';
+  const m = cd.match(/filename="?([^";]+)"?/);
+  const filename = m ? decodeURIComponent(m[1]) : `方案套件_${Date.now()}.zip`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+export function triggerAutoTagAll() {
+  return postJson('/api/creation-templates/auto-tag-all', {});
+}
+
+export function comparePromptsWithAi(promptA, promptB) {
+  return postJson('/api/creation-templates/ai-compare', { promptA, promptB });
+}
+
 

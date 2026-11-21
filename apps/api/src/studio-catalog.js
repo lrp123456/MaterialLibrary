@@ -595,10 +595,10 @@ const OFFICIAL_STUDIO = {
         capabilities: 'video',
         dbId: 'wan3_0_video',
         aliases: ['wan3.0-video'],
-        params: { duration: true, resolution: ['480p', '720p', '1080p'], refs: 10 },
+        params: { duration: true, resolution: ['480p', '720p', '1080p'], refs: 5 },
         caps: {
           output: 'video',
-          input: { images: 10, videos: 0, audios: 0 },
+          input: { images: 5, videos: 0, audios: 0 },
           region: R_NONE,
           multiRef: true,
           ratioFromImage1: false,

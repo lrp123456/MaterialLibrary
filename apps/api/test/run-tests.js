@@ -45,6 +45,7 @@ const E2E_MS = 420000;
 const MANIFEST = [
   // ---------- unit：纯函数/纯数据契约，不开库不起服务 ----------
   ['unit', 'edit-preview.test.js'],
+  ['unit', 'image-analysis.test.js'],
   ['unit', 'classify-parse.test.js'],
   ['unit', 'classify-part.test.js'],
   ['unit', 'crop-selection-interior.test.js'],
@@ -60,6 +61,8 @@ const MANIFEST = [
   ['unit', 'p1-theme.test.js'],
   ['unit', 'p2-browse-detail.test.js'],
   ['unit', 'p3-studio.test.js'],
+  ['unit', 'video-analysis.test.js'],
+  ['unit', 'video-modes-contract.test.js'],
   ['unit', 'gate-route.test.js'],
   ['unit', 'guide-sentence.test.js'],
   ['unit', 'outpaint-layout.test.js'],
@@ -70,7 +73,6 @@ const MANIFEST = [
   ['unit', 'runtime-log.test.js'],
   ['unit', 'asset-replace-caches.test.js'],
   ['unit', 'revive-ref-url.test.js'],
-  ['unit', 'ref-version.test.js'],
   ['unit', 'vip-error-format.test.js'],
   ['unit', 'gen-job-timing.test.js'],
   ['unit', 'chat-playback-cache.test.mjs'],

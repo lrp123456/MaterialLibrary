@@ -60,10 +60,9 @@ function missingEnvError() {
 }
 
 function gatewayBase() {
-  // 按量付费钥匙的视频地址是千问 AI：https://maas.qianwenaiapi.com/api/v1。
-  // 这里只写到域名，后面的 /api/v1/services/... 由提交函数自己接上。
-  // 不要填 /compatible-mode/v1，那是对话接口。
-  return String(process.env.ALIBAILIAN_BASE_URL || 'https://maas.qianwenaiapi.com')
+  // 官方百炼网关域名是 maas.aliyuncs.com；旧代码误写成 baas.aliyun.com，
+  // TLS 握手会被直接重置（fetch failed / ECONNRESET），提交与轮询全部失败。
+  return String(process.env.ALIBAILIAN_BASE_URL || 'https://llm-l2i86gc5rubd2u49.cn-beijing.maas.aliyuncs.com')
     .replace(/\/+$/, '')
     .replace(/\/api\/v1$/i, '');
 }
@@ -131,7 +130,7 @@ async function buildMedia(services, input) {
     return media;
   }
   if (mode === 'text_to_video' || !images.length) return [];
-  return images.slice(0, 10).map((url) => ({ type: 'reference_image', url }));
+  return images.slice(0, 5).map((url) => ({ type: 'reference_image', url }));
 }
 
 function buildSubmitBody(input, media) {

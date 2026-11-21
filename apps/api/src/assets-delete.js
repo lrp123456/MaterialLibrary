@@ -294,40 +294,18 @@ function softDeleteAsset(services, fid, { deletedBy = '', reason = 'user_delete'
     addBlacklist(db, keys, { reason, createdBy: deletedBy });
     db.prepare("UPDATE assets SET status='deleted', updated_at=? WHERE fid=?").run(now, fid);
 
-    // 血缘同步清除（软删时即断开孤儿引用）：衍生图或素材软删除后，
-    // 立即清洗其他存活资产对该 fid 的引用，避免血缘图展示已删除的幽灵节点导致「关系没有查出来」报错
+    // 统一血缘模型与双库解耦：从素材库删除资产时，仅将关联记录的 in_material_lib 置为 0。
+    // 若 in_creation_lib = 1，创作库记录与私有副本完好无损，去向自动变为「只在创作库」；
+    // 若 in_creation_lib = 0，下游记录保存的 root_origin_hash 保持不变，整组血缘不断链。
     try {
-      db.prepare('UPDATE assets SET parent_fid=NULL, updated_at=? WHERE parent_fid=?').run(now, fid);
-      db.prepare('UPDATE assets SET source_asset_id=NULL, updated_at=? WHERE source_asset_id=?').run(now, fid);
-      const holders = db.prepare(
-        "SELECT fid, lineage_json FROM assets WHERE lineage_json IS NOT NULL AND lineage_json LIKE ?"
-      ).all(`%${fid}%`);
-      for (const holder of holders) {
-        let rec = null;
-        try { rec = JSON.parse(holder.lineage_json); } catch { continue; }
-        if (!rec || typeof rec !== 'object') continue;
-        let changed = false;
-        if (rec.parentFid === fid) { rec.parentFid = ''; changed = true; }
-        if (Array.isArray(rec.refFids)) {
-          const next = rec.refFids.filter((x) => x && x !== fid);
-          if (next.length !== rec.refFids.length) { rec.refFids = next; changed = true; }
-        }
-        if (Array.isArray(rec.children)) {
-          const next = rec.children.filter((c) => (typeof c === 'string' ? c !== fid : c?.fid !== fid));
-          if (next.length !== rec.children.length) { rec.children = next; changed = true; }
-        }
-        if (Array.isArray(rec.editUses)) {
-          const next = rec.editUses.filter((u) => u && u.fid !== fid);
-          if (next.length !== rec.editUses.length) { rec.editUses = next; changed = true; }
-        }
-        if (changed) {
-          db.prepare('UPDATE assets SET lineage_json=?, updated_at=? WHERE fid=?')
-            .run(JSON.stringify(rec), now, holder.fid);
-        }
-      }
-    } catch (lineageErr) {
-      logger?.warn?.('[assets-delete] 软删清理血缘异常:', lineageErr.message);
-    }
+      db.prepare(`
+        UPDATE creation_templates
+        SET in_material_lib = 0, updated_at = ?
+        WHERE (result_images LIKE ? OR origin_images LIKE ? ${asset.sha256 ? 'OR root_origin_hash = ?' : ''})
+      `).run(now, `%${fid}%`, `%${fid}%`, ...(asset.sha256 ? [asset.sha256] : []));
+    } catch (_) {}
+
+    // 注意：软删严禁清空其他资产的 parent_fid / source_asset_id 或清洗 lineage_json（保留引用关系，恢复素材时血缘自动复原）。
     db.prepare(`
       INSERT INTO asset_trash (fid, file_name, nas_rel, trash_rel, size, deleted_by, deleted_at, dispose_source, dispose_detail, dispose_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

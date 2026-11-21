@@ -262,14 +262,13 @@ async function runTests() {
     });
     assert.strictEqual(flowC.targetGenMode, 'image_to_image', '扩边也不自动改图像子模式');
 
-    // 场景 D：视频首尾帧 (2张图片 + 视频能力模型)
+    // 场景 D：视频调度 (默认全能参考，首尾帧仅限手动去选)
     const mockVideoSchema = {
       id: 'seedance2_5',
       modes: [
         { id: 'text_to_video', label: '文生视频' },
-        { id: 'image_to_video', label: '图生视频' },
-        { id: 'first_last_frame', label: '首尾帧' },
-        { id: 'omni_reference', label: '全能参考' }
+        { id: 'omni_reference', label: '全能参考' },
+        { id: 'first_last_frame', label: '首尾帧' }
       ],
       common: [
         { key: 'ratio', options: ['16:9', '9:16', '1:1', 'adaptive'] },
@@ -282,11 +281,23 @@ async function runTests() {
       referenceTray: [frame1, frame2],
       selectedImageIndex: 0,
       currentModality: 'video',
-      currentGenMode: 'image_to_video',
+      currentGenMode: 'omni_reference',
       currentSchema: mockVideoSchema,
       currentParams: { ratio: '16:9' }
     });
-    assert.strictEqual(flowD.targetGenMode, 'omni_reference', '2 张图片在视频板块下用全能参考，不自动进首尾帧');
+    assert.strictEqual(flowD.targetGenMode, 'omni_reference', '2 张图片在视频板块下默认使用全能参考，不自动进首尾帧');
+    assert.strictEqual(flowD.targetRatio, '9:16', '视频画幅应根据首帧自动纠正为 9:16');
+
+    const flowDManual = inferOptimalWorkflowAndParams({
+      referenceTray: [frame1, frame2],
+      selectedImageIndex: 0,
+      currentModality: 'video',
+      currentGenMode: 'first_last_frame',
+      currentSchema: mockVideoSchema,
+      currentParams: { ratio: '16:9' }
+    });
+    assert.strictEqual(flowDManual.targetGenMode, 'first_last_frame', '手动选择首尾帧时保持首尾帧模式');
+
     const flowD1 = inferOptimalWorkflowAndParams({
       referenceTray: [frame1],
       selectedImageIndex: 0,
@@ -296,7 +307,6 @@ async function runTests() {
       currentParams: { ratio: '9:16' }
     });
     assert.strictEqual(flowD1.targetGenMode, 'omni_reference', '1 张参考图在支持全能参考的模型中统一使用全能参考');
-    assert.strictEqual(flowD.targetRatio, '9:16', '视频画幅应根据首帧自动纠正为 9:16');
 
     // 场景 D2：托盘为空（文生视频，此前由于 videoItems 未定义在无图片素材时必崩）
     const flowD2 = inferOptimalWorkflowAndParams({

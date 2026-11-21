@@ -25,6 +25,7 @@ function ensureCreationLibrarySchema(db) {
   try { db.exec('ALTER TABLE creation_templates ADD COLUMN deleted_at INTEGER;'); } catch (e) {}
   try { db.exec('ALTER TABLE creation_templates ADD COLUMN trashed_section_id TEXT;'); } catch (e) {}
   try { db.exec('ALTER TABLE creation_templates ADD COLUMN media_dir TEXT;'); } catch (e) {}
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN trajectory TEXT;'); } catch (e) {}
   try {
     db.exec(`
       CREATE TABLE IF NOT EXISTS creation_sections (

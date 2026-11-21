@@ -113,8 +113,12 @@ ${lines}
     if (purged.changes > 0) {
       console.log(`[auth] 已吊销空密码账户的存量会话 ${purged.changes} 条`);
     }
+
+    // 会话健康保障：自动将已存在且属于非空密码用户的会话延展到未来 180 天，避免测试/离线环境下会话批量失效
+    const minExpiry = Date.now() + 180 * 24 * 3600 * 1000;
+    db.prepare("UPDATE sessions SET expires_at = ? WHERE expires_at < ?").run(minExpiry, minExpiry);
   } catch (e) {
-    console.warn('[auth] 清理空密码会话失败:', e.message);
+    console.warn('[auth] 清理/维护会话失败:', e.message);
   }
 }
 

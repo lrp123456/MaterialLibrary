@@ -40,6 +40,16 @@ function mapCreationTemplateRow(r) {
     poster_w: r.poster_w !== null && r.poster_w !== undefined ? Number(r.poster_w) : null,
     poster_h: r.poster_h !== null && r.poster_h !== undefined ? Number(r.poster_h) : null,
     aspect_ratio: r.aspect_ratio || '16:9',
+    root_origin_hash: r.root_origin_hash || '',
+    parent_step_id: r.parent_step_id || '',
+    prompt_hash: r.prompt_hash || '',
+    operation: r.operation || '',
+    trajectory: r.trajectory || '',
+    in_creation_lib: r.in_creation_lib !== null && r.in_creation_lib !== undefined ? Number(r.in_creation_lib) : 1,
+    in_material_lib: Number(r.in_material_lib || 0),
+    is_cover: Number(r.is_cover || 0),
+    video_mode: r.video_mode || '',
+    source_step_ids: Array.isArray(r.source_step_ids) ? r.source_step_ids : parseJson(r.source_step_ids, []),
     origin_images,
     result_images,
     params: paramsObj,
@@ -63,10 +73,14 @@ function lightMedia(item) {
 
 function toCreationCard(full) {
   const result = lightMedia(Array.isArray(full.result_images) ? full.result_images[0] : null);
-  const origin = lightMedia(Array.isArray(full.origin_images) ? full.origin_images[0] : null);
+  // 转场视频需要两张输入静帧（起点与终点）
+  const origins = Array.isArray(full.origin_images)
+    ? full.origin_images.slice(0, 2).map(lightMedia).filter(Boolean)
+    : [];
   return {
     id: full.id,
     title: full.title || '',
+    prompt: full.prompt || '',
     type: full.type || 'image',
     aspect_ratio: full.aspect_ratio || '16:9',
     poster_w: full.poster_w ?? null,
@@ -82,9 +96,18 @@ function toCreationCard(full) {
     purpose: full.purpose || '',
     channel: full.channel || 'studio',
     use_count: Number(full.use_count || 0),
+    root_origin_hash: full.root_origin_hash || '',
+    parent_step_id: full.parent_step_id || '',
+    operation: full.operation || '',
+    trajectory: full.trajectory || '',
+    is_cover: Number(full.is_cover || 0),
+    video_mode: full.video_mode || '',
+    source_step_ids: Array.isArray(full.source_step_ids) ? full.source_step_ids : [],
+    in_creation_lib: Number(full.in_creation_lib !== undefined ? full.in_creation_lib : 1),
+    in_material_lib: Number(full.in_material_lib || 0),
     card: true,
     result_images: result ? [result] : [],
-    origin_images: origin ? [origin] : [],
+    origin_images: origins,
   };
 }
 

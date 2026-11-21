@@ -51,7 +51,7 @@ export const STUDIO_SKILLS_REGISTRY = [
  */
 function modeLockReason(mode, key) {
   if (key === 'ratio' || key === 'aspect_ratio') {
-    if (mode === 'first_last_frame') return '首尾帧模式的画幅由两张关键帧决定，已自动锁定；想换画幅请改用「图生视频」或「全能参考」';
+    if (mode === 'first_last_frame') return '首尾帧模式的画幅由两张关键帧决定，已自动锁定；想换画幅请改用「全能参考」';
     if (mode === 'video_edit') return '视频编辑沿用原片画幅，无法单独改比例';
     if (mode === 'video_extend') return '视频续写沿用原片画幅，无法单独改比例';
   }
@@ -664,28 +664,11 @@ export function inferOptimalWorkflowAndParams({
     }
   }
 
-  // 1.2 检查挂载素材属性
+  // 1.2 挂载素材时不擅自跨模态切换板块（除非用户显式复用配方 templateMeta）
+  // 保持用户当前所选模态（chat/image/video/music），只在各模态内部根据有无参考图自适应子模式
   const videoItems = tray.filter(it => detectMediaSemantics(it).isVideo);
   const audioItems = tray.filter(it => detectMediaSemantics(it).isAudio);
   const imageItems = tray.filter(it => !detectMediaSemantics(it).isVideo && !detectMediaSemantics(it).isAudio);
-  const hasVideo = videoItems.length > 0;
-  const hasAudio = audioItems.length > 0;
-
-  if (hasVideo) {
-    if (targetModality !== 'video') {
-      targetModality = 'video';
-      reasons.push('检测到视频参考素材，自动自适应切至视频板块');
-    }
-  } else if (hasAudio) {
-    if (targetModality !== 'music') {
-      targetModality = 'music';
-      reasons.push('检测到音频素材，自动自适应切至配乐板块');
-    }
-  } else if (imageItems.length > 0 && targetModality === 'chat') {
-    // 关键优化：挂载图片时，绝不僵化停留在纯对话框，自动激活图像板块
-    targetModality = 'image';
-    reasons.push('检测到挂载图片素材，自动由纯对话切至图像生成板块');
-  }
 
   // 2. 子模式研判与自适应调度 (Sub-Mode Dispatch)
   let targetGenMode = currentGenMode;
@@ -706,16 +689,13 @@ export function inferOptimalWorkflowAndParams({
   // 图像/视频默认模式：有参考统一使用「全能参考」(视频) 或「图生图」(生图)；无参考使用文生。
   // 首尾帧、交互编辑、扩边等非默认模式只接受用户手动点选，不自动进入。
   if (targetModality === 'video') {
-    const hasRefs = imageItems.length > 0 || videoItems.length > 0;
-    const tplSchemaMode = templateMeta?.params?.schemaMode;
-    if (tplSchemaMode && hasMode(tplSchemaMode)) {
-      targetGenMode = tplSchemaMode;
-    } else if (hasRefs) {
-      if (hasMode('omni_reference')) targetGenMode = 'omni_reference';
-      else if (hasMode('image_to_video')) targetGenMode = 'image_to_video';
-      else if (hasMode('image_reference')) targetGenMode = 'image_reference';
-      else if (hasMode('reference')) targetGenMode = 'reference';
-    } else if (hasMode('text_to_video')) {
+    if (currentGenMode === 'first_last_frame' && hasMode('first_last_frame')) {
+      targetGenMode = 'first_last_frame';
+    } else if (imageItems.length === 0 && currentGenMode === 'text_to_video' && hasMode('text_to_video')) {
+      targetGenMode = 'text_to_video';
+    } else if (hasMode('omni_reference')) {
+      targetGenMode = 'omni_reference';
+    } else if (imageItems.length === 0 && hasMode('text_to_video')) {
       targetGenMode = 'text_to_video';
     }
   } else if (targetModality === 'image') {
@@ -723,7 +703,11 @@ export function inferOptimalWorkflowAndParams({
     if (tplSchemaMode && hasMode(tplSchemaMode)) {
       targetGenMode = tplSchemaMode;
     } else if (imageItems.length > 0) {
-      if (hasMode('image_to_image')) targetGenMode = 'image_to_image';
+      const hasSwatch = tray.some(it => detectMediaSemantics(it).isMaterialSwatch);
+      if (imageItems.length > 1 && (has3D || hasSwatch) && hasMode('image_edit')) {
+        targetGenMode = 'image_edit';
+        reasons.push(has3D ? '识别到 3D 软装家具透视参考，自动激活空间局部编辑模式' : '识别到材质色板贴图参考，自动激活材质重塑模式');
+      } else if (hasMode('image_to_image')) targetGenMode = 'image_to_image';
       else if (hasMode('image_reference')) targetGenMode = 'image_reference';
     } else if (hasMode('text_to_image')) {
       targetGenMode = 'text_to_image';

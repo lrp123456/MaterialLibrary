@@ -1,6 +1,9 @@
 /**
- * 回归：发送前不得改写已经挂上的地址。
- * 没有地址、失效 blob、丢了 derivative 的库图，都不许按 fid 换成另一张图。
+ * 回归：图片裁剪/标绘/扩图落地后的像素地址，发送前不能被素材 fid 重签回原图。
+ *
+ * 看图区确认裁剪后 url 已是 data:，但托盘项仍带着库 fid。
+ * 发送时 reviveRefUrl 若见 fid 就无条件换回 /api/viewer/assets/:fid/image，
+ * 看图区、气泡缩略图和出站 imageUrls 会一起回到原图。
  */
 const assert = require('node:assert');
 const path = require('node:path');
@@ -27,7 +30,7 @@ function deps() {
 }
 
 async function runTests() {
-  const { reviveRefUrl, sameMountedFile, adoptEditedPixels, revertEditedPixels } = await load();
+  const { reviveRefUrl, adoptEditedPixels, revertEditedPixels } = await load();
   const d = deps();
   const cropped = 'data:image/jpeg;base64,CROPPED';
 
@@ -39,85 +42,29 @@ async function runTests() {
 
   assert.strictEqual(
     reviveRefUrl({ fid: 'asset_1', url: '' }, d),
-    '',
-    '没有地址时不按 fid 另找一张图'
+    '/api/viewer/assets/asset_1/image?token=fresh',
+    '没有地址时仍按 fid 重签'
   );
 
-  const mounted = '/api/viewer/assets/asset_1/image?token=stale';
   assert.strictEqual(
-    reviveRefUrl({ fid: 'asset_1', url: mounted }, d),
-    mounted,
-    '已经挂上的库图地址保持不变，不能每次发送都重签'
-  );
-
-  const derivative = '/api/viewer/assets/asset_1/image?derivative=30139&token=stale';
-  assert.strictEqual(
-    reviveRefUrl({ fid: 'asset_1', derivativeId: 30139, url: derivative }, d),
-    derivative,
-    '9:16 衍生地址必须原样保留'
-  );
-
-  const ratio34 = '/api/viewer/assets/asset_1/image?derivative=30140&token=stale';
-  assert.strictEqual(
-    reviveRefUrl({ fid: 'asset_1', derivativeId: 30140, derivativeKind: 'restage_3_4', url: ratio34 }, d),
-    ratio34,
-    '3:4 衍生地址必须原样保留'
-  );
-
-  const origin = '/api/viewer/assets/asset_1/image?raw=1&token=stale';
-  assert.strictEqual(
-    reviveRefUrl({ fid: 'asset_1', derivativeId: '', url: origin }, d),
-    origin,
-    '原图 raw=1 不能被换成不带版本的地址'
-  );
-
-  const bare = '/api/viewer/assets/asset_1/image?token=stale';
-  assert.strictEqual(
-    reviveRefUrl({
-      fid: 'asset_1',
-      derivativeId: 30139,
-      url: bare
-    }, d),
-    bare,
-    '地址没写 derivative 时也不许按 derivativeId 改成另一版'
+    reviveRefUrl({ fid: 'asset_1', url: '/api/viewer/assets/asset_1/image?token=stale' }, d),
+    '/api/viewer/assets/asset_1/image?token=fresh',
+    '库图地址上的过期 token 仍要重签'
   );
 
   assert.strictEqual(
     reviveRefUrl({
       fid: 'asset_1',
-      url: 'http://127.0.0.1:30001/api/viewer/assets/asset_1/image?derivative=30139&token=stale'
+      url: 'http://127.0.0.1:30001/api/viewer/assets/asset_1/image?token=stale'
     }, d),
-    'http://127.0.0.1:30001/api/viewer/assets/asset_1/image?derivative=30139&token=stale',
-    '绝对地址的衍生图也原样保留'
+    '/api/viewer/assets/asset_1/image?token=fresh',
+    '绝对地址的库图同样按 fid 重签'
   );
 
   assert.strictEqual(
     reviveRefUrl({ url: '/api/viewer/assets/asset_1/image?token=stale' }, d),
-    '/api/viewer/assets/asset_1/image?token=stale',
-    '已有 token 的库图不再刷新凭证'
-  );
-
-  assert.strictEqual(
-    reviveRefUrl({ url: '/api/viewer/assets/asset_1/image?derivative=8' }, d),
-    '/api/viewer/assets/asset_1/image?derivative=8',
-    '没有凭证也不补写，避免发送前改地址'
-  );
-
-  assert.strictEqual(
-    sameMountedFile(
-      '/api/viewer/assets/asset_1/image?derivative=8',
-      '/api/viewer/assets/asset_1/image?derivative=8&token=resigned'
-    ),
-    true,
-    '只多了 token 仍是同一份文件'
-  );
-  assert.strictEqual(
-    sameMountedFile(
-      '/api/viewer/assets/asset_1/image?token=stale',
-      '/api/viewer/assets/asset_1/image?token=stale&derivative=30139'
-    ),
-    false,
-    '写回 derivative 是换了一版，和原来的裸地址不是同一份'
+    '/api/viewer/assets/asset_1/image?token=resigned',
+    '没有 fid 的库图地址仍刷新 token'
   );
 
   assert.strictEqual(
@@ -146,14 +93,14 @@ async function runTests() {
 
   assert.strictEqual(
     reviveRefUrl({ url: 'blob:http://local/dead' }, d),
-    'blob:http://local/dead',
-    '失效 blob 保持原地址，不在发送前清掉或替换'
+    '',
+    '失效且没有 fid 的 blob 救不回来'
   );
 
   assert.strictEqual(
     reviveRefUrl({ fid: 'asset_1', url: 'blob:http://local/dead' }, d),
-    'blob:http://local/dead',
-    '失效 blob 也不许按 fid 换成库图'
+    '/api/viewer/assets/asset_1/image?token=fresh',
+    '失效 blob 仍可按 fid 回到库图'
   );
 
   const edited = adoptEditedPixels({

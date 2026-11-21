@@ -273,7 +273,7 @@
                     @click="openPreview(entry.version)"
                   >
                     <img :src="entry.version.url" class="w-full h-full object-contain" :alt="entry.version.label" />
-                    <span v-if="entry.version.derivativeId" class="absolute top-1 left-1 px-1 py-0.5 rounded bg-black/75 text-[9px] font-bold text-sky-300">{{ labelForDerivativeKind(entry.version.derivativeKind) || '衍生' }}</span>
+                    <span v-if="entry.version.derivativeId" class="absolute top-1 left-1 px-1 py-0.5 rounded bg-black/75 text-[9px] font-bold text-sky-300">衍生</span>
                     <span v-if="entry.version.geometry" class="absolute top-1 right-1 px-1 py-0.5 rounded bg-amber-400/95 text-[9px] font-bold text-slate-950">画幅变更</span>
                     <span class="on-media absolute inset-0 flex items-center justify-center bg-black/45 text-[11px] font-bold text-white opacity-0 group-hover/ver:opacity-100 transition-opacity">🔍 查看大图</span>
                   </button>
@@ -345,7 +345,7 @@
           <div class="min-w-0 flex items-center gap-3">
             <span class="text-sm font-bold text-white truncate">{{ previewVersion.label }}</span>
             <span class="text-[11px] text-white opacity-60 font-mono">{{ versionBadge(previewVersion) || '读取尺寸…' }}</span>
-            <span v-if="previewVersion.derivativeId" class="px-1.5 py-0.5 rounded bg-white/15 border border-white/20 text-[9px] font-bold text-sky-300">{{ labelForDerivativeKind(previewVersion.derivativeKind) || '衍生' }}</span>
+            <span v-if="previewVersion.derivativeId" class="px-1.5 py-0.5 rounded bg-white/15 border border-white/20 text-[9px] font-bold text-sky-300">衍生</span>
             <span v-if="previewVersion.geometry" class="px-1.5 py-0.5 rounded bg-amber-400/95 text-[9px] font-bold text-slate-950">画幅变更</span>
           </div>
           <div class="flex items-center gap-2">
@@ -470,6 +470,7 @@ import {
   fetchAssets,
   fetchAssetDetail,
   getAssetImageUrl,
+  getAssetPosterUrl,
   getAssetOriginalUrl,
   getDerivativeImageUrl,
   triggerRestageDerivatives,
@@ -485,7 +486,6 @@ import {
   onDerivativeSlotPrefsChange,
   slotStatusFromDetail,
 } from '@mls/shared-core';
-import { labelForDerivativeKind } from '../utils/ref-version.js';
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -823,6 +823,8 @@ async function loadAssets(targetPage = 1) {
     if (Array.isArray(opts.material_kind)) filterMaterials.value = opts.material_kind.slice(0, 8);
     if (Array.isArray(opts.colors)) filterColors.value = opts.colors.slice(0, 12);
     let mapped = items.map((it) => {
+      const isVideo = (it.kind || it.media_type) === 'video';
+      const isAudio = (it.kind || it.media_type) === 'audio';
       // 覆盖原图后 fid 不变：用 sha 前 10 位做版本参数，缩略图/原图都不会再命中旧缓存
       const cacheBust = String(it.sha256 || '').slice(0, 10);
       return {
@@ -830,11 +832,15 @@ async function loadAssets(targetPage = 1) {
         fid: it.fid,
         mediaToken: it.mediaToken,
         name: it.file_name || it.fileName || it.name || '素材资产',
-        // 选择器网格缩略图走 256px grid 档；确认选择时原图/衍生图由 versionsOf 另签 URL
-        url: getAssetImageUrl(it.fid, it.mediaToken, (it.kind || it.media_type) === 'video' ? '' : 'grid', cacheBust),
+        // 视频走 poster 专用端点，避免尝试取不存在的 image 缩略图；图片缩略图走 256px grid 档
+        url: isVideo
+          ? getAssetPosterUrl(it.fid, it.mediaToken)
+          : isAudio
+            ? ''
+            : getAssetImageUrl(it.fid, it.mediaToken, 'grid', cacheBust),
         cacheBust,
         category: it.category,
-        kind: it.kind || it.media_type || 'image',
+        kind: isVideo ? 'video' : (isAudio ? 'audio' : (it.kind || it.media_type || 'image')),
         library_shelf: it.library_shelf || 'original',
       };
     });
@@ -877,9 +883,11 @@ function versionsOf(item) {
   }
   return buildVersions(item, derivativeCache.value[item.fid], {
     originUrl: (it) =>
-      it.fid && !['video', 'audio'].includes(it.kind)
-        ? getAssetOriginalUrl(it.fid, it.mediaToken, it.cacheBust)
-        : (it.url || ''),
+      it.fid && (it.kind === 'video' || it.media_type === 'video')
+        ? getAssetPosterUrl(it.fid, it.mediaToken)
+        : (it.fid && !['video', 'audio'].includes(it.kind)
+          ? getAssetOriginalUrl(it.fid, it.mediaToken, it.cacheBust)
+          : (it.url || '')),
     derivativeUrl: (it, derivativeId) => getDerivativeImageUrl(it.fid, derivativeId, it.mediaToken),
   });
 }
