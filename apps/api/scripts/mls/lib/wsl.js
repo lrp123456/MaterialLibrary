@@ -16,13 +16,21 @@ const DISTRO = process.env.ML_WSL_DISTRO || 'smu';
 const WSL_EXE = process.env.WSL_EXE || 'wsl.exe';
 const PROD_DATA_UNC =
   process.env.ML_PROD_DATA_DIR_UNC || `\\\\wsl.localhost\\${DISTRO}\\home\\lrp\\.dsh-material-library`;
+const TEST_DATA_UNC =
+  process.env.ML_TEST_DATA_DIR_UNC || `\\\\wsl.localhost\\${DISTRO}\\home\\lrp\\.dsh-material-library-test`;
 
-/** 正式端可 tail 的日志（UNC 相对路径） */
+/** 正式端与测试端可 tail 的日志（UNC 相对路径） */
 const PROD_LOGS = {
   'prod-server': 'server.log',
   'prod-web': 'webpro.log',
   'prod-watchdog': 'watchdog.log',
   'prod-prewarm': path.join('logs', 'prewarm.log'),
+};
+const TEST_LOGS = {
+  'test-server': 'server.log',
+  'test-web': 'webpro.log',
+  'test-watchdog': 'watchdog.log',
+  'test-prewarm': path.join('logs', 'prewarm.log'),
 };
 
 let _runningState = null;
@@ -143,6 +151,69 @@ function toWslPath(winPath) {
   }).trim();
 }
 
+function testSnapshot() {
+  if (!distroRunning()) {
+    return { distro: DISTRO, reachable: false, running: false, pids: {}, stopFlag: false, dataUnc: TEST_DATA_UNC };
+  }
+  const readTestPidUnc = (name) => {
+    try {
+      const raw = fs.readFileSync(path.join(TEST_DATA_UNC, `${name}.pid`), 'utf8');
+      const pid = Number(raw.trim());
+      return Number.isFinite(pid) && pid > 0 ? pid : 0;
+    } catch (_) {
+      return 0;
+    }
+  };
+  const pids = {
+    watchdog: readTestPidUnc('watchdog'),
+    server: readTestPidUnc('server'),
+    webpro: readTestPidUnc('webpro'),
+  };
+  let stopFlag = false;
+  try {
+    stopFlag = fs.existsSync(path.join(TEST_DATA_UNC, 'watchdog.stop'));
+  } catch (_) {}
+  return {
+    distro: DISTRO,
+    reachable: true,
+    running: Boolean(pids.watchdog || pids.server || pids.webpro),
+    pids,
+    stopFlag,
+    dataUnc: TEST_DATA_UNC,
+  };
+}
+
+/**
+ * 测试端变更：start / stop / restart，委托 WSL 里的 start.sh（在 MaterialLibrary-test 工作树下执行）。
+ */
+function testControl(action, { winProject } = {}) {
+  if (!['start', 'stop', 'restart', 'status'].includes(action)) {
+    throw new Error(`不支持的测试端动作：${action}`);
+  }
+  const project = winProject || path.resolve(__dirname, '../../../../../../MaterialLibrary-test/apps/api');
+  const wslProject = toWslPath(project);
+  execFileSync(
+    WSL_EXE,
+    ['-d', DISTRO, '-e', 'bash', '-lc', `ML_PORT=30000 WEB_PRO_PORT=30003 ML_DATA_DIR=/home/lrp/.dsh-material-library-test bash '${wslProject}/start.sh' ${action}`],
+    { stdio: 'inherit', timeout: action === 'status' ? 30000 : 180000, windowsHide: true }
+  );
+  return { ok: true, via: `wsl ${DISTRO} test start.sh ${action}` };
+}
+
+/** 读测试端日志尾部 N 行；不可达时返回 ok:false */
+function tailTestLog(name, lines = 200) {
+  const rel = TEST_LOGS[name];
+  if (!rel) return { ok: false, error: `未知日志目标：${name}` };
+  if (!distroRunning()) return { ok: false, error: `WSL/${DISTRO} 未运行`, unreachable: true };
+  try {
+    const text = fs.readFileSync(path.join(TEST_DATA_UNC, rel), 'utf8');
+    const arr = text.split(/\r?\n/);
+    return { ok: true, path: path.join(TEST_DATA_UNC, rel), lines: arr.slice(-(lines + 1)) };
+  } catch (_) {
+    return { ok: false, error: `日志不存在：${rel}`, unreachable: true };
+  }
+}
+
 /**
  * 正式端变更：start / stop / restart，一律委托 WSL 里的 start.sh。
  * stdio 继承，让用户直接看到 start.sh 输出。
@@ -188,13 +259,18 @@ module.exports = {
   DISTRO,
   WSL_EXE,
   PROD_DATA_UNC,
+  TEST_DATA_UNC,
   PROD_LOGS,
+  TEST_LOGS,
   distroRunning,
   prodSnapshot,
+  testSnapshot,
   tailProdLog,
+  tailTestLog,
   prodLogSize,
   readProdLogBytes,
   toWslPath,
   prodControl,
+  testControl,
   windowsShadowPlane,
 };

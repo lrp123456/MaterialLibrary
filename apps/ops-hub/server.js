@@ -100,6 +100,24 @@ const SERVICES = [
     delegate: 'prod',
   },
   {
+    id: 'test-server',
+    name: '素材库服务端 (测试)',
+    desc: 'WSL/smu · MaterialLibrary-test · 与 30003 网关整组启停',
+    port: 30000,
+    url: 'http://127.0.0.1:30000',
+    kind: 'delegate',
+    delegate: 'test',
+  },
+  {
+    id: 'test-web',
+    name: 'Web 网关 (测试)',
+    desc: 'WSL/smu watchdog 第二子进程 · web-pro/server.cjs 30003 · 与 30000 整组启停',
+    port: 30003,
+    url: 'http://127.0.0.1:30003',
+    kind: 'delegate',
+    delegate: 'test',
+  },
+  {
     id: 'clip-editor',
     name: '剪辑编辑器 (OpenCut)',
     desc: 'fork 自 OpenCut Classic · 内部端口 3010，经 30002 的 /editor 反代访问',
@@ -661,15 +679,24 @@ const server = http.createServer(async (req, res) => {
       }
       let r;
       if (svc.kind === 'delegate') {
-        // 正式组（30001/30002）：只经 WSL start.sh 整组操作，任务化执行。
         if (!['start', 'stop', 'restart'].includes(act)) {
           return json(res, 400, { ok: false, error: '委托服务仅支持 start/stop/restart' });
         }
-        if (act === 'start' && (await portOpen(30001)) && (await portOpen(30002))) {
-          r = { ok: true, note: '30001/30002 均已在监听，跳过（如需重启请用「重启」）' };
-        } else {
-          const job = spawnMlsJob('prod-' + act, [act, 'prod']);
-          r = { ok: true, jobId: job.id, note: `已提交 WSL 整组${act}任务，执行结果见任务输出` };
+        const target = svc.delegate || 'prod';
+        if (target === 'prod') {
+          if (act === 'start' && (await portOpen(30001)) && (await portOpen(30002))) {
+            r = { ok: true, note: '30001/30002 均已在监听，跳过（如需重启请用「重启」）' };
+          } else {
+            const job = spawnMlsJob('prod-' + act, [act, 'prod']);
+            r = { ok: true, jobId: job.id, note: `已提交 WSL 正式端整组${act}任务，执行结果见任务输出` };
+          }
+        } else if (target === 'test') {
+          if (act === 'start' && (await portOpen(30000)) && (await portOpen(30003))) {
+            r = { ok: true, note: '30000/30003 均已在监听，跳过（如需重启请用「重启」）' };
+          } else {
+            const job = spawnMlsJob('test-' + act, [act, 'test']);
+            r = { ok: true, jobId: job.id, note: `已提交 WSL 测试端整组${act}任务，执行结果见任务输出` };
+          }
         }
         const services = await snapshot();
         return json(res, 200, { ok: true, result: r, services });

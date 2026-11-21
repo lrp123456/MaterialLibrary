@@ -17,9 +17,9 @@ const API_TARGET = process.env.API_TARGET || 'http://127.0.0.1:30001';
 const EDITOR_TARGET = process.env.EDITOR_TARGET || 'http://127.0.0.1:3010';
 const MEDIA_SECRET = process.env.MEDIA_GATEWAY_SECRET || 'mls_media_gateway_secret_v1';
 const DATA_DIR = process.env.DATA_DIR || path.join(os.homedir(), '.dsh-material-library');
-// 通道标记：正式 30002 托管 dist；test worktree 通道在 30003 借 APP_CHANNEL=gray
-// 标记做只读联调（遗留同树灰测通道 2026-11-03 退役，见 archive/gray-retired-20261103/）
-const CHANNEL = String(process.env.APP_CHANNEL || '').toLowerCase() === 'gray' ? 'gray' : 'prod';
+// 通道标记：正式 30002 托管 dist；test worktree 通道在 30003 标记 test
+const rawCh = String(process.env.APP_CHANNEL || '').toLowerCase();
+const CHANNEL = (rawCh === 'test' || rawCh === 'gray') ? rawCh : 'prod';
 const DIST_DIR = path.resolve(__dirname, process.env.WEB_PRO_DIST || 'dist');
 
 // 剪辑器依赖 OPFS 与 WebCodecs，二者在非安全上下文（局域网/公网 HTTP）会被浏览器禁用。

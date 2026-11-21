@@ -272,13 +272,15 @@ async function cmdLifecycle(action, target) {
   }
 
   if (target === 'test') {
-    const opts = {
-      skipBuild: action === 'start' ? has('--no-build') : !has('--build'),
-      takeover: has('--takeover'),
-    };
-    if (action === 'start') return await channels.startManaged(target, opts);
-    if (action === 'stop') return channels.stopManaged(target);
-    if (action === 'restart') return await channels.restartManaged(target, opts);
+    console.log(`[mls] ${action} 测试端 → 委托 WSL/${wsl.DISTRO} start.sh（MaterialLibrary-test）`);
+    wsl.testControl(action);
+    if (action !== 'stop') {
+      console.log('[mls] 等待 30000/30003 就绪…');
+      const api = await bc.waitPort(30000, 90000);
+      const web = await bc.waitPort(30003, 90000);
+      console.log(`[mls] 30000 ${api ? 'UP' : 'TIMEOUT'} · 30003 ${web ? 'UP' : 'TIMEOUT'}`);
+    }
+    return;
   }
 
   throw new Error(
