@@ -1,61 +1,36 @@
 /**
- * 发送前引用地址自愈。
+ * 发送前不再改写引用地址。
  *
- * 裁剪、标绘合成、扩图落地后的 url 是一份新像素（data: 或仍活着的 blob:）。
- * 托盘项上的素材 fid 只代表库里的原图。见 fid 就重签会在发送时把裁剪图换回原图。
- *
- * 只在这两种情况下按 fid 重签：
- *   - 当前没有地址
- *   - 当前地址本身就是这张库图（/api/viewer/assets/:fid/image，token 过期）
- * 失效的 blob 也回到库图。没有 fid 的库图地址仍走 resignUrl 刷新 token。
+ * 看图区用的就是 ref.url。原图、9:16、3:4、裁剪结果挂上之后是什么，上传就是什么。
+ * 以前见 fid 会重签成不带版本的库图，或在地址丢了 derivative 时写回另一版。
+ * 那一步会让屏幕和上传变成两张图，所以这里原样返回，什么都不补、什么都不换。
+ * 地址本身不可用时由发送流程停下来告诉用户，而不是换成别的图继续发。
  */
 
-function pathnameOf(url) {
+function parseUrl(url) {
   try {
-    return new URL(url, 'http://local.invalid').pathname;
+    return new URL(url, 'http://local.invalid');
   } catch {
-    return '';
+    return null;
   }
 }
 
 export function isLibraryAssetUrl(url) {
-  const path = pathnameOf(String(url || ''));
-  return /^\/api\/(?:viewer\/)?assets\/[^/]+\/image\/?$/.test(path);
+  return /^\/api\/(?:viewer\/)?assets\/[^/]+\/image\/?$/.test(parseUrl(url)?.pathname || '');
 }
 
-function isApiUrl(url) {
-  return url.startsWith('/api/') || /^https?:\/\/[^/]+\/api\//i.test(url);
+/** 忽略登录凭证，只比「哪一个文件」。token 不同不算换了一张图。 */
+export function sameMountedFile(a, b) {
+  const left = parseUrl(a);
+  const right = parseUrl(b);
+  if (!left || !right) return String(a || '') === String(b || '');
+  if (left.pathname !== right.pathname) return false;
+  return left.searchParams.get('derivative') === right.searchParams.get('derivative')
+    && left.searchParams.get('raw') === right.searchParams.get('raw');
 }
 
-export function reviveRefUrl(ref, { signAsset, resignUrl, blobAlive } = {}) {
-  const fid = String(ref?.fid || '');
-  const mediaToken = ref?.mediaToken || '';
-  const url = String(ref?.url || '');
-
-  if (url.startsWith('data:')) return url;
-
-  if (url.startsWith('blob:')) {
-    if (typeof blobAlive === 'function' && blobAlive(url)) return url;
-    if (fid && typeof signAsset === 'function') {
-      const fresh = signAsset(fid, mediaToken);
-      if (fresh) return fresh;
-    }
-    return '';
-  }
-
-  if (fid && (!url || isLibraryAssetUrl(url)) && typeof signAsset === 'function') {
-    const fresh = signAsset(fid, mediaToken);
-    if (fresh) return fresh;
-  }
-
-  if (!url) return '';
-  if (isApiUrl(url)) {
-    if (typeof resignUrl === 'function') return resignUrl(url) || '';
-    return url;
-  }
-  if (/^https?:/i.test(url)) return url;
-  if (url.startsWith('/')) return url;
-  return '';
+export function reviveRefUrl(ref) {
+  return String(ref?.url || '');
 }
 
 /**

@@ -70,6 +70,7 @@ const MANIFEST = [
   ['unit', 'runtime-log.test.js'],
   ['unit', 'asset-replace-caches.test.js'],
   ['unit', 'revive-ref-url.test.js'],
+  ['unit', 'ref-version.test.js'],
   ['unit', 'vip-error-format.test.js'],
   ['unit', 'gen-job-timing.test.js'],
   ['unit', 'chat-playback-cache.test.mjs'],

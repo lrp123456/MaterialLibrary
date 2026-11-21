@@ -33,6 +33,27 @@ function ok(title) {
   assert.strictEqual(screened.result.imageUrl, 'data:image/jpeg;base64,123456');
   assert.strictEqual(screened.result.requestSnapshot, undefined);
   ok('screenMessage 保留 data: imageUrl 不被误删');
+
+  const withRef = screenMessage({
+    id: 'msg_ref',
+    role: 'user',
+    params: {
+      refs: [{
+        fid: 'gen_1',
+        url: '/api/viewer/assets/gen_1/image?derivative=30181',
+        derivativeId: 30181,
+        derivativeKind: 'restage_3_4',
+        versionLabel: '3:4',
+        name: '图2',
+        kind: 'image',
+        tag: '@图2',
+      }],
+    },
+  });
+  assert.strictEqual(withRef.params.refs[0].derivativeKind, 'restage_3_4');
+  assert.strictEqual(withRef.params.refs[0].versionLabel, '3:4');
+  assert.strictEqual(withRef.params.refs[0].derivativeId, 30181);
+  ok('screenMessage 保留衍生版本种类，不退成笼统衍生');
 }
 
 // 2. 测试消息读取与游标翻页

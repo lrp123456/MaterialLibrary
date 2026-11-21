@@ -13,6 +13,9 @@ function lightRef(item) {
     name: item.name || '',
     kind: item.kind || '',
     tag: item.tag || '',
+    derivativeId: item.derivativeId || '',
+    derivativeKind: item.derivativeKind || '',
+    versionLabel: item.versionLabel || '',
   };
 }
 
@@ -73,4 +76,29 @@ function screenMessage(row) {
   };
 }
 
-module.exports = { screenMessage };
+function derivativeIdOf(ref) {
+  if (!ref || typeof ref !== 'object') return '';
+  if (ref.derivativeId) return String(ref.derivativeId);
+  const match = String(ref.url || '').match(/[?&]derivative=(\d+)/);
+  return match ? match[1] : '';
+}
+
+/** 地址里已经写了 derivative=id 时，把库里的种类补回引用。这是读这一份文件的种类，不是猜主衍生。 */
+function enrichRefVersions(db, refs) {
+  if (!db || !Array.isArray(refs)) return refs;
+  return refs.map((ref) => {
+    if (!ref || typeof ref !== 'object' || ref.derivativeKind) return ref;
+    const id = derivativeIdOf(ref);
+    if (!id) return ref;
+    let row = null;
+    try {
+      row = db.prepare('SELECT kind FROM derivatives WHERE id=?').get(Number(id));
+    } catch (_) {
+      return ref;
+    }
+    if (!row?.kind) return ref;
+    return { ...ref, derivativeId: Number(id), derivativeKind: row.kind };
+  });
+}
+
+module.exports = { screenMessage, enrichRefVersions };

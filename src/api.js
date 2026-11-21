@@ -4466,7 +4466,8 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
       // 瘦身脱敏投影：剔除巨型 Base64 wireframeUrl 与调试快照
       if (params && typeof params === 'object') {
         if (Array.isArray(params.refs)) {
-          params.refs = params.refs.map((r) => {
+          const { enrichRefVersions } = require('./chat-screen');
+          params.refs = enrichRefVersions(db, params.refs).map((r) => {
             if (!r || typeof r !== 'object') return r;
             if (r.wireframeUrl && String(r.wireframeUrl).startsWith('data:image/')) {
               const { wireframeUrl, ...rest } = r;
@@ -10249,15 +10250,24 @@ module.exports = {
         } catch (_) {}
       }
 
+      const cancelStatus = Number(cancellationAudit?.cancelHttpStatus || 0);
+      const cancelCode = String(cancellationAudit?.cancelResponseData?.code || '');
+      const cancelSent = Boolean(cancellationAudit?.cancelAttempted) && cancelStatus > 0;
+      const vendorRefusedRunning = cancelSent && (cancelStatus === 400 || cancelCode === 'UnsupportedOperation');
+      const hasVideo = Boolean(vendorVideoUrl) || vendorStatus === 'SUCCEEDED';
       let auditSummary = cancellationAudit?.auditSummary || '该任务已手动取消。';
-      if (cloudContinued || vendorStatus === 'SUCCEEDED') {
-        auditSummary = '⚠️ 云端在本地取消后继续生成了视频（当时本地未向服务商成功发送取消请求，云端跑完全部算力并生成了视频）。';
-      } else if (vendorStatus === 'CANCELLED' || cancellationAudit?.realCloudCancelled) {
-        auditSummary = '✅ 云端已确认真实取消（CANCELLED）：向服务商发送了取消请求并在排队阶段成功截断，云端未继续解算，未产生多余资源消耗。';
+      if (vendorStatus === 'CANCELLED' || cancellationAudit?.realCloudCancelled) {
+        auditSummary = '✅ 云端已确认真实取消（CANCELLED）：取消请求在排队阶段生效，云端未继续解算。';
+      } else if (vendorRefusedRunning) {
+        auditSummary = hasVideo
+          ? '⚠️ 取消请求已送达服务商，但任务当时已是 RUNNING。官方只允许取消 PENDING，所以云端没有停，并已生成视频。'
+          : '⚠️ 取消请求已送达服务商（HTTP 400 UnsupportedOperation）。任务当时已是 RUNNING，官方只允许取消 PENDING，所以云端没有停。这次查询还没有视频地址。';
+      } else if (hasVideo) {
+        auditSummary = '⚠️ 云端在本地取消后仍生成了视频。';
       } else if (vendorStatus === 'FAILED') {
         auditSummary = '❌ 云端任务失败（FAILED）：未生成视频。';
-      } else if (vTaskId) {
-        auditSummary = `云端任务号: ${vTaskId}，已执行前端/本地取消。`;
+      } else if (vTaskId && !cancelSent) {
+        auditSummary = `云端任务号: ${vTaskId}。这次没有拿到服务商的取消回执。`;
       }
 
       cancellationAudit = {
@@ -10265,7 +10275,7 @@ module.exports = {
         vendorTaskId: vTaskId,
         vendorStatus,
         cloudContinued,
-        videoGenerated: Boolean(cloudContinued || vendorVideoUrl),
+        videoGenerated: hasVideo,
         vendorVideoUrl,
         auditSummary,
         rawVendorData

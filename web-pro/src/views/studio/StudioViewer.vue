@@ -345,6 +345,7 @@
               :alt="`图${idx + 1}`"
               @load="onImgLoad($event, idx)"
             />
+            <span class="absolute top-2 left-2 z-30 px-1.5 py-0.5 rounded bg-black/75 text-white text-[10px] font-bold pointer-events-none">{{ versionBadge(img) }}</span>
 
             <!-- 多边形矢量图层 (SVG) -->
             <svg
@@ -595,6 +596,7 @@
               :alt="`图${idx + 1}`"
               @load="onImgLoad($event, idx)"
             />
+            <span class="absolute top-2 left-2 z-30 px-1.5 py-0.5 rounded bg-black/75 text-white text-[10px] font-bold pointer-events-none">{{ versionBadge(img) }}</span>
             <!-- 多边形矢量图层 (SVG) -->
             <svg
               v-if="hasSvgAnnotations(img) && isRegionsVisible(idx)"
@@ -809,6 +811,7 @@
               :alt="`图${idx + 1}`"
               @load="onImgLoad($event, idx)"
             />
+            <span class="absolute top-2 left-2 z-30 px-1.5 py-0.5 rounded bg-black/75 text-white text-[10px] font-bold pointer-events-none">{{ versionBadge(img) }}</span>
             <!-- 多边形矢量图层 (SVG) -->
             <svg
               v-if="hasSvgAnnotations(img) && isRegionsVisible(idx)"
@@ -974,6 +977,7 @@
 <script setup>
 import { computed, reactive, ref } from 'vue';
 import StudioIcon from '../../components/StudioIcon.vue';
+import { versionBadge } from '../../utils/ref-version.js';
 
 const props = defineProps({
   images: { type: Array, default: () => [] },
@@ -1385,7 +1389,7 @@ function resolveViewerImageUrl(img) {
   if (typeof img === 'string') {
     raw = img;
   } else if (typeof img === 'object') {
-    raw = img.url || img.imgUrl || img.imageUrl || img.previewUrl || img.thumbUrl || img.displayUrl || img.fullUrl || img.path || '';
+    raw = img.url || '';
   }
   raw = String(raw || '').trim();
   if (!raw || raw === 'undefined' || raw === 'null') return '';

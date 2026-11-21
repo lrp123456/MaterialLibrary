@@ -409,7 +409,8 @@
                       class="block cursor-zoom-in"
                       @click="openMediaPreview(item)"
                     >
-                      <img v-if="mediaKind(item) === 'image'" :src="attachmentPreviewSrc(item)" :alt="item.name || '图片'" class="h-16 w-16 object-cover" loading="lazy" decoding="async" />
+                      <img v-if="mediaKind(item) === 'image'" :src="attachmentPreviewSrc(item)" :alt="item.name || '图片'" class="h-16 w-16 object-contain bg-black/30" loading="lazy" decoding="async" />
+                      <span v-if="mediaKind(item) === 'image'" class="absolute top-0 left-0 px-1 py-px bg-black/80 text-white text-[8px] font-bold leading-tight">{{ versionBadge(item) }}</span>
                       <span v-else-if="mediaKind(item) === 'video'" class="relative flex h-16 w-24 items-center justify-center bg-black/50">
                         <img v-if="attachmentPosterSrc(item)" :src="attachmentPosterSrc(item)" alt="" class="h-16 w-24 object-cover" loading="lazy" />
                         <span class="absolute text-white text-xs">▶</span>
@@ -1087,7 +1088,7 @@
                   @click="selectAtMention(item, idx)"
                   class="w-full px-2.5 py-1.5 rounded-lg hover:bg-studio-800 cursor-pointer text-xs text-slate-200 flex items-center space-x-2.5 transition-colors text-left"
                 >
-                  <img :src="item.thumbUrl || item.url" class="w-8 h-8 rounded object-cover border border-studio-700 shrink-0" />
+                  <img :src="authedMediaUrl(item.url)" class="w-8 h-8 rounded object-contain bg-studio-950 border border-studio-700 shrink-0" />
                   <div class="flex-1 min-w-0">
                     <div class="font-bold text-studio-cyan font-mono flex items-center justify-between">
                       <span>图{{ idx + 1 }} (整图)</span>
@@ -3128,7 +3129,8 @@ import StudioIcon from '../../components/StudioIcon.vue';
 import { onTaskUpdate, onAssetChange } from '../../service/sse.js';
 import { bindOverlays } from '../../service/overlay-stack.js';
 import { resolveParams, buildSessionSnapshot, snapshotFromMessage } from '../../utils/studio-params.js';
-import { reviveRefUrl as decideReviveRefUrl, adoptEditedPixels, revertEditedPixels } from '../../utils/revive-ref-url.js';
+import { adoptEditedPixels, revertEditedPixels } from '../../utils/revive-ref-url.js';
+import { hasExplicitVersion, labelForDerivativeKind, versionBadge } from '../../utils/ref-version.js';
 import DynamicModelParamBar from '../../components/DynamicModelParamBar.vue';
 import AssetPickerModal from '../../components/AssetPickerModal.vue';
 import StudioViewer from './StudioViewer.vue';
@@ -3610,6 +3612,33 @@ function modelNeedsWireframe(item, modelKey) {
   return false;
 }
 
+/** 线框要发给模型时，先换成看图区里的那张，这一次不发送。 */
+async function promoteWireframesOntoTray(modelKey) {
+  let changed = 0;
+  for (const item of referenceTray.value) {
+    if (!item || mediaKind(item) !== 'image') continue;
+    if (item.versionLabel === '线框' || item.isWireframe) continue;
+    if (!modelNeedsWireframe(item, modelKey)) continue;
+    let nextUrl = item.wireframeUrl || '';
+    if (!nextUrl) {
+      try {
+        nextUrl = await createWireframeOverlayImage(item.url, item.regions);
+      } catch (_) {
+        nextUrl = '';
+      }
+    }
+    if (!nextUrl || nextUrl === item.url) continue;
+    if (!item.originalUrl) item.originalUrl = item.url;
+    item.url = nextUrl;
+    item.thumbUrl = nextUrl;
+    item.wireframeUrl = nextUrl;
+    item.versionLabel = '线框';
+    item.isWireframe = true;
+    changed += 1;
+  }
+  return changed;
+}
+
 async function resolveDeliveryImageForModel(item, modelKey) {
   if (!item) return { url: '', isWireframe: false };
   const needsVisual = modelNeedsWireframe(item, modelKey);
@@ -3654,19 +3683,10 @@ async function handlePreviewRequest() {
       return u;
     };
 
-    const deliveryTray = await Promise.all(currentTray.map(async (it) => {
-      const resolved = await resolveDeliveryImageForModel(it, currentModel);
-      return {
-        ...it,
-        deliveryUrl: resolved.url,
-        isWireframe: resolved.isWireframe
-      };
-    }));
-
     const imageItems = [];
     const seenUrls = new Set();
-    deliveryTray.forEach((it, idx) => {
-      const u = it.deliveryUrl || it.url;
+    currentTray.forEach((it) => {
+      const u = it.url;
       if (!u || seenUrls.has(u)) return;
       seenUrls.add(u);
       const is3d = Boolean(it.isRefObject || it.origin === '3d_snapshot');
@@ -3680,26 +3700,6 @@ async function handlePreviewRequest() {
         relatedImageIndex: it.relatedImageIndex ?? 0
       });
     });
-
-    // 补充尚未直接展平进 referenceTray 的 silentRefs (如 3D 快照等)
-    for (const it of currentTray) {
-      if (it && Array.isArray(it.silentRefs)) {
-        for (const sr of it.silentRefs) {
-          if (sr?.url && !seenUrls.has(sr.url)) {
-            seenUrls.add(sr.url);
-            imageItems.push({
-              tag: sr.tag || `@图${imageItems.length + 1}`,
-              source: '3d_snapshot',
-              url: sr.url,
-              name: sr.name || '3D模型透视参考',
-              isWireframe: false,
-              isRefObject: true,
-              relatedImageIndex: sr.sourceImageIndex ?? 0
-            });
-          }
-        }
-      }
-    }
 
     const imageUrls = imageItems.map(it => it.url);
 
@@ -4361,7 +4361,8 @@ function onEditApplyRegionsToImage({ imageIndex, regions, recipe, silentRefs, an
           origin: ref.origin || '3d_snapshot',
           isRefObject: true,
           relatedImageIndex: imageIndex,
-          sourceRegionId: ref.targetRegionId || ref.sourceRegionId
+          sourceRegionId: ref.targetRegionId || ref.sourceRegionId,
+          versionLabel: '生成结果'
         });
       }
     }
@@ -4408,6 +4409,7 @@ function onEditApplyOutpaintedImage({ imageIndex, url }) {
   if (!target || !url) return;
   // 扩图是新像素。留下 fid 会在发送时被重签回库原图。
   Object.assign(target, adoptEditedPixels(target, url, { outpainted: true }));
+  target.versionLabel = '生成结果';
 }
 
 // 裁剪/标绘 Base64 异步转存为持久化 URL
@@ -4461,6 +4463,7 @@ async function onEditApplyCustomImage({ imageIndex, dataUrl }) {
   const originalAssetFid = target.fid;
   // 裁剪/标绘合成是新像素。thumbUrl 不更新的话，输入区缩略图仍显示原图。
   Object.assign(target, adoptEditedPixels(target, dataUrl, { annotated: true }));
+  target.versionLabel = '裁剪';
   target.isCustomEdited = true;
   modeUserLocked.value = false;
   syncGenModeWithReferenceTray({ forceDefault: true });
@@ -5364,10 +5367,13 @@ let recentPushQueue = [];
 const recentBackfilled = new Set();
 let recentPoolSid = '';
 
-/** 服务端存的是去掉 token 的稳定路径，展示/挂载前要重签一次，否则必然 401 */
+/** 服务端存的是去掉 token 的稳定路径，展示前只重签凭证。derivative / raw 必须留着，否则最近使用会把 9:16 显示成另一张图。 */
 function refineRecentItem(item) {
   const fid = item?.fid || '';
-  const url = fid ? getAssetImageUrl(fid) : resignAssetUrl(item?.url || '');
+  const stored = String(item?.url || '');
+  const url = (stored.startsWith('/api/') || /^https?:\/\/[^/]+\/api\//i.test(stored))
+    ? resignAssetUrl(stored)
+    : (fid ? getAssetImageUrl(fid) : resignAssetUrl(stored));
   return {
     ...item,
     fid,
@@ -6538,9 +6544,8 @@ function templateOriginCoverSrc(tpl) {
 }
 
 function attachmentPreviewSrc(item) {
-  if (!item) return '';
-  if (item.fid && !String(item.url || '').includes('/api/cache/temp/')) return getAssetImageUrl(item.fid, '', 'grid');
-  return withSmallMediaUrl(item.url);
+  if (!item?.url) return '';
+  return authedMediaUrl(item.url);
 }
 
 function attachmentPosterSrc(item) {
@@ -7660,7 +7665,7 @@ function normalizeTrayAsset(item, idx = 0) {
   const num = idx + 1;
   const rawUrl = typeof item === 'string'
     ? item
-    : (item.url || item.imgUrl || item.imageUrl || item.previewUrl || item.thumbUrl || item.displayUrl || item.fullUrl || item.path || '');
+    : (item.url || item.imgUrl || item.imageUrl || '');
   if (!rawUrl) return null;
   const url = authedMediaUrl(rawUrl);
 
@@ -8054,50 +8059,19 @@ function syncTrayFromEditor() {
   });
 }
 
-/** 给一个引用地址做"能不能用"的判定并尽量换新凭证；返回 '' 表示彻底救不回来。 */
-function reviveRefUrl(ref) {
-  return decideReviveRefUrl(ref, {
-    signAsset: (fid, mediaToken) => getAssetImageUrl(fid, mediaToken),
-    resignUrl: (url) => resignAssetUrl(url),
-    blobAlive: (url) => localFileByUrl.has(url)
-  });
-}
-
 /**
- * 发送前的引用自愈（不阻断发送）。
- *
- * 素材本身没坏，坏的是「编辑器胶囊」和「referenceTray」这两份状态对不上：
- * 胶囊有 fid 却没有 URL、陈旧 token 的 /api 地址、切板块后失效的 blob、编号指向不存在的槽位……
- * 这里先按 fid/凭证把能救的都救回来，再把确实没有地址的槽位摘掉，
- * 最后按托盘顺序重排 @图N，保证「胶囊编号 = 托盘下标 = 出站图片顺序」三者永远一致。
+ * 发送前对齐胶囊编号。不改任何一张图的地址。
+ * 原图、9:16、3:4、裁剪结果挂上是什么，就按什么上传。
  */
 function repairReferenceChips() {
   const editor = richEditorRef.value;
-  let repaired = 0;
+  const repaired = 0;
   let downgraded = 0;
 
-  // 1. 托盘规整化（确保每个元素都有标准的 url, name, tag）
   referenceTray.value = normalizeTrayAssets(referenceTray.value);
-
-  // 2. 托盘地址有效性体检：能换新签发地址尽量换新，换不了新也严格保留原 url，绝不误杀！
-  const kept = [];
   for (const asset of referenceTray.value) {
-    if (!asset || !asset.url) continue;
-    // 已裁剪/标绘/自定义的像素产物，严禁重新自愈回原始素材库图片
-    if (asset.annotated || asset.isCustomEdited || !asset.fid) {
-      asset.resolved = true;
-      kept.push(asset);
-      continue;
-    }
-    const fixed = reviveRefUrl({ fid: asset.fid, url: asset.url, mediaToken: asset.mediaToken }) || asset.url;
-    if (fixed && fixed !== asset.url) {
-      asset.url = fixed;
-      repaired += 1;
-    }
-    asset.resolved = true;
-    kept.push(asset);
+    if (asset) asset.resolved = true;
   }
-  referenceTray.value = kept;
 
   // 3. 严格按托盘下标重排 @图1, @图2... 并清洗名称
   referenceTray.value.forEach((asset, idx) => {
@@ -10375,6 +10349,7 @@ function onAssetPickerConfirm(versions) {
       isRefObject: is3D,
       derivativeId: version.derivativeId || '',
       derivativeKind: version.derivativeKind || '',
+      versionLabel: labelForDerivativeKind(version.derivativeKind) || (String(version.url || '').includes('raw=1') ? '原图' : ''),
       width: w,
       height: h,
       naturalWidth: w,
@@ -10401,7 +10376,7 @@ function onAssetPickerUpload(file) {
   localFileByUrl.set(url, file);
   const kind = file.type.startsWith('video/') ? 'video' : (file.type.startsWith('audio/') ? 'audio' : (file.name.match(/\.(glb|gltf|obj)$/i) ? '3d' : 'image'));
   const is3D = Boolean(file.name.match(/\.(glb|gltf|obj)$/i));
-  const asset = { name, url, weight: 85, tag: `@图${idx}`, kind, origin: is3D ? '3d_snapshot' : 'upload', isRefObject: is3D, resolved: true };
+  const asset = { name, url, weight: 85, tag: `@图${idx}`, kind, origin: is3D ? '3d_snapshot' : 'upload', isRefObject: is3D, resolved: true, versionLabel: kind === 'image' ? '原图' : '' };
   referenceTray.value.push(asset);
   // 用户需求：不自动在对话框新增胶囊
   showAssetSelector.value = false;
@@ -10719,11 +10694,9 @@ async function sendMessage() {
   syncTrayFromEditor();
   const currentMod = activeModality.value;
 
-  // 引用自愈优先于校验：素材本身没坏，坏的是「胶囊」和「托盘」两份状态的对齐关系。
-  // 先按 fid / 凭证把能救的都救回来，救不回来的摘掉并降级成纯文本，绝不因此拦下发不出去。
-  let refRepair = { repaired: 0, downgraded: 0 };
+  // 只对齐胶囊编号，不改图片地址。
   if (currentMod !== 'chat') {
-    refRepair = repairReferenceChips();
+    repairReferenceChips();
   }
   // 修复会改写编辑器内容（失效胶囊变纯文本），提示词必须在修复之后再取
   const rawContent = getFullPromptText();
@@ -10802,11 +10775,35 @@ async function sendMessage() {
   }
   composerError.value = '';
   composerNotice.value = '';
-  if (refRepair.repaired || refRepair.downgraded) {
-    const parts = [];
-    if (refRepair.repaired) parts.push(`已自动修复 ${refRepair.repaired} 处引用素材的图片地址`);
-    if (refRepair.downgraded) parts.push(`${refRepair.downgraded} 处确实取不到图片，已从引用里移除并降级为文字`);
-    composerNotice.value = `${parts.join('，')}，本次继续生成。`;
+  if (currentMod === 'image' || currentMod === 'video') {
+    const modelKeyNow = currentMod === 'image' ? imageModelKey.value : videoModelKey.value;
+    const promoted = await promoteWireframesOntoTray(modelKeyNow);
+    if (promoted > 0) {
+      composerNotice.value = `有 ${promoted} 张图已换成线框合成图，并显示在看图区。确认画面后再发送。本次未发送。`;
+      return;
+    }
+    const unlabeled = referenceTray.value.filter((item) => mediaKind(item) === 'image' && !hasExplicitVersion(item));
+    if (unlabeled.length) {
+      const names = unlabeled.map((item) => item.tag || item.name || '参考图').join('、');
+      referenceTray.value = referenceTray.value.filter((item) => mediaKind(item) !== 'image' || hasExplicitVersion(item));
+      referenceTray.value.forEach((asset, idx) => { asset.tag = `@图${idx + 1}`; });
+      composerError.value = `${names} 没有标明是原图、9:16 还是 3:4，已从看图区移除。请重新挂上并点明版本后再发送。本次未发送。`;
+      return;
+    }
+    currentTray = JSON.parse(JSON.stringify(referenceTray.value));
+  }
+  if (currentMod === 'image' || currentMod === 'video') {
+    const unsound = currentTray.filter((item) => {
+      if (mediaKind(item) !== 'image') return false;
+      const url = String(item?.url || '');
+      if (!url) return true;
+      return url.startsWith('blob:') && !localFileByUrl.has(url);
+    });
+    if (unsound.length) {
+      const names = unsound.map((item) => item.tag || item.name || '参考图').join('、');
+      composerError.value = `${names} 无法按挂上的原样提交（本地文件已失效）。没有换成别的图，本次未发送。请重新挂上后再试。`;
+      return;
+    }
   }
   if (currentMod !== 'chat' && currentTray.length) {
     // 正文里提到但没有对应素材的编号：只提示，不再拦（以前的强制拦截正是「素材明明挂上了却说失效」的来源）
@@ -10845,8 +10842,9 @@ async function sendMessage() {
   messagesCache.delete(targetSessionId);
   sessionGeneratingMap.set(targetSessionId, true);
 
-  const resolvedDeliveryList = await Promise.all(currentTray.map(async (it) => {
-    return await resolveDeliveryImageForModel(it, retryModel);
+  const resolvedDeliveryList = currentTray.map((it) => ({
+    url: it.url,
+    isWireframe: it.versionLabel === '线框'
   }));
 
   const outboundSnapshot = {
@@ -11063,26 +11061,8 @@ async function sendMessage() {
         result: asstMsg
       });
     } else if (currentMod === 'image') {
-      const deliveryTray = currentTray.map((it, idx) => {
-        const resolved = resolvedDeliveryList[idx] || { url: it.url, isWireframe: false };
-        return {
-          ...it,
-          url: resolved.url,
-          isWireframe: resolved.isWireframe
-        };
-      });
+      const deliveryTray = currentTray.map((it) => ({ ...it, url: it.url }));
       const rawUrls = await portableImageUrls(deliveryTray, deliveryTray.length || 1);
-      for (const it of currentTray) {
-        if (Array.isArray(it.baseAttrRefs)) {
-          for (const bar of it.baseAttrRefs) {
-            if (bar?.path) rawUrls.push(authedMediaUrl(bar.path));
-          }
-        } else if (Array.isArray(it.silentRefs)) {
-          for (const sr of it.silentRefs) {
-            if (sr?.url) rawUrls.push(sr.url);
-          }
-        }
-      }
       const imageUrls = [];
       const seenUrlSet = new Set();
       for (const u of rawUrls) {
@@ -11090,6 +11070,10 @@ async function sendMessage() {
           seenUrlSet.add(u);
           imageUrls.push(u);
         }
+      }
+      const mountedImageCount = deliveryTray.filter((item) => mediaKind(item) === 'image' && item.url).length;
+      if (mountedImageCount > imageUrls.length) {
+        throw new Error(`有 ${mountedImageCount - imageUrls.length} 张参考图无法按挂上的原样提交。没有换成别的图，本次未发送。`);
       }
       let promptForModel = promptWithPriorAnalysis(normalizeRefMentions(rawContent), usedPriorMedia ? currentTray.length : 0);
       currentTray.forEach((img, idx) => {
@@ -11248,11 +11232,14 @@ async function sendMessage() {
       const droppedRefs = imageCount - imageUrls.length;
       const ignoredRefs = currentTray.length - capped.length;
       const isKeyframeMode = retryMode === 'first_last_frame';
+      if (droppedRefs > 0) {
+        throw new Error(`有 ${droppedRefs} 张参考图无法按挂上的原样提交。没有换成别的图，本次未发送。`);
+      }
+      if (ignoredRefs > 0) {
+        throw new Error(`挂了 ${currentTray.length} 个引用，这个模型最多接受 ${cap} 个。没有自动拿掉多余的图，本次未发送。`);
+      }
       const notices = [];
-      if (droppedRefs > 0) notices.push(`有 ${droppedRefs} 张参考图没能转换成可提交的数据，本次已跳过。`);
-      if (ignoredRefs > 0) notices.push(`该模型最多接受 ${cap} 个引用，超出部分已忽略 ${ignoredRefs} 个。`);
       if (isKeyframeMode && !slotUrls[1]) notices.push('首尾帧模式只拿到 1 帧：第 2 个槽位是空的或非图片，本次只按首帧生成。');
-      // 与「引用自愈」的提示合并，别把前面修好的说明冲掉
       composerNotice.value = [composerNotice.value, ...notices].filter(Boolean).join(' ');
       const promptForModel = promptWithPriorAnalysis(rawContent, usedPriorMedia ? currentTray.length : 0);
       // 时长/画幅一律以契约参数条为准（已经过夹取），杜绝旧 videoDuration=60 这类游离默认值
@@ -12475,8 +12462,13 @@ function addMediaToViewer(item) {
       name: item.name || `参考图_${idx}`,
       url,
       tag: `@图${idx}`,
-      thumbUrl: item.thumbUrl || item.preview_url || url,
-      isRefObject: !!item.isRefObject
+      thumbUrl: url,
+      isRefObject: !!item.isRefObject,
+      derivativeId: item.derivativeId || '',
+      derivativeKind: item.derivativeKind || '',
+      versionLabel: item.versionLabel || (item.imageUrl && item.imageUrl === url ? '生成结果' : ''),
+      annotated: !!item.annotated,
+      isWireframe: !!item.isWireframe
     });
     selectedImageIndex.value = referenceTray.value.length - 1;
   }

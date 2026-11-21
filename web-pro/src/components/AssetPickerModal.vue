@@ -273,7 +273,7 @@
                     @click="openPreview(entry.version)"
                   >
                     <img :src="entry.version.url" class="w-full h-full object-contain" :alt="entry.version.label" />
-                    <span v-if="entry.version.derivativeId" class="absolute top-1 left-1 px-1 py-0.5 rounded bg-black/75 text-[9px] font-bold text-sky-300">衍生</span>
+                    <span v-if="entry.version.derivativeId" class="absolute top-1 left-1 px-1 py-0.5 rounded bg-black/75 text-[9px] font-bold text-sky-300">{{ labelForDerivativeKind(entry.version.derivativeKind) || '衍生' }}</span>
                     <span v-if="entry.version.geometry" class="absolute top-1 right-1 px-1 py-0.5 rounded bg-amber-400/95 text-[9px] font-bold text-slate-950">画幅变更</span>
                     <span class="on-media absolute inset-0 flex items-center justify-center bg-black/45 text-[11px] font-bold text-white opacity-0 group-hover/ver:opacity-100 transition-opacity">🔍 查看大图</span>
                   </button>
@@ -345,7 +345,7 @@
           <div class="min-w-0 flex items-center gap-3">
             <span class="text-sm font-bold text-white truncate">{{ previewVersion.label }}</span>
             <span class="text-[11px] text-white opacity-60 font-mono">{{ versionBadge(previewVersion) || '读取尺寸…' }}</span>
-            <span v-if="previewVersion.derivativeId" class="px-1.5 py-0.5 rounded bg-white/15 border border-white/20 text-[9px] font-bold text-sky-300">衍生</span>
+            <span v-if="previewVersion.derivativeId" class="px-1.5 py-0.5 rounded bg-white/15 border border-white/20 text-[9px] font-bold text-sky-300">{{ labelForDerivativeKind(previewVersion.derivativeKind) || '衍生' }}</span>
             <span v-if="previewVersion.geometry" class="px-1.5 py-0.5 rounded bg-amber-400/95 text-[9px] font-bold text-slate-950">画幅变更</span>
           </div>
           <div class="flex items-center gap-2">
@@ -485,6 +485,7 @@ import {
   onDerivativeSlotPrefsChange,
   slotStatusFromDetail,
 } from '../../../shared/ml-asset-core/index.ts';
+import { labelForDerivativeKind } from '../utils/ref-version.js';
 
 const props = defineProps({
   visible: { type: Boolean, default: false },

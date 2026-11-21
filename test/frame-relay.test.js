@@ -70,7 +70,67 @@ async function main() {
   relay.serveFrame(services, { method: 'GET' }, traversal, '../../etc/passwd', token);
   assert.strictEqual(traversal.statusCode, 404);
 
+  // 5. 指定 derivative= 时只读那一版，旁边的原图缓存不能顶上
+  const verDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ml-frame-ver-'));
+  const originFile = path.join(verDir, 'origin.jpg');
+  const nineFile = path.join(verDir, 'nine.jpg');
+  const threeFile = path.join(verDir, 'three.jpg');
+  fs.writeFileSync(originFile, Buffer.from('ORIGIN'));
+  fs.writeFileSync(nineFile, Buffer.from('NINE16'));
+  fs.writeFileSync(threeFile, Buffer.from('THREE4'));
+  fs.mkdirSync(path.join(verDir, 'cache', 'originals'), { recursive: true });
+  fs.writeFileSync(path.join(verDir, 'cache', 'originals', 'fidA.jpg'), Buffer.from('CACHED-ORIGIN'));
+  const rows = {
+    30139: { id: 30139, asset_fid: 'fidA', kind: 'restage_9_16', storage_ref: nineFile },
+    30140: { id: 30140, asset_fid: 'fidA', kind: 'restage_3_4', storage_ref: threeFile },
+    origin: { id: 1, asset_fid: 'fidA', kind: 'origin', storage_ref: originFile },
+  };
+  const verServices = {
+    config: { dataDir: verDir, port: 30001 },
+    db: {
+      prepare(sql) {
+        return {
+          get(a, b) {
+            if (String(sql).includes('WHERE id=?')) return rows[String(a)] && String(rows[String(a)].asset_fid) === String(b) ? rows[String(a)] : undefined;
+            if (String(sql).includes("kind='origin'")) return rows.origin;
+            return undefined;
+          },
+        };
+      },
+    },
+  };
+  const nine = relay.readLocalRef(verServices, '/api/viewer/assets/fidA/image?derivative=30139&token=stale');
+  assert.strictEqual(nine.buf.toString(), 'NINE16', '9:16 必须读衍生文件，不能读原图缓存');
+  const three = relay.readLocalRef(verServices, '/api/viewer/assets/fidA/image?derivative=30140');
+  assert.strictEqual(three.buf.toString(), 'THREE4', '3:4 必须读自己的衍生文件');
+  const raw = relay.readLocalRef(verServices, '/api/viewer/assets/fidA/image?raw=1&token=stale');
+  assert.strictEqual(raw.buf.toString(), 'ORIGIN', 'raw=1 读原图行，不读 9:16');
+  const missing = relay.readLocalRef(verServices, '/api/viewer/assets/fidA/image?derivative=999');
+  assert.strictEqual(missing, null, '指定了不存在的衍生时不能用原图缓存顶上');
+  const legacy = relay.readLocalRef(verServices, '/api/viewer/assets/fidA/image?token=stale');
+  assert.strictEqual(legacy.refused, true, '没写版本的图片地址必须拒绝，不能读原图缓存');
+  assert.ok(!legacy.buf, '拒绝时不能附带另一张图的字节');
+
+  const nasServices = {
+    config: { dataDir: verDir, port: 30001 },
+    db: {
+      prepare(sql) {
+        return {
+          get() {
+            if (String(sql).includes("kind='origin'")) {
+              return { id: 9, asset_fid: 'fidNas', kind: 'origin', storage_type: 'nas', storage_ref: '2026/10/missing-on-data-dir.jpg' };
+            }
+            return undefined;
+          },
+        };
+      },
+    },
+  };
+  const nasOrigin = relay.readLocalRef(nasServices, '/api/viewer/assets/fidNas/image?raw=1&token=stale');
+  assert.strictEqual(nasOrigin, null, 'raw=1 但原图在 NAS、本机 dataDir 没有时不能当成没写版本');
+
   fs.rmSync(dataDir, { recursive: true, force: true });
+  fs.rmSync(verDir, { recursive: true, force: true });
   delete process.env.BFF_PUBLIC_BASE;
   console.log('✔ frame-relay 验收通过');
 }

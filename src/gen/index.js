@@ -575,12 +575,18 @@ async function executeAdapterInner(services, adapter, input) {
     // 4. 素材库资产 (/api/viewer/assets/:fid/image 或 /api/assets/:fid/image)
     //    以前只要 cache/thumbs 存在就直接返回它 —— 那是 512px 预览图，参考给供应商既糊又可能画幅不符，
     //    而且原查询写的 derivatives.storage_path 列根本不存在（真实列是 storage_ref），一直是静默 catch。
-    //    现在按 URL 查询串取「用户实际选中的那一版」：?derivative=N → ?raw=1 原图 → 素材主衍生。
+    //    只认地址写明的版本：?derivative=N 或 ?raw=1。没有版本就拒绝，不用主衍生或缩略图顶上。
     const mAsset = s.match(/\/api\/(?:viewer\/)?assets\/([^/?#]+)/);
     if (mAsset) {
       const fid = decodeURIComponent(mAsset[1]);
       let q = new URLSearchParams();
-      try { q = new URL(s, 'http://local.invalid').searchParams; } catch (e) {}
+      let imagePath = false;
+      try {
+        const parsed = new URL(s, 'http://local.invalid');
+        q = parsed.searchParams;
+        imagePath = /\/image\/?$/.test(parsed.pathname);
+      } catch (e) {}
+      if (imagePath && !q.get('derivative') && q.get('raw') !== '1') return null;
       const IMAGE_MIME = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif', '.bmp': 'image/bmp' };
       const inlineImage = (fp, mime) => {
         if (!fp || !fs.existsSync(fp)) return null;
@@ -595,17 +601,9 @@ async function executeAdapterInner(services, adapter, input) {
         const db = services.db;
         const originRow = () => db.prepare("SELECT * FROM derivatives WHERE asset_fid=? AND kind='origin' ORDER BY id DESC LIMIT 1").get(fid);
         const derivId = Number(q.get('derivative') || 0);
-        const asset = db.prepare('SELECT category, main_derivative_id FROM assets WHERE fid=?').get(fid);
-        const isPortraitOrClothing = asset?.category === 'portrait' || asset?.category === 'clothing';
         let deriv = null;
-        if (derivId && !isPortraitOrClothing) deriv = getDerivativeById(db, derivId);
-        else if (q.get('raw') === '1' || isPortraitOrClothing) deriv = originRow();
-        else {
-          deriv = asset?.main_derivative_id ? getDerivativeById(db, asset.main_derivative_id) : originRow();
-        }
-        if (isPortraitOrClothing && (!deriv || String(deriv.kind || '').startsWith('restage_'))) {
-          deriv = originRow();
-        }
+        if (derivId) deriv = getDerivativeById(db, derivId);
+        else if (q.get('raw') === '1') deriv = originRow();
         if (deriv && deriv.asset_fid === fid) {
           const fp = await resolveDerivativeFile(services, deriv);
           if (fp) {
@@ -628,13 +626,29 @@ async function executeAdapterInner(services, adapter, input) {
     //     复用帧中继的本地解析（含 originals/thumbs/derivatives）
     try {
       const local = require('../frame-relay').readLocalRef(services, s);
+      if (local?.refused) return null;
       if (local?.buf?.length && String(local.mime || 'image/jpeg').startsWith('image/')) {
         return `data:${local.mime || 'image/jpeg'};base64,${local.buf.toString('base64')}`;
       }
     } catch (e) {}
 
-    // 4.6 视频/音频素材或全图缺失：海报缩略图是最后一个还能给的静态参考
+    // 4.6 视频/音频素材或全图缺失：海报缩略图是最后一个还能给的静态参考。
+    // 用户指定了 derivative= / raw=1 时不能用缩略图顶上，否则上传的和屏幕上不是同一张。
     if (mAsset) {
+      let imageWithoutVersion = false;
+      try {
+        const askedUrl = new URL(s, 'http://local.invalid');
+        imageWithoutVersion = /\/image\/?$/.test(askedUrl.pathname)
+          && !askedUrl.searchParams.get('derivative')
+          && askedUrl.searchParams.get('raw') !== '1';
+      } catch (_) {}
+      if (imageWithoutVersion) return null;
+      let askedVersion = false;
+      try {
+        const asked = new URL(s, 'http://local.invalid').searchParams;
+        askedVersion = !!(asked.get('derivative') || asked.get('raw') === '1');
+      } catch (_) {}
+      if (askedVersion) return null;
       const thumb = path.join(config.dataDir, 'cache', 'thumbs', `${decodeURIComponent(mAsset[1])}.jpg`);
       if (fs.existsSync(thumb)) {
         try {

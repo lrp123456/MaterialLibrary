@@ -803,7 +803,7 @@ const DEFAULT_MODEL_CONTRACTS = [
       { id: 'first_last_frame', label: '首尾帧' },
       { id: 'omni_reference', label: '参考生视频' },
     ],
-    slots: { images: 5, videos: 0, audios: 0 },
+    slots: { images: 10, videos: 0, audios: 0 },
     enabled: 1,
     params: wan30Params(),
     table_mappings: {},

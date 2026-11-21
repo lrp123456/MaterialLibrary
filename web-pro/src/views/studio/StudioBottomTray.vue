@@ -69,7 +69,7 @@
         </div>
         <div class="mt-1 flex items-center justify-center pointer-events-none">
           <span class="px-1.5 py-0.2 rounded bg-studio-cyan/15 text-studio-cyan font-mono text-[10px] font-bold leading-tight">
-            图{{ idx + 1 }}
+            图{{ idx + 1 }} · {{ versionBadge(item) }}
           </span>
         </div>
       </div>
@@ -155,7 +155,7 @@
           />
         </div>
         <span class="px-1 py-0.2 rounded bg-studio-cyan/15 text-studio-cyan font-mono text-[10px] font-bold leading-tight pointer-events-none">
-          图{{ idx + 1 }}
+          图{{ idx + 1 }} · {{ versionBadge(item) }}
         </span>
       </div>
 
@@ -186,6 +186,7 @@
 <script setup>
 import { ref } from 'vue';
 import StudioIcon from '../../components/StudioIcon.vue';
+import { versionBadge } from '../../utils/ref-version.js';
 
 const props = defineProps({
   images: { type: Array, default: () => [] },
@@ -312,7 +313,7 @@ function resolveViewerImageUrl(img) {
   if (typeof img === 'string') {
     raw = img;
   } else if (typeof img === 'object') {
-    raw = img.url || img.imgUrl || img.imageUrl || img.previewUrl || img.thumbUrl || img.displayUrl || img.fullUrl || img.path || '';
+    raw = img.url || '';
   }
   raw = String(raw || '').trim();
   if (!raw || raw === 'undefined' || raw === 'null') return '';
