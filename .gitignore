@@ -2,11 +2,9 @@
 node_modules/
 .pnpm-store/
 
-# Backups of independent repos (preserved read-only per Phase 0 rollback plan)
-material-library-app/
-material-library-harmony/
-material-library-server/
-material-library-web/
+# Legacy archives & backups
+_backups/
+_archive_bak/
 
 # Release bundles & large archives
 release/
