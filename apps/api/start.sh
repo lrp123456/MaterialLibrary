@@ -91,12 +91,12 @@ check_node() {
 # 检查前端构建静态包
 check_frontend() {
   if [ ! -f "$PROJECT_DIR/web/dist/index.html" ]; then
-    if [ -d "$PROJECT_DIR/web" ]; then
+    if [ -f "$PROJECT_DIR/web/package.json" ]; then
       info "检测到前端静态包尚未构建，正在自动执行首次编译 (npm run build)..."
       (cd "$PROJECT_DIR/web" && npm run build)
       success "前端静态资源编译完成！"
     else
-      warn "web 源码已独立拆分至 material-library-web，跳过内置 web 构建"
+      warn "web 源码已独立拆分至 apps/web-pro，跳过内置 web 构建"
     fi
   fi
 }
