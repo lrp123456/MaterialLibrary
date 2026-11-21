@@ -140,6 +140,31 @@ function ensureCreationTemplatesSchema(db) {
   try { db.exec('ALTER TABLE creation_templates ADD COLUMN deleted_at INTEGER;'); } catch (e) {}
   try { db.exec('ALTER TABLE creation_templates ADD COLUMN trashed_section_id TEXT;'); } catch (e) {}
   try { db.exec('ALTER TABLE creation_templates ADD COLUMN media_dir TEXT;'); } catch (e) {}
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN root_origin_hash TEXT;'); } catch (e) {}
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN parent_step_id TEXT;'); } catch (e) {}
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN prompt_hash TEXT;'); } catch (e) {}
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN operation TEXT;'); } catch (e) {}
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN in_creation_lib INTEGER DEFAULT 1;'); } catch (e) {}
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN in_material_lib INTEGER DEFAULT 0;'); } catch (e) {}
+  try { db.exec('ALTER TABLE creation_templates ADD COLUMN is_cover INTEGER DEFAULT 0;'); } catch (e) {}
+  try { db.exec("ALTER TABLE creation_templates ADD COLUMN video_mode TEXT DEFAULT '';"); } catch (e) {}
+  try { db.exec("ALTER TABLE creation_templates ADD COLUMN source_step_ids TEXT DEFAULT '[]';"); } catch (e) {}
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_creation_tpl_root ON creation_templates(root_origin_hash);'); } catch (e) {}
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_creation_tpl_prompt_hash ON creation_templates(prompt_hash);'); } catch (e) {}
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_creation_tpl_group ON creation_templates(root_origin_hash, style, space);'); } catch (e) {}
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS image_readings (
+        sha256 TEXT PRIMARY KEY,
+        space TEXT DEFAULT '',
+        style TEXT DEFAULT '',
+        reading_summary TEXT DEFAULT '',
+        surfaces_json TEXT DEFAULT '{}',
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_image_readings_sha ON image_readings(sha256);
+    `);
+  } catch (e) {}
   try {
     db.exec(`
       CREATE TABLE IF NOT EXISTS creation_sections (
@@ -1961,6 +1986,10 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     ['GET', /^\/studio\/catalog$/],
     ['GET', /^\/studio\/video-analysis$/],
     ['POST', /^\/studio\/video-analysis$/],
+    ['GET', /^\/studio\/image-analysis$/],
+    ['POST', /^\/studio\/image-analysis\/scene$/],
+    ['POST', /^\/studio\/image-analysis\/preview$/],
+    ['POST', /^\/studio\/image-analysis\/region$/],
     ['DELETE', /^\/studio\/video-analysis$/],
     ['GET', /^\/studio\/video-analysis\/history$/],
     ['GET', /^\/studio\/video-analysis\/asset$/],
@@ -2025,6 +2054,14 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     ['PATCH', /^\/creation-templates\/[^\/]+$/],
     ['DELETE', /^\/creation-templates\/[^\/]+$/],
     ['POST', /^\/creation-templates\/pull-external$/],
+    ['GET', /^\/creation-groups\/[^\/]+$/],
+    ['POST', /^\/creation-templates\/[^\/]+\/set-cover$/],
+    ['POST', /^\/creation-schemes\/export$/],
+    ['GET', /^\/creation-schemes$/],
+    ['POST', /^\/creation-templates\/ai-compare$/],
+    ['POST', /^\/creation-templates\/auto-tag-all$/],
+    ['POST', /^\/image-readings\/[^\/]+\/reread$/],
+    ['PATCH', /^\/image-readings\/[^\/]+$/],
     ['POST', /^\/ai\/segment$/],
     ['POST', /^\/ai\/detect$/],
     ['GET', /^\/ai\/capabilities$/],
@@ -2346,6 +2383,7 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
       pathname.startsWith('/studio/video-analysis/asset-file/') ||
       /^\/assets\/[^\/]+\/poster$/.test(pathname) ||
       (/^\/assets\/[^\/]+\/file(?:\/[^\/]+)?$/.test(pathname) && urlObj.searchParams.get('play') === '1') ||
+      /^\/creation-templates\/[^\/]+\/media\/(origin|result|poster)\/\d+$/.test(pathname) ||
       /^\/base-library\/items\/[^\/]+\/(preview|scene)$/.test(pathname) ||
       /^\/base-library\/materials\/[^\/]+\/preview$/.test(pathname) ||
       /^\/products\/(previews|models)\/[^\/]+$/.test(pathname);
@@ -4918,7 +4956,6 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
   // 配方私有媒体：/creation-templates/:id/media/<origin|result|poster>/<idx>
   const mTplMedia = pathname.match(/^\/creation-templates\/([^\/]+)\/media\/(origin|result|poster)\/(\d+)$/);
   if (mTplMedia && (req.method === 'GET' || req.method === 'HEAD')) {
-    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
     ensureCreationLibrarySchema(db);
     const tplId = decodeURIComponent(mTplMedia[1]);
     const row = db.prepare('SELECT id FROM creation_templates WHERE id=?').get(tplId);
@@ -4928,7 +4965,7 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     if (!file) return sendJson(res, 404, { error: '媒体不存在' });
     res.writeHead(200, {
       'Content-Type': mimeForFile(file),
-      'Cache-Control': 'private, max-age=3600',
+      'Cache-Control': 'public, max-age=3600',
       'Content-Length': fs.statSync(file).size,
     });
     if (req.method === 'HEAD') return res.end();
@@ -4992,23 +5029,59 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     const curUid = Number(sessionUser?.id || 0);
     const cardView = urlObj.searchParams.get('view') === 'card';
     const selectList = cardView
-      ? 'id, title, type, aspect_ratio, poster_w, poster_h, is_pinned, section_id, pin_order, pinned_at, created_at, updated_at, space, style, purpose, channel, use_count, origin_images, result_images'
+      ? 'id, title, type, prompt, aspect_ratio, poster_w, poster_h, is_pinned, section_id, pin_order, pinned_at, created_at, updated_at, space, style, trajectory, purpose, channel, use_count, origin_images, result_images, root_origin_hash, parent_step_id, operation, in_creation_lib, in_material_lib, is_cover, video_mode, source_step_ids, params_json'
       : '*';
     // 回收里的配方（deleted_at 非空）不参与正常列表/增量同步，只出现在 /creation-trash
     let sql = `SELECT ${selectList} FROM creation_templates WHERE (user_id = ? OR (builtin = 1 AND user_id = 0)) AND deleted_at IS NULL`;
+    const inCreationOnly = urlObj.searchParams.get('in_creation_only') !== '0';
+    if (inCreationOnly) {
+      sql += ' AND (in_creation_lib IS NULL OR in_creation_lib = 1)';
+    }
     const params = [curUid];
+
+    const filterTime = (urlObj.searchParams.get('time') || '').trim();
+    if (filterTime === 'today') {
+      const todayStart = new Date().setHours(0, 0, 0, 0);
+      sql += ' AND updated_at >= ?';
+      params.push(todayStart);
+    } else if (filterTime === '7days') {
+      const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      sql += ' AND updated_at >= ?';
+      params.push(sevenDaysAgo);
+    } else if (filterTime === '30days') {
+      const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+      sql += ' AND updated_at >= ?';
+      params.push(thirtyDaysAgo);
+    }
 
     if (filterType && filterType !== 'all') {
       sql += ' AND type = ?';
       params.push(filterType);
     }
     if (filterSpace && filterSpace !== 'all' && filterSpace !== '全部空间') {
-      sql += ' AND space = ?';
-      params.push(filterSpace);
+      if (filterSpace === '未填写') {
+        sql += " AND (space IS NULL OR space = '')";
+      } else {
+        sql += ' AND space = ?';
+        params.push(filterSpace);
+      }
     }
     if (filterStyle && filterStyle !== 'all' && filterStyle !== '全部风格') {
-      sql += ' AND style = ?';
-      params.push(filterStyle);
+      if (filterStyle === '未填写') {
+        sql += " AND (style IS NULL OR style = '')";
+      } else {
+        sql += ' AND style = ?';
+        params.push(filterStyle);
+      }
+    }
+    const filterOperation = (urlObj.searchParams.get('operation') || '').trim();
+    if (filterOperation && filterOperation !== 'all') {
+      if (filterOperation === '未填写') {
+        sql += " AND (operation IS NULL OR operation = '')";
+      } else {
+        sql += ' AND operation = ?';
+        params.push(filterOperation);
+      }
     }
     if (pinnedOnly) {
       sql += ' AND is_pinned = 1';
@@ -5021,11 +5094,15 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     let rows = [];
     let hasMore = false;
     let nextSince = null;
+    const sortParam = (urlObj.searchParams.get('sort') || '').trim();
+    const isDesc = sortParam === 'desc' || sortParam === 'latest';
 
     if (!hasSince) {
-      // 与增量同一把游标：(updated_at, id) 升序分页，客户端循环到 has_more=false。
-      // 以前固定 LIMIT 1000 且 has_more 恒为 false，超过 1000 条的旧配方再也拉不回来。
-      sql += ' ORDER BY updated_at ASC, id ASC LIMIT 1000';
+      if (isDesc) {
+        sql += ' ORDER BY updated_at DESC, id DESC LIMIT 1000';
+      } else {
+        sql += ' ORDER BY updated_at ASC, id ASC LIMIT 1000';
+      }
       rows = db.prepare(sql).all(...params);
       hasMore = rows.length === 1000;
       nextSince = rows.length > 0
@@ -5069,6 +5146,23 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     } catch (e) {}
 
     let data = rows.map(mapCreationTemplateRow);
+    const isSchemeView = urlObj.searchParams.get('view') === 'scheme';
+    if (isSchemeView) {
+      const { aggregateSchemes } = require('./creation-schemes');
+      const schemes = aggregateSchemes(data, {
+        kw,
+        filterSpace,
+        filterStyle,
+        filterOperation,
+        pinnedOnly
+      });
+      return sendJson(res, 200, {
+        success: true,
+        data: schemes,
+        has_more: false,
+        server_time: serverTime
+      });
+    }
     if (cardView) data = data.map(toCreationCard);
 
     const mode = hasSince ? 'delta' : 'full';
@@ -5108,6 +5202,7 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     }
     // 源图与产物各复制一份到配方私有目录，素材库永远看不到这些副本
     const { copyTemplateMedia } = require('./creation-library');
+    const { aiTagCreationItem } = require('./ai-tagger');
     const media = await copyTemplateMedia(services, id, originList, resultList);
     originList = media.originImages;
     resultList = media.resultImages;
@@ -5116,13 +5211,67 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     const mediaDir = media.mediaDir;
     const paramsJson = JSON.stringify(b.params || {});
     const tagsJson = JSON.stringify(b.tags || ['用户自定义']);
-    const space = (b.space || '').trim();
-    const style = (b.style || '').trim();
+
+    // 智能提取标签 (优先调用 AI 视觉/文本打标)
+    let space = (b.space || '').trim();
+    let style = (b.style || '').trim();
+    let trajectory = (b.trajectory || '').trim();
+    let operation = (b.operation || '').trim();
+
+    if (!space || !style || (type === 'video' && !trajectory)) {
+      try {
+        const aiRes = await aiTagCreationItem({
+          prompt,
+          originUrl: originList[0]?.url,
+          resultUrl: resultList[0]?.url || resultList[0]?.poster,
+          type
+        });
+        if (!space) space = aiRes.space || '';
+        if (!style) style = aiRes.style || '';
+        if (!trajectory && type === 'video') trajectory = aiRes.trajectory || '';
+        if (!operation) operation = aiRes.operation || '';
+      } catch (_) {}
+    }
+    if (!operation) operation = type === 'video' ? '生视频' : '换空间';
     const purpose = (b.purpose || '').trim();
     const isPinned = b.is_pinned ? 1 : 0;
     const useCount = Number(b.use_count || 0);
     const posterW = b.poster_w !== undefined && b.poster_w !== null ? Number(b.poster_w) : (b.posterW !== undefined && b.posterW !== null ? Number(b.posterW) : null);
     const posterH = b.poster_h !== undefined && b.poster_h !== null ? Number(b.poster_h) : (b.posterH !== undefined && b.posterH !== null ? Number(b.posterH) : null);
+
+    const promptNorm = prompt.trim().replace(/\s+/g, ' ');
+    const promptHash = crypto.createHash('sha256').update(promptNorm).digest('hex');
+    let rootOriginHash = (b.root_origin_hash || '').trim();
+    let parentStepId = (b.parent_step_id || '').trim();
+    const inCreationLib = b.in_creation_lib !== undefined ? (b.in_creation_lib ? 1 : 0) : 1;
+    const inMaterialLib = b.in_material_lib !== undefined ? (b.in_material_lib ? 1 : 0) : 0;
+    const isCover = b.is_cover ? 1 : 0;
+    let videoMode = (b.video_mode || '').trim();
+    if (type === 'video' && !videoMode) {
+      videoMode = prompt.includes('转场') ? 'room_transition' : 'single_tour';
+    }
+    const sourceStepIds = JSON.stringify(Array.isArray(b.source_step_ids) ? b.source_step_ids : []);
+
+    if (!rootOriginHash) {
+      const firstOrigin = originList[0];
+      const originUrl = typeof firstOrigin === 'string' ? firstOrigin : (firstOrigin && firstOrigin.url);
+      if (originUrl) {
+        const matchedTpl = db.prepare(`
+          SELECT id, root_origin_hash FROM creation_templates
+          WHERE result_images LIKE ? AND deleted_at IS NULL
+          ORDER BY updated_at DESC LIMIT 1
+        `).get(`%${originUrl}%`);
+        if (matchedTpl && matchedTpl.root_origin_hash) {
+          rootOriginHash = matchedTpl.root_origin_hash;
+          if (!parentStepId) parentStepId = matchedTpl.id;
+        } else {
+          rootOriginHash = crypto.createHash('sha256').update(originUrl).digest('hex');
+        }
+      } else {
+        rootOriginHash = crypto.createHash('sha256').update(id).digest('hex');
+      }
+    }
+
     // 新置顶出现在「未分区」第一位
     let pinOrder = null;
     let pinnedAt = null;
@@ -5148,9 +5297,23 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
       const updated_at = Math.max(now, maxU + 1);
       const created_at = b.createdAt || b.created_at || now;
 
+      if (isCover === 1) {
+        db.prepare(`
+          UPDATE creation_templates
+          SET is_cover = 0
+          WHERE root_origin_hash = ? AND style = ? AND space = ? AND deleted_at IS NULL
+        `).run(rootOriginHash, style, space);
+      }
+
       db.prepare(`
-        INSERT INTO creation_templates (id, user_id, title, prompt, aspect_ratio, origin_images, result_images, params_json, tags, type, space, style, purpose, is_pinned, pin_order, pinned_at, media_dir, use_count, created_at, updated_at, poster_w, poster_h)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO creation_templates (
+          id, user_id, title, prompt, aspect_ratio, origin_images, result_images,
+          params_json, tags, type, space, style, purpose, is_pinned, pin_order,
+          pinned_at, media_dir, use_count, created_at, updated_at, poster_w, poster_h,
+          root_origin_hash, parent_step_id, prompt_hash, operation,
+          in_creation_lib, in_material_lib, is_cover, video_mode, source_step_ids, trajectory
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           title=excluded.title,
           prompt=excluded.prompt,
@@ -5172,8 +5335,24 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
           trashed_section_id=NULL,
           updated_at=excluded.updated_at,
           poster_w=COALESCE(creation_templates.poster_w, excluded.poster_w),
-          poster_h=COALESCE(creation_templates.poster_h, excluded.poster_h)
-      `).run(id, sessionUser.id, title, prompt, aspectRatio, originImages, resultImages, paramsJson, tagsJson, type, space, style, purpose, isPinned, pinOrder, pinnedAt, mediaDir, useCount, created_at, updated_at, posterW, posterH);
+          poster_h=COALESCE(creation_templates.poster_h, excluded.poster_h),
+          root_origin_hash=COALESCE(creation_templates.root_origin_hash, excluded.root_origin_hash),
+          parent_step_id=COALESCE(creation_templates.parent_step_id, excluded.parent_step_id),
+          prompt_hash=excluded.prompt_hash,
+          operation=COALESCE(excluded.operation, creation_templates.operation),
+          in_creation_lib=excluded.in_creation_lib,
+          in_material_lib=excluded.in_material_lib,
+          is_cover=COALESCE(excluded.is_cover, creation_templates.is_cover),
+          video_mode=COALESCE(excluded.video_mode, creation_templates.video_mode),
+          source_step_ids=COALESCE(excluded.source_step_ids, creation_templates.source_step_ids),
+          trajectory=COALESCE(excluded.trajectory, creation_templates.trajectory)
+      `).run(
+        id, sessionUser.id, title, prompt, aspectRatio, originImages, resultImages,
+        paramsJson, tagsJson, type, space, style, purpose, isPinned, pinOrder,
+        pinnedAt, mediaDir, useCount, created_at, updated_at, posterW, posterH,
+        rootOriginHash, parentStepId, promptHash, operation,
+        inCreationLib, inMaterialLib, isCover, videoMode, sourceStepIds, trajectory
+      );
 
       return updated_at;
     });
@@ -5185,7 +5364,10 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
         id, title, prompt, type, space, style, purpose, is_pinned: isPinned,
         use_count: useCount, poster_w: posterW, poster_h: posterH,
         aspect_ratio: aspectRatio, updated_at: finalUpdatedAt,
-        origin_images: originList, result_images: resultList, media_dir: mediaDir
+        origin_images: originList, result_images: resultList, media_dir: mediaDir,
+        root_origin_hash: rootOriginHash, parent_step_id: parentStepId,
+        prompt_hash: promptHash, operation, in_creation_lib: inCreationLib,
+        in_material_lib: inMaterialLib, is_cover: isCover, video_mode: videoMode
       }
     });
   }
@@ -5342,6 +5524,14 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
       if (b.aspect_ratio !== undefined) newAspectRatio = String(b.aspect_ratio);
     }
 
+    let newOperation = b.operation !== undefined ? String(b.operation).trim() : (existing.operation || '');
+    let newIsCover = b.is_cover !== undefined ? (b.is_cover ? 1 : 0) : Number(existing.is_cover || 0);
+    let newPromptHash = existing.prompt_hash;
+    if (b.prompt !== undefined) {
+      const promptNorm = newPrompt.trim().replace(/\s+/g, ' ');
+      newPromptHash = crypto.createHash('sha256').update(promptNorm).digest('hex');
+    }
+
     const patchTx = db.transaction(() => {
       const maxRow = db.prepare('SELECT MAX(updated_at) as max_u FROM creation_templates').get();
       const now = Date.now();
@@ -5350,9 +5540,9 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
 
       db.prepare(`
         UPDATE creation_templates
-        SET title=?, is_pinned=?, section_id=?, pin_order=?, pinned_at=?, use_count=?, space=?, style=?, purpose=?, type=?, prompt=?, tags=?, poster_w=?, poster_h=?, aspect_ratio=?, updated_at=?
+        SET title=?, is_pinned=?, section_id=?, pin_order=?, pinned_at=?, use_count=?, space=?, style=?, purpose=?, type=?, prompt=?, tags=?, poster_w=?, poster_h=?, aspect_ratio=?, operation=?, is_cover=?, prompt_hash=?, updated_at=?
         WHERE id=?
-      `).run(newTitle, newIsPinned, newSectionId, newPinOrder, newPinnedAt, newUseCount, newSpace, newStyle, newPurpose, newType, newPrompt, newTags, newPosterW, newPosterH, newAspectRatio, updated_at, tplId);
+      `).run(newTitle, newIsPinned, newSectionId, newPinOrder, newPinnedAt, newUseCount, newSpace, newStyle, newPurpose, newType, newPrompt, newTags, newPosterW, newPosterH, newAspectRatio, newOperation, newIsCover, newPromptHash, updated_at, tplId);
 
       return updated_at;
     });
@@ -5372,12 +5562,279 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
         style: newStyle,
         purpose: newPurpose,
         type: newType,
+        operation: newOperation,
+        is_cover: newIsCover,
+        prompt_hash: newPromptHash,
         poster_w: newPosterW !== null && newPosterW !== undefined ? Number(newPosterW) : null,
         poster_h: newPosterH !== null && newPosterH !== undefined ? Number(newPosterH) : null,
         aspect_ratio: newAspectRatio,
         updated_at: finalUpdatedAt
       }
     });
+  }
+
+  // 封面锁定切换 (POST /api/creation-templates/:id/set-cover)
+  const mSetCover = pathname.match(/^\/creation-templates\/([^\/]+)\/set-cover$/);
+  if (mSetCover && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationTemplatesSchema(db);
+    const tplId = decodeURIComponent(mSetCover[1]);
+    const b = await parseBody(req).catch(() => ({}));
+    const targetCover = b.is_cover !== undefined ? (b.is_cover ? 1 : 0) : 1;
+
+    const row = db.prepare('SELECT * FROM creation_templates WHERE id=? AND deleted_at IS NULL').get(tplId);
+    if (!row) return sendJson(res, 404, { error: '配方不存在' });
+
+    const now = Date.now();
+    db.transaction(() => {
+      if (targetCover === 1) {
+        db.prepare(`
+          UPDATE creation_templates
+          SET is_cover = 0, updated_at = ?
+          WHERE root_origin_hash = ? AND style = ? AND space = ? AND deleted_at IS NULL
+        `).run(now, row.root_origin_hash, row.style, row.space);
+      }
+      db.prepare(`
+        UPDATE creation_templates
+        SET is_cover = ?, updated_at = ?
+        WHERE id = ?
+      `).run(targetCover, now + 1, tplId);
+    })();
+
+    return sendJson(res, 200, {
+      success: true,
+      data: { id: tplId, is_cover: targetCover, updated_at: now + 1 }
+    });
+  }
+
+  // 查询同基图下的聚合大图板块 (GET /api/creation-groups/:rootHash)
+  const mGroup = pathname.match(/^\/creation-groups\/([^\/]+)$/);
+  if (mGroup && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationTemplatesSchema(db);
+    const rootHash = decodeURIComponent(mGroup[1]);
+    const curUid = Number(sessionUser?.id || 0);
+
+    const rows = db.prepare(`
+      SELECT * FROM creation_templates
+      WHERE root_origin_hash = ? AND (user_id = ? OR (builtin = 1 AND user_id = 0)) AND deleted_at IS NULL AND (in_creation_lib IS NULL OR in_creation_lib = 1)
+      ORDER BY updated_at DESC
+    `).all(rootHash, curUid);
+
+    let reading = db.prepare('SELECT * FROM image_readings WHERE sha256 = ?').get(rootHash);
+    if (!reading) {
+      reading = {
+        sha256: rootHash,
+        space: rows[0]?.space || '',
+        style: rows[0]?.style || '',
+        reading_summary: rows[0]?.title ? `室内设计基图：${rows[0].title}` : '空间设计根原图',
+        surfaces_json: '{}',
+        updated_at: Date.now()
+      };
+    }
+    let parsedSurfaces = {};
+    try { parsedSurfaces = JSON.parse(reading.surfaces_json || '{}'); } catch (_) {}
+    reading.surfaces = parsedSurfaces;
+
+    // 找出该项目下出现过的最主要明确风格 (排除空或未填写)
+    let dominantStyle = '';
+    for (const r of rows) {
+      const s = (r.style || '').trim();
+      if (s && s !== '未填写' && s !== '未填写风格') {
+        dominantStyle = s;
+        break;
+      }
+    }
+
+    const styleGroups = new Map();
+    for (const r of rows) {
+      const mapped = mapCreationTemplateRow(r);
+      // 如果本条记录风格为空或未填写，且项目有明确主导风格，自动继承该风格，避免产生割裂的“未填写”风格
+      let st = (mapped.style || '').trim();
+      if ((!st || st === '未填写' || st === '未填写风格') && dominantStyle) {
+        st = dominantStyle;
+        mapped.style = dominantStyle;
+      }
+      if (!st) st = '未填写风格';
+      if (!styleGroups.has(st)) {
+        styleGroups.set(st, {
+          style: st,
+          last_active_at: mapped.updated_at,
+          rows: []
+        });
+      }
+      const g = styleGroups.get(st);
+      if (mapped.updated_at > g.last_active_at) g.last_active_at = mapped.updated_at;
+      g.rows.push(mapped);
+    }
+
+    const CANONICAL_ROOM_ORDER = ['门厅', '客厅', '餐厅', '厨房', '卧室', '衣帽间', '卫浴', '其他'];
+    const styles = [];
+
+    for (const [st, g] of styleGroups.entries()) {
+      const spaceMap = new Map();
+      const videos = [];
+
+      for (const item of g.rows) {
+        if (item.type === 'video') {
+          videos.push(item);
+        } else {
+          const sp = item.space || '未填写';
+          if (!spaceMap.has(sp)) {
+            spaceMap.set(sp, []);
+          }
+          spaceMap.get(sp).push(item);
+        }
+      }
+
+      const spaces = [];
+      for (const [sp, stepList] of spaceMap.entries()) {
+        const lockedCover = stepList.find(x => Number(x.is_cover) === 1);
+        const cover = lockedCover || stepList[0];
+
+        spaces.push({
+          space: sp,
+          step_count: stepList.length,
+          cover,
+          steps: stepList
+        });
+      }
+
+      spaces.sort((a, b) => {
+        let idxA = CANONICAL_ROOM_ORDER.indexOf(a.space);
+        let idxB = CANONICAL_ROOM_ORDER.indexOf(b.space);
+        if (idxA === -1) idxA = 999;
+        if (idxB === -1) idxB = 999;
+        if (idxA !== idxB) return idxA - idxB;
+        return b.step_count - a.step_count;
+      });
+
+      const videoItems = videos.map(v => {
+        const sourceIds = Array.isArray(v.source_step_ids) ? v.source_step_ids : [];
+        let sourceSteps = [];
+        if (sourceIds.length > 0) {
+          const placeholders = sourceIds.map(() => '?').join(',');
+          try {
+            const foundSteps = db.prepare(`SELECT id, space, style, prompt, origin_images, result_images FROM creation_templates WHERE id IN (${placeholders})`).all(...sourceIds);
+            sourceSteps = sourceIds.map(sid => foundSteps.find(f => f.id === sid)).filter(Boolean).map(mapCreationTemplateRow);
+          } catch (_) {}
+        }
+        return {
+          ...v,
+          source_steps: sourceSteps
+        };
+      });
+
+      styles.push({
+        style: st,
+        last_active_at: g.last_active_at,
+        spaces,
+        videos: videoItems
+      });
+    }
+
+    styles.sort((a, b) => b.last_active_at - a.last_active_at);
+
+    return sendJson(res, 200, {
+      success: true,
+      data: {
+        root_origin_hash: rootHash,
+        reading,
+        styles
+      }
+    });
+  }
+
+  // 重读基图分析 (POST /api/image-readings/:sha256/reread)
+  const mReread = pathname.match(/^\/image-readings\/([^\/]+)\/reread$/);
+  if (mReread && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationTemplatesSchema(db);
+    const sha = decodeURIComponent(mReread[1]);
+    
+    const sample = db.prepare(`
+      SELECT origin_images, title, space, style FROM creation_templates
+      WHERE root_origin_hash = ? AND deleted_at IS NULL
+      ORDER BY created_at ASC LIMIT 1
+    `).get(sha);
+
+    let surfaces = {};
+    let summary = sample?.title ? `室内设计基图：${sample.title}` : '空间基图分析完成';
+    let space = sample?.space || '';
+    let style = sample?.style || '';
+
+    if (sample) {
+      try {
+        const { extractSpaceSurfaces } = require('./base-library/space-transfer');
+        const oi = JSON.parse(sample.origin_images || '[]');
+        if (oi.length > 0) {
+          const url = typeof oi[0] === 'string' ? oi[0] : (oi[0] && oi[0].url);
+          const { resolveCopySource } = require('./creation-library');
+          const src = await resolveCopySource(services, url);
+          let buf = null;
+          if (src) {
+            if (src.buffer) buf = src.buffer;
+            else if (src.path && fs.existsSync(src.path)) buf = fs.readFileSync(src.path);
+          }
+          if (buf) {
+            const extracted = await extractSpaceSurfaces(services, buf);
+            if (extracted) surfaces = extracted;
+          }
+        }
+      } catch (err) {
+        console.warn('[image-readings] 重读异常:', err.message);
+      }
+    }
+
+    const now = Date.now();
+    db.prepare(`
+      INSERT INTO image_readings (sha256, space, style, reading_summary, surfaces_json, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(sha256) DO UPDATE SET
+        reading_summary = excluded.reading_summary,
+        surfaces_json = excluded.surfaces_json,
+        updated_at = excluded.updated_at
+    `).run(sha, space, style, summary, JSON.stringify(surfaces), now);
+
+    return sendJson(res, 200, {
+      success: true,
+      data: {
+        sha256: sha,
+        space,
+        style,
+        reading_summary: summary,
+        surfaces,
+        updated_at: now
+      }
+    });
+  }
+
+  // 保存用户手改的基图说明 (PATCH /api/image-readings/:sha256)
+  const mPatchReading = pathname.match(/^\/image-readings\/([^\/]+)$/);
+  if (mPatchReading && req.method === 'PATCH') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationTemplatesSchema(db);
+    const sha = decodeURIComponent(mPatchReading[1]);
+    const b = await parseBody(req);
+    const summary = String(b.reading_summary || b.summary || '').trim();
+    const now = Date.now();
+
+    const existing = db.prepare('SELECT * FROM image_readings WHERE sha256 = ?').get(sha);
+    if (!existing) {
+      db.prepare(`
+        INSERT INTO image_readings (sha256, space, style, reading_summary, surfaces_json, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(sha, b.space || '', b.style || '', summary || '空间设计根原图', '{}', now);
+    } else {
+      db.prepare(`
+        UPDATE image_readings
+        SET reading_summary = ?, updated_at = ?
+        WHERE sha256 = ?
+      `).run(summary || existing.reading_summary, now, sha);
+    }
+
+    const updated = db.prepare('SELECT * FROM image_readings WHERE sha256 = ?').get(sha);
+    return sendJson(res, 200, { success: true, data: updated });
   }
 
   // 删除创作配方 (同事务写入墓碑)
@@ -5414,6 +5871,72 @@ async function handleApiImpl(services, req, res, prefix = '/api') {
     const deletedAt = delTx.immediate();
 
     return sendJson(res, 200, { success: true, data: { id: tplId, deleted_at: deletedAt } });
+  }
+
+  // 方案活体包导出 (POST /api/creation-schemes/export)
+  if (pathname === '/creation-schemes/export' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationTemplatesSchema(db);
+    const b = await parseBody(req).catch(() => ({}));
+    try {
+      const { exportSchemeZip } = require('./creation-schemes');
+      const pkg = await exportSchemeZip(services, b || {});
+      res.writeHead(200, {
+        'Content-Type': 'application/zip',
+        'Content-Disposition': `attachment; filename="${pkg.filename}"`,
+        'Content-Length': pkg.buffer.length
+      });
+      return res.end(pkg.buffer);
+    } catch (err) {
+      console.error('[creation-schemes] 导出方案包失败:', err);
+      return sendJson(res, 500, { success: false, error: err.message || '导出失败' });
+    }
+  }
+
+  // AI 提示词语义比对 (POST /api/creation-templates/ai-compare)
+  if (pathname === '/creation-templates/ai-compare' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const b = await parseBody(req).catch(() => ({}));
+    const { comparePromptsSemantically } = require('./ai-tagger');
+    const result = await comparePromptsSemantically(b.promptA, b.promptB);
+    return sendJson(res, 200, { success: true, data: result });
+  }
+
+  // AI 全量智能重打标与空间走向提取 (POST /api/creation-templates/auto-tag-all)
+  if (pathname === '/creation-templates/auto-tag-all' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    ensureCreationTemplatesSchema(db);
+    const { ruleBasedExtract } = require('./ai-tagger');
+    const rows = db.prepare('SELECT id, prompt, type, style, space, trajectory, root_origin_hash FROM creation_templates WHERE deleted_at IS NULL').all();
+    let updatedCount = 0;
+
+    // 先做一次项目根原图的风格归集
+    const rootStyleMap = new Map();
+    for (const r of rows) {
+      const ext = ruleBasedExtract(r.prompt, r.type);
+      const s = (ext.style && ext.style !== '未填写') ? ext.style : ((r.style && r.style !== '未填写') ? r.style : '');
+      if (s && r.root_origin_hash && !rootStyleMap.has(r.root_origin_hash)) {
+        rootStyleMap.set(r.root_origin_hash, s);
+      }
+    }
+
+    const updTx = db.transaction(() => {
+      const stmt = db.prepare('UPDATE creation_templates SET space=?, style=?, trajectory=?, operation=? WHERE id=?');
+      for (const r of rows) {
+        const ext = ruleBasedExtract(r.prompt, r.type);
+        const inheritedStyle = r.root_origin_hash ? rootStyleMap.get(r.root_origin_hash) : '';
+        const newSpace = (ext.space && ext.space !== '未填写') ? ext.space : ((r.space && r.space !== '未填写') ? r.space : ext.space);
+        const newStyle = (ext.style && ext.style !== '未填写') ? ext.style : (inheritedStyle || ((r.style && r.style !== '未填写') ? r.style : ext.style));
+        // 对于视频，全量重提取必须以干净规范的提取结果为准，彻底冲刷掉此前被污染的碎片走向词
+        const isVid = r.type === 'video' || String(r.prompt || '').includes('视频');
+        const newTraj = isVid ? (ext.trajectory || '全景空间漫游') : '';
+        const newOp = ext.operation;
+        stmt.run(newSpace, newStyle, newTraj, newOp, r.id);
+        updatedCount++;
+      }
+    });
+    updTx.immediate();
+    return sendJson(res, 200, { success: true, updated_count: updatedCount });
   }
 
   // 主动拉取/同步外部数据源创作资产 (POST /api/creation-templates/pull-external)
@@ -10360,6 +10883,67 @@ module.exports = {
       return sendJson(res, 200, { success: true, data });
     } catch (e) {
       return sendJson(res, 500, { error: e.message || '记录最近使用素材失败' });
+    }
+  }
+
+  // ── 空间创作 · 图片区域分析 ──
+  if (pathname === '/studio/image-analysis' && req.method === 'GET') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    const fid = urlObj.searchParams.get('fid');
+    if (!fid) return sendJson(res, 400, { error: '缺少 fid 参数' });
+    try {
+      const { createImageAnalysisService } = require('./services/image-analysis');
+      const data = createImageAnalysisService(db, services).getReport(fid);
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message || '读取图片分析失败' });
+    }
+  }
+
+  if (pathname === '/studio/image-analysis/scene' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const b = await parseBody(req);
+      if (!b.fid) return sendJson(res, 400, { error: '缺少 fid 参数' });
+      const { createImageAnalysisService } = require('./services/image-analysis');
+      const data = await createImageAnalysisService(db, services).analyzeScene(b.fid, b.model ? String(b.model).trim() : '');
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message || '分析整张图失败' });
+    }
+  }
+
+  if (pathname === '/studio/image-analysis/preview' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const b = await parseBody(req);
+      if (!b.fid || !b.selection) return sendJson(res, 400, { error: '缺少 fid 或选区' });
+      const { createImageAnalysisService } = require('./services/image-analysis');
+      const data = createImageAnalysisService(db, services).preview(b.fid, b.selection, b.phrase || '');
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message || '筛选候选失败' });
+    }
+  }
+
+  if (pathname === '/studio/image-analysis/region' && req.method === 'POST') {
+    if (!isViewerOrAdmin) return sendJson(res, 401, { error: '未登录或会话已过期' });
+    try {
+      const b = await parseBody(req);
+      if (!b.fid || !b.selection) return sendJson(res, 400, { error: '缺少 fid 或选区' });
+      const { createImageAnalysisService } = require('./services/image-analysis');
+      const data = await createImageAnalysisService(db, services).analyzeRegion(b.fid, {
+        id: b.id,
+        selection: b.selection,
+        phrase: b.phrase || '',
+        focusId: b.focusId || '',
+        colorIntent: b.colorIntent,
+        materialIntent: b.materialIntent,
+        skipVision: Boolean(b.skipVision)
+      }, b.model ? String(b.model).trim() : '');
+      return sendJson(res, 200, { success: true, data });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message || '分析这块失败' });
     }
   }
 

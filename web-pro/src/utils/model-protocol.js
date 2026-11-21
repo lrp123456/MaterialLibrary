@@ -664,28 +664,11 @@ export function inferOptimalWorkflowAndParams({
     }
   }
 
-  // 1.2 检查挂载素材属性
+  // 1.2 挂载素材时不擅自跨模态切换板块（除非用户显式复用配方 templateMeta）
+  // 保持用户当前所选模态（chat/image/video/music），只在各模态内部根据有无参考图自适应子模式
   const videoItems = tray.filter(it => detectMediaSemantics(it).isVideo);
   const audioItems = tray.filter(it => detectMediaSemantics(it).isAudio);
   const imageItems = tray.filter(it => !detectMediaSemantics(it).isVideo && !detectMediaSemantics(it).isAudio);
-  const hasVideo = videoItems.length > 0;
-  const hasAudio = audioItems.length > 0;
-
-  if (hasVideo) {
-    if (targetModality !== 'video') {
-      targetModality = 'video';
-      reasons.push('检测到视频参考素材，自动自适应切至视频板块');
-    }
-  } else if (hasAudio) {
-    if (targetModality !== 'music') {
-      targetModality = 'music';
-      reasons.push('检测到音频素材，自动自适应切至配乐板块');
-    }
-  } else if (imageItems.length > 0 && targetModality === 'chat') {
-    // 关键优化：挂载图片时，绝不僵化停留在纯对话框，自动激活图像板块
-    targetModality = 'image';
-    reasons.push('检测到挂载图片素材，自动由纯对话切至图像生成板块');
-  }
 
   // 2. 子模式研判与自适应调度 (Sub-Mode Dispatch)
   let targetGenMode = currentGenMode;

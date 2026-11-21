@@ -45,6 +45,7 @@ const E2E_MS = 420000;
 const MANIFEST = [
   // ---------- unit：纯函数/纯数据契约，不开库不起服务 ----------
   ['unit', 'edit-preview.test.js'],
+  ['unit', 'image-analysis.test.js'],
   ['unit', 'classify-parse.test.js'],
   ['unit', 'classify-part.test.js'],
   ['unit', 'crop-selection-interior.test.js'],

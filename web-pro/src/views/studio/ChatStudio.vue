@@ -3212,7 +3212,7 @@ const props = defineProps({
   initialPayload: { type: Object, default: null }
 });
 
-const emit = defineEmits(['sendToPrecisionEdit', 'sendToClip', 'payloadConsumed']);
+const emit = defineEmits(['sendToPrecisionEdit', 'sendToClip', 'payloadConsumed', 'openCreationLibrary']);
 
 // 侧栏与基础状态
 // 阶段 1 新增状态机
@@ -5678,10 +5678,8 @@ function autoSelectRefMode(kinds) {
     return;
   }
 
-  // 零配置智能调度：若当前在 chat 纯对话，自动切入 image 图像生成板块
-  if (activeModality.value === 'chat') {
-    activeModality.value = 'image';
-  }
+  // 遵循用户规则：不因挂载图片而擅自跨板块切换当前模态，保持用户所选模态不变
+  // 仅在当前模态内部（如生图/生视频）根据有无参考图自适应文生/图生等子模式
 
   nextTick(() => {
     if (activeModality.value === 'image' && activeGenMode.value === 'image_edit' && tray.some((img) => Array.isArray(img.regions) && img.regions.length > 0)) {
@@ -7104,6 +7102,7 @@ async function triggerPullExternal(manual = false) {
 }
 
 function openCreationLibraryModal() {
+  emit('openCreationLibrary');
   const t0 = performance.now();
   libraryMounted.value = true;
   showExpandedLibrary.value = true;
@@ -7230,6 +7229,44 @@ async function consumeIncomingInner(payload) {
   // quick 抽屉只开抽屉，不新建会话
   if (payload.target === 'quick' || (items.length === 1 && items[0]._openDrawer)) {
     mountAssetFromLibrary(items[0]);
+    emit('payloadConsumed');
+    return;
+  }
+
+  // 图片分析：新开图片对话，图1 带框，草稿可编辑，不自动发送
+  if (payload.target === 'image-analysis') {
+    await createNewSession({ forceReset: true });
+    activeModality.value = 'image';
+    const image = payload.image || {};
+    mountAssetsFromLibrary([{ ...image, kind: 'image' }]);
+    if (referenceTray.value[0] && payload.region) {
+      referenceTray.value[0].regions = [payload.region];
+    }
+    recipePrompt.value = payload.draft || '';
+    recipeExpanded.value = true;
+    startRecipeEdit();
+    emit('payloadConsumed');
+    return;
+  }
+
+  // creation_reuse 跳转：创作库一键带回对话台复用
+  if (payload.target === 'creation_reuse') {
+    await createNewSession({ forceReset: true });
+    const promptText = payload.prompt || payload.recipePrompt || '';
+    if (promptText) {
+      recipePrompt.value = '';
+      recipeExpanded.value = false;
+      if (richEditorRef.value) richEditorRef.value.innerText = promptText;
+      inputText.value = promptText;
+    }
+    if (payload.originImage && payload.action !== 'apply_new') {
+      mountAssetsFromLibrary([{ ...payload.originImage, kind: 'image' }]);
+    }
+    if (payload.action === 'shoot_video' || payload.action === 'refine_video') {
+      activeModality.value = 'video';
+    } else {
+      activeModality.value = 'image';
+    }
     emit('payloadConsumed');
     return;
   }
@@ -7811,13 +7848,11 @@ function mountAssetFromLibrary(item) {
     rightDrawerOpen.value = true;
   }
 
-  const stayOnVideo = activeModality.value === 'video' && asset.kind !== 'audio';
-  if (item.category === 'video' || item.kind === 'video' || asset.kind === 'video') {
+  // 用户明确要求：添加图片后不自动跨板块跳转到图片创作，保持用户当前所选模态（chat/video/image等）
+  if ((item.category === 'video' || item.kind === 'video' || asset.kind === 'video') && activeModality.value !== 'chat') {
     activeModality.value = 'video';
-  } else if (item.category === 'audio' || item.kind === 'audio') {
+  } else if ((item.category === 'audio' || item.kind === 'audio') && activeModality.value !== 'chat') {
     activeModality.value = 'music';
-  } else if (!stayOnVideo) {
-    activeModality.value = 'image';
   }
 
   // 用户需求：增加了图片后对话框不自动新增图片引用，取消输入框自动关联
@@ -7863,17 +7898,13 @@ function mountAssetsFromLibrary(items) {
   }
   rememberSessionRefs(referenceTray.value, 'upload', { persist: true });
 
-  // 已经在视频里挂图时留在视频，并按张数取图生 / 全能参考。不要改去文生视频，也不要把视频板块拽到图像。
+  // 用户规则：添加图片后不擅自改动用户当前模态；若当前是视频且挂视频则保留/设为视频，若当前是对话/生图则维持原模态
   const anyVideo = list.some((item) => item.kind === 'video' || item.media_type === 'video');
-  const stayOnVideo = activeModality.value === 'video';
-  if (anyVideo || stayOnVideo) {
+  if (anyVideo && activeModality.value !== 'chat') {
     activeModality.value = 'video';
-    autoSelectRefMode(anyVideo ? ['video'] : ['image']);
-    syncGenModeWithReferenceTray();
-  } else {
-    activeModality.value = 'image';
-    autoSelectRefMode(['image']);
   }
+  autoSelectRefMode(anyVideo ? ['video'] : ['image']);
+  syncGenModeWithReferenceTray();
 
   nextTick(() => {
     // 用户需求：增加了图片后对话框不自动新增图片引用，取消输入框自动关联，只挂载到参考托盘
@@ -10960,21 +10991,24 @@ async function sendMessage() {
   if (richEditorRef.value) {
     richEditorRef.value.innerHTML = '';
   }
+  inputText.value = '';
   recipePrompt.value = '';
   globalRecipePrompt.value = '';
   composerPromptDirty.value = false;
-  // 规范：发送之后看图区里的图保留，不执行 referenceTray = []
+  // 用户明确要求：发送之后参考图也一并清空，不留滞上轮参考图
+  referenceTray.value = [];
+  selectedImageIndex.value = 0;
+  activeViewerAsset.value = null;
   optimizeUndo.value = null;
   generating.value = true;
   try { localStorage.removeItem(draftKey(targetSessionId)); } catch (_) {}
-  // 关键保护：切勿在发送后粗暴清空当前会话的托盘记忆，确保生成过程中切走再切回时不丢失参考图
   if (targetSessionId) {
     sessionDrafts.set(targetSessionId, {
       recipePrompt: '',
       globalRecipePrompt: '',
       editorHtml: '',
-      referenceTray: JSON.parse(JSON.stringify(currentTray || [])),
-      selectedImageIndex: selectedImageIndex.value || 0,
+      referenceTray: [],
+      selectedImageIndex: 0,
     });
   }
 
