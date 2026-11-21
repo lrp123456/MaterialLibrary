@@ -234,10 +234,10 @@ start_service() {
     if [ "${ML_WATCHDOG_SELFTEST:-}" = "1" ] && [ -n "${ML_WATCH_MAIN_CMD:-}" ]; then
       bash -c "$ML_WATCH_MAIN_CMD" >> "$log" 2>&1 &
     else
-      (cd "$PROJECT_DIR" && exec node server.js) >> "$log" 2>&1 &
+      (cd "$PROJECT_DIR" && ML_PORT="$PORT" exec node server.js) >> "$log" 2>&1 &
     fi
   else
-    (cd "$WEBPRO_DIR" && exec node server.cjs "$WEB_PRO_PORT") >> "$WEBPRO_LOG_FILE" 2>&1 &
+    (cd "$WEBPRO_DIR" && API_TARGET="http://127.0.0.1:$PORT" exec node server.cjs "$WEB_PRO_PORT") >> "$WEBPRO_LOG_FILE" 2>&1 &
   fi
   local pid=$!
   child_pid[$name]="$pid"
